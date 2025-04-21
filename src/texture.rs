@@ -25,10 +25,7 @@ impl TextureResource {
 }
 
 // --- load_texture function remains the same ---
-pub fn load_texture(
-    base: &VulkanBase,
-    path: &Path,
-) -> Result<TextureResource, Box<dyn Error>> {
+pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, Box<dyn Error>> {
     // --- 1. Load Image with `image` crate ---
     log::info!("Starting to load texture from: {:?}", path);
     let img = image::open(path).map_err(|e| format!("Failed to open image {:?}: {}", path, e))?;
@@ -55,7 +52,11 @@ pub fn load_texture(
 
     // --- 3. Create Vulkan Image ---
     let format = vk::Format::R8G8B8A8_UNORM; // Standard RGBA format
-    let image_extent = vk::Extent3D { width, height, depth: 1 };
+    let image_extent = vk::Extent3D {
+        width,
+        height,
+        depth: 1,
+    };
 
     let image_create_info = vk::ImageCreateInfo::default()
         .image_type(vk::ImageType::TYPE_2D)

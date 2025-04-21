@@ -7,9 +7,7 @@
     unused_qualifications
 )]
 
-use std::{
-    borrow::Cow, default::Default, error::Error, ffi, ops::Drop, os::raw::c_char,
-};
+use std::{borrow::Cow, default::Default, error::Error, ffi, ops::Drop, os::raw::c_char};
 
 use ash::{
     ext::debug_utils,
@@ -18,7 +16,7 @@ use ash::{
     vk, Device, Entry, Instance,
 };
 use cgmath::Matrix4;
-use log::{debug, error, info, warn};
+use log::warn;
 use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
     window::Window,
@@ -164,7 +162,7 @@ pub struct BufferResource {
 impl BufferResource {
     // Helper to cleanup
     pub fn destroy(&mut self, device: &Device) {
-         unsafe {
+        unsafe {
             if let Some(ptr) = self.mapped_ptr {
                 if !ptr.is_null() {
                     device.unmap_memory(self.memory);
@@ -175,7 +173,6 @@ impl BufferResource {
         }
     }
 }
-
 
 pub struct VulkanBase {
     pub entry: Entry,
@@ -229,7 +226,9 @@ impl VulkanBase {
             let entry = Entry::linked();
             let app_name = ffi::CStr::from_bytes_with_nul(b"AshRITG\0")?;
 
-            let layer_names = [ffi::CStr::from_bytes_with_nul(b"VK_LAYER_KHRONOS_validation\0")?];
+            let layer_names = [ffi::CStr::from_bytes_with_nul(
+                b"VK_LAYER_KHRONOS_validation\0",
+            )?];
             let layers_names_raw: Vec<*const c_char> = layer_names
                 .iter()
                 .map(|raw_name| raw_name.as_ptr())
@@ -284,7 +283,8 @@ impl VulkanBase {
 
             let debug_utils_loader = debug_utils::Instance::new(&entry, &instance);
             let debug_call_back = debug_utils_loader
-                .create_debug_utils_messenger(&debug_info, None).ok();
+                .create_debug_utils_messenger(&debug_info, None)
+                .ok();
 
             let surface = ash_window::create_surface(
                 &entry,
@@ -351,11 +351,13 @@ impl VulkanBase {
                     f.format == vk::Format::B8G8R8A8_UNORM || f.format == vk::Format::R8G8B8A8_UNORM
                 })
                 .unwrap_or_else(|| {
-                    surface_loader.get_physical_device_surface_formats(pdevice, surface).unwrap()[0]
+                    surface_loader
+                        .get_physical_device_surface_formats(pdevice, surface)
+                        .unwrap()[0]
                 });
 
-            let surface_capabilities = surface_loader
-                .get_physical_device_surface_capabilities(pdevice, surface)?;
+            let surface_capabilities =
+                surface_loader.get_physical_device_surface_capabilities(pdevice, surface)?;
             let mut desired_image_count = surface_capabilities.min_image_count + 1;
             if surface_capabilities.max_image_count > 0
                 && desired_image_count > surface_capabilities.max_image_count
@@ -377,8 +379,8 @@ impl VulkanBase {
             } else {
                 surface_capabilities.current_transform
             };
-            let present_modes = surface_loader
-                .get_physical_device_surface_present_modes(pdevice, surface)?;
+            let present_modes =
+                surface_loader.get_physical_device_surface_present_modes(pdevice, surface)?;
             let present_mode = present_modes
                 .iter()
                 .cloned()
@@ -442,8 +444,8 @@ impl VulkanBase {
                 .level(vk::CommandBufferLevel::PRIMARY)
                 .command_buffer_count(command_buffer_count + 1); // +1 for setup CB
 
-            let all_command_buffers = device
-                .allocate_command_buffers(&command_buffer_allocate_info)?;
+            let all_command_buffers =
+                device.allocate_command_buffers(&command_buffer_allocate_info)?;
             let setup_command_buffer = all_command_buffers[0];
             let draw_command_buffers = all_command_buffers[1..].to_vec();
 
@@ -476,23 +478,22 @@ impl VulkanBase {
             let depth_image_allocate_info = vk::MemoryAllocateInfo::default()
                 .allocation_size(depth_image_memory_req.size)
                 .memory_type_index(depth_image_memory_index);
-            let depth_image_memory = device
-                .allocate_memory(&depth_image_allocate_info, None)?;
-            device
-                .bind_image_memory(depth_image, depth_image_memory, 0)?;
+            let depth_image_memory = device.allocate_memory(&depth_image_allocate_info, None)?;
+            device.bind_image_memory(depth_image, depth_image_memory, 0)?;
 
             // Transition depth image layout
-            let setup_commands_reuse_fence = device
-                .create_fence(
-                    &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
-                    None,
-                )?;
+            let setup_commands_reuse_fence = device.create_fence(
+                &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
+                None,
+            )?;
             record_submit_commandbuffer(
                 &device,
                 setup_command_buffer,
                 setup_commands_reuse_fence,
                 present_queue,
-                &[], &[], &[],
+                &[],
+                &[],
+                &[],
                 |device, setup_command_buffer| {
                     let layout_transition_barrier = vk::ImageMemoryBarrier::default()
                         .image(depth_image)
@@ -513,9 +514,11 @@ impl VulkanBase {
                     device.cmd_pipeline_barrier(
                         setup_command_buffer,
                         vk::PipelineStageFlags::TOP_OF_PIPE,
-                        vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                        vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                            | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
                         vk::DependencyFlags::empty(),
-                        &[], &[],
+                        &[],
+                        &[],
                         &[layout_transition_barrier],
                     );
                 },
@@ -573,10 +576,13 @@ impl VulkanBase {
             let dependencies = [vk::SubpassDependency {
                 src_subpass: vk::SUBPASS_EXTERNAL,
                 dst_subpass: 0,
-                src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-                dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
                 src_access_mask: vk::AccessFlags::NONE,
-                dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                 ..Default::default()
             }];
 
@@ -608,21 +614,24 @@ impl VulkanBase {
 
             // --- Synchronization Objects (Per Frame) ---
             let semaphore_create_info = vk::SemaphoreCreateInfo::default();
-            let fence_create_info = vk::FenceCreateInfo::default()
-                                      .flags(vk::FenceCreateFlags::SIGNALED);
+            let fence_create_info =
+                vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
             let mut present_complete_semaphores = Vec::with_capacity(command_buffer_count as usize);
-            let mut rendering_complete_semaphores = Vec::with_capacity(command_buffer_count as usize);
+            let mut rendering_complete_semaphores =
+                Vec::with_capacity(command_buffer_count as usize);
             let mut draw_commands_fences = Vec::with_capacity(command_buffer_count as usize);
 
             for _ in 0..command_buffer_count {
-                present_complete_semaphores.push(device.create_semaphore(&semaphore_create_info, None)?);
-                rendering_complete_semaphores.push(device.create_semaphore(&semaphore_create_info, None)?);
+                present_complete_semaphores
+                    .push(device.create_semaphore(&semaphore_create_info, None)?);
+                rendering_complete_semaphores
+                    .push(device.create_semaphore(&semaphore_create_info, None)?);
                 draw_commands_fences.push(device.create_fence(&fence_create_info, None)?);
             }
 
             // Use VulkanBase explicitly instead of Self, pass in window
-            Ok(VulkanBase {
+            Ok(Self {
                 entry,
                 instance,
                 device,
@@ -658,7 +667,7 @@ impl VulkanBase {
         }
     }
 
-     // Helper function to create buffers
+    // Helper function to create buffers
     pub fn create_buffer(
         &self,
         size: vk::DeviceSize,
@@ -688,7 +697,12 @@ impl VulkanBase {
             self.device.bind_buffer_memory(buffer, memory, 0)?;
 
             let mapped_ptr = if memory_flags.contains(vk::MemoryPropertyFlags::HOST_VISIBLE) {
-                match self.device.map_memory(memory, 0, mem_requirements.size, vk::MemoryMapFlags::empty()) {
+                match self.device.map_memory(
+                    memory,
+                    0,
+                    mem_requirements.size,
+                    vk::MemoryMapFlags::empty(),
+                ) {
                     Ok(ptr) => Some(ptr),
                     Err(e) => {
                         log::warn!("Failed to map buffer memory: {}", e);
@@ -716,11 +730,15 @@ impl VulkanBase {
         buffer_resource: &BufferResource,
         data: &[T],
     ) -> Result<(), Box<dyn Error>> {
-        use std::mem::{align_of, size_of};
+        use std::mem::align_of;
         unsafe {
-            let data_size = (data.len() * size_of::<T>()) as vk::DeviceSize;
+            let data_size = size_of_val(data) as vk::DeviceSize;
             if data_size > buffer_resource.size {
-                return Err(format!("Data size ({}) exceeds buffer size ({})", data_size, buffer_resource.size).into());
+                return Err(format!(
+                    "Data size ({}) exceeds buffer size ({})",
+                    data_size, buffer_resource.size
+                )
+                .into());
             }
 
             if let Some(ptr) = buffer_resource.mapped_ptr {
@@ -729,16 +747,22 @@ impl VulkanBase {
 
                 // Simplified: Assume we need to find the memory type again for properties.
                 // In a real app, might store the memory type index or flags with the buffer.
-                let mem_requirements = self.device.get_buffer_memory_requirements(buffer_resource.buffer);
+                let mem_requirements = self
+                    .device
+                    .get_buffer_memory_requirements(buffer_resource.buffer);
                 let mem_type_index = find_memorytype_index(
                     &mem_requirements,
                     &self.device_memory_properties,
-                    vk::MemoryPropertyFlags::HOST_VISIBLE // We assume it must have this flag if mapped
-                ).ok_or("Could not find buffer memory type index for flushing")?;
+                    vk::MemoryPropertyFlags::HOST_VISIBLE, // We assume it must have this flag if mapped
+                )
+                .ok_or("Could not find buffer memory type index for flushing")?;
 
                 let mem_type = &self.device_memory_properties.memory_types[mem_type_index as usize];
 
-                if !mem_type.property_flags.contains(vk::MemoryPropertyFlags::HOST_COHERENT) {
+                if !mem_type
+                    .property_flags
+                    .contains(vk::MemoryPropertyFlags::HOST_COHERENT)
+                {
                     let flush_range = vk::MappedMemoryRange::default()
                         .memory(buffer_resource.memory)
                         .offset(0)
@@ -755,7 +779,12 @@ impl VulkanBase {
     // Method to get GPU name
     pub fn get_gpu_name(&self) -> String {
         let props = self.pdevice_properties;
-        let name_bytes = props.device_name.iter().map(|&c| c as u8).take_while(|&c| c != 0).collect::<Vec<_>>();
+        let name_bytes = props
+            .device_name
+            .iter()
+            .map(|&c| c as u8)
+            .take_while(|&c| c != 0)
+            .collect::<Vec<_>>();
         String::from_utf8_lossy(&name_bytes).into_owned()
     }
 
@@ -769,32 +798,32 @@ impl VulkanBase {
             let present_complete_semaphore = self.present_complete_semaphores[self.frame_index];
             let rendering_complete_semaphore = self.rendering_complete_semaphores[self.frame_index];
             let current_command_buffer = self.draw_command_buffers[self.frame_index];
-    
+
             self.device
                 .wait_for_fences(&[fence], true, u64::MAX)
                 .expect("Fence wait failed");
-    
+
             self.device
                 .reset_fences(&[fence])
                 .expect("Fence reset failed");
             self.device
                 .reset_command_buffer(current_command_buffer, vk::CommandBufferResetFlags::empty())
                 .expect("Reset command buffer failed");
-    
+
             let (present_index, _suboptimal) = self.swapchain_loader.acquire_next_image(
                 self.swapchain,
                 u64::MAX,
                 present_complete_semaphore,
                 vk::Fence::null(),
             )?;
-    
+
             // --- Record Command Buffer ---
             let cmd_begin_info = vk::CommandBufferBeginInfo::default()
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
             self.device
                 .begin_command_buffer(current_command_buffer, &cmd_begin_info)
                 .expect("Begin commandbuffer failed.");
-    
+
             let clear_values = [
                 vk::ClearValue {
                     color: vk::ClearColorValue {
@@ -816,7 +845,7 @@ impl VulkanBase {
                     extent: self.surface_resolution,
                 })
                 .clear_values(&clear_values);
-    
+
             self.device.cmd_begin_render_pass(
                 current_command_buffer,
                 &render_pass_begin_info,
@@ -827,44 +856,44 @@ impl VulkanBase {
             self.device
                 .end_command_buffer(current_command_buffer)
                 .expect("End commandbuffer failed.");
-    
+
             // --- Submit to Queue ---
             let wait_semaphores = [present_complete_semaphore];
             let wait_dst_stage_mask = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
             let command_buffers = [current_command_buffer];
             let signal_semaphores = [rendering_complete_semaphore];
-    
+
             let submit_info = vk::SubmitInfo::default()
                 .wait_semaphores(&wait_semaphores)
                 .wait_dst_stage_mask(&wait_dst_stage_mask)
                 .command_buffers(&command_buffers)
                 .signal_semaphores(&signal_semaphores);
-    
+
             self.device
                 .queue_submit(self.present_queue, &[submit_info], fence)
                 .expect("Queue submit failed.");
-    
+
             // --- Present ---
             let wait_semaphores_present = [rendering_complete_semaphore];
             let swapchains = [self.swapchain];
             let image_indices = [present_index];
-    
+
             let present_info = vk::PresentInfoKHR::default()
                 .wait_semaphores(&wait_semaphores_present)
                 .swapchains(&swapchains)
                 .image_indices(&image_indices);
-    
+
             let present_result = self
                 .swapchain_loader
                 .queue_present(self.present_queue, &present_info);
-    
+
             // Determine if resize is needed
             let resize_needed = match present_result {
                 Ok(suboptimal) => suboptimal, // true if suboptimal, false otherwise
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => true, // Out of date, needs resize
-                Err(e) => return Err(e), // Propagate other errors
+                Err(e) => return Err(e),      // Propagate other errors
             };
-    
+
             self.frame_index = (self.frame_index + 1) % self.draw_command_buffers.len();
             Ok(resize_needed)
         }
@@ -882,7 +911,8 @@ impl Drop for VulkanBase {
             for fence in self.draw_commands_fences.drain(..) {
                 self.device.destroy_fence(fence, None);
             }
-            self.device.destroy_fence(self.setup_commands_reuse_fence, None);
+            self.device
+                .destroy_fence(self.setup_commands_reuse_fence, None);
             for semaphore in self.present_complete_semaphores.drain(..) {
                 self.device.destroy_semaphore(semaphore, None);
             }
@@ -901,11 +931,12 @@ impl Drop for VulkanBase {
             self.device.free_memory(self.depth_image_memory, None);
             self.device.destroy_image(self.depth_image, None);
             // Destroy swapchain image views
-            for &image_view in self.present_image_views.iter() { // Iterate before clearing
+            for &image_view in self.present_image_views.iter() {
+                // Iterate before clearing
                 self.device.destroy_image_view(image_view, None);
             }
             self.present_image_views.clear(); // Clear the vec after destroying
-            // Destroy command pool (destroys command buffers)
+                                              // Destroy command pool (destroys command buffers)
             self.device.destroy_command_pool(self.pool, None);
             // Destroy swapchain
             self.swapchain_loader
