@@ -58,6 +58,7 @@ const MISS_WINDOW_MS: f32 = 200.0;
 const FONT_INI_PATH: &str = "assets/fonts/miso/font.ini";
 const FONT_TEXTURE_PATH: &str = "assets/fonts/miso/_miso light 15x15 (res 360x360).png";
 const LOGO_TEXTURE_PATH: &str = "assets/graphics/logo.png";
+const DANCE_TEXTURE_PATH: &str = "assets/graphics/dance.png"; // ADDED
 const LOGO_DISPLAY_WIDTH: f32 = 500.0;
 const LOGO_Y_POS: f32 = WINDOW_HEIGHT as f32 - 700.0;
 
@@ -212,7 +213,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("Audio stream handle obtained. Path: {:?}", audio_path);
 
     // --- RNG ---
-    let mut rng = rand::thread_rng(); // Use thread_rng unless specific needs dictate otherwise
+    let mut rng = rand::rng();
 
     // --- Common Game Variables ---
     let mut fps_counter = FPSCounter::new();
@@ -288,6 +289,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut logo_texture: TextureResource = load_texture(&base, logo_texture_path)?;
     info!("Logo texture loaded: {:?}", logo_texture_path);
 
+    // --- Load Dance Texture --- // ADDED
+    let dance_texture_path = Path::new(DANCE_TEXTURE_PATH);
+    if !dance_texture_path.exists() {
+        return Err(format!("Dance texture file not found: {:?}", dance_texture_path).into());
+    }
+    let mut dance_texture: TextureResource = load_texture(&base, dance_texture_path)?;
+    info!("Dance texture loaded: {:?}", dance_texture_path);
+    // --- END ADDED ---
+
     // --- Descriptors, Pipeline Layout, Pipeline ---
     // Descriptor Set Layout (defines bindings 0 and 1)
     let dsl_bindings = [
@@ -308,40 +318,48 @@ fn main() -> Result<(), Box<dyn Error>> {
             .create_descriptor_set_layout(&dsl_create_info, None)?
     };
 
-    // Descriptor Pool (Allocate space for TWO sets)
+    // Descriptor Pool (Allocate space for FOUR sets now)
     let pool_sizes = [
         vk::DescriptorPoolSize {
             ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: 2,
+            descriptor_count: 4,
         }, // One UBO per set
         vk::DescriptorPoolSize {
             ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: 2,
+            descriptor_count: 4,
         }, // One Sampler per set
     ];
     let pool_create_info = vk::DescriptorPoolCreateInfo::default()
         .pool_sizes(&pool_sizes)
-        .max_sets(2); // Need TWO sets
+        .max_sets(4); // Need FOUR sets
     let descriptor_pool = unsafe {
         base.device
             .create_descriptor_pool(&pool_create_info, None)?
     };
 
-    // Allocate TWO Descriptor Sets
-    let set_layouts = [descriptor_set_layout, descriptor_set_layout];
+    // Allocate FOUR Descriptor Sets
+    let set_layouts = [
+        descriptor_set_layout,
+        descriptor_set_layout,
+        descriptor_set_layout,
+        descriptor_set_layout,
+    ];
     let desc_alloc_info = vk::DescriptorSetAllocateInfo::default()
         .descriptor_pool(descriptor_pool)
         .set_layouts(&set_layouts);
     let descriptor_sets = unsafe { base.device.allocate_descriptor_sets(&desc_alloc_info)? };
-    let descriptor_set_font = descriptor_sets[0]; // Set for font rendering
-    let descriptor_set_sprite = descriptor_sets[1]; // Set for logo/gameplay sprites
+    let descriptor_set_font = descriptor_sets[0];
+    let descriptor_set_logo = descriptor_sets[1];
+    let descriptor_set_dancer = descriptor_sets[2]; // NEW
+    let descriptor_set_gameplay = descriptor_sets[3]; // Was sprite before
 
     // --- Initial Descriptor Set Updates ---
-    // Update Font Set
     let ubo_buffer_info = vk::DescriptorBufferInfo::default()
         .buffer(projection_ubo.buffer)
         .offset(0)
         .range(vk::WHOLE_SIZE);
+
+    // Update Font Set
     let font_image_info = vk::DescriptorImageInfo::default()
         .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
         .image_view(font.texture.view)
@@ -357,30 +375,65 @@ fn main() -> Result<(), Box<dyn Error>> {
         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
         .image_info(std::slice::from_ref(&font_image_info));
 
-    // Update Sprite Set (initially with logo, as menu is first state)
-    // UBO info is the same pointer
+    // Update Logo Set
     let logo_image_info = vk::DescriptorImageInfo::default()
         .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
         .image_view(logo_texture.view)
         .sampler(logo_texture.sampler);
-    let write_ubo_sprite = vk::WriteDescriptorSet::default()
-        .dst_set(descriptor_set_sprite)
+    let write_ubo_logo = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_set_logo)
         .dst_binding(0)
         .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-        .buffer_info(std::slice::from_ref(&ubo_buffer_info)); // Use same UBO info
-    let write_sampler_sprite_logo = vk::WriteDescriptorSet::default()
-        .dst_set(descriptor_set_sprite)
+        .buffer_info(std::slice::from_ref(&ubo_buffer_info));
+    let write_sampler_logo = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_set_logo)
         .dst_binding(1)
         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-        .image_info(std::slice::from_ref(&logo_image_info)); // Logo initially
+        .image_info(std::slice::from_ref(&logo_image_info));
+
+    // Update Dancer Set (NEW)
+    let dancer_image_info = vk::DescriptorImageInfo::default()
+        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+        .image_view(dance_texture.view)
+        .sampler(dance_texture.sampler);
+    let write_ubo_dancer = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_set_dancer)
+        .dst_binding(0)
+        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+        .buffer_info(std::slice::from_ref(&ubo_buffer_info));
+    let write_sampler_dancer = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_set_dancer)
+        .dst_binding(1)
+        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+        .image_info(std::slice::from_ref(&dancer_image_info));
+
+    // Update Gameplay Set (initially with arrows, though it doesn't matter until Gameplay state)
+    let arrow_image_info = vk::DescriptorImageInfo::default()
+        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+        .image_view(arrow_texture.view)
+        .sampler(arrow_texture.sampler);
+    let write_ubo_gameplay = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_set_gameplay)
+        .dst_binding(0)
+        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+        .buffer_info(std::slice::from_ref(&ubo_buffer_info));
+    let write_sampler_gameplay = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_set_gameplay)
+        .dst_binding(1)
+        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+        .image_info(std::slice::from_ref(&arrow_image_info));
 
     unsafe {
         base.device.update_descriptor_sets(
             &[
                 write_ubo_font,
                 write_sampler_font,
-                write_ubo_sprite,
-                write_sampler_sprite_logo,
+                write_ubo_logo,
+                write_sampler_logo,
+                write_ubo_dancer,
+                write_sampler_dancer, // ADDED
+                write_ubo_gameplay,
+                write_sampler_gameplay,
             ],
             &[],
         );
@@ -533,33 +586,43 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             Event::AboutToWait => {
                 // --- State Transition Logic ---
-                 if let Some(new_state) = next_app_state.take() {
-                     if new_state != current_app_state {
-                         match (current_app_state, new_state) {
+                if let Some(new_state) = next_app_state.take() {
+                    if new_state != current_app_state {
+                        match (current_app_state, new_state) {
                             (AppState::Menu, AppState::Gameplay) => {
                                 info!("Transitioning Menu -> Gameplay");
                                 game_init_pending = true;
-                                if let Some(ref mut gs) = game_state { if let Some(sink) = gs.audio_sink.take() { sink.stop(); } }
+                                if let Some(ref mut gs) = game_state {
+                                    if let Some(sink) = gs.audio_sink.take() {
+                                        sink.stop();
+                                    }
+                                }
                                 game_state = None;
-                                // Update sprite descriptor set for gameplay texture
-                                update_descriptor_set_texture(&base.device, descriptor_set_sprite, &arrow_texture); // Use correct variable
-                                info!("Updated sprite descriptor set for gameplay.");
+                                // NO descriptor set update needed here - descriptor_set_gameplay is already configured
                             }
                             (AppState::Gameplay, AppState::Menu) => {
                                 info!("Transitioning Gameplay -> Menu");
-                                if let Some(ref mut gs) = game_state { if let Some(sink) = gs.audio_sink.take() { info!("Stopping gameplay audio."); sink.stop(); } }
+                                if let Some(ref mut gs) = game_state {
+                                    if let Some(sink) = gs.audio_sink.take() {
+                                        info!("Stopping gameplay audio.");
+                                        sink.stop();
+                                    }
+                                }
                                 game_state = None;
                                 base.window.set_title("DeadSync");
                                 menu_state.selected_index = 0;
-                                // Update sprite descriptor set for logo texture
-                                update_descriptor_set_texture(&base.device, descriptor_set_sprite, &logo_texture); // Use correct variable
-                                info!("Updated sprite descriptor set for menu logo.");
+                                // NO descriptor set update needed here - logo/dancer sets are already configured
                             }
-                             _ => { warn!("Unexpected state transition requested from {:?} to {:?}", current_app_state, new_state); }
-                         }
-                         current_app_state = new_state;
-                     }
-                 }
+                            _ => {
+                                warn!(
+                                    "Unexpected state transition requested from {:?} to {:?}",
+                                    current_app_state, new_state
+                                );
+                            }
+                        }
+                        current_app_state = new_state;
+                    }
+                }
 
                 // --- Initialize Game State if Pending ---
                 if game_init_pending && current_app_state == AppState::Gameplay {
@@ -616,29 +679,33 @@ fn main() -> Result<(), Box<dyn Error>> {
                             if let Some(ms) = menu_state_clone {
                                 unsafe {
                                     // --- Draw Logo ---
-                                    // Bind the SPRITE descriptor set
-                                    device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline_layout, 0, &[descriptor_set_sprite], &[]);
-
-                                    // Calculate logo geometry
-                                    let aspect_ratio = logo_texture.width as f32 / logo_texture.height.max(1) as f32;
-                                    let logo_height = LOGO_DISPLAY_WIDTH / aspect_ratio;
+                                    device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline_layout, 0, &[descriptor_set_logo], &[]);
+                                    let aspect_ratio_logo = logo_texture.width as f32 / logo_texture.height.max(1) as f32;
+                                    let logo_height = LOGO_DISPLAY_WIDTH / aspect_ratio_logo;
                                     let logo_x = (current_window_size.0 - LOGO_DISPLAY_WIDTH) / 2.0;
                                     let logo_y = LOGO_Y_POS;
                                     let model_matrix_logo = Matrix4::from_translation(Vector3::new(logo_x + LOGO_DISPLAY_WIDTH / 2.0, logo_y + logo_height / 2.0, 0.0)) * Matrix4::from_nonuniform_scale(LOGO_DISPLAY_WIDTH, logo_height, 1.0);
-
-                                    // Push constants for logo
                                     let push_data_logo = PushConstantData { model: model_matrix_logo, color: [1.0, 1.0, 1.0, 1.0], uv_offset: [0.0, 0.0], uv_scale: [1.0, 1.0] };
                                     let push_data_bytes_logo = std::slice::from_raw_parts(&push_data_logo as *const _ as *const u8, mem::size_of::<PushConstantData>());
                                     device.cmd_push_constants(cmd_buf, pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, push_data_bytes_logo);
+                                    device.cmd_draw_indexed(cmd_buf, quad_index_count, 1, 0, 0, 0); // Draw Logo
 
-                                    // Draw the logo
-                                    device.cmd_draw_indexed(cmd_buf, quad_index_count, 1, 0, 0, 0);
+                                    // --- Draw Dancer ---
+                                    device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline_layout, 0, &[descriptor_set_dancer], &[]); // Bind DANCER set
+                                    let aspect_ratio_dancer = dance_texture.width as f32 / dance_texture.height.max(1) as f32;
+                                    let dancer_height = LOGO_DISPLAY_WIDTH / aspect_ratio_dancer; // Scale dancer width to logo width
+                                    let dancer_x = logo_x; // Same horizontal position as logo
+                                    // Calculate Y position to center dancer in the logo's vertical center
+                                    let dancer_y = logo_y + (logo_height / 2.0) - (dancer_height / 2.0);
+                                    let model_matrix_dancer = Matrix4::from_translation(Vector3::new(dancer_x + LOGO_DISPLAY_WIDTH / 2.0, dancer_y + dancer_height / 2.0, 0.0)) * Matrix4::from_nonuniform_scale(LOGO_DISPLAY_WIDTH, dancer_height, 1.0);
+                                    let push_data_dancer = PushConstantData { model: model_matrix_dancer, color: [1.0, 1.0, 1.0, 1.0], uv_offset: [0.0, 0.0], uv_scale: [1.0, 1.0] };
+                                    let push_data_bytes_dancer = std::slice::from_raw_parts(&push_data_dancer as *const _ as *const u8, mem::size_of::<PushConstantData>());
+                                    device.cmd_push_constants(cmd_buf, pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, push_data_bytes_dancer);
+                                    device.cmd_draw_indexed(cmd_buf, quad_index_count, 1, 0, 0, 0); // Draw Dancer
+
 
                                     // --- Draw Menu Options ---
-                                    // Bind the FONT descriptor set
-                                    device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline_layout, 0, &[descriptor_set_font], &[]);
-
-                                    // Call the function to draw text
+                                    device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline_layout, 0, &[descriptor_set_font], &[]); // Bind FONT set
                                     draw_menu_options(device, cmd_buf, pipeline_layout, &ms, font_ref, current_window_size, quad_index_count);
                                 }
                             }
@@ -647,7 +714,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                              if let Some((current_beat, arrows, targets, flash_states)) = game_state_data_for_draw {
                                 unsafe {
                                     // Bind the SPRITE descriptor set
-                                    device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline_layout, 0, &[descriptor_set_sprite], &[]);
+                                    device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline_layout, 0, &[descriptor_set_gameplay], &[]);
                                 }
                                 // Call gameplay draw function
                                 draw_gameplay(device, cmd_buf, pipeline_layout, current_beat, &arrows, &targets, &flash_states, quad_index_count);
@@ -698,6 +765,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         font.destroy(&base.device);
         info!("Destroying logo texture...");
         logo_texture.destroy(&base.device);
+        info!("Destroying dance texture...");
+        dance_texture.destroy(&base.device);
     }
     info!("Main Vulkan resources cleaned up.");
     info!("Exiting application.");
@@ -909,7 +978,7 @@ fn update_game_state(state: &mut GameState, dt: f32, rng: &mut impl Rng) {
                 }
                 *available_dirs.choose(rng).unwrap_or(&ARROW_DIRECTIONS[0])
             } else {
-                ARROW_DIRECTIONS[rng.gen_range(0..ARROW_DIRECTIONS.len())]
+                ARROW_DIRECTIONS[rng.random_range(0..ARROW_DIRECTIONS.len())]
             };
             let target_x = state
                 .targets
