@@ -268,3 +268,23 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
         height,
     })
 }
+
+// --- Helper to update descriptor set for a specific texture ---
+pub fn update_descriptor_set_texture(
+    device: &ash::Device,
+    descriptor_set: vk::DescriptorSet,
+    texture_resource: &TextureResource,
+) {
+    let image_info = vk::DescriptorImageInfo::default()
+        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+        .image_view(texture_resource.view)
+        .sampler(texture_resource.sampler);
+
+    let write_sampler = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_set)
+        .dst_binding(1) // Binding 1 for texture sampler
+        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+        .image_info(std::slice::from_ref(&image_info));
+
+    unsafe { device.update_descriptor_sets(&[write_sampler], &[]) };
+}
