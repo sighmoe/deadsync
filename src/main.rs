@@ -6,7 +6,6 @@ use rand::distr::{Bernoulli, Distribution};
 use rand::prelude::IndexedRandom;
 use rand::Rng; // Use Rng trait
 use rodio::{Decoder, OutputStream, Sink};
-use rodio::buffer::SamplesBuffer;
 use rodio::OutputStreamHandle;
 use rodio::Source;
 use rodio::source::Buffered;
@@ -19,7 +18,6 @@ use std::io::{BufReader, Cursor};
 use std::mem;
 use std::path::Path;
 use std::time::{Duration, Instant};
-use std::sync::Arc;
 
 use winit::{
     event::{ElementState, Event, KeyEvent, WindowEvent},
