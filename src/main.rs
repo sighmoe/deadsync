@@ -6,6 +6,10 @@ use rand::distr::{Bernoulli, Distribution};
 use rand::prelude::IndexedRandom;
 use rand::Rng; // Use Rng trait
 use rodio::{Decoder, OutputStream, Sink};
+use rodio::buffer::SamplesBuffer;
+use rodio::OutputStreamHandle;
+use rodio::Source;
+use rodio::source::Buffered;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::f32::consts::PI;
@@ -15,6 +19,7 @@ use std::io::{BufReader, Cursor};
 use std::mem;
 use std::path::Path;
 use std::time::{Duration, Instant};
+use std::sync::Arc;
 
 use winit::{
     event::{ElementState, Event, KeyEvent, WindowEvent},
@@ -32,7 +37,7 @@ mod utils;
 mod vulkan_base;
 
 use font::{draw_text, load_font, Font};
-use texture::{load_texture, update_descriptor_set_texture, TextureResource};
+use texture::{load_texture, TextureResource};
 use utils::fps::FPSCounter;
 use vulkan_base::{BufferResource, UniformBufferObject, Vertex, VulkanBase};
 
@@ -59,6 +64,8 @@ const FONT_INI_PATH: &str = "assets/fonts/miso/font.ini";
 const FONT_TEXTURE_PATH: &str = "assets/fonts/miso/_miso light 15x15 (res 360x360).png";
 const LOGO_TEXTURE_PATH: &str = "assets/graphics/logo.png";
 const DANCE_TEXTURE_PATH: &str = "assets/graphics/dance.png"; // ADDED
+const SFX_CHANGE_PATH: &str = "assets/sounds/change.ogg"; // ADDED
+const SFX_START_PATH: &str = "assets/sounds/start.ogg";   // ADDED
 const LOGO_DISPLAY_WIDTH: f32 = 500.0;
 const LOGO_Y_POS: f32 = WINDOW_HEIGHT as f32 - 700.0;
 
@@ -170,6 +177,16 @@ pub enum VirtualKeyCode {
     Escape,
 }
 
+// In src/main.rs
+fn load_sound_effect(path: &Path) -> Result<Buffered<Decoder<BufReader<File>>>, Box<dyn Error>> {
+    let file = File::open(path).map_err(|e| format!("Failed to open SFX {:?}: {}", path, e))?;
+    let source = Decoder::new(BufReader::new(file))
+        .map_err(|e| format!("Failed to decode SFX {:?}: {}", path, e))?;
+    let buffered = source.buffered();
+    info!("Loaded SFX: {:?}, Buffered", path);
+    Ok(buffered)
+}
+
 // --- Main Function ---
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::Builder::from_default_env()
@@ -204,13 +221,26 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // --- Audio Setup ---
     info!("Preparing audio stream...");
-    let (_stream, stream_handle) = OutputStream::try_default()?;
+    let (_stream, stream_handle) = OutputStream::try_default()?; // Keep stream_handle for SFX
     let audio_path_str = format!("{}/{}", SONG_FOLDER_PATH, SONG_AUDIO_FILENAME);
     let audio_path = Path::new(&audio_path_str);
-    if !audio_path.exists() {
-        return Err(format!("Audio file not found: {:?}", audio_path).into());
+    if !audio_path.exists() { return Err(format!("Audio file not found: {:?}", audio_path).into()); }
+    info!("Audio stream handle obtained. Music path: {:?}", audio_path);
+
+    // --- Load Sound Effects --- // ADDED
+    let change_sfx_path = Path::new(SFX_CHANGE_PATH);
+    let start_sfx_path = Path::new(SFX_START_PATH);
+    if !change_sfx_path.exists() {
+        return Err(format!("SFX not found: {:?}", change_sfx_path).into());
     }
-    info!("Audio stream handle obtained. Path: {:?}", audio_path);
+    if !start_sfx_path.exists() {
+        return Err(format!("SFX not found: {:?}", start_sfx_path).into());
+    }
+
+    let change_sfx = load_sound_effect(change_sfx_path)?;
+    let start_sfx = load_sound_effect(start_sfx_path)?;
+    info!("Menu sound effects loaded.");
+    // --- END ADDED ---
 
     // --- RNG ---
     let mut rng = rand::rng();
@@ -566,6 +596,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut modifiers_state = ModifiersState::default();
     let mut next_app_state: Option<AppState> = None;
 
+    // Clone Arc<SamplesBuffer> for the closure
+    let change_sfx_clone = change_sfx.clone();
+    let start_sfx_clone = start_sfx.clone();
+    // Clone stream handle for closure
+    let stream_handle_clone = stream_handle.clone();
+
     event_loop.run_on_demand(|event, elwp| {
         elwp.set_control_flow(ControlFlow::Poll);
 
@@ -577,7 +613,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                     WindowEvent::ModifiersChanged(modifiers) => { modifiers_state = modifiers.state(); }
                     WindowEvent::KeyboardInput { event: key_event, .. } => {
                         match current_app_state {
-                            AppState::Menu => { if let Some(requested_state) = handle_menu_input(key_event, &mut menu_state, elwp) { next_app_state = Some(requested_state); } }
+                            AppState::Menu => {
+                                // Pass cloned Arcs (&Arc<...>) to input handler
+                                if let Some(requested_state) = handle_menu_input(
+                                    key_event,
+                                    &mut menu_state,
+                                    elwp,
+                                    &stream_handle_clone,
+                                    &change_sfx_clone, // Pass the cloned Arc
+                                    &start_sfx_clone,  // Pass the cloned Arc
+                                ) {
+                                    next_app_state = Some(requested_state);
+                                }
+                            }
                             AppState::Gameplay => { if let Some(ref mut gs) = game_state { if let Some(requested_state) = handle_gameplay_input(key_event, gs, modifiers_state, elwp) { next_app_state = Some(requested_state); } } }
                         }
                     }
@@ -785,29 +833,55 @@ fn update_projection_matrix(
     Ok(())
 }
 
-// --- Input Handlers ---
 fn handle_menu_input(
     key_event: KeyEvent,
     menu_state: &mut MenuState,
     elwp: &EventLoopWindowTarget<()>,
+    stream_handle: &OutputStreamHandle,
+    change_sfx: &Buffered<Decoder<BufReader<File>>>,
+    start_sfx: &Buffered<Decoder<BufReader<File>>>,
 ) -> Option<AppState> {
     if key_event.state == ElementState::Pressed && !key_event.repeat {
         match key_event.logical_key {
             Key::Named(NamedKey::ArrowUp) => {
+                let old_index = menu_state.selected_index;
                 menu_state.selected_index = if menu_state.selected_index == 0 {
                     menu_state.options.len() - 1
                 } else {
                     menu_state.selected_index - 1
                 };
+                if menu_state.selected_index != old_index {
+                    if let Ok(sink) = Sink::try_new(stream_handle) {
+                        sink.append(change_sfx.clone());
+                        sink.detach();
+                    } else {
+                        warn!("Failed to create temporary sink for change SFX");
+                    }
+                }
                 debug!("Menu Up: Selected index {}", menu_state.selected_index);
             }
             Key::Named(NamedKey::ArrowDown) => {
-                menu_state.selected_index =
-                    (menu_state.selected_index + 1) % menu_state.options.len();
+                let old_index = menu_state.selected_index;
+                menu_state.selected_index = (menu_state.selected_index + 1) % menu_state.options.len();
+                if menu_state.selected_index != old_index {
+                    if let Ok(sink) = Sink::try_new(stream_handle) {
+                        sink.append(change_sfx.clone());
+                        sink.detach();
+                    } else {
+                        warn!("Failed to create temporary sink for change SFX");
+                    }
+                }
                 debug!("Menu Down: Selected index {}", menu_state.selected_index);
             }
             Key::Named(NamedKey::Enter) => {
                 debug!("Menu Enter: Selected index {}", menu_state.selected_index);
+                if let Ok(sink) = Sink::try_new(stream_handle) {
+                    sink.append(start_sfx.clone());
+                    sink.detach();
+                } else {
+                    warn!("Failed to create temporary sink for start SFX");
+                }
+                std::thread::sleep(Duration::from_millis(50));
                 match menu_state.selected_index {
                     0 => return Some(AppState::Gameplay),
                     1 => elwp.exit(),
