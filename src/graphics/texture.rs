@@ -1,4 +1,4 @@
-use crate::vulkan_base::{find_memorytype_index, record_submit_commandbuffer, VulkanBase};
+use crate::graphics::vulkan_base::{find_memorytype_index, record_submit_commandbuffer, VulkanBase};
 use ash::{vk, Device};
 use image::RgbaImage;
 use std::error::Error;

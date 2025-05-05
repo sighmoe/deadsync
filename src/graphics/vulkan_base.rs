@@ -764,6 +764,13 @@ impl VulkanBase {
         Ok(())
     }
 
+    pub fn wait_idle(&self) -> Result<(), vk::Result> {
+        log::debug!("Waiting for device idle...");
+        unsafe { self.device.device_wait_idle()? };
+        log::debug!("Device idle.");
+        Ok(())
+    }
+
     // Method to get GPU name
     pub fn get_gpu_name(&self) -> String {
         let props = self.pdevice_properties;
