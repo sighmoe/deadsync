@@ -141,15 +141,14 @@ pub fn draw(
             config::MENU_NORMAL_COLOR
         };
 
-        // Center text horizontally
         let text_width = font.measure_text(option_text);
         let x_pos = center_x - text_width / 2.0;
 
-        // Use the renderer's draw_text function
         renderer.draw_text(
             device, cmd_buf, font, option_text,
-            x_pos, y_pos, // Position is baseline
+            x_pos, y_pos,
             color,
+            1.0, // ADDED: Scale factor (1.0 for normal size)
         );
     }
 

@@ -48,6 +48,7 @@ pub fn draw(
         device, cmd_buf, font, title,
         center_x - title_width / 2.0, 100.0,
         config::MENU_NORMAL_COLOR,
+        1.0, // ADDED: Scale factor
     );
 
     // --- Draw Placeholder Text ---
@@ -57,6 +58,7 @@ pub fn draw(
          device, cmd_buf, font, placeholder_text,
          center_x - placeholder_width / 2.0, window_height / 2.0,
          config::MENU_NORMAL_COLOR,
+         1.0, // ADDED: Scale factor
      );
 
 
@@ -67,5 +69,6 @@ pub fn draw(
          device, cmd_buf, font, help_text,
          center_x - help_width / 2.0, window_height - 50.0,
          config::MENU_NORMAL_COLOR,
+         1.0, // ADDED: Scale factor
      );
 }
