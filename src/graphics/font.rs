@@ -1,9 +1,8 @@
-// FILE: src/graphics/font.rs
-
 use crate::graphics::texture::{load_texture, TextureResource}; // Corrected path
-use crate::graphics::vulkan_base::VulkanBase;                   // Corrected path
+use crate::graphics::vulkan_base::VulkanBase; // Corrected path
 use ash::Device;                                                // Keep Device for destroy
-use configparser::ini::Ini;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader};
 use log::{error, info, warn};
 use std::collections::HashMap;
 use std::error::Error;
@@ -101,50 +100,96 @@ pub fn load_font(
     texture_path: &Path,
 ) -> Result<Font, Box<dyn Error>> {
     log::info!("Loading font from INI: {:?}", ini_path);
+    log::debug!("Texture path: {:?}", texture_path);
 
     // --- 1. Parse INI ---
-    let mut config = Ini::new();
-    let map = config
-        .load(ini_path)
-        .map_err(|e| format!("Failed to load/parse INI file {:?}: {}", ini_path, e))?;
-    log::debug!("INI Parsed successfully.");
+    let file = File::open(ini_path).map_err(|e| format!("Failed to open INI file {:?}: {}", ini_path, e))?;
+    let reader = BufReader::new(file);
+
+    let mut current_section: Option<String> = None; // None represents the root section
+    let mut common_metrics_map: HashMap<String, String> = HashMap::new();
+    let mut main_lines_map: HashMap<usize, String> = HashMap::new();
+    let mut width_map: HashMap<u32, f32> = HashMap::new();
+
+    log::debug!("Starting manual INI parsing...");
+    for (line_num, line_result) in reader.lines().enumerate() {
+        let line = line_result.map_err(|e| format!("Failed to read line {} from {:?}: {}", line_num + 1, ini_path, e))?;
+        let line = line.trim();
+
+        // Skip empty lines and comments
+        if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
+            continue;
+        }
+
+        // Check for section headers
+        if line.starts_with('[') && line.ends_with(']') {
+            let section_name = line[1..line.len() - 1].trim().to_lowercase();
+            current_section = Some(section_name);
+            log::trace!("Line {}: Switched to section: [{:?}]", line_num + 1, current_section.as_deref().unwrap_or("root"));
+            continue;
+        }
+
+        // Parse key-value pairs
+        if let Some(eq_pos) = line.find('=') {
+            let key_original_case = line[..eq_pos].trim();
+            let key_lower_case = key_original_case.to_lowercase();
+            let value = line[eq_pos + 1..].trim().to_string();
+
+            match current_section.as_deref() {
+                Some("common") => {
+                    common_metrics_map.insert(key_lower_case, value);
+                }
+                Some("main") => {
+                    if key_lower_case.starts_with("line") {
+                        if let Some(num_part) = key_lower_case.strip_prefix("line") {
+                            if let Ok(num) = num_part.trim().parse::<usize>() {
+                                main_lines_map.insert(num, value); // value retains original case if needed by glyph map later
+                            } else {
+                                warn!("Line {}: Could not parse line number from key '{}' in [main]", line_num + 1, key_original_case);
+                            }
+                        }
+                    } else {
+                        warn!("Line {}: Unexpected key '{}' in [main] section", line_num + 1, key_original_case);
+                    }
+                }
+                None => { // Root section for widths
+                    if let Ok(char_code_idx) = key_original_case.parse::<u32>() {
+                        if let Ok(width) = value.parse::<f32>() {
+                            width_map.insert(char_code_idx, width);
+                        } else {
+                            warn!("Line {}: Invalid width value for root key '{}': {}", line_num + 1, key_original_case, value);
+                        }
+                    } // Ignore non-numeric root keys silently
+                }
+                Some(other_section) => {
+                    log::trace!("Line {}: Ignoring key '{}' in unknown section '{}'", line_num + 1, key_original_case, other_section);
+                }
+            }
+        } else {
+            warn!("Line {}: Malformed line in INI file (missing '='): {}", line_num + 1, line);
+        }
+    }
+    log::debug!("Finished manual INI parsing: {} common, {} lines, {} widths", common_metrics_map.len(), main_lines_map.len(), width_map.len());
+
+    // Helper closure to parse f32 from the common metrics map
+    let parse_f32 = |map: &HashMap<String, String>, key: &str, default: Option<f32>| -> Result<f32, String> {
+        match map.get(key) {
+            Some(s) => s.parse::<f32>().map_err(|e| format!("Invalid float value for '{}': {} ({})", key, s, e)),
+            None => default.ok_or_else(|| format!("Missing required key '{}' in [common] section", key)),
+        }
+    };
 
     // --- 2. Parse [common] Metrics ---
-    let common = map.get("common").ok_or("Missing [common] section in INI")?;
-    log::debug!("Parsing [common] section...");
+    log::debug!("Parsing common metrics from manually parsed data...");
 
-    let baseline = common
-        .get("baseline")
-        .and_then(|opt_s| opt_s.as_deref())
-        .and_then(|s| s.parse::<f32>().ok())
-        .ok_or("Missing or invalid 'baseline' in [common]")?;
-    let top = common
-        .get("top")
-        .and_then(|opt_s| opt_s.as_deref())
-        .and_then(|s| s.parse::<f32>().ok())
-        .ok_or("Missing or invalid 'top' in [common]")?;
-    let line_spacing = common
-        .get("linespacing")
-        .and_then(|opt_s| opt_s.as_deref())
-        .and_then(|s| s.parse::<f32>().ok())
-        .ok_or("Missing or invalid 'linespacing' in [common]")?;
+    let baseline = parse_f32(&common_metrics_map, "baseline", None).map_err(|e| Box::<dyn Error>::from(e))?;
+    let top = parse_f32(&common_metrics_map, "top", None).map_err(|e| Box::<dyn Error>::from(e))?;
+    let line_spacing = parse_f32(&common_metrics_map, "linespacing", None).map_err(|e| Box::<dyn Error>::from(e))?;
 
     // Optional metrics with defaults
-    let draw_extra_pixels_left = common
-        .get("drawextrapixelsleft")
-        .and_then(|opt_s| opt_s.as_deref())
-        .and_then(|s| s.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let draw_extra_pixels_right = common
-        .get("drawextrapixelsright")
-        .and_then(|opt_s| opt_s.as_deref())
-        .and_then(|s| s.parse::<f32>().ok())
-        .unwrap_or(0.0);
-    let advance_extra_pixels = common
-        .get("advanceextrapixels")
-        .and_then(|opt_s| opt_s.as_deref())
-        .and_then(|s| s.parse::<f32>().ok())
-        .unwrap_or(0.0);
+    let draw_extra_pixels_left = parse_f32(&common_metrics_map, "drawextrapixelsleft", Some(0.0))?;
+    let draw_extra_pixels_right = parse_f32(&common_metrics_map, "drawextrapixelsright", Some(0.0))?;
+    let advance_extra_pixels = parse_f32(&common_metrics_map, "advanceextrapixels", Some(0.0))?;
 
     log::info!(
         "Parsed Common Metrics: Baseline={}, Top={}, LineSpacing={}",
@@ -158,64 +203,24 @@ pub fn load_font(
     log::info!("Font texture loaded: {}x{}", tex_width, tex_height);
 
     // --- 4. Determine Grid Size & Get Line Keys ---
-    let main_section = map.get("main").ok_or("Missing [main] section in INI")?;
-    let mut max_row: u32 = 0;
-    let mut max_col: u32 = 0;
-
-    let mut line_keys: Vec<usize> = Vec::new();
-    log::debug!("Parsing 'Line X' keys from [main] section...");
-    for key in main_section.keys() {
-        let lower_key = key.to_lowercase();
-        if lower_key.starts_with("line") {
-             // Extract number after "line"
-             if let Some(num_part) = lower_key.strip_prefix("line") {
-                if let Ok(num) = num_part.trim().parse::<usize>() {
-                    log::trace!("Found valid line key: '{}' -> Parsed number: {}", key, num);
-                    line_keys.push(num);
-                } else {
-                    warn!(
-                        "Could not parse number from line key: '{}' (part: '{}')",
-                        key, num_part
-                    );
-                }
-             } else {
-                  warn!("Could not extract number part from line key: '{}'", key);
-             }
-        }
+    if main_lines_map.is_empty() {
+        return Err("No 'LineX' entries found in [main] section".into());
     }
 
-    if line_keys.is_empty() {
-        return Err("No valid 'Line X' entries found in [main] section".into());
-    }
+    let mut line_keys: Vec<usize> = main_lines_map.keys().copied().collect();
     line_keys.sort_unstable();
     log::debug!("Found and sorted line keys: {:?}", line_keys);
 
-    // Loop just to find max row/col using the *parsed* line_keys
+    let mut max_row: u32 = 0;
+    let mut max_col: u32 = 0;
+
     log::debug!("Determining grid size from line content...");
     for &row_idx_usize in &line_keys {
-         // Find the original case-sensitive key corresponding to the parsed number
-        let original_key = main_section
-            .keys()
-            .find(|k| {
-                 k.to_lowercase().strip_prefix("line")
-                 .and_then(|num_part| num_part.trim().parse::<usize>().ok())
-                 == Some(row_idx_usize)
-            })
-            .ok_or_else(|| {
-                // This should ideally not happen if line_keys were derived correctly
-                format!(
-                    "Internal error: Could not find original key for parsed line number {}",
-                    row_idx_usize
-                )
-            })?;
-
-        if let Some(Some(line_str)) = main_section.get(original_key) { // Check inner Option
+        if let Some(line_str) = main_lines_map.get(&row_idx_usize) {
             max_row = max_row.max(row_idx_usize as u32);
             // Number of columns is number of characters - 1 (0-based index)
             let current_max_col = line_str.chars().count().saturating_sub(1) as u32;
             max_col = max_col.max(current_max_col);
-        } else {
-            warn!("Could not read value for original key: {}", original_key);
         }
     }
     let num_rows = max_row + 1;
@@ -239,47 +244,15 @@ pub fn load_font(
     };
 
     // --- Parse Width Map (from root section) ---
-    let mut width_map: HashMap<u32, f32> = HashMap::new();
-    if let Some(root_section) = map.get("") { // Root section has empty string key ""
-         log::debug!("Parsing width map from root INI section...");
-        for (key, value_opt) in root_section {
-            if let Ok(char_code_idx) = key.parse::<u32>() { // Key is unicode codepoint
-                if let Some(width_str) = value_opt {
-                    if let Ok(width) = width_str.parse::<f32>() {
-                        width_map.insert(char_code_idx, width);
-                    } else {
-                        warn!("Invalid width value for root key '{}': {}", key, width_str);
-                    }
-                }
-            } else {
-                 // Ignore non-numeric keys in the root section
-                 // log::trace!("Ignoring non-numeric root key: {}", key);
-            }
-        }
-         log::debug!("Parsed {} entries into width map.", width_map.len());
-    } else {
-         log::warn!("No root section ('') found in INI for width map.");
-    }
-
+    // The `width_map` is already populated by the manual parser above.
 
     // --- 5. Build Glyph Map ---
     let mut glyphs: HashMap<char, GlyphInfo> = HashMap::new();
     log::info!("Building Glyph Map...");
     for &row_idx_usize in &line_keys {
         let row_idx = row_idx_usize as u32;
-        // Find original key again
-         let original_key = main_section
-            .keys()
-            .find(|k| {
-                 k.to_lowercase().strip_prefix("line")
-                 .and_then(|num_part| num_part.trim().parse::<usize>().ok())
-                 == Some(row_idx_usize)
-            })
-            .expect("Internal error: Could not find original key during glyph building"); // Should exist
-
-
-        if let Some(Some(line_str)) = main_section.get(original_key) { // Check inner Option
-            log::trace!("Processing Key: {}, Row Idx: {}", original_key, row_idx);
+        if let Some(line_str) = main_lines_map.get(&row_idx_usize) {
+             log::trace!("Processing Line {}: '{}'", row_idx_usize, line_str);
 
             for (col_idx, char_code) in line_str.chars().enumerate() {
                 // Skip null char or zero-width space sometimes used as placeholders
@@ -302,8 +275,7 @@ pub fn load_font(
                             );
                         }
                          // Use cell width as fallback if no explicit width found
-                        // metrics.cell_width
-                        56.0
+                         metrics.cell_width // <-- CORRECTED Fallback
                     }
                 };
 
@@ -394,7 +366,3 @@ pub fn load_font(
         space_width,
     })
 }
-
-// --- Text Drawing Function (REMOVED) ---
-// The actual drawing logic (Vulkan calls) has been moved to the Renderer.
-// This module now only provides the Font struct and loading capabilities.
