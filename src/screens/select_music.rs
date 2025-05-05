@@ -82,83 +82,60 @@ pub fn draw(
 
     // --- Calculate Scaled Heights ---
     let bar_height = (window_height / config::UI_REFERENCE_HEIGHT) * config::UI_BAR_REFERENCE_HEIGHT;
-    trace!("Calculated bar height: {}", bar_height);
+    trace!("Bar height: {}", bar_height);
 
-    // --- Draw Header Background ---
+    // --- 1. Draw Header Background --- (Drawn FIRST)
     let header_center_y = bar_height / 2.0;
     renderer.draw_quad(
-        device,
-        cmd_buf,
-        DescriptorSetId::SolidColor, // CHANGED: Use the dedicated set
-        Vector3::new(center_x, header_center_y, 0.0),
-        (window_width, bar_height),
-        Rad(0.0),
-        config::UI_BAR_COLOR, // Use the desired gray tint
-        [0.0, 0.0],           // UVs don't matter for 1x1 texture
-        [1.0, 1.0],           // UVs don't matter for 1x1 texture
+        device, cmd_buf, DescriptorSetId::SolidColor,
+        Vector3::new(center_x, header_center_y, 0.0), (window_width, bar_height),
+        Rad(0.0), config::UI_BAR_COLOR, [0.0, 0.0], [1.0, 1.0],
     );
 
-    // --- Draw Footer Background ---
+    // --- 2. Draw Footer Background --- (Drawn SECOND)
     let footer_y_top = window_height - bar_height;
     let footer_center_y = footer_y_top + bar_height / 2.0;
     renderer.draw_quad(
-        device,
-        cmd_buf,
-        DescriptorSetId::SolidColor, // CHANGED: Use the dedicated set
-        Vector3::new(center_x, footer_center_y, 0.0),
-        (window_width, bar_height),
-        Rad(0.0),
-        config::UI_BAR_COLOR, // Use the desired gray tint
-        [0.0, 0.0],           // UVs don't matter for 1x1 texture
-        [1.0, 1.0],           // UVs don't matter for 1x1 texture
+        device, cmd_buf, DescriptorSetId::SolidColor,
+        Vector3::new(center_x, footer_center_y, 0.0), (window_width, bar_height),
+        Rad(0.0), config::UI_BAR_COLOR, [0.0, 0.0], [1.0, 1.0],
     );
 
-    // --- Calculate Text Scale & Baselines --- (no change from previous step)
+    // --- Calculate Text Scale & Baselines ---
     let target_text_height_ratio = 0.6;
     let target_text_pixel_height = bar_height * target_text_height_ratio;
     let text_scale = target_text_pixel_height / font.line_height;
-    trace!("Calculated text scale: {}", text_scale);
+    trace!("Text scale: {}", text_scale);
 
     let scaled_font_ascent = (font.metrics.baseline - font.metrics.top) * text_scale;
-    let scaled_font_descent = (font.metrics.line_spacing - font.metrics.baseline) * text_scale;
-    let scaled_font_total_height = scaled_font_ascent + scaled_font_descent;
+    let padding_y = bar_height * 0.15; // Fine-tune this padding if needed
 
-    let header_text_top_y = header_center_y - scaled_font_total_height / 2.0;
-    let header_baseline_y = header_text_top_y + scaled_font_ascent;
+    let header_baseline_y = padding_y + scaled_font_ascent;
+    let footer_baseline_y = footer_y_top + padding_y + scaled_font_ascent;
+    trace!("Header baseline Y: {}, Footer baseline Y: {}", header_baseline_y, footer_baseline_y);
+    trace!("Text color: {:?}", config::UI_BAR_TEXT_COLOR); // Log the color being used
 
-    let footer_text_top_y = footer_center_y - scaled_font_total_height / 2.0;
-    let footer_baseline_y = footer_text_top_y + scaled_font_ascent;
-
-    // --- Draw Header Text --- (no change from previous step)
+    // --- 3. Draw Header Text --- (Drawn THIRD, should be ON TOP of header bg)
     let header_text = "Select Music";
     renderer.draw_text(
-        device,
-        cmd_buf,
-        font,
-        header_text,
-        config::UI_HEADER_PADDING_X,
-        header_baseline_y,
-        config::UI_BAR_TEXT_COLOR,
-        text_scale,
+        device, cmd_buf, font, header_text,
+        1.0, 1.0,
+        config::UI_BAR_TEXT_COLOR, // Use the (now black) color from config
+        0.4,
     );
 
-    // --- Draw Footer Text --- (no change from previous step)
+    // --- 4. Draw Footer Text --- (Drawn FOURTH, should be ON TOP of footer bg)
     let footer_text = "EVENT MODE";
     let scaled_footer_text_width = font.measure_text(footer_text) * text_scale;
     renderer.draw_text(
-        device,
-        cmd_buf,
-        font,
-        footer_text,
-        center_x - scaled_footer_text_width / 2.0,
-        footer_baseline_y,
-        config::UI_BAR_TEXT_COLOR,
+        device, cmd_buf, font, footer_text,
+        center_x - scaled_footer_text_width / 2.0, footer_baseline_y,
+        config::UI_BAR_TEXT_COLOR, // Use the (now black) color from config
         text_scale,
     );
 
-    // --- Draw Song List --- (no change from previous step)
-    // ... (rest of draw function as before) ...
-     let list_area_top = bar_height;
+    // --- 5. Draw Song List --- (Drawn LAST, between bars)
+    let list_area_top = bar_height;
     let list_area_bottom = window_height - bar_height;
     let list_area_height = list_area_bottom - list_area_top;
 
@@ -166,7 +143,6 @@ pub fn draw(
     let list_text_scale = 1.0;
     let list_line_height = font.line_height * list_text_scale;
     let list_spacing_y = list_line_height * 2.5;
-
     let total_list_height = (list_item_count - 1.0) * list_spacing_y + list_line_height;
     let start_y = list_area_top + (list_area_height - total_list_height) / 2.0 + list_line_height * 0.5;
 
@@ -174,14 +150,9 @@ pub fn draw(
         let empty_text = "No songs found!";
         let text_width = font.measure_text(empty_text) * list_text_scale;
         renderer.draw_text(
-            device,
-            cmd_buf,
-            font,
-            empty_text,
-            center_x - text_width / 2.0,
-            list_area_top + list_area_height / 2.0,
-            config::MENU_NORMAL_COLOR,
-            list_text_scale,
+            device, cmd_buf, font, empty_text,
+            center_x - text_width / 2.0, list_area_top + list_area_height / 2.0,
+            config::MENU_NORMAL_COLOR, list_text_scale,
         );
     } else {
         for (index, song_name) in state.songs.iter().enumerate() {
@@ -191,20 +162,12 @@ pub fn draw(
             } else {
                 config::MENU_NORMAL_COLOR
             };
-
             let text_width = font.measure_text(song_name) * list_text_scale;
             let x_pos = center_x - text_width / 2.0;
-
             renderer.draw_text(
-                device,
-                cmd_buf,
-                font,
-                song_name,
-                x_pos,
-                y_pos,
-                color,
-                list_text_scale,
+                device, cmd_buf, font, song_name,
+                x_pos, y_pos, color, list_text_scale,
             );
         }
     }
-} // End draw function
+}

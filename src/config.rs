@@ -59,7 +59,7 @@ pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 // --- UI Constants ---
 // Color #A6A6A6 converted to normalized float RGBA
 pub const UI_BAR_COLOR: [f32; 4] = [166.0 / 255.0, 166.0 / 255.0, 166.0 / 255.0, 1.0];
-pub const UI_BAR_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // CHANGED TO WHITE
+pub const UI_BAR_TEXT_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; // CHANGED TO BLACK
 pub const UI_HEADER_PADDING_X: f32 = 15.0;
 pub const UI_REFERENCE_HEIGHT: f32 = 768.0; // Reference screen height for scaling UI elements
 pub const UI_BAR_REFERENCE_HEIGHT: f32 = 51.0; // Desired bar height at reference screen height
