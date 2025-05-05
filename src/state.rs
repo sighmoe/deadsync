@@ -9,8 +9,10 @@ use winit::keyboard::{Key, NamedKey};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppState {
     Menu,
+    SelectMusic, // NEW - Was missing in your provided file
+    Options,     // NEW - Was missing in your provided file
     Gameplay,
-    Exiting, // Added state for clean exit request
+    Exiting,
 }
 
 // --- Screen Specific States ---
@@ -21,13 +23,42 @@ pub struct MenuState {
     pub selected_index: usize,
 }
 
+// Define the menu options here or load from config if preferred
+const MAIN_MENU_OPTIONS: [&str; 3] = ["Gameplay", "Options", "Exit"]; // UPDATED
+
 impl Default for MenuState {
     fn default() -> Self {
         MenuState {
-            options: config::MENU_OPTIONS.iter().map(|&s| s.to_string()).collect(),
+            // CORRECTED: Use the locally defined MAIN_MENU_OPTIONS constant
+            options: MAIN_MENU_OPTIONS.iter().map(|&s| s.to_string()).collect(),
             selected_index: 0,
         }
     }
+}
+
+// NEW: State for the music selection screen - Was missing in your provided file
+#[derive(Debug, Clone)]
+pub struct SelectMusicState {
+    pub songs: Vec<String>, // For now, just the names
+    pub selected_index: usize,
+    // Later: Add paths, BPM, etc. here or in a SongInfo struct
+}
+
+impl Default for SelectMusicState {
+    fn default() -> Self {
+        SelectMusicState {
+            // TODO: Later, scan a directory for songs
+            songs: vec![config::SONG_FOLDER_PATH.split('/').last().unwrap_or("Unknown Song").to_string()], // Derive name from path for now
+            selected_index: 0,
+        }
+    }
+}
+
+// NEW: State for the options screen (can be simple for now) - Was missing in your provided file
+#[derive(Debug, Clone, Default)]
+pub struct OptionsState {
+    // Add fields for options later (e.g., volume, keybinds)
+    pub placeholder: bool,
 }
 
 #[derive(Debug, Clone)]

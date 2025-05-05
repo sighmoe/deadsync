@@ -2,6 +2,7 @@ use crate::assets::{AssetManager, FontId, SoundId, TextureId};
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
+// Make sure MenuState is using the correct options now (defined in state.rs)
 use crate::state::{AppState, MenuState, VirtualKeyCode};
 use log::{debug};
 use ash::vk;
@@ -42,10 +43,13 @@ pub fn handle_input(
                     audio_manager.play_sfx(SoundId::MenuStart);
                     // Add a small delay to let the sound play slightly before transition
                     // std::thread::sleep(Duration::from_millis(50)); // Consider if needed
+
+                    // UPDATED: Match based on the new options/indices
                     match menu_state.selected_index {
-                        0 => return Some(AppState::Gameplay), // Request transition to Gameplay
-                        1 => return Some(AppState::Exiting),  // Request application exit
-                        _ => {} // Should not happen with current options
+                        0 => return Some(AppState::SelectMusic), // "Select Music"
+                        1 => return Some(AppState::Options),     // "Options"
+                        2 => return Some(AppState::Exiting),     // "Exit"
+                        _ => {} // Should not happen
                     }
                 }
                 VirtualKeyCode::Escape => {
@@ -66,6 +70,8 @@ pub fn update(_menu_state: &mut MenuState, _dt: f32) {
 }
 
 // --- Drawing Logic ---
+// Draw function remains the same, it just reads the options from MenuState
+// which now defaults to ["Select Music", "Options", "Exit"]
 pub fn draw(
     renderer: &Renderer, // Use the renderer for drawing commands
     menu_state: &MenuState,
@@ -124,7 +130,8 @@ pub fn draw(
     let center_x = window_width / 2.0;
     // Calculate Y position based on center, offset, and spacing
     let start_y = window_height / 2.0 + config::MENU_START_Y_OFFSET;
-    let spacing_y = font.line_height * config::MENU_ITEM_SPACING;
+    // Adjust spacing if needed for 3 items
+    let spacing_y = font.line_height * config::MENU_ITEM_SPACING * (2.0/3.0); // Make slightly tighter
 
     for (index, option_text) in menu_state.options.iter().enumerate() {
         let y_pos = start_y + index as f32 * spacing_y;

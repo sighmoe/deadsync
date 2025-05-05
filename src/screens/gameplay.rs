@@ -2,6 +2,7 @@ use crate::assets::{AssetManager, TextureId}; // Assuming sound IDs for hits exi
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
 use crate::state::{
+    // Ensure AppState::SelectMusic is included
     AppState, Arrow, ArrowDirection, FlashState, GameState, Judgment, NoteType, TargetInfo,
     VirtualKeyCode, ALL_ARROW_DIRECTIONS,
 };
@@ -85,11 +86,14 @@ pub fn handle_input(
     game_state: &mut GameState,
 ) -> Option<AppState> {
     if key_event.state == ElementState::Pressed && !key_event.repeat {
+        // UPDATED: Handle Escape first
         if let Some(VirtualKeyCode::Escape) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
-            info!("Escape pressed in gameplay, returning to menu.");
-            return Some(AppState::Menu); // Request state transition
-        }
-    }
+           info!("Escape pressed in gameplay, returning to Select Music.");
+           // Stop music here if you want it to stop immediately upon leaving gameplay
+           // game_state.audio_manager.stop_music(); // Requires passing AudioManager or making it accessible
+           return Some(AppState::SelectMusic); // Request transition back to SelectMusic
+       }
+   }
 
     // Handle arrow key presses/releases for gameplay
      if let Some(virtual_keycode) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {

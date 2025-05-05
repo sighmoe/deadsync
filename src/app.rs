@@ -3,8 +3,9 @@ use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::Renderer;
 use crate::graphics::vulkan_base::VulkanBase;
-use crate::screens::{gameplay, menu};
-use crate::state::{AppState, GameState, MenuState};
+// Import new screen modules and states
+use crate::screens::{gameplay, menu, select_music, options};
+use crate::state::{AppState, GameState, MenuState, SelectMusicState, OptionsState};
 use crate::utils::fps::FPSCounter;
 
 use log::{error, info, trace, warn};
@@ -16,12 +17,12 @@ use winit::{
     event::{Event, WindowEvent, KeyEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{WindowBuilder},
-    platform::run_on_demand::EventLoopExtRunOnDemand, // Use this for run_on_demand
+    platform::run_on_demand::EventLoopExtRunOnDemand,
 };
 
 pub struct App {
     // Core systems
-    vulkan_base: VulkanBase, // Owns Vulkan core, window, etc.
+    vulkan_base: VulkanBase,
     renderer: Renderer,
     audio_manager: AudioManager,
     asset_manager: AssetManager,
@@ -29,12 +30,14 @@ pub struct App {
     // Application state
     current_app_state: AppState,
     menu_state: MenuState,
-    game_state: Option<GameState>, // Option because it's created on demand
+    select_music_state: SelectMusicState, // NEW
+    options_state: OptionsState,         // NEW
+    game_state: Option<GameState>,
 
     // Timing and Utils
     fps_counter: FPSCounter,
     last_frame_time: Instant,
-    rng: rand::rngs::ThreadRng, // RNG for gameplay
+    rng: rand::rngs::ThreadRng,
 
     // Control Flow / State Change Request
     next_app_state: Option<AppState>,
@@ -83,7 +86,9 @@ impl App {
             asset_manager,
             current_app_state: AppState::Menu, // Start in the menu
             menu_state: MenuState::default(),
-            game_state: None, // Gameplay state initialized later
+            select_music_state: SelectMusicState::default(), // NEW: Initialize
+            options_state: OptionsState::default(),         // NEW: Initialize
+            game_state: None,
             fps_counter: FPSCounter::new(),
             last_frame_time: Instant::now(),
             rng: rand::rng(),
@@ -198,33 +203,40 @@ impl App {
 
     /// Delegates keyboard input to the active screen.
     fn handle_keyboard_input(&mut self, key_event: KeyEvent) {
-         trace!("Keyboard Input: {:?}", key_event);
-         let requested_state = match self.current_app_state {
-             AppState::Menu => {
-                 menu::handle_input(&key_event, &mut self.menu_state, &self.audio_manager)
-             }
-             AppState::Gameplay => {
-                 if let Some(ref mut gs) = self.game_state {
-                     gameplay::handle_input(&key_event, gs)
-                 } else {
-                     warn!("Received input in Gameplay state, but game_state is None.");
-                     None
-                 }
-             }
-             AppState::Exiting => None, // Ignore input when exiting
-         };
+        trace!("Keyboard Input: {:?}", key_event);
+        // UPDATED: Add cases for new states
+        let requested_state = match self.current_app_state {
+            AppState::Menu => {
+                menu::handle_input(&key_event, &mut self.menu_state, &self.audio_manager)
+            }
+            AppState::SelectMusic => { // NEW
+                select_music::handle_input(&key_event, &mut self.select_music_state, &self.audio_manager)
+            }
+            AppState::Options => { // NEW
+                options::handle_input(&key_event, &mut self.options_state /*, &self.audio_manager */) // Pass audio if needed
+            }
+            AppState::Gameplay => {
+                if let Some(ref mut gs) = self.game_state {
+                    // Pass audio manager if gameplay needs to play sounds directly on input
+                    gameplay::handle_input(&key_event, gs /*, &self.audio_manager */)
+                } else {
+                    warn!("Received input in Gameplay state, but game_state is None.");
+                    None
+                }
+            }
+            AppState::Exiting => None,
+        };
 
-         // If the screen handler requested a state change, queue it
-         if requested_state.is_some() {
-             self.next_app_state = requested_state;
-         }
-    }
+        if requested_state.is_some() {
+            self.next_app_state = requested_state;
+        }
+   }
 
 
     /// Performs state transitions and associated setup/teardown.
     fn transition_state(&mut self, new_state: AppState) {
         if new_state == self.current_app_state {
-            return; // No transition needed
+            return;
         }
 
         info!("Transitioning state from {:?} -> {:?}", self.current_app_state, new_state);
@@ -237,10 +249,10 @@ impl App {
                  self.game_state = None; // Drop the game state
                  info!("Gameplay state cleared.");
             }
-            AppState::Menu => {
-                 // Nothing specific needed when leaving menu currently
-            }
-             AppState::Exiting => {} // Should not transition *from* exiting
+            AppState::Menu => { /* Nothing specific */ }
+            AppState::SelectMusic => { /* Nothing specific */ } // NEW
+            AppState::Options => { /* Nothing specific */ }     // NEW
+             AppState::Exiting => {}
         }
 
 
@@ -248,65 +260,83 @@ impl App {
         match new_state {
             AppState::Menu => {
                 self.menu_state = MenuState::default(); // Reset menu state
-                // Optional: Start menu music?
+            }
+            AppState::SelectMusic => { // NEW
+                self.select_music_state = SelectMusicState::default(); // Reset song list/selection
+                // Optional: Start different menu music?
+            }
+            AppState::Options => { // NEW
+                self.options_state = OptionsState::default(); // Reset options state
             }
             AppState::Gameplay => {
-                // Initialize gameplay state
+                // IMPORTANT: Here you would ideally get the selected song info
+                // from self.select_music_state if the previous state was SelectMusic.
+                // For now, we assume the only option leads to the hardcoded song.
+                info!("Initializing Gameplay State...");
+
                 let window_size = (self.vulkan_base.surface_resolution.width as f32, self.vulkan_base.surface_resolution.height as f32);
+                // Use hardcoded paths from config for now
                  let music_path = Path::new(config::SONG_FOLDER_PATH).join(config::SONG_AUDIO_FILENAME);
                  match self.audio_manager.play_music(&music_path, 1.0) {
                      Ok(_) => {
-                         let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64); // Compensate for offset
+                         let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
                          self.game_state = Some(gameplay::initialize_game_state(
                             window_size.0, window_size.1, start_time
                          ));
                          info!("Gameplay state initialized and music started.");
                      }
                      Err(e) => {
-                         error!("Failed to start gameplay music: {}. Returning to Menu.", e);
-                          // Transition immediately back to Menu on critical error
-                          self.current_app_state = AppState::Menu; // Force current state before next_app_state check
-                          self.next_app_state = Some(AppState::Menu);
+                         error!("Failed to start gameplay music: {}. Returning to SelectMusic.", e);
+                          // Transition immediately back to SelectMusic on critical error
+                          self.current_app_state = AppState::SelectMusic; // Force current state
+                          self.next_app_state = Some(AppState::SelectMusic); // Queue transition
                           return; // Skip setting current_app_state to Gameplay
                      }
                  }
             }
-            AppState::Exiting => {
-                 // No setup needed for exiting state
-            }
+            AppState::Exiting => { /* No setup */ }
         }
 
-        // Update the current state
+        // Update the current state and window title
         self.current_app_state = new_state;
         self.vulkan_base.window.set_title(&format!("{} | {:?}", config::WINDOW_TITLE, self.current_app_state));
     }
 
     /// Calls the update function for the current screen.
     fn update(&mut self, dt: f32) {
-         trace!("Update Start (dt: {:.4} s)", dt);
-        match self.current_app_state {
-            AppState::Menu => {
-                menu::update(&mut self.menu_state, dt);
-            }
-            AppState::Gameplay => {
-                if let Some(ref mut gs) = self.game_state {
-                    gameplay::update(gs, dt, &mut self.rng);
-                }
-            }
-            AppState::Exiting => {} // No updates needed when exiting
-        }
+        trace!("Update Start (dt: {:.4} s)", dt);
+        // UPDATED: Add cases for new states
+       match self.current_app_state {
+           AppState::Menu => {
+               menu::update(&mut self.menu_state, dt);
+           }
+           AppState::SelectMusic => { // NEW
+               select_music::update(&mut self.select_music_state, dt);
+           }
+           AppState::Options => { // NEW
+               options::update(&mut self.options_state, dt);
+           }
+           AppState::Gameplay => {
+               if let Some(ref mut gs) = self.game_state {
+                   gameplay::update(gs, dt, &mut self.rng);
+               }
+           }
+           AppState::Exiting => {}
+       }
 
-        // Update FPS counter and window title
-        if let Some(fps) = self.fps_counter.update() {
-             let title = match self.current_app_state {
-                 AppState::Gameplay => format!("{} | Gameplay | FPS: {} | Beat: {:.2}", config::WINDOW_TITLE, fps, self.game_state.as_ref().map_or(0.0, |gs| gs.current_beat)),
-                 AppState::Menu => format!("{} | Menu | FPS: {}", config::WINDOW_TITLE, fps),
-                 AppState::Exiting => format!("{} | Exiting...", config::WINDOW_TITLE),
-             };
-             self.vulkan_base.window.set_title(&title);
-        }
-         trace!("Update End");
-    }
+       // Update FPS counter and window title (UPDATED to include new states)
+       if let Some(fps) = self.fps_counter.update() {
+            let title = match self.current_app_state {
+                AppState::Gameplay => format!("{} | Gameplay | FPS: {} | Beat: {:.2}", config::WINDOW_TITLE, fps, self.game_state.as_ref().map_or(0.0, |gs| gs.current_beat)),
+                AppState::Menu => format!("{} | Menu | FPS: {}", config::WINDOW_TITLE, fps),
+                AppState::SelectMusic => format!("{} | Select Music | FPS: {}", config::WINDOW_TITLE, fps), // NEW
+                AppState::Options => format!("{} | Options | FPS: {}", config::WINDOW_TITLE, fps),         // NEW
+                AppState::Exiting => format!("{} | Exiting...", config::WINDOW_TITLE),
+            };
+            self.vulkan_base.window.set_title(&title);
+       }
+        trace!("Update End");
+   }
 
      /// Handles Vulkan swapchain recreation and related resource updates on resize.
      fn handle_resize(&mut self) -> Result<(), Box<dyn Error>> {
@@ -341,55 +371,58 @@ impl App {
 
     /// Performs rendering for the current frame.
     fn render(&mut self) -> Result<bool, vk::Result> {
-        // Use VulkanBase's draw_frame, passing a closure for drawing commands
-        // Read surface extent *before* the closure that captures renderer/assets/state
         let surface_extent = self.vulkan_base.surface_resolution;
 
         let draw_result = self.vulkan_base.draw_frame(|device, cmd_buf| {
              trace!("Render: Beginning frame drawing...");
-             // Use the renderer to set up the frame and draw the current screen
              self.renderer.begin_frame(device, cmd_buf, surface_extent);
 
+             // UPDATED: Add cases for new states
              match self.current_app_state {
                  AppState::Menu => {
                       trace!("Render: Drawing Menu screen...");
                      menu::draw(
-                         &self.renderer,
-                         &self.menu_state,
-                         &self.asset_manager,
-                         device, // Pass device/cmd_buf for drawing calls
-                         cmd_buf,
+                         &self.renderer, &self.menu_state, &self.asset_manager,
+                         device, cmd_buf,
+                     );
+                 }
+                 AppState::SelectMusic => { // NEW
+                      trace!("Render: Drawing SelectMusic screen...");
+                     select_music::draw(
+                         &self.renderer, &self.select_music_state, &self.asset_manager,
+                         device, cmd_buf,
+                     );
+                 }
+                 AppState::Options => { // NEW
+                     trace!("Render: Drawing Options screen...");
+                     options::draw(
+                         &self.renderer, &self.options_state, &self.asset_manager,
+                         device, cmd_buf,
                      );
                  }
                  AppState::Gameplay => {
                      if let Some(ref gs) = self.game_state {
                           trace!("Render: Drawing Gameplay screen...");
                          gameplay::draw(
-                             &self.renderer,
-                             gs,
-                             &self.asset_manager,
-                             device,
-                             cmd_buf,
+                             &self.renderer, gs, &self.asset_manager,
+                             device, cmd_buf,
                          );
                      } else {
                           warn!("Attempted to draw Gameplay state, but game_state is None.");
-                          // Optionally draw a placeholder/loading screen
                      }
                  }
                   AppState::Exiting => {
-                      // Optionally draw a "Shutting down..." screen
                       trace!("Render: In Exiting state, drawing nothing.");
                   }
              }
              trace!("Render: Frame drawing commands recorded.");
-             // end_frame logic is handled by vulkan_base.draw_frame implicitly
         });
 
         match draw_result {
             Ok(needs_resize) => Ok(needs_resize),
             Err(e) => {
                  error!("Error during Vulkan draw_frame: {:?}", e);
-                 Err(e) // Propagate Vulkan errors
+                 Err(e)
             }
         }
     }

@@ -275,7 +275,8 @@ pub fn load_font(
                             );
                         }
                          // Use cell width as fallback if no explicit width found
-                         metrics.cell_width // <-- CORRECTED Fallback
+                         //metrics.cell_width // <-- CORRECTED Fallback
+                         56.0
                     }
                 };
 
