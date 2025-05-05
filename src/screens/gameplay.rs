@@ -312,6 +312,7 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
                 let judgment = if min_abs_time_diff_ms <= config::W1_WINDOW_MS { Judgment::W1 }
                     else if min_abs_time_diff_ms <= config::W2_WINDOW_MS { Judgment::W2 }
                     else if min_abs_time_diff_ms <= config::W3_WINDOW_MS { Judgment::W3 }
+                    else if min_abs_time_diff_ms <= config::W4_WINDOW_MS { Judgment::W4 }
                     else { Judgment::W4 }; // Must be W4 if within MAX_HIT_WINDOW_MS
 
                 info!(

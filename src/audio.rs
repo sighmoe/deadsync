@@ -123,6 +123,7 @@ impl AudioManager {
     }
 
     // Optional: Add functions to pause, resume, set volume, etc.
+    /*
     pub fn set_music_volume(&self, volume: f32) {
          if let Ok(sink_guard) = self.music_sink.lock() {
             if let Some(sink) = sink_guard.as_ref() {
@@ -132,7 +133,7 @@ impl AudioManager {
          } else {
               error!("Failed to lock music sink mutex during set_volume.");
          }
-    }
+    } */
 }
 
 // Drop implementation ensures music stops if AudioManager is dropped

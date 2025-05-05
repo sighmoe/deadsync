@@ -19,14 +19,6 @@ use winit::{
     platform::run_on_demand::EventLoopExtRunOnDemand, // Use this for run_on_demand
 };
 
-// Potentially define a trait for screen event handling later
-pub trait AppEventHandler {
-     fn handle_event(&mut self, event: &WindowEvent) -> Option<AppState>;
-     fn update(&mut self, dt: f32);
-     // Draw might take more specific arguments like renderer, assets
-     // fn draw(&self, renderer: &mut Renderer, assets: &AssetManager);
-}
-
 pub struct App {
     // Core systems
     vulkan_base: VulkanBase, // Owns Vulkan core, window, etc.

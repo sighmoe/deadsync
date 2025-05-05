@@ -29,12 +29,12 @@ pub const SPAWN_LOOKAHEAD_BEATS: f32 = 4.0; // How many beats ahead to spawn not
 pub const DIFFICULTY: u32 = 2; // 0:Q, 1:Q+50%E, 2:Q+E, 3:Q+E+S+NoRepeat, 4+:Q+E+S
 
 // Judgment Windows (milliseconds)
-pub const W1_WINDOW_MS: f32 = 22.5;
-pub const W2_WINDOW_MS: f32 = 45.0;
-pub const W3_WINDOW_MS: f32 = 90.0;
+pub const W1_WINDOW_MS: f32 = 21.5;
+pub const W2_WINDOW_MS: f32 = 43.0;
+pub const W3_WINDOW_MS: f32 = 102.0;
 pub const W4_WINDOW_MS: f32 = 135.0;
 pub const MAX_HIT_WINDOW_MS: f32 = 180.0; // W4 outer edge
-pub const MISS_WINDOW_MS: f32 = 200.0;     // Time after target beat until considered a miss
+pub const MISS_WINDOW_MS: f32 = 200.0;    // Time after target beat until considered a miss
 
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5]; // Default target tint

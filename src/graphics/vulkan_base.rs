@@ -172,14 +172,14 @@ pub struct VulkanBase {
     pub window: Window,
     pub debug_call_back: Option<vk::DebugUtilsMessengerEXT>,
 
-    pub pdevice: vk::PhysicalDevice,
+    pdevice: vk::PhysicalDevice,
     pub device_memory_properties: vk::PhysicalDeviceMemoryProperties,
     pub pdevice_properties: vk::PhysicalDeviceProperties,
-    pub queue_family_index: u32,
+    queue_family_index: u32,
     pub present_queue: vk::Queue,
 
     pub surface: vk::SurfaceKHR,
-    pub surface_format: vk::SurfaceFormatKHR,
+    surface_format: vk::SurfaceFormatKHR,
     pub surface_resolution: vk::Extent2D,
 
     pub swapchain: vk::SwapchainKHR,
