@@ -48,11 +48,19 @@ pub const FLASH_COLOR_W4: [f32; 4] = [0.8, 0.4, 1.0, 0.9]; // Good
 pub const FLASH_DURATION: Duration = Duration::from_millis(120);
 
 // Menu Constants
-pub const LOGO_DISPLAY_WIDTH: f32 = 500.0;
-pub const LOGO_Y_POS: f32 = WINDOW_HEIGHT as f32 - 700.0; // Adjust as needed
-pub const MENU_OPTIONS: [&str; 2] = ["Play!", "Exit"];
-pub const MENU_ITEM_SPACING: f32 = 4.5; // Multiplier for font line height
-pub const MENU_START_Y_OFFSET: f32 = 140.0; // Offset from window center Y
+// Logo's display height will be this fraction of the window's current height.
+pub const LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT: f32 = 0.55;
+
+// // Defines the margin from the bottom of the window to the bottom of the logo,
+// // as a ratio of the window height. (216px / 768px) - NO LONGER USED FOR CENTERING
+// pub const LOGO_BOTTOM_MARGIN_RATIO_TO_WINDOW_HEIGHT: f32 = 0.28125; 
+
+pub const MENU_OPTIONS: [&str; 3] = ["Gameplay", "Options", "Exit"]; 
+pub const MENU_ITEM_SPACING: f32 = 4.5; 
+// Position menu text relative to screen center or bottom, now that logo is centered.
+// Let's try placing it relative to the screen bottom.
+pub const MENU_TEXT_BOTTOM_MARGIN_RATIO: f32 = 0.15; // e.g., bottom of text block is 15% from window bottom
+
 pub const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0];
 pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 

@@ -2,26 +2,25 @@ use crate::assets::{AssetManager, FontId, SoundId, TextureId};
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
-// Make sure MenuState is using the correct options now (defined in state.rs)
 use crate::state::{AppState, MenuState, VirtualKeyCode};
-use log::{debug};
+use log::{debug, trace};
 use ash::vk;
 use winit::event::{ElementState, KeyEvent};
 
 // --- Input Handling ---
+// ... (no changes) ...
 pub fn handle_input(
     key_event: &KeyEvent,
     menu_state: &mut MenuState,
-    audio_manager: &AudioManager, // Borrow audio manager to play SFX
+    audio_manager: &AudioManager,
 ) -> Option<AppState> {
-    // Process only key presses, ignore repeats for menu navigation
     if key_event.state == ElementState::Pressed && !key_event.repeat {
         if let Some(virtual_keycode) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
             match virtual_keycode {
                 VirtualKeyCode::Up => {
                     let old_index = menu_state.selected_index;
                     menu_state.selected_index = if menu_state.selected_index == 0 {
-                        menu_state.options.len() - 1
+                        config::MENU_OPTIONS.len() - 1
                     } else {
                         menu_state.selected_index - 1
                     };
@@ -32,7 +31,7 @@ pub fn handle_input(
                 }
                 VirtualKeyCode::Down => {
                     let old_index = menu_state.selected_index;
-                    menu_state.selected_index = (menu_state.selected_index + 1) % menu_state.options.len();
+                    menu_state.selected_index = (menu_state.selected_index + 1) % config::MENU_OPTIONS.len();
                      if menu_state.selected_index != old_index {
                          audio_manager.play_sfx(SoundId::MenuChange);
                      }
@@ -41,116 +40,131 @@ pub fn handle_input(
                 VirtualKeyCode::Enter => {
                     debug!("Menu Enter: Selected index {}", menu_state.selected_index);
                     audio_manager.play_sfx(SoundId::MenuStart);
-                    // Add a small delay to let the sound play slightly before transition
-                    // std::thread::sleep(Duration::from_millis(50)); // Consider if needed
 
-                    // UPDATED: Match based on the new options/indices
                     match menu_state.selected_index {
-                        0 => return Some(AppState::SelectMusic), // "Select Music"
-                        1 => return Some(AppState::Options),     // "Options"
-                        2 => return Some(AppState::Exiting),     // "Exit"
-                        _ => {} // Should not happen
+                        0 => return Some(AppState::SelectMusic),
+                        1 => return Some(AppState::Options),
+                        2 => return Some(AppState::Exiting),
+                        _ => {}
                     }
                 }
                 VirtualKeyCode::Escape => {
                     debug!("Menu Escape: Exiting");
-                    return Some(AppState::Exiting); // Request application exit
+                    return Some(AppState::Exiting);
                 }
-                _ => {} // Ignore other keys like Left/Right in menu
+                _ => {}
             }
         }
     }
-    None // No state change requested
+    None
 }
 
 // --- Update Logic ---
-// Menu typically doesn't need per-frame updates unless animating something.
 pub fn update(_menu_state: &mut MenuState, _dt: f32) {
     // No-op for now
 }
 
 // --- Drawing Logic ---
-// Draw function remains the same, it just reads the options from MenuState
-// which now defaults to ["Select Music", "Options", "Exit"]
 pub fn draw(
-    renderer: &Renderer, // Use the renderer for drawing commands
+    renderer: &Renderer,
     menu_state: &MenuState,
-    assets: &AssetManager, // Access loaded assets
+    assets: &AssetManager,
     device: &ash::Device,
     cmd_buf: vk::CommandBuffer,
 ) {
-    // Assumes renderer.begin_frame() was called before this.
-
-    // Get necessary assets
     let logo_texture = assets.get_texture(TextureId::Logo).expect("Logo texture not loaded");
     let dancer_texture = assets.get_texture(TextureId::Dancer).expect("Dancer texture not loaded");
     let font = assets.get_font(FontId::Main).expect("Main font not loaded");
 
-    let (window_width, window_height) = renderer.window_size(); // Use getter
+    let (window_width, window_height) = renderer.window_size();
+    let center_x = window_width / 2.0;
+    let center_y = window_height / 2.0;
+    trace!("Menu draw - Window size: {}x{}", window_width, window_height);
 
-    // --- Draw Logo ---
+    // --- Calculate Dynamic Logo Size (based on HEIGHT) ---
+    let logo_display_height = window_height * config::LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT;
     let aspect_ratio_logo = logo_texture.width as f32 / logo_texture.height.max(1) as f32;
-    let logo_height = config::LOGO_DISPLAY_WIDTH / aspect_ratio_logo;
-    let logo_x = (window_width - config::LOGO_DISPLAY_WIDTH) / 2.0;
-    let logo_y = config::LOGO_Y_POS;
-    let logo_center_x = logo_x + config::LOGO_DISPLAY_WIDTH / 2.0;
-    let logo_center_y = logo_y + logo_height / 2.0;
+    let logo_display_width = logo_display_height * aspect_ratio_logo;
+
+    // --- Position Logo Centered ---
+    let logo_center_x = center_x;
+    let logo_center_y = center_y;
+
+    trace!("Logo dynamic height: {}, width: {}, center_x: {}, center_y: {}",
+           logo_display_height, logo_display_width, logo_center_x, logo_center_y);
 
     renderer.draw_quad(
         device, cmd_buf, DescriptorSetId::Logo,
         cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0),
-        (config::LOGO_DISPLAY_WIDTH, logo_height),
-        cgmath::Rad(0.0), // No rotation
-        [1.0, 1.0, 1.0, 1.0], // White tint
-        [0.0, 0.0], // Default UV offset
-        [1.0, 1.0], // Default UV scale
-    );
-
-    // --- Draw Dancer (overlayed on Logo) ---
-    let aspect_ratio_dancer = dancer_texture.width as f32 / dancer_texture.height.max(1) as f32;
-    let dancer_height = config::LOGO_DISPLAY_WIDTH / aspect_ratio_dancer; // Scale based on logo width
-    // Center the dancer horizontally like the logo
-    let dancer_x = logo_x;
-    // Center the dancer vertically within the logo's vertical space
-    let dancer_y = logo_y + (logo_height / 2.0) - (dancer_height / 2.0);
-    let dancer_center_x = dancer_x + config::LOGO_DISPLAY_WIDTH / 2.0;
-    let dancer_center_y = dancer_y + dancer_height / 2.0;
-
-    renderer.draw_quad(
-        device, cmd_buf, DescriptorSetId::Dancer,
-        cgmath::Vector3::new(dancer_center_x, dancer_center_y, 0.0),
-        (config::LOGO_DISPLAY_WIDTH, dancer_height),
+        (logo_display_width, logo_display_height),
         cgmath::Rad(0.0),
         [1.0, 1.0, 1.0, 1.0],
         [0.0, 0.0],
         [1.0, 1.0],
     );
 
-    // --- Draw Menu Options ---
-    let center_x = window_width / 2.0;
-    // Calculate Y position based on center, offset, and spacing
-    let start_y = window_height / 2.0 + config::MENU_START_Y_OFFSET;
-    // Adjust spacing if needed for 3 items
-    let spacing_y = font.line_height * config::MENU_ITEM_SPACING * (2.0/3.0); // Make slightly tighter
+    // --- Draw Dancer (Width matches logo width, Height derived from dancer aspect ratio) ---
+    // Set dancer width to match the calculated logo width
+    let dancer_display_width = logo_display_width; // <-- KEY CHANGE: Base dancer scale on logo width
+    // Calculate dancer height based on ITS width and ITS aspect ratio
+    let aspect_ratio_dancer = dancer_texture.width as f32 / dancer_texture.height.max(1) as f32;
+    // Avoid division by zero if aspect ratio is invalid
+    let dancer_display_height = if aspect_ratio_dancer > 0.0 {
+        dancer_display_width / aspect_ratio_dancer
+    } else {
+        0.0 // Or some fallback height
+    };
 
-    for (index, option_text) in menu_state.options.iter().enumerate() {
-        let y_pos = start_y + index as f32 * spacing_y;
+    // Position centered on logo
+    let dancer_center_x = logo_center_x;
+    let dancer_center_y = logo_center_y;
+
+    trace!("Dancer dynamic width: {}, height: {}, center_x: {}, center_y: {}",
+           dancer_display_width, dancer_display_height, dancer_center_x, dancer_center_y);
+
+    // Only draw if height is valid
+    if dancer_display_height > 0.0 {
+        renderer.draw_quad(
+            device, cmd_buf, DescriptorSetId::Dancer,
+            cgmath::Vector3::new(dancer_center_x, dancer_center_y, 0.0),
+            (dancer_display_width, dancer_display_height), // Use dynamic width and height
+            cgmath::Rad(0.0),
+            [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
+        );
+    }
+
+
+    // --- Draw Menu Options (Corrected Y position for top-left draw_text) ---
+    let font_scale = 1.0;
+    let scaled_line_height = font.line_height * font_scale;
+    let item_y_spacing = scaled_line_height * config::MENU_ITEM_SPACING * (2.0 / 3.0);
+    let num_options = config::MENU_OPTIONS.len() as f32;
+    let total_text_block_height = (num_options - 1.0) * item_y_spacing + scaled_line_height;
+
+    let text_block_bottom_y = window_height * (1.0 - config::MENU_TEXT_BOTTOM_MARGIN_RATIO);
+    let text_block_desired_top_y = text_block_bottom_y - total_text_block_height;
+
+    trace!("Menu text_block_desired_top_y (from bottom margin): {}", text_block_desired_top_y);
+
+    for (index, option_text_str) in config::MENU_OPTIONS.iter().enumerate() {
+        let y_pos_top = text_block_desired_top_y + index as f32 * item_y_spacing;
+
         let color = if index == menu_state.selected_index {
             config::MENU_SELECTED_COLOR
         } else {
             config::MENU_NORMAL_COLOR
         };
 
-        let text_width = font.measure_text(option_text);
+        let text_width = font.measure_text(option_text_str) * font_scale;
         let x_pos = center_x - text_width / 2.0;
 
         renderer.draw_text(
-            device, cmd_buf, font, option_text,
-            x_pos, y_pos,
+            device, cmd_buf, font, option_text_str,
+            x_pos, y_pos_top, // Pass top-left Y
             color,
-            1.0, // ADDED: Scale factor (1.0 for normal size)
+            font_scale,
         );
     }
-
-    // Assumes renderer end_frame / submit happens after this.
 }
