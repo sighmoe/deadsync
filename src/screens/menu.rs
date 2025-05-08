@@ -1,4 +1,3 @@
-// src/screens/menu.rs
 use crate::assets::{AssetManager, FontId, SoundId, TextureId};
 use crate::audio::AudioManager;
 use crate::config;
@@ -82,28 +81,52 @@ pub fn draw(
     let center_y = window_height / 2.0;
 
     // --- Logo ---
-    let logo_display_height = window_height * config::LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT;
-    let aspect_ratio_logo = logo_texture.width as f32 / logo_texture.height.max(1) as f32;
-    let logo_display_width = logo_display_height * aspect_ratio_logo;
+    // Calculate initial dimensions based on window height
+    let initial_logo_display_height = window_height * config::LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT;
+    let aspect_ratio_logo = logo_texture.width as f32 / logo_texture.height.max(1) as f32; // .max(1) to prevent division by zero if height is 0
+    let initial_logo_display_width = initial_logo_display_height * aspect_ratio_logo;
+
+    let final_logo_display_width;
+    let final_logo_display_height;
+
+    // If the logo (scaled by height) is wider than the window, then scale it down to fit the window width.
+    if initial_logo_display_width > window_width {
+        final_logo_display_width = window_width; // Fit exactly to window width
+        // Recalculate height to maintain aspect ratio, only if aspect_ratio_logo is meaningfully positive
+        if aspect_ratio_logo > 1e-6 { // Use a small epsilon to avoid division by zero or issues with near-zero aspect ratios
+            final_logo_display_height = final_logo_display_width / aspect_ratio_logo;
+        } else {
+            // Fallback if aspect ratio is zero or problematic (e.g., texture width is 0)
+            // In this case, height constraint from initial calculation might still be best.
+            final_logo_display_height = initial_logo_display_height;
+        }
+    } else {
+        // Otherwise, the height-based scaling is fine.
+        final_logo_display_width = initial_logo_display_width;
+        final_logo_display_height = initial_logo_display_height;
+    }
+    
     let logo_center_x = center_x;
     let logo_center_y = center_y;
-    let logo_bottom_edge_y = logo_center_y + (logo_display_height / 2.0);
+    let logo_bottom_edge_y = logo_center_y + (final_logo_display_height / 2.0);
 
     renderer.draw_quad(
         device, cmd_buf, DescriptorSetId::Logo,
         cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0),
-        (logo_display_width, logo_display_height),
+        (final_logo_display_width, final_logo_display_height), // Use final dimensions
         cgmath::Rad(0.0), [1.0; 4], [0.0; 2], [1.0; 2],
     );
 
     // --- Dancer ---
-    let dancer_display_width = logo_display_width;
+    // Dancer scales relative to the final logo width
+    let dancer_display_width = final_logo_display_width; 
     let aspect_ratio_dancer = dancer_texture.width as f32 / dancer_texture.height.max(1) as f32;
-    let dancer_display_height = if aspect_ratio_dancer > 0.0 { dancer_display_width / aspect_ratio_dancer } else { 0.0 };
+    let dancer_display_height = if aspect_ratio_dancer > 1e-6 { dancer_display_width / aspect_ratio_dancer } else { 0.0 };
+    
     if dancer_display_height > 0.0 {
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::Dancer,
-            cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0),
+            cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0), // Centered with logo
             (dancer_display_width, dancer_display_height),
             cgmath::Rad(0.0), [1.0; 4], [0.0; 2], [1.0; 2],
         );

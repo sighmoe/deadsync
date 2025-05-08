@@ -50,10 +50,6 @@ pub const FLASH_DURATION: Duration = Duration::from_millis(120);
 // Menu Constants
 // Logo's display height will be this fraction of the window's current height.
 pub const LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT: f32 = 0.55;
-
-// // Defines the margin from the bottom of the window to the bottom of the logo,
-// // as a ratio of the window height. (216px / 768px) - NO LONGER USED FOR CENTERING
-
 pub const MENU_OPTIONS: [&str; 3] = ["Gameplay", "Options", "Exit"];
 pub const MENU_ITEM_SPACING: f32 = 5.5;
 pub const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0];
