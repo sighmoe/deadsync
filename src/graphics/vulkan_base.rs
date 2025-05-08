@@ -12,7 +12,6 @@ use std::{borrow::Cow, default::Default, error::Error, ffi, ops::Drop, os::raw::
 use ash::{
     ext::debug_utils,
     khr::{surface, swapchain},
-    util::*,
     vk, Device, Entry, Instance,
 };
 use cgmath::Matrix4;
@@ -752,7 +751,7 @@ impl VulkanBase {
     ) -> Result<(), Box<dyn Error>> {
         use std::ptr;
         unsafe {
-            let data_size = (data.len() * std::mem::size_of::<T>()) as vk::DeviceSize;
+            let data_size = (data.len() * size_of::<T>()) as vk::DeviceSize;
             if data_size > buffer_resource.size {
                 return Err(format!(
                     "Data size ({}) exceeds buffer size ({})",

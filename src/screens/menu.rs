@@ -4,7 +4,7 @@ use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
 use crate::state::{AppState, MenuState, VirtualKeyCode};
-use log::{debug, trace};
+use log::{debug};
 use ash::vk;
 use winit::event::{ElementState, KeyEvent};
 

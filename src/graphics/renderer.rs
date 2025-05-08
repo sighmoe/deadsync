@@ -1,12 +1,10 @@
-      
-// src/graphics/renderer.rs
 use crate::graphics::font::{Font};
 use crate::graphics::texture::{self, TextureResource}; // Import texture module and TextureResource
 use crate::graphics::vulkan_base::{BufferResource, UniformBufferObject, Vertex, VulkanBase};
 use crate::state::PushConstantData;
 use ash::{vk, Device};
-use cgmath::{ortho, Matrix4, Rad, SquareMatrix, Vector3}; // Added SquareMatrix
-use log::{debug, info, trace, warn}; // Added info
+use cgmath::{ortho, Matrix4, Rad, Vector3};
+use log::{debug, info, trace, warn};
 use ash::util::read_spv;
 use memoffset::offset_of;
 use std::error::Error;

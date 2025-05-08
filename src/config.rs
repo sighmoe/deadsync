@@ -53,14 +53,9 @@ pub const LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT: f32 = 0.55;
 
 // // Defines the margin from the bottom of the window to the bottom of the logo,
 // // as a ratio of the window height. (216px / 768px) - NO LONGER USED FOR CENTERING
-// pub const LOGO_BOTTOM_MARGIN_RATIO_TO_WINDOW_HEIGHT: f32 = 0.28125; 
 
 pub const MENU_OPTIONS: [&str; 3] = ["Gameplay", "Options", "Exit"];
 pub const MENU_ITEM_SPACING: f32 = 5.5;
-// Position menu text relative to screen center or bottom, now that logo is centered.
-// Let's try placing it relative to the screen bottom.
-pub const MENU_TEXT_BOTTOM_MARGIN_RATIO: f32 = 0.0; // e.g., bottom of text block is 15% from window bottom
-
 pub const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0];
 pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 
@@ -68,7 +63,6 @@ pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 // Color #A6A6A6 converted to normalized float RGBA
 pub const UI_BAR_COLOR: [f32; 4] = [166.0 / 255.0, 166.0 / 255.0, 166.0 / 255.0, 1.0];
 pub const UI_BAR_TEXT_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; // CHANGED TO BLACK
-pub const UI_HEADER_PADDING_X: f32 = 15.0;
 pub const UI_REFERENCE_HEIGHT: f32 = 768.0; // Reference screen height for scaling UI elements
 pub const UI_BAR_REFERENCE_HEIGHT: f32 = 51.0; // Desired bar height at reference screen height
 
