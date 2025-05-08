@@ -1,3 +1,4 @@
+// src/screens/menu.rs
 use crate::assets::{AssetManager, FontId, SoundId, TextureId};
 use crate::audio::AudioManager;
 use crate::config;
@@ -79,92 +80,92 @@ pub fn draw(
     let (window_width, window_height) = renderer.window_size();
     let center_x = window_width / 2.0;
     let center_y = window_height / 2.0;
-    trace!("Menu draw - Window size: {}x{}", window_width, window_height);
 
-    // --- Calculate Dynamic Logo Size (based on HEIGHT) ---
+    // --- Logo ---
     let logo_display_height = window_height * config::LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT;
     let aspect_ratio_logo = logo_texture.width as f32 / logo_texture.height.max(1) as f32;
     let logo_display_width = logo_display_height * aspect_ratio_logo;
-
-    // --- Position Logo Centered ---
     let logo_center_x = center_x;
     let logo_center_y = center_y;
-
-    trace!("Logo dynamic height: {}, width: {}, center_x: {}, center_y: {}",
-           logo_display_height, logo_display_width, logo_center_x, logo_center_y);
+    let logo_bottom_edge_y = logo_center_y + (logo_display_height / 2.0);
 
     renderer.draw_quad(
         device, cmd_buf, DescriptorSetId::Logo,
         cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0),
         (logo_display_width, logo_display_height),
-        cgmath::Rad(0.0),
-        [1.0, 1.0, 1.0, 1.0],
-        [0.0, 0.0],
-        [1.0, 1.0],
+        cgmath::Rad(0.0), [1.0; 4], [0.0; 2], [1.0; 2],
     );
 
-    // --- Draw Dancer (Width matches logo width, Height derived from dancer aspect ratio) ---
-    // Set dancer width to match the calculated logo width
-    let dancer_display_width = logo_display_width; // <-- KEY CHANGE: Base dancer scale on logo width
-    // Calculate dancer height based on ITS width and ITS aspect ratio
+    // --- Dancer ---
+    let dancer_display_width = logo_display_width;
     let aspect_ratio_dancer = dancer_texture.width as f32 / dancer_texture.height.max(1) as f32;
-    // Avoid division by zero if aspect ratio is invalid
-    let dancer_display_height = if aspect_ratio_dancer > 0.0 {
-        dancer_display_width / aspect_ratio_dancer
-    } else {
-        0.0 // Or some fallback height
-    };
-
-    // Position centered on logo
-    let dancer_center_x = logo_center_x;
-    let dancer_center_y = logo_center_y;
-
-    trace!("Dancer dynamic width: {}, height: {}, center_x: {}, center_y: {}",
-           dancer_display_width, dancer_display_height, dancer_center_x, dancer_center_y);
-
-    // Only draw if height is valid
+    let dancer_display_height = if aspect_ratio_dancer > 0.0 { dancer_display_width / aspect_ratio_dancer } else { 0.0 };
     if dancer_display_height > 0.0 {
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::Dancer,
-            cgmath::Vector3::new(dancer_center_x, dancer_center_y, 0.0),
-            (dancer_display_width, dancer_display_height), // Use dynamic width and height
-            cgmath::Rad(0.0),
-            [1.0, 1.0, 1.0, 1.0],
-            [0.0, 0.0],
-            [1.0, 1.0],
+            cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0),
+            (dancer_display_width, dancer_display_height),
+            cgmath::Rad(0.0), [1.0; 4], [0.0; 2], [1.0; 2],
         );
     }
 
+    // --- Menu Options ---
+    let default_font_scale = 0.4;
+    let selected_font_scale = 0.5;
 
-    // --- Draw Menu Options (Corrected Y position for top-left draw_text) ---
-    let font_scale = 0.5;
-    let scaled_line_height = font.line_height * font_scale;
-    let item_y_spacing = scaled_line_height * config::MENU_ITEM_SPACING * (2.0 / 3.0);
+    let unscaled_font_ascent = font.metrics.baseline - font.metrics.top;
+    // Using font.line_height (which is metrics.line_spacing) as an approximation for the full visual height of a line of text.
+    let default_item_scaled_visual_height = font.line_height * default_font_scale;
+    let visual_top_spacing = default_item_scaled_visual_height * config::MENU_ITEM_SPACING * (2.0 / 3.0); // Spacing between visual tops of default-sized items
+
     let num_options = config::MENU_OPTIONS.len() as f32;
-    let total_text_block_height = (num_options - 1.0) * item_y_spacing + scaled_line_height;
+    // This is the total height the block *would* occupy if all items were default size.
+    // It's used to center the entire block.
+    let total_text_block_height_for_layout = (num_options - 1.0) * visual_top_spacing + default_item_scaled_visual_height;
 
-    let text_block_bottom_y = window_height * (1.0 - config::MENU_TEXT_BOTTOM_MARGIN_RATIO);
-    let text_block_desired_top_y = text_block_bottom_y - total_text_block_height;
+    let space_for_menu_top_y = logo_bottom_edge_y;
+    let space_for_menu_bottom_y = window_height;
+    let menu_available_vertical_space = space_for_menu_bottom_y - space_for_menu_top_y;
+    let target_menu_block_center_y = space_for_menu_top_y + (menu_available_vertical_space / 2.0);
+    let text_block_visual_top_start_y_for_layout = target_menu_block_center_y - (total_text_block_height_for_layout / 2.0);
 
-    trace!("Menu text_block_desired_top_y (from bottom margin): {}", text_block_desired_top_y);
 
     for (index, option_text_str) in config::MENU_OPTIONS.iter().enumerate() {
-        let y_pos_top = text_block_desired_top_y + index as f32 * item_y_spacing;
+        let current_font_scale;
+        let current_color;
 
-        let color = if index == menu_state.selected_index {
-            config::MENU_SELECTED_COLOR
+        if index == menu_state.selected_index {
+            current_font_scale = selected_font_scale;
+            current_color = config::MENU_SELECTED_COLOR;
         } else {
-            config::MENU_NORMAL_COLOR
-        };
+            current_font_scale = default_font_scale;
+            current_color = config::MENU_NORMAL_COLOR;
+        }
 
-        let text_width = font.measure_text(option_text_str) * font_scale;
+        // 1. Determine the Y-coordinate for the *visual center* of the grid slot for this item.
+        //    This position is fixed, based on default item sizes.
+        let grid_slot_visual_top_y = text_block_visual_top_start_y_for_layout + index as f32 * visual_top_spacing;
+        let grid_slot_visual_center_y = grid_slot_visual_top_y + (default_item_scaled_visual_height / 2.0);
+
+        // 2. Calculate the actual scaled visual height of the current item (selected or not).
+        let current_item_scaled_visual_height = font.line_height * current_font_scale;
+
+        // 3. Calculate the desired *visual top* of the current item so its center aligns with grid_slot_visual_center_y.
+        let current_item_desired_visual_top_y = grid_slot_visual_center_y - (current_item_scaled_visual_height / 2.0);
+
+        // 4. Calculate the baseline Y for draw_text, based on this adjusted visual top.
+        let item_scaled_ascent = unscaled_font_ascent * current_font_scale;
+        let baseline_y_for_draw_text = current_item_desired_visual_top_y + item_scaled_ascent;
+
+        // Center the text horizontally.
+        let text_width = font.measure_text(option_text_str) * current_font_scale;
         let x_pos = center_x - text_width / 2.0;
 
         renderer.draw_text(
             device, cmd_buf, font, option_text_str,
-            x_pos, y_pos_top, // Pass top-left Y
-            color,
-            font_scale,
+            x_pos, baseline_y_for_draw_text,
+            current_color,
+            current_font_scale,
         );
     }
 }
