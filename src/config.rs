@@ -8,8 +8,8 @@ pub const WINDOW_HEIGHT: u32 = 768;
 // Asset Paths
 //pub const FONT_INI_PATH: &str = "assets/fonts/miso.ini";
 pub const FONT_INI_PATH: &str = "assets/fonts/wendy.ini";
-//pub const FONT_TEXTURE_PATH: &str = "assets/fonts/_miso light 15x15 (res 360x360).png";
-pub const FONT_TEXTURE_PATH: &str = "assets/fonts/_wendy small 13x8 (doubleres).png";
+//pub const FONT_TEXTURE_PATH: &str = "assets/fonts/_miso light 15x15.png";
+pub const FONT_TEXTURE_PATH: &str = "assets/fonts/_wendy small 13x8.png";
 pub const LOGO_TEXTURE_PATH: &str = "assets/graphics/logo.png";
 pub const DANCE_TEXTURE_PATH: &str = "assets/graphics/dance.png";
 pub const ARROW_TEXTURE_PATH: &str = "assets/noteskins/down_arrow_cel.png";
@@ -55,11 +55,11 @@ pub const LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT: f32 = 0.55;
 // // as a ratio of the window height. (216px / 768px) - NO LONGER USED FOR CENTERING
 // pub const LOGO_BOTTOM_MARGIN_RATIO_TO_WINDOW_HEIGHT: f32 = 0.28125; 
 
-pub const MENU_OPTIONS: [&str; 3] = ["Gameplay", "Options", "Exit"]; 
-pub const MENU_ITEM_SPACING: f32 = 4.5; 
+pub const MENU_OPTIONS: [&str; 3] = ["Gameplay", "Options", "Exit"];
+pub const MENU_ITEM_SPACING: f32 = 5.5;
 // Position menu text relative to screen center or bottom, now that logo is centered.
 // Let's try placing it relative to the screen bottom.
-pub const MENU_TEXT_BOTTOM_MARGIN_RATIO: f32 = 0.15; // e.g., bottom of text block is 15% from window bottom
+pub const MENU_TEXT_BOTTOM_MARGIN_RATIO: f32 = 0.0; // e.g., bottom of text block is 15% from window bottom
 
 pub const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0];
 pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];

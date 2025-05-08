@@ -137,7 +137,7 @@ pub fn draw(
 
 
     // --- Draw Menu Options (Corrected Y position for top-left draw_text) ---
-    let font_scale = 1.0;
+    let font_scale = 0.5;
     let scaled_line_height = font.line_height * font_scale;
     let item_y_spacing = scaled_line_height * config::MENU_ITEM_SPACING * (2.0 / 3.0);
     let num_options = config::MENU_OPTIONS.len() as f32;

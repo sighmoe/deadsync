@@ -6,7 +6,7 @@ use crate::graphics::vulkan_base::{BufferResource, UniformBufferObject, Vertex, 
 use crate::state::PushConstantData;
 use ash::{vk, Device};
 use cgmath::{ortho, Matrix4, Rad, SquareMatrix, Vector3}; // Added SquareMatrix
-use log::{info, trace, warn}; // Added info
+use log::{debug, info, trace, warn}; // Added info
 use ash::util::read_spv;
 use memoffset::offset_of;
 use std::error::Error;
@@ -448,92 +448,127 @@ impl Renderer {
     // ...
      #[allow(clippy::too_many_arguments)]
      pub fn draw_text(
-         &self,
-         device: &Device,
-         cmd_buf: vk::CommandBuffer,
-         font: &Font,
-         text: &str,
-         mut x: f32,
-         mut y: f32,
-         color: [f32; 4],
-         scale: f32,
-     ) {
-        let font_set = self.descriptor_sets.get(&DescriptorSetId::Font)
-            .expect("Font descriptor set not found");
-         unsafe {
-             device.cmd_bind_descriptor_sets(
-                 cmd_buf,
-                 vk::PipelineBindPoint::GRAPHICS,
-                 self.pipeline_layout,
-                 0,
-                 &[*font_set],
-                 &[],
-             );
-         }
+        &self,
+        device: &Device,
+        cmd_buf: vk::CommandBuffer,
+        font: &Font,
+        text: &str,
+        mut x: f32, // Pen position: where the current char's VISUAL INK should start
+        mut y: f32, // Baseline
+        color: [f32; 4],
+        scale: f32,
+    ) {
+        let start_x_for_newline = x;
+        // Track the screen coordinate where the previous character's ink ended.
+        // Initialize to the starting pen position for the first character.
+        let mut previous_ink_end_x = x;
 
-         let start_x = x;
+        for (char_index, char_code) in text.chars().enumerate() {
+            debug!("\nProcessing char #{}: '{}' at pen x={:.2}", char_index, char_code, x);
 
-         for char_code in text.chars() {
-             match char_code {
-                 '\n' => {
-                     x = start_x;
-                     y += font.line_height * scale;
-                 }
-                 ' ' => {
-                     x += font.space_width * scale;
-                 }
-                 _ => {
-                     if let Some(glyph_info) = font.get_glyph(char_code) {
-                         let scaled_quad_width = font.metrics.cell_width * scale;
-                         let scaled_quad_height = font.metrics.cell_height * scale;
+            match char_code {
+                '\n' => {
+                    x = start_x_for_newline;
+                    y += font.line_height * scale;
+                    previous_ink_end_x = x; // Reset tracking for the new line
+                    debug!("  Newline processed. Resetting x to {:.2}, previous_ink_end_x to {:.2}. New y: {:.2}", x, previous_ink_end_x, y);
+                }
+                ' ' => {
+                    let space_advance_scaled = font.space_width * scale;
+                    debug!("  Space character:");
+                    debug!("    Space Before: {:.2} (pen_x - previous_ink_end)", x - previous_ink_end_x);
+                    // Treat space as having zero ink width for spacing calculation
+                    let current_ink_end_x = x; // Ink effectively ends where it starts
+                    let next_x = x + space_advance_scaled;
+                    let space_after = next_x - current_ink_end_x; // This *is* the space width
+                    debug!("    Space Width (Advance): {:.2}", space_advance_scaled);
+                    debug!("    Space After (calculated): {:.2}", space_after);
 
-                         let scaled_bearing_x = glyph_info.bearing_x * scale;
-                         let scaled_bearing_y = glyph_info.bearing_y * scale;
-                         let final_top_left_x = x + scaled_bearing_x;
-                         let final_top_left_y = y - scaled_bearing_y;
+                    x = next_x; // Advance pen
+                    previous_ink_end_x = current_ink_end_x; // Previous ink ended where space started
+                }
+                _ => {
+                    if let Some(glyph_info) = font.get_glyph(char_code) {
+                        // --- Calculations ---
+                        let scaled_cell_width = font.metrics.cell_width * scale;
+                        let scaled_cell_height = font.metrics.cell_height * scale;
+                        let scaled_visual_width = glyph_info.visual_width_pixels * scale;
+                        let scaled_internal_bearing_x = glyph_info.bearing_x * scale;
+                        let scaled_ascent = glyph_info.bearing_y * scale;
+                        let scaled_advance = glyph_info.advance * scale;
+                        let scaled_letter_spacing = (glyph_info.advance - glyph_info.visual_width_pixels) * scale; // Calculate LS for logging
 
-                         let final_center_x = final_top_left_x + scaled_quad_width / 2.0;
-                         let final_center_y = final_top_left_y + scaled_quad_height / 2.0;
+                        // --- Spacing Calculation ---
+                        let space_before = x - previous_ink_end_x;
+                        let current_ink_end_x = x + scaled_visual_width;
+                        let next_x = x + scaled_advance;
+                        let space_after = next_x - current_ink_end_x;
 
-                         let model_matrix = Matrix4::from_translation(Vector3::new(final_center_x, final_center_y, 0.0))
-                                          * Matrix4::from_nonuniform_scale(scaled_quad_width, scaled_quad_height, 1.0);
+                        debug!("  Glyph Info & Spacing:");
+                        debug!("    Visual Width: {:.2} (scaled: {:.2})", glyph_info.visual_width_pixels, scaled_visual_width);
+                        debug!("    Advance:      {:.2} (scaled: {:.2})", glyph_info.advance, scaled_advance);
+                        debug!("    LetterSpacing:{:.2} (scaled: {:.2}) (Calculated as Advance - VisualWidth)", glyph_info.advance - glyph_info.visual_width_pixels, scaled_letter_spacing);
+                        debug!("    ---");
+                        debug!("    Space BEFORE ink: {:.2} (current_pen_x - previous_ink_end)", space_before);
+                        debug!("    Ink Starts At:    {:.2} (current_pen_x)", x);
+                        debug!("    Ink Ends At:      {:.2} (ink_start + scaled_visual_width)", current_ink_end_x);
+                        debug!("    Space AFTER ink:  {:.2} (next_pen_x - current_ink_end)", space_after);
+                        debug!("    Next Pen Starts:  {:.2} (current_pen_x + scaled_advance)", next_x);
+                        debug!("    ---");
+                        debug!("    InternalBearingX: {:.2} (scaled: {:.2})", glyph_info.bearing_x, scaled_internal_bearing_x);
+                        debug!("    CellWidth:        {:.2} (scaled: {:.2})", font.metrics.cell_width, scaled_cell_width);
 
 
-                         let uv_offset = [glyph_info.u0, glyph_info.v0];
-                         let uv_scale_uv = [glyph_info.u1 - glyph_info.u0, glyph_info.v1 - glyph_info.v0];
+                        // --- Positioning (Using the logic where x is the start of INK) ---
+                        let cell_draw_start_x = x - scaled_internal_bearing_x;
+                        let cell_draw_top_y = (y - scaled_ascent) - (font.metrics.top * scale);
+                        let cell_center_x = cell_draw_start_x + (scaled_cell_width / 2.0);
+                        let cell_center_y = cell_draw_top_y + (scaled_cell_height / 2.0);
 
-                         let push_data = PushConstantData {
-                             model: model_matrix,
-                             color,
-                             uv_offset,
-                             uv_scale: uv_scale_uv,
-                         };
+                        let model_matrix = Matrix4::from_translation(Vector3::new(cell_center_x, cell_center_y, 0.0))
+                                         * Matrix4::from_nonuniform_scale(scaled_cell_width, scaled_cell_height, 1.0);
 
-                         unsafe {
-                             let push_data_bytes = std::slice::from_raw_parts(
-                                 &push_data as *const _ as *const u8,
-                                 mem::size_of::<PushConstantData>(),
-                             );
-                             device.cmd_push_constants(
-                                 cmd_buf,
-                                 self.pipeline_layout,
-                                 vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                                 0,
-                                 push_data_bytes,
-                             );
-                             device.cmd_draw_indexed(cmd_buf, self.quad_index_count, 1, 0, 0, 0);
-                         }
+                        // --- Drawing ---
+                        let uv_offset = [glyph_info.u0, glyph_info.v0];
+                        let uv_scale_uv = [glyph_info.u1 - glyph_info.u0, glyph_info.v1 - glyph_info.v0];
+                        let push_data = PushConstantData { model: model_matrix, color, uv_offset, uv_scale: uv_scale_uv };
+                        unsafe {
+                           // Bind correct descriptor set (make sure Font is right)
+                           let descriptor_set = self.descriptor_sets.get(&DescriptorSetId::Font)
+                               .expect("Font descriptor set not found for draw_text");
+                           device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.pipeline_layout, 0, &[*descriptor_set], &[]);
+                           // Push constants
+                           let push_data_bytes = std::slice::from_raw_parts(&push_data as *const _ as *const u8, std::mem::size_of::<PushConstantData>());
+                           device.cmd_push_constants(cmd_buf, self.pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, push_data_bytes);
+                           // Draw
+                           device.cmd_draw_indexed(cmd_buf, self.quad_index_count, 1, 0, 0, 0);
+                        }
 
-                         x += glyph_info.advance * scale;
+                        // --- Advance for next iteration ---
+                        x = next_x; // Update pen position
+                        previous_ink_end_x = current_ink_end_x; // Update end tracking
 
-                     } else {
-                         warn!("Glyph for '{}' and fallback '?' not found. Advancing by scaled space width.", char_code);
-                         x += font.space_width * scale;
-                     }
-                 }
-             }
-         }
-     }
+                    } else {
+                        warn!("Glyph for '{}' fallback not found. Advancing by fallback space width.", char_code);
+                        // Use space width for advance, but treat ink width as 0 for spacing logs
+                        let space_advance_scaled = font.space_width * scale;
+                        let space_before = x - previous_ink_end_x;
+                        let current_ink_end_x = x; // No visual width
+                        let next_x = x + space_advance_scaled;
+                        let space_after = next_x - current_ink_end_x;
+
+                        debug!("  Fallback Glyph (?) handling:");
+                        debug!("    Space BEFORE ink: {:.2}", space_before);
+                        debug!("    Advance (Space):  {:.2}", space_advance_scaled);
+                        debug!("    Space AFTER ink:  {:.2}", space_after);
+
+                        x = next_x;
+                        previous_ink_end_x = current_ink_end_x;
+                    }
+                }
+            }
+        }
+    }
 
 
     /// Cleans up renderer-specific Vulkan resources.
