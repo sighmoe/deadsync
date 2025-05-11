@@ -1,7 +1,7 @@
-use crate::graphics::font::{Font};
-use crate::graphics::texture::{self, TextureResource}; // Import texture module and TextureResource
+use crate::graphics::font::{Font, GlyphInfo}; // GlyphInfo is used in draw_text
+use crate::graphics::texture::{self, TextureResource};
 use crate::graphics::vulkan_base::{BufferResource, UniformBufferObject, Vertex, VulkanBase};
-use crate::state::PushConstantData;
+use crate::state::PushConstantData; // This now includes px_range
 use ash::{vk, Device};
 use cgmath::{ortho, Matrix4, Rad, Vector3};
 use log::{debug, info, trace, warn};
@@ -10,28 +10,34 @@ use memoffset::offset_of;
 use std::error::Error;
 use std::{ffi::CString, mem};
 
-// --- Add SolidColor variant ---
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DescriptorSetId {
-    Font,
+    FontWendy,
+    FontMiso,
+    FontCjk,
     Logo,
     Dancer,
     Gameplay,
-    SolidColor, // NEW
+    SolidColor,
 }
 
 pub struct Renderer {
-    pipeline_layout: vk::PipelineLayout,
-    graphics_pipeline: vk::Pipeline,
+    // Unified pipeline layout and pipeline for both general quads and MSDF text.
+    // The fragment shader (msdf.frag) will differentiate behavior based on pushConsts.pxRange.
+    main_pipeline_layout: vk::PipelineLayout,
+    main_pipeline: vk::Pipeline,
+
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: std::collections::HashMap<DescriptorSetId, vk::DescriptorSet>,
-    descriptor_set_layout: vk::DescriptorSetLayout,
+    descriptor_set_layout: vk::DescriptorSetLayout, 
+    
     quad_vertex_buffer: BufferResource,
     quad_index_buffer: BufferResource,
     quad_index_count: u32,
+    
     projection_ubo: BufferResource,
     current_window_size: (f32, f32),
-    solid_white_texture: TextureResource, // NEW: Store the white texture
+    solid_white_texture: TextureResource,
 }
 
 impl Renderer {
@@ -39,15 +45,13 @@ impl Renderer {
         base: &VulkanBase,
         initial_window_size: (f32, f32),
     ) -> Result<Self, Box<dyn Error>> {
-        info!("Initializing Renderer..."); // Use info log level
+        info!("Initializing Renderer...");
 
-        // --- Create Common Quad Buffers --- (no change)
-        // ... (as before) ...
         let quad_vertices: [Vertex; 4] = [
-            Vertex { pos: [-0.5, -0.5], tex_coord: [0.0, 0.0] },
-            Vertex { pos: [ 0.5, -0.5], tex_coord: [1.0, 0.0] },
-            Vertex { pos: [ 0.5,  0.5], tex_coord: [1.0, 1.0] },
-            Vertex { pos: [-0.5,  0.5], tex_coord: [0.0, 1.0] },
+            Vertex { pos: [-0.5, -0.5], tex_coord: [0.0, 0.0] }, 
+            Vertex { pos: [ 0.5, -0.5], tex_coord: [1.0, 0.0] }, 
+            Vertex { pos: [ 0.5,  0.5], tex_coord: [1.0, 1.0] }, 
+            Vertex { pos: [-0.5,  0.5], tex_coord: [0.0, 1.0] }, 
         ];
         let vertex_buffer_size = (quad_vertices.len() * mem::size_of::<Vertex>()) as vk::DeviceSize;
         let quad_vertex_buffer = base.create_buffer(
@@ -56,7 +60,6 @@ impl Renderer {
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
         base.update_buffer(&quad_vertex_buffer, &quad_vertices)?;
-        info!("Quad Vertex Buffer created and populated.");
 
         let quad_indices: [u32; 6] = [0, 1, 2, 2, 3, 0];
         let index_buffer_size = (quad_indices.len() * mem::size_of::<u32>()) as vk::DeviceSize;
@@ -67,28 +70,16 @@ impl Renderer {
         )?;
         base.update_buffer(&quad_index_buffer, &quad_indices)?;
         let quad_index_count = quad_indices.len() as u32;
-        info!("Quad Index Buffer created and populated.");
 
-
-        // --- Create Projection UBO Buffer --- (no change)
-        // ... (as before) ...
         let ubo_size = mem::size_of::<UniformBufferObject>() as vk::DeviceSize;
         let projection_ubo = base.create_buffer(
             ubo_size,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
-         info!("Projection UBO buffer created.");
 
-
-        // --- Create 1x1 White Texture ---
-        info!("Creating solid white texture...");
         let solid_white_texture = texture::create_solid_color_texture(base, [255, 255, 255, 255])?;
-        info!("Solid white texture created.");
 
-
-        // --- Create Descriptor Set Layout (DSL) --- (no change)
-        // ... (as before) ...
         let dsl_bindings = [
             vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
@@ -105,150 +96,92 @@ impl Renderer {
         let descriptor_set_layout = unsafe {
             base.device.create_descriptor_set_layout(&dsl_create_info, None)?
         };
-         info!("Descriptor Set Layout created.");
 
-
-        // --- Create Descriptor Pool ---
-        const MAX_SETS: u32 = 5; // UPDATED: Increased count by 1
+        const MAX_SETS: u32 = 7;
         let pool_sizes = [
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: MAX_SETS, // Enough for all sets
-            },
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: MAX_SETS, // Enough for all sets
-            },
+            vk::DescriptorPoolSize { ty: vk::DescriptorType::UNIFORM_BUFFER, descriptor_count: MAX_SETS },
+            vk::DescriptorPoolSize { ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER, descriptor_count: MAX_SETS },
         ];
-        let pool_create_info = vk::DescriptorPoolCreateInfo::default()
-            .pool_sizes(&pool_sizes)
-            .max_sets(MAX_SETS); // Use the updated count
-        let descriptor_pool = unsafe {
-            base.device.create_descriptor_pool(&pool_create_info, None)?
-        };
-        info!("Descriptor Pool created for {} sets.", MAX_SETS);
+        let pool_create_info = vk::DescriptorPoolCreateInfo::default().pool_sizes(&pool_sizes).max_sets(MAX_SETS);
+        let descriptor_pool = unsafe { base.device.create_descriptor_pool(&pool_create_info, None)? };
 
-
-        // --- Allocate Descriptor Sets ---
-        let set_layouts = vec![descriptor_set_layout; MAX_SETS as usize]; // Use updated count
+        let set_layouts_vec = vec![descriptor_set_layout; MAX_SETS as usize];
         let desc_alloc_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(descriptor_pool)
-            .set_layouts(&set_layouts);
+            .set_layouts(&set_layouts_vec);
         let allocated_sets = unsafe { base.device.allocate_descriptor_sets(&desc_alloc_info)? };
-        info!("Allocated {} descriptor sets.", allocated_sets.len());
 
-        // Store sets in a map
         let mut descriptor_sets = std::collections::HashMap::new();
-        descriptor_sets.insert(DescriptorSetId::Font, allocated_sets[0]);
+        descriptor_sets.insert(DescriptorSetId::FontWendy, allocated_sets[0]);
         descriptor_sets.insert(DescriptorSetId::Logo, allocated_sets[1]);
         descriptor_sets.insert(DescriptorSetId::Dancer, allocated_sets[2]);
         descriptor_sets.insert(DescriptorSetId::Gameplay, allocated_sets[3]);
-        descriptor_sets.insert(DescriptorSetId::SolidColor, allocated_sets[4]); // Add the new set
+        descriptor_sets.insert(DescriptorSetId::SolidColor, allocated_sets[4]);
+        descriptor_sets.insert(DescriptorSetId::FontMiso, allocated_sets[5]);
+        descriptor_sets.insert(DescriptorSetId::FontCjk, allocated_sets[6]);
 
-
-        // --- Create Pipeline Layout & Graphics Pipeline --- (no change)
-        // ... (as before) ...
         let push_constant_ranges = [vk::PushConstantRange {
-            stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, // Accessible by both
+            stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
             offset: 0,
             size: mem::size_of::<PushConstantData>() as u32,
         }];
         let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
-            .set_layouts(std::slice::from_ref(&descriptor_set_layout)) // Use the DSL
-            .push_constant_ranges(&push_constant_ranges); // Define push constants
-        let pipeline_layout = unsafe {
+            .set_layouts(std::slice::from_ref(&descriptor_set_layout))
+            .push_constant_ranges(&push_constant_ranges);
+        let main_pipeline_layout = unsafe {
             base.device.create_pipeline_layout(&pipeline_layout_create_info, None)?
         };
-         info!("Pipeline Layout created.");
-
+        info!("Main Pipeline Layout created.");
+        
         let vert_shader_module = {
-            let mut vert_shader_file = std::io::Cursor::new(&include_bytes!("../../shaders/vert.spv")[..]);
-            let vert_code = read_spv(&mut vert_shader_file)?;
-            let vert_module_info = vk::ShaderModuleCreateInfo::default().code(&vert_code);
-            unsafe { base.device.create_shader_module(&vert_module_info, None)? }
+            let mut file = std::io::Cursor::new(&include_bytes!("../../shaders/msdf_vert.spv")[..]); // USE MSDF VERT
+            let code = read_spv(&mut file)?;
+            let info = vk::ShaderModuleCreateInfo::default().code(&code);
+            unsafe { base.device.create_shader_module(&info, None)? }
         };
         let frag_shader_module = {
-            let mut frag_shader_file = std::io::Cursor::new(&include_bytes!("../../shaders/frag.spv")[..]);
-            let frag_code = read_spv(&mut frag_shader_file)?;
-            let frag_module_info = vk::ShaderModuleCreateInfo::default().code(&frag_code);
-            unsafe { base.device.create_shader_module(&frag_module_info, None)? }
+            let mut file = std::io::Cursor::new(&include_bytes!("../../shaders/msdf_frag.spv")[..]); // USE MSDF FRAG
+            let code = read_spv(&mut file)?;
+            let info = vk::ShaderModuleCreateInfo::default().code(&code);
+            unsafe { base.device.create_shader_module(&info, None)? }
         };
-         info!("Shader modules created.");
+        info!("MSDF shader modules loaded for main pipeline.");
 
         let shader_entry_name = CString::new("main").unwrap();
-
-        let shader_stage_create_infos = [
-            vk::PipelineShaderStageCreateInfo::default()
-                .module(vert_shader_module)
-                .name(&shader_entry_name)
-                .stage(vk::ShaderStageFlags::VERTEX),
-            vk::PipelineShaderStageCreateInfo::default()
-                .module(frag_shader_module)
-                .name(&shader_entry_name)
-                .stage(vk::ShaderStageFlags::FRAGMENT),
-        ];
-         let binding_descriptions = [vk::VertexInputBindingDescription {
-            binding: 0,
-            stride: mem::size_of::<Vertex>() as u32,
-            input_rate: vk::VertexInputRate::VERTEX,
+        let binding_descriptions = [vk::VertexInputBindingDescription {
+            binding: 0, stride: mem::size_of::<Vertex>() as u32, input_rate: vk::VertexInputRate::VERTEX,
         }];
         let attribute_descriptions = [
-            vk::VertexInputAttributeDescription {
-                location: 0, binding: 0,
-                format: vk::Format::R32G32_SFLOAT,
-                offset: offset_of!(Vertex, pos) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                location: 1, binding: 0,
-                format: vk::Format::R32G32_SFLOAT,
-                offset: offset_of!(Vertex, tex_coord) as u32,
-            },
+            vk::VertexInputAttributeDescription { location: 0, binding: 0, format: vk::Format::R32G32_SFLOAT, offset: offset_of!(Vertex, pos) as u32 },
+            vk::VertexInputAttributeDescription { location: 1, binding: 0, format: vk::Format::R32G32_SFLOAT, offset: offset_of!(Vertex, tex_coord) as u32 },
         ];
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_binding_descriptions(&binding_descriptions)
             .vertex_attribute_descriptions(&attribute_descriptions);
-
-        let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
-            .topology(vk::PrimitiveTopology::TRIANGLE_LIST)
-            .primitive_restart_enable(false);
-
-        let viewport_state = vk::PipelineViewportStateCreateInfo::default()
-            .viewport_count(1)
-            .scissor_count(1);
-
-        let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
-            .polygon_mode(vk::PolygonMode::FILL)
-            .line_width(1.0)
-            .cull_mode(vk::CullModeFlags::NONE)
-            .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
-
-        let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-
+        let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+        let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
+        let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default().polygon_mode(vk::PolygonMode::FILL).line_width(1.0).cull_mode(vk::CullModeFlags::NONE).front_face(vk::FrontFace::COUNTER_CLOCKWISE);
+        let multisample_state = vk::PipelineMultisampleStateCreateInfo::default().rasterization_samples(vk::SampleCountFlags::TYPE_1);
         let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default()
-            .color_write_mask(vk::ColorComponentFlags::RGBA)
-            .blend_enable(true)
-            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+            .color_write_mask(vk::ColorComponentFlags::RGBA).blend_enable(true)
+            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA) // Common for UI
+            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA) // Common for UI
             .color_blend_op(vk::BlendOp::ADD)
-            .src_alpha_blend_factor(vk::BlendFactor::ONE)
-            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+            .src_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA) // CHANGED for straight alpha
+            .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA) // CHANGED for straight alpha
             .alpha_blend_op(vk::BlendOp::ADD);
-        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
-            .logic_op_enable(false)
-            .attachments(std::slice::from_ref(&color_blend_attachment));
-
-        let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default()
-            .depth_test_enable(false)
-            .depth_write_enable(false)
-            .stencil_test_enable(false);
-
+        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default().attachments(std::slice::from_ref(&color_blend_attachment));
+        let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default();
         let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-        let dynamic_state_info =
-            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+        let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+        
+        let shader_stages_for_main_pipeline = [
+            vk::PipelineShaderStageCreateInfo::default().module(vert_shader_module).name(&shader_entry_name).stage(vk::ShaderStageFlags::VERTEX),
+            vk::PipelineShaderStageCreateInfo::default().module(frag_shader_module).name(&shader_entry_name).stage(vk::ShaderStageFlags::FRAGMENT),
+        ];
 
         let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
-            .stages(&shader_stage_create_infos)
+            .stages(&shader_stages_for_main_pipeline)
             .vertex_input_state(&vertex_input_state)
             .input_assembly_state(&input_assembly_state)
             .viewport_state(&viewport_state)
@@ -256,30 +189,26 @@ impl Renderer {
             .multisample_state(&multisample_state)
             .color_blend_state(&color_blend_state)
             .depth_stencil_state(&depth_stencil_state)
-            .layout(pipeline_layout)
+            .layout(main_pipeline_layout) 
             .render_pass(base.render_pass)
             .subpass(0)
             .dynamic_state(&dynamic_state_info);
 
-        let graphics_pipeline = unsafe {
-            base.device
-                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
-                .map_err(|(p, r)| { log::error!("Pipeline creation failed: {:?}", r); Box::new(r) as Box<dyn Error>})?[0]
+        let main_pipeline = unsafe {
+            base.device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+                .map_err(|(_p, r)| { log::error!("Main pipeline creation failed: {:?}", r); Box::new(r) as Box<dyn Error>})?[0]
         };
-        info!("Graphics Pipeline created.");
+        info!("Main Graphics Pipeline (using MSDF shaders) created.");
 
         unsafe {
             base.device.destroy_shader_module(vert_shader_module, None);
             base.device.destroy_shader_module(frag_shader_module, None);
         }
-         info!("Shader modules destroyed.");
+        info!("Shader modules destroyed.");
 
-
-
-        // --- Initial Projection Matrix Update & Bind White Texture ---
         let mut renderer = Self {
-            pipeline_layout,
-            graphics_pipeline,
+            main_pipeline_layout,
+            main_pipeline,
             descriptor_pool,
             descriptor_sets,
             descriptor_set_layout,
@@ -288,29 +217,18 @@ impl Renderer {
             quad_index_count,
             projection_ubo,
             current_window_size: (0.0, 0.0),
-            solid_white_texture, // Store the created texture
+            solid_white_texture,
         };
-        // Update projection first (needed for UBO binding in descriptor set update)
         renderer.update_projection_matrix(base, initial_window_size)?;
-
-        // NOW bind the white texture to its dedicated descriptor set
-        renderer.update_texture_descriptor(
-            &base.device,
-            DescriptorSetId::SolidColor,
-            &renderer.solid_white_texture,
-        );
-         info!("Bound solid white texture to its descriptor set.");
-
-
-        log::info!("Renderer initialization complete.");
+        renderer.update_texture_descriptor(&base.device, DescriptorSetId::SolidColor, &renderer.solid_white_texture);
+        info!("Renderer initialization complete.");
         Ok(renderer)
     }
 
-    // --- window_size, update_projection_matrix, update_texture_descriptor --- (no change)
-    // ...
     pub fn window_size(&self) -> (f32, f32) {
         self.current_window_size
     }
+
     pub fn update_projection_matrix(
         &mut self,
         base: &VulkanBase,
@@ -321,66 +239,42 @@ impl Renderer {
             return Ok(());
         }
         self.current_window_size = window_size;
+        // Y-DOWN: top=0, bottom=height
         let proj = ortho(0.0, window_size.0, 0.0, window_size.1, -1.0, 1.0);
         let ubo = UniformBufferObject { projection: proj };
         base.update_buffer(&self.projection_ubo, &[ubo])?;
-        log::info!("Projection matrix UBO updated for size: {:?}", window_size);
+        debug!("Projection matrix UBO updated for size: {:?}, Y-DOWN (0,0 top-left)", window_size);
         Ok(())
     }
-     pub fn update_texture_descriptor(
-         &self,
-         device: &Device,
-         set_id: DescriptorSetId,
-         texture: &TextureResource,
-     ) {
-         let descriptor_set = self.descriptor_sets.get(&set_id)
-             .unwrap_or_else(|| panic!("Invalid DescriptorSetId provided for update: {:?}", set_id));
 
-         let ubo_buffer_info = vk::DescriptorBufferInfo::default()
-             .buffer(self.projection_ubo.buffer)
-             .offset(0)
-             .range(vk::WHOLE_SIZE);
-         let write_ubo = vk::WriteDescriptorSet::default()
-             .dst_set(*descriptor_set)
-             .dst_binding(0)
-             .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-             .buffer_info(std::slice::from_ref(&ubo_buffer_info));
+    pub fn update_texture_descriptor(
+        &self,
+        device: &Device,
+        set_id: DescriptorSetId,
+        texture: &TextureResource,
+    ) {
+        let descriptor_set = self.descriptor_sets.get(&set_id)
+            .unwrap_or_else(|| panic!("Invalid DescriptorSetId provided for update: {:?}", set_id));
 
-         let image_info = vk::DescriptorImageInfo::default()
-             .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-             .image_view(texture.view)
-             .sampler(texture.sampler);
-         let write_sampler = vk::WriteDescriptorSet::default()
-             .dst_set(*descriptor_set)
-             .dst_binding(1)
-             .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-             .image_info(std::slice::from_ref(&image_info));
+        let ubo_buffer_info = vk::DescriptorBufferInfo::default().buffer(self.projection_ubo.buffer).offset(0).range(vk::WHOLE_SIZE);
+        let write_ubo = vk::WriteDescriptorSet::default().dst_set(*descriptor_set).dst_binding(0).descriptor_type(vk::DescriptorType::UNIFORM_BUFFER).buffer_info(std::slice::from_ref(&ubo_buffer_info));
+        let image_info = vk::DescriptorImageInfo::default().image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL).image_view(texture.view).sampler(texture.sampler);
+        let write_sampler = vk::WriteDescriptorSet::default().dst_set(*descriptor_set).dst_binding(1).descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER).image_info(std::slice::from_ref(&image_info));
+        unsafe { device.update_descriptor_sets(&[write_ubo, write_sampler], &[]) };
+        trace!("Updated descriptor set {:?} for texture view {:?}", set_id, texture.view);
+    }
 
-         unsafe { device.update_descriptor_sets(&[write_ubo, write_sampler], &[]) };
-         log::trace!("Updated descriptor set {:?} to use texture with view {:?}", set_id, texture.view);
-     }
-
-    // --- begin_frame, draw_quad --- (no change)
-    // ...
-     pub fn begin_frame(
+    pub fn begin_frame(
         &self,
         device: &Device,
         cmd_buf: vk::CommandBuffer,
         surface_extent: vk::Extent2D,
     ) {
         unsafe {
-            device.cmd_bind_pipeline(cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.graphics_pipeline);
+            device.cmd_bind_pipeline(cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.main_pipeline);
 
-            let viewport = vk::Viewport {
-                x: 0.0, y: 0.0,
-                width: surface_extent.width as f32,
-                height: surface_extent.height as f32,
-                min_depth: 0.0, max_depth: 1.0,
-            };
-            let scissor = vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: surface_extent,
-            };
+            let viewport = vk::Viewport { x: 0.0, y: 0.0, width: surface_extent.width as f32, height: surface_extent.height as f32, min_depth: 0.0, max_depth: 1.0 };
+            let scissor = vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent: surface_extent };
             device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
             device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
 
@@ -388,6 +282,7 @@ impl Renderer {
             device.cmd_bind_index_buffer(cmd_buf, self.quad_index_buffer.buffer, 0, vk::IndexType::UINT32);
         }
     }
+
     pub fn draw_quad(
         &self,
         device: &Device,
@@ -400,9 +295,7 @@ impl Renderer {
         uv_offset: [f32; 2],
         uv_scale: [f32; 2],
     ) {
-         trace!("Drawing quad: pos={:?}, size={:?}, rot={:?}, tint={:?}, uv_off={:?}, uv_scl={:?}, set={:?}",
-               position, size, rotation_rad, tint, uv_offset, uv_scale, set_id);
-
+        trace!("Drawing quad: pos={:?}, size={:?}, set={:?}", position, size, set_id);
         let model_matrix = Matrix4::from_translation(position)
             * Matrix4::from_angle_z(rotation_rad)
             * Matrix4::from_nonuniform_scale(size.0, size.1, 1.0);
@@ -412,205 +305,169 @@ impl Renderer {
             color: tint,
             uv_offset,
             uv_scale,
+            px_range: 0.0, // Set to 0.0 for non-MSDF quads (shader will use texture alpha)
         };
 
         unsafe {
-            let descriptor_set = self.descriptor_sets.get(&set_id)
-                .unwrap_or_else(|| panic!("Invalid DescriptorSetId provided for draw_quad: {:?}", set_id));
-            device.cmd_bind_descriptor_sets(
-                cmd_buf,
-                vk::PipelineBindPoint::GRAPHICS,
-                self.pipeline_layout,
-                0,
-                &[*descriptor_set],
-                &[],
-            );
-
-            let push_data_bytes = std::slice::from_raw_parts(
-                &push_data as *const _ as *const u8,
-                mem::size_of::<PushConstantData>(),
-            );
-            device.cmd_push_constants(
-                cmd_buf,
-                self.pipeline_layout,
-                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                0,
-                push_data_bytes,
-            );
-
+            let descriptor_set = self.descriptor_sets.get(&set_id).unwrap_or_else(|| panic!("Invalid DescriptorSetId: {:?}", set_id));
+            device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.main_pipeline_layout, 0, &[*descriptor_set], &[]);
+            let push_data_bytes = std::slice::from_raw_parts(&push_data as *const _ as *const u8, mem::size_of::<PushConstantData>());
+            device.cmd_push_constants(cmd_buf, self.main_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, push_data_bytes);
             device.cmd_draw_indexed(cmd_buf, self.quad_index_count, 1, 0, 0, 0);
         }
     }
 
-    // --- draw_text --- (keep the version with scale argument from previous step)
-    // ...
-     #[allow(clippy::too_many_arguments)]
-     pub fn draw_text(
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_text(
         &self,
         device: &Device,
         cmd_buf: vk::CommandBuffer,
         font: &Font,
         text: &str,
-        mut x: f32, // Pen position: where the current char's VISUAL INK should start
-        mut y: f32, // Baseline
+        mut pen_x: f32, 
+        pen_y: f32,   
         color: [f32; 4],
-        scale: f32,
+        scale: f32,      
     ) {
-        let start_x_for_newline = x;
-        // Track the screen coordinate where the previous character's ink ended.
-        // Initialize to the starting pen position for the first character.
-        let mut previous_ink_end_x = x;
+        let start_pen_x = pen_x;
 
-        for (char_index, char_code) in text.chars().enumerate() {
-            debug!("\nProcessing char #{}: '{}' at pen x={:.2}", char_index, char_code, x);
+        for char_code in text.chars() {
+            if char_code == '\n' {
+                pen_x = start_pen_x;
+                // The caller of draw_text should handle advancing pen_y for new lines.
+                // This function draws a single conceptual "line" of text at a given pen_y baseline.
+                // For simplicity, we'll just reset pen_x here.
+                // If true multiline rendering within one call is needed, pen_y would also be adjusted.
+                debug!("Newline in draw_text. Resetting pen_x. Caller handles pen_y advance.");
+                continue;
+            }
 
-            match char_code {
-                '\n' => {
-                    x = start_x_for_newline;
-                    y += font.line_height * scale;
-                    previous_ink_end_x = x; // Reset tracking for the new line
-                    debug!("  Newline processed. Resetting x to {:.2}, previous_ink_end_x to {:.2}. New y: {:.2}", x, previous_ink_end_x, y);
+            if char_code == ' ' {
+                pen_x += font.space_width * scale;
+                continue;
+            }
+
+            if let Some(glyph_info) = font.get_glyph(char_code) {
+                let quad_width = (glyph_info.plane_right - glyph_info.plane_left) * scale;
+                let quad_height = (glyph_info.plane_top - glyph_info.plane_bottom) * scale; // plane_top is usually > plane_bottom
+
+                if char_code == 'A' { // Log only for 'A' to reduce spam
+                    debug!("DRAW_TEXT 'A': scale: {:.2}", scale);
+                    debug!("  GlyphInfo: plane_left={:.2}, plane_bottom={:.2}, plane_right={:.2}, plane_top={:.2}, advance={:.2}",
+                        glyph_info.plane_left, glyph_info.plane_bottom, glyph_info.plane_right, glyph_info.plane_top, glyph_info.advance);
+                    debug!("  GlyphInfo UVs: u0={:.3}, v0={:.3}, u1={:.3}, v1={:.3}",
+                        glyph_info.u0, glyph_info.v0, glyph_info.u1, glyph_info.v1);
+                    debug!("  Calculated quad_width={:.2}, quad_height={:.2}", quad_width, quad_height);
                 }
-                ' ' => {
-                    let space_advance_scaled = font.space_width * scale;
-                    debug!("  Space character:");
-                    debug!("    Space Before: {:.2} (pen_x - previous_ink_end)", x - previous_ink_end_x);
-                    // Treat space as having zero ink width for spacing calculation
-                    let current_ink_end_x = x; // Ink effectively ends where it starts
-                    let next_x = x + space_advance_scaled;
-                    let space_after = next_x - current_ink_end_x; // This *is* the space width
-                    debug!("    Space Width (Advance): {:.2}", space_advance_scaled);
-                    debug!("    Space After (calculated): {:.2}", space_after);
 
-                    x = next_x; // Advance pen
-                    previous_ink_end_x = current_ink_end_x; // Previous ink ended where space started
+                if quad_width <= 0.0 || quad_height <= 0.0 { 
+                    pen_x += glyph_info.advance * scale;
+                    continue;
                 }
-                _ => {
-                    if let Some(glyph_info) = font.get_glyph(char_code) {
-                        // --- Calculations ---
-                        let scaled_cell_width = font.metrics.cell_width * scale;
-                        let scaled_cell_height = font.metrics.cell_height * scale;
-                        let scaled_visual_width = glyph_info.visual_width_pixels * scale;
-                        let scaled_internal_bearing_x = glyph_info.bearing_x * scale;
-                        let scaled_ascent = glyph_info.bearing_y * scale;
-                        let scaled_advance = glyph_info.advance * scale;
-                        let scaled_letter_spacing = (glyph_info.advance - glyph_info.visual_width_pixels) * scale; // Calculate LS for logging
+                
+                // Quad origin (bottom-left of the glyph's visual box, relative to pen_x, pen_y baseline)
+                // For Y-down projection:
+                // pen_y is the baseline.
+                // plane_bottom is often negative (below baseline). plane_top is positive (above baseline).
+                // So, visual top of quad is at pen_y + plane_top*scale
+                // Visual bottom of quad is at pen_y + plane_bottom*scale
+                // (If plane_bottom is -2, and pen_y is 100, then visual bottom is at 100 - 2*scale)
 
-                        // --- Spacing Calculation ---
-                        let space_before = x - previous_ink_end_x;
-                        let current_ink_end_x = x + scaled_visual_width;
-                        let next_x = x + scaled_advance;
-                        let space_after = next_x - current_ink_end_x;
+                // We draw quads from their center.
+                // Top-left of the glyph quad in screen space (Y-down):
+                let quad_visual_left_x = pen_x + (glyph_info.plane_left * scale);
+                // With Y-DOWN projection (0,0 is top-left screen):
+                // pen_y is the baseline.
+                // glyph_info.plane_top is distance *above* baseline (positive).
+                // So, visual top of glyph quad is at pen_y - (glyph_info.plane_top * scale)
+                let quad_actual_top_y = pen_y - (glyph_info.plane_top * scale);
 
-                        debug!("  Glyph Info & Spacing:");
-                        debug!("    Visual Width: {:.2} (scaled: {:.2})", glyph_info.visual_width_pixels, scaled_visual_width);
-                        debug!("    Advance:      {:.2} (scaled: {:.2})", glyph_info.advance, scaled_advance);
-                        debug!("    LetterSpacing:{:.2} (scaled: {:.2}) (Calculated as Advance - VisualWidth)", glyph_info.advance - glyph_info.visual_width_pixels, scaled_letter_spacing);
-                        debug!("    ---");
-                        debug!("    Space BEFORE ink: {:.2} (current_pen_x - previous_ink_end)", space_before);
-                        debug!("    Ink Starts At:    {:.2} (current_pen_x)", x);
-                        debug!("    Ink Ends At:      {:.2} (ink_start + scaled_visual_width)", current_ink_end_x);
-                        debug!("    Space AFTER ink:  {:.2} (next_pen_x - current_ink_end)", space_after);
-                        debug!("    Next Pen Starts:  {:.2} (current_pen_x + scaled_advance)", next_x);
-                        debug!("    ---");
-                        debug!("    InternalBearingX: {:.2} (scaled: {:.2})", glyph_info.bearing_x, scaled_internal_bearing_x);
-                        debug!("    CellWidth:        {:.2} (scaled: {:.2})", font.metrics.cell_width, scaled_cell_width);
+                // Center of the quad for translation
+                let quad_center_x = quad_visual_left_x + quad_width / 2.0;
+                // For Y-down: baseline_y is where the "pen" is.
+                // plane_top is distance *above* baseline. plane_bottom is distance *below* baseline (often negative).
+                // So, the quad's y center relative to baseline is (plane_top + plane_bottom) / 2.0
+                // Screen Y for center: pen_y + ((glyph_info.plane_top + glyph_info.plane_bottom) / 2.0) * scale
+                // No, this is simpler if we think about the quad's top-left corner.
+                // Quad top-left X: pen_x + (glyph_info.plane_left * scale)
+                // Quad top-left Y (visual top): pen_y - (glyph_info.plane_top * scale) (since plane_top is ascent from baseline)
+                //let quad_actual_top_y = pen_y - (glyph_info.plane_top * scale);
+                let quad_center_y = quad_actual_top_y + quad_height / 2.0; // Center of the quad in screen Y-down
 
+                if char_code == 'A' {
+                    debug!("  Pen_x={:.2}, Pen_y (baseline)={:.2}", pen_x, pen_y);
+                    debug!("  Quad visual_left_x={:.2}, actual_top_y={:.2}", quad_visual_left_x, quad_actual_top_y);
+                    debug!("  Quad center_x={:.2}, center_y={:.2}", quad_center_x, quad_center_y);
+                    debug!("  UV offset=[{:.3}, {:.3}], UV scale=[{:.3}, {:.3}]",
+                       glyph_info.u0, glyph_info.v0,
+                       glyph_info.u1 - glyph_info.u0, glyph_info.v1 - glyph_info.v0);
+               }
 
-                        // --- Positioning (Using the logic where x is the start of INK) ---
-                        let cell_draw_start_x = x - scaled_internal_bearing_x;
-                        let cell_draw_top_y = (y - scaled_ascent) - (font.metrics.top * scale);
-                        let cell_center_x = cell_draw_start_x + (scaled_cell_width / 2.0);
-                        let cell_center_y = cell_draw_top_y + (scaled_cell_height / 2.0);
+                let model_matrix = Matrix4::from_translation(Vector3::new(quad_center_x, quad_center_y, 0.0))
+                                 * Matrix4::from_nonuniform_scale(quad_width, quad_height, 1.0);
 
-                        let model_matrix = Matrix4::from_translation(Vector3::new(cell_center_x, cell_center_y, 0.0))
-                                         * Matrix4::from_nonuniform_scale(scaled_cell_width, scaled_cell_height, 1.0);
-
-                        // --- Drawing ---
-                        let uv_offset = [glyph_info.u0, glyph_info.v0];
-                        let uv_scale_uv = [glyph_info.u1 - glyph_info.u0, glyph_info.v1 - glyph_info.v0];
-                        let push_data = PushConstantData { model: model_matrix, color, uv_offset, uv_scale: uv_scale_uv };
-                        unsafe {
-                           // Bind correct descriptor set (make sure Font is right)
-                           let descriptor_set = self.descriptor_sets.get(&DescriptorSetId::Font)
-                               .expect("Font descriptor set not found for draw_text");
-                           device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.pipeline_layout, 0, &[*descriptor_set], &[]);
-                           // Push constants
-                           let push_data_bytes = std::slice::from_raw_parts(&push_data as *const _ as *const u8, std::mem::size_of::<PushConstantData>());
-                           device.cmd_push_constants(cmd_buf, self.pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, push_data_bytes);
-                           // Draw
-                           device.cmd_draw_indexed(cmd_buf, self.quad_index_count, 1, 0, 0, 0);
-                        }
-
-                        // --- Advance for next iteration ---
-                        x = next_x; // Update pen position
-                        previous_ink_end_x = current_ink_end_x; // Update end tracking
-
-                    } else {
-                        warn!("Glyph for '{}' fallback not found. Advancing by fallback space width.", char_code);
-                        // Use space width for advance, but treat ink width as 0 for spacing logs
-                        let space_advance_scaled = font.space_width * scale;
-                        let space_before = x - previous_ink_end_x;
-                        let current_ink_end_x = x; // No visual width
-                        let next_x = x + space_advance_scaled;
-                        let space_after = next_x - current_ink_end_x;
-
-                        debug!("  Fallback Glyph (?) handling:");
-                        debug!("    Space BEFORE ink: {:.2}", space_before);
-                        debug!("    Advance (Space):  {:.2}", space_advance_scaled);
-                        debug!("    Space AFTER ink:  {:.2}", space_after);
-
-                        x = next_x;
-                        previous_ink_end_x = current_ink_end_x;
-                    }
+                if char_code == 'A' {
+                    debug!("  Model Matrix for 'A': {:?}", model_matrix);
                 }
+
+                let uv_offset_vals = [glyph_info.u0, glyph_info.v0];
+                let uv_scale_vals = [glyph_info.u1 - glyph_info.u0, glyph_info.v1 - glyph_info.v0];
+
+                if char_code == 'A' || text.starts_with("Scaled Text") { // Log only for first char or specific text to reduce spam
+                    debug!(
+                        "DRAW_TEXT (char: {}): px_range for push_data: {:.2}",
+                        char_code, font.metrics.msdf_pixel_range
+                    );
+                }
+
+                let push_data = PushConstantData {
+                    model: model_matrix,
+                    color,
+                    uv_offset: uv_offset_vals,
+                    uv_scale: uv_scale_vals,
+                    px_range: font.metrics.msdf_pixel_range,
+                };
+                
+                unsafe {
+                    let descriptor_set = self.descriptor_sets.get(&font.descriptor_set_id)
+                        .unwrap_or_else(|| panic!("Font descriptor set {:?} not found", font.descriptor_set_id));
+                    device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.main_pipeline_layout, 0, &[*descriptor_set], &[]);
+                    let push_data_bytes = std::slice::from_raw_parts(&push_data as *const _ as *const u8, std::mem::size_of::<PushConstantData>());
+                    device.cmd_push_constants(cmd_buf, self.main_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, push_data_bytes);
+                    device.cmd_draw_indexed(cmd_buf, self.quad_index_count, 1, 0, 0, 0);
+                }
+
+                pen_x += glyph_info.advance * scale;
+            } else {
+                warn!("Glyph for '{}' not found in MSDF font. Advancing by space width.", char_code);
+                pen_x += font.space_width * scale;
             }
         }
     }
 
-
-    /// Cleans up renderer-specific Vulkan resources.
     pub fn destroy(&mut self, device: &Device) {
         log::info!("Destroying Renderer resources...");
         unsafe {
-            log::debug!("Destroying quad vertex buffer...");
             self.quad_vertex_buffer.destroy(device);
-            log::debug!("Destroying quad index buffer...");
             self.quad_index_buffer.destroy(device);
-            log::debug!("Destroying projection UBO buffer...");
             self.projection_ubo.destroy(device);
-
-            // NEW: Destroy the solid white texture
-            log::debug!("Destroying solid white texture...");
             self.solid_white_texture.destroy(device);
 
-            log::debug!("Destroying graphics pipeline...");
-            if self.graphics_pipeline != vk::Pipeline::null() {
-                device.destroy_pipeline(self.graphics_pipeline, None);
-                self.graphics_pipeline = vk::Pipeline::null();
+            if self.main_pipeline != vk::Pipeline::null() {
+                device.destroy_pipeline(self.main_pipeline, None);
+            }
+            if self.main_pipeline_layout != vk::PipelineLayout::null() {
+                device.destroy_pipeline_layout(self.main_pipeline_layout, None);
             }
 
-            log::debug!("Destroying pipeline layout...");
-            if self.pipeline_layout != vk::PipelineLayout::null() {
-                device.destroy_pipeline_layout(self.pipeline_layout, None);
-                self.pipeline_layout = vk::PipelineLayout::null();
-            }
-
-            log::debug!("Destroying descriptor pool...");
             if self.descriptor_pool != vk::DescriptorPool::null() {
                 device.destroy_descriptor_pool(self.descriptor_pool, None);
-                self.descriptor_pool = vk::DescriptorPool::null();
             }
             self.descriptor_sets.clear();
-
-            log::debug!("Destroying descriptor set layout...");
             if self.descriptor_set_layout != vk::DescriptorSetLayout::null() {
                 device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-                self.descriptor_set_layout = vk::DescriptorSetLayout::null();
             }
         }
         log::info!("Renderer resources destroyed.");
     }
-} // End impl Renderer
-
-    
+}

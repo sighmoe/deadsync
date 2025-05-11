@@ -6,10 +6,13 @@ pub const WINDOW_WIDTH: u32 = 1024;
 pub const WINDOW_HEIGHT: u32 = 768;
 
 // Asset Paths
-//pub const FONT_INI_PATH: &str = "assets/fonts/miso.ini";
-pub const FONT_INI_PATH: &str = "assets/fonts/wendy.ini";
-//pub const FONT_TEXTURE_PATH: &str = "assets/fonts/_miso light 15x15.png";
-pub const FONT_TEXTURE_PATH: &str = "assets/fonts/_wendy small 13x8.png";
+// MSDF Fonts - NEW
+pub const WENDY_MSDF_JSON_PATH: &str = "assets/fonts/wendy_msdf.json";
+pub const WENDY_MSDF_TEXTURE_PATH: &str = "assets/fonts/wendy_msdf.png";
+pub const MISO_MSDF_JSON_PATH: &str = "assets/fonts/miso_msdf.json";
+pub const MISO_MSDF_TEXTURE_PATH: &str = "assets/fonts/miso_msdf.png";
+pub const CJK_MSDF_JSON_PATH: &str = "assets/fonts/notosans_cjk_msdf.json";
+pub const CJK_MSDF_TEXTURE_PATH: &str = "assets/fonts/notosans_cjk_msdf.png";
 pub const LOGO_TEXTURE_PATH: &str = "assets/graphics/logo.png";
 pub const DANCE_TEXTURE_PATH: &str = "assets/graphics/dance.png";
 pub const ARROW_TEXTURE_PATH: &str = "assets/noteskins/down_arrow_cel.png";
@@ -50,8 +53,7 @@ pub const FLASH_DURATION: Duration = Duration::from_millis(120);
 // Menu Constants
 // Logo's display height will be this fraction of the window's current height.
 pub const LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT: f32 = 0.55;
-pub const MENU_OPTIONS: [&str; 3] = ["Gameplay", "Options", "Exit"];
-pub const MENU_ITEM_SPACING: f32 = 5.5;
+pub const MENU_OPTIONS: [&str; 3] = ["GAMEPLAY", "OPTIONS", "EXIT"];
 pub const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0];
 pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 
@@ -62,5 +64,33 @@ pub const UI_BAR_TEXT_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; // CHANGED TO BLAC
 pub const UI_REFERENCE_HEIGHT: f32 = 768.0; // Reference screen height for scaling UI elements
 pub const UI_BAR_REFERENCE_HEIGHT: f32 = 51.0; // Desired bar height at reference screen height
 
+// MSDF Shader Parameters (NEW)
+pub const MSDF_PX_RANGE: f32 = 4.0; // Should match the -pxrange used in msdf-atlas-gen, or be configurable per font
+
 // Misc
 pub const MAX_DELTA_TIME: f32 = 0.1; // Clamp dt to avoid large jumps
+
+// Colors
+/* Colors = {
+    "#FF5D47",
+    "#FF577E",
+    "#FF47B3",
+    "#DD57FF",
+    "#8885ff",
+    "#3D94FF",
+    "#00B8CC",
+    "#5CE087",
+    "#AEFA44",
+    "#FFFF00",
+    "#FFBE00",
+    "#FF7D00",
+},
+
+		ITG = {
+			color("#21CCE8"),	-- blue
+			color("#e29c18"),	-- gold
+			color("#66c955"),	-- green
+			color("#b45cff"),	-- purple (greatly lightened)
+			color("#c9855e"),	-- peach?
+			color("#ff3030")	-- red (slightly lightened)
+		}, */

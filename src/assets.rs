@@ -1,6 +1,6 @@
 use crate::audio::AudioManager; // Assuming AudioManager handles sound loading internally
 use crate::config;
-use crate::graphics::font::{load_font, Font};
+use crate::graphics::font::{load_font, Font, LoadedFontData};
 use crate::graphics::renderer::{DescriptorSetId, Renderer}; // Need Renderer to update descriptors
 use crate::graphics::texture::{load_texture, TextureResource};
 use crate::graphics::vulkan_base::VulkanBase;
@@ -20,7 +20,9 @@ pub enum TextureId {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FontId {
-    Main, // e.g., Miso font
+    Wendy, // Wendy (MSDF)
+    Miso, // Miso (MSDF)
+    Cjk,  // For the comprehensive Noto Sans CJK font
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -31,12 +33,8 @@ pub enum SoundId {
 
 // AssetManager holds the loaded assets
 pub struct AssetManager {
-    // Store resources in HashMaps keyed by their IDs
     textures: HashMap<TextureId, TextureResource>,
-    fonts: HashMap<FontId, Font>,
-    // Sounds might be managed entirely within AudioManager,
-    // but AssetManager could trigger loading.
-    // sounds: HashMap<SoundId, SoundResource>, // Or similar
+    fonts: HashMap<FontId, Font>, // Stores the final Font struct
 }
 
 impl AssetManager {
@@ -47,17 +45,16 @@ impl AssetManager {
         }
     }
 
-    /// Loads all essential assets. Call this during initialization.
     pub fn load_all(
         &mut self,
-        base: &VulkanBase, // Needed for texture/font loading
-        renderer: &Renderer, // Needed to update descriptor sets
-        audio_manager: &mut AudioManager, // Needed to load sounds
+        base: &VulkanBase,
+        renderer: &Renderer,
+        audio_manager: &mut AudioManager,
     ) -> Result<(), Box<dyn Error>> {
         info!("Loading all assets...");
 
-        // --- Load Textures ---
-        info!("Loading textures...");
+        // --- Load Textures (Non-Font) ---
+        info!("Loading non-font textures...");
         let logo_texture = load_texture(base, Path::new(config::LOGO_TEXTURE_PATH))?;
         renderer.update_texture_descriptor(&base.device, DescriptorSetId::Logo, &logo_texture);
         self.textures.insert(TextureId::Logo, logo_texture);
@@ -67,30 +64,56 @@ impl AssetManager {
         self.textures.insert(TextureId::Dancer, dance_texture);
 
         let arrow_texture = load_texture(base, Path::new(config::ARROW_TEXTURE_PATH))?;
-        // Update the 'Gameplay' descriptor set to use the arrow texture
         renderer.update_texture_descriptor(&base.device, DescriptorSetId::Gameplay, &arrow_texture);
         self.textures.insert(TextureId::Arrows, arrow_texture);
-        info!("Textures loaded and descriptor sets updated.");
+        info!("Non-font textures loaded and descriptor sets updated.");
 
-        // --- Load Fonts ---
-        info!("Loading fonts...");
-        let main_font = load_font(
+        // --- Load MSDF Fonts ---
+        info!("Loading MSDF fonts...");
+
+        // Load Wendy Font (Main) using MSDF
+        let wendy_loaded_data: LoadedFontData = load_font(
             base,
-            Path::new(config::FONT_INI_PATH),
-            Path::new(config::FONT_TEXTURE_PATH),
+            Path::new(config::WENDY_MSDF_JSON_PATH), // Wendy MSDF JSON
+            Path::new(config::WENDY_MSDF_TEXTURE_PATH), // Wendy MSDF Texture
         )?;
-        // Update the 'Font' descriptor set to use the font's texture
-        renderer.update_texture_descriptor(&base.device, DescriptorSetId::Font, &main_font.texture);
-        self.fonts.insert(FontId::Main, main_font);
-        info!("Fonts loaded and descriptor sets updated.");
+        // The renderer needs to know which descriptor set to use for this font's texture.
+        // Assuming FontWendy is still the correct ID.
+        renderer.update_texture_descriptor(&base.device, DescriptorSetId::FontWendy, &wendy_loaded_data.texture);
+        let wendy_font = Font {
+            metrics: wendy_loaded_data.metrics,
+            glyphs: wendy_loaded_data.glyphs,
+            texture: wendy_loaded_data.texture,
+            space_width: wendy_loaded_data.space_width,
+            descriptor_set_id: DescriptorSetId::FontWendy, // Store which descriptor set this font uses
+        };
+        self.fonts.insert(FontId::Wendy, wendy_font);
+        info!("Wendy MSDF font (Wendy) loaded and descriptor set updated.");
+
+        // Load Miso Font (Secondary) using MSDF
+        let miso_loaded_data: LoadedFontData = load_font(
+            base,
+            Path::new(config::MISO_MSDF_JSON_PATH), // Miso MSDF JSON
+            Path::new(config::MISO_MSDF_TEXTURE_PATH), // Miso MSDF Texture
+        )?;
+        renderer.update_texture_descriptor(&base.device, DescriptorSetId::FontMiso, &miso_loaded_data.texture);
+        let miso_font = Font {
+            metrics: miso_loaded_data.metrics,
+            glyphs: miso_loaded_data.glyphs,
+            texture: miso_loaded_data.texture,
+            space_width: miso_loaded_data.space_width,
+            descriptor_set_id: DescriptorSetId::FontMiso, // Store which descriptor set this font uses
+        };
+        self.fonts.insert(FontId::Miso, miso_font);
+        info!("Miso MSDF font loaded and descriptor set updated.");
+
+        info!("All MSDF fonts loaded and descriptor sets updated.");
 
         // --- Load Sounds ---
         info!("Loading sounds...");
         audio_manager.load_sfx(SoundId::MenuChange, Path::new(config::SFX_CHANGE_PATH))?;
         audio_manager.load_sfx(SoundId::MenuStart, Path::new(config::SFX_START_PATH))?;
-        // Load gameplay sounds here if needed
         info!("Sounds loaded.");
-
 
         info!("All assets loaded successfully.");
         Ok(())
@@ -106,23 +129,19 @@ impl AssetManager {
         self.fonts.get(&id)
     }
 
-    // `get_sound` might not be needed if AudioManager handles playback internally via ID
-
-    /// Cleans up all loaded assets that need explicit destruction (Vulkan resources).
     pub fn destroy(&mut self, device: &Device) {
         info!("Destroying AssetManager resources...");
         for (_, texture) in self.textures.iter_mut() {
             texture.destroy(device);
         }
         self.textures.clear();
-        info!("Textures destroyed.");
+        info!("Non-font textures destroyed.");
 
         for (_, font) in self.fonts.iter_mut() {
             font.destroy(device); // Font internally destroys its texture
         }
         self.fonts.clear();
-        info!("Fonts destroyed.");
-        // Sounds might be handled by AudioManager's drop
+        info!("Font resources destroyed.");
         info!("AssetManager resources destroyed.");
     }
 }
