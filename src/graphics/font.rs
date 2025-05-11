@@ -1,13 +1,13 @@
 // src/graphics/font.rs
+use crate::graphics::renderer::DescriptorSetId;
 use crate::graphics::texture::{load_texture, TextureResource};
 use crate::graphics::vulkan_base::VulkanBase;
-use crate::graphics::renderer::DescriptorSetId;
 use ash::Device;
+use log::{debug, error, info, warn};
 use serde::Deserialize;
-use std::fs;
-use log::{error, info, warn, debug};
 use std::collections::HashMap;
 use std::error::Error;
+use std::fs;
 use std::path::Path;
 
 // --- MSDF JSON Structures ---
@@ -15,7 +15,7 @@ use std::path::Path;
 #[serde(rename_all = "camelCase")]
 struct MsdfAtlasMetrics {
     distance_range: f64,
-    size: f64,          // This is the nominal font size the atlas was generated for (e.g., from -size param)
+    size: f64, // This is the nominal font size the atlas was generated for (e.g., from -size param)
     width: u32,
     height: u32,
     y_origin: Option<String>, // "top" or "bottom"
@@ -24,11 +24,11 @@ struct MsdfAtlasMetrics {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 struct MsdfFontMetrics {
-    em_size: f64,       // Often 1.0 if font metrics are normalized, or can match atlas.size
+    em_size: f64, // Often 1.0 if font metrics are normalized, or can match atlas.size
     line_height: f64,
     ascender: f64,
     descender: f64,
-    underline_y: Option<f64>, // Optional fields
+    underline_y: Option<f64>,         // Optional fields
     underline_thickness: Option<f64>, // Optional fields
 }
 
@@ -62,13 +62,13 @@ struct MsdfJsonFormat {
 
 #[derive(Debug, Clone, Copy)]
 pub struct FontMetrics {
-    pub em_size: f32,       // Font size the MSDF was generated for (often 1.0 if metrics are normalized)
-    pub line_height: f32,   // Distance between baselines (often normalized)
-    pub ascender: f32,      // Max height above baseline (often normalized)
-    pub descender: f32,     // Max depth below baseline (often normalized, usually negative)
+    pub em_size: f32, // Font size the MSDF was generated for (often 1.0 if metrics are normalized)
+    pub line_height: f32, // Distance between baselines (often normalized)
+    pub ascender: f32, // Max height above baseline (often normalized)
+    pub descender: f32, // Max depth below baseline (often normalized, usually negative)
     pub atlas_width: u32,
     pub atlas_height: u32,
-    pub msdf_pixel_range: f32, // pxRange used during generation
+    pub msdf_pixel_range: f32,       // pxRange used during generation
     pub atlas_font_size_pixels: f32, // The 'size' parameter used for msdf-atlas-gen (e.g., 128)
 }
 
@@ -76,8 +76,11 @@ pub struct FontMetrics {
 pub struct GlyphInfo {
     // Texture coordinates in the atlas (0.0 to 1.0 range)
     // v0 = top V coordinate, v1 = bottom V coordinate for standard quad UVs (Y=0 top, Y=1 bottom)
-    pub u0: f32, pub v0: f32, pub u1: f32, pub v1: f32, 
-    
+    pub u0: f32,
+    pub v0: f32,
+    pub u1: f32,
+    pub v1: f32,
+
     // Quad plane bounds (relative to cursor_x, cursor_y on baseline, often normalized)
     pub plane_left: f32,
     pub plane_bottom: f32,
@@ -105,7 +108,11 @@ pub struct Font {
 
 impl Font {
     pub fn destroy(&mut self, device: &Device) {
-        log::debug!("Destroying Font resources (Texture: {:?}, DescriptorSetId: {:?})", self.texture.image, self.descriptor_set_id);
+        log::debug!(
+            "Destroying Font resources (Texture: {:?}, DescriptorSetId: {:?})",
+            self.texture.image,
+            self.descriptor_set_id
+        );
         self.texture.destroy(device);
         log::debug!("Font resources destroyed.");
     }
@@ -120,11 +127,11 @@ impl Font {
                 width += self.space_width;
             } else if char_code == '\n' {
                 // Newlines don't add width
-            } else if let Some(fallback) = self.glyphs.get(&'?') { 
+            } else if let Some(fallback) = self.glyphs.get(&'?') {
                 width += fallback.advance;
                 warn!("Character '{}' not found in MSDF font, using fallback '?' for width calculation (normalized).", char_code);
             } else {
-                width += self.space_width; 
+                width += self.space_width;
                 error!("Character '{}' and fallback '?' not found in MSDF font! Using space width (normalized).", char_code);
             }
         }
@@ -138,14 +145,14 @@ impl Font {
     pub fn get_line_height_normalized(&self) -> f32 {
         self.metrics.line_height
     }
-    
+
     pub fn get_ascender_normalized(&self) -> f32 {
         self.metrics.ascender
     }
 
     pub fn get_glyph(&self, char_code: char) -> Option<&GlyphInfo> {
         self.glyphs.get(&char_code).or_else(|| {
-            if char_code != '?' { 
+            if char_code != '?' {
                 warn!(
                     "Character '{}' (unicode {}) not found in font map (size {}), trying fallback '?'.",
                     char_code, char_code as u32, self.glyphs.len()
@@ -167,13 +174,16 @@ pub fn load_font(
         .map_err(|e| format!("Failed to read MSDF JSON file {:?}: {}", json_path, e))?;
     let msdf_data: MsdfJsonFormat = serde_json::from_str(&json_string)
         .map_err(|e| format!("Failed to parse MSDF JSON {:?}: {}", json_path, e))?;
-    
+
     debug!("LOAD_FONT: Raw MSDF JSON Parsed. Atlas section: {:?}, Metrics section: {:?}, Glyphs found: {}", 
            msdf_data.atlas, msdf_data.metrics, msdf_data.glyphs.len());
 
     let texture = load_texture(base, texture_path)?;
-    info!("LOAD_FONT: MSDF Font texture loaded: {}x{} from {:?}", texture.width, texture.height, texture_path);
-    
+    info!(
+        "LOAD_FONT: MSDF Font texture loaded: {}x{} from {:?}",
+        texture.width, texture.height, texture_path
+    );
+
     if texture.width != msdf_data.atlas.width || texture.height != msdf_data.atlas.height {
         warn!(
             "LOAD_FONT: Texture dimensions ({}x{}) mismatch JSON atlas dimensions ({}x{}). Using texture dimensions from loaded image.",
@@ -198,7 +208,13 @@ pub fn load_font(
     let mut glyphs_map: HashMap<char, GlyphInfo> = HashMap::new();
     let mut space_advance_pixels_normalized: Option<f32> = None;
 
-    let atlas_y_origin_is_bottom = msdf_data.atlas.y_origin.as_deref().unwrap_or("top").to_lowercase() == "bottom";
+    let atlas_y_origin_is_bottom = msdf_data
+        .atlas
+        .y_origin
+        .as_deref()
+        .unwrap_or("top")
+        .to_lowercase()
+        == "bottom";
     if atlas_y_origin_is_bottom {
         info!("LOAD_FONT: Atlas yOrigin is 'bottom' (from JSON). Will adjust V coordinates for top-down texture sampling.");
     } else {
@@ -209,7 +225,10 @@ pub fn load_font(
         let char_code = match std::char::from_u32(msdf_glyph.unicode) {
             Some(c) => c,
             None => {
-                warn!("LOAD_FONT: Invalid unicode scalar: {} in MSDF JSON. Skipping glyph.", msdf_glyph.unicode);
+                warn!(
+                    "LOAD_FONT: Invalid unicode scalar: {} in MSDF JSON. Skipping glyph.",
+                    msdf_glyph.unicode
+                );
                 continue;
             }
         };
@@ -221,7 +240,7 @@ pub fn load_font(
         if let (Some(pb), Some(ab)) = (msdf_glyph.plane_bounds, msdf_glyph.atlas_bounds) {
             let u0_px = ab.left as f32;
             let u1_px = ab.right as f32;
-            
+
             let v0_tex: f32; // V-coordinate for the top edge of the glyph in the texture (0.0 at top of texture)
             let v1_tex: f32; // V-coordinate for the bottom edge of the glyph in the texture (1.0 at bottom of texture)
 
@@ -234,8 +253,10 @@ pub fn load_font(
                 // And texture V for JSON's ab.bottom (lower Y value) = (atlas_height - ab.bottom) / atlas_height
                 // v0_tex should be the smaller V value (top of glyph in texture space)
                 // v1_tex should be the larger V value (bottom of glyph in texture space)
-                v0_tex = (font_metrics.atlas_height as f32 - ab.top as f32) / font_metrics.atlas_height as f32;
-                v1_tex = (font_metrics.atlas_height as f32 - ab.bottom as f32) / font_metrics.atlas_height as f32;
+                v0_tex = (font_metrics.atlas_height as f32 - ab.top as f32)
+                    / font_metrics.atlas_height as f32;
+                v1_tex = (font_metrics.atlas_height as f32 - ab.bottom as f32)
+                    / font_metrics.atlas_height as f32;
             } else {
                 // atlasBounds from JSON has Y=0 at the top of the atlas image.
                 // ab.top is the smaller Y pixel value.
@@ -248,19 +269,32 @@ pub fn load_font(
             let u0_tex = u0_px / font_metrics.atlas_width as f32;
             let u1_tex = u1_px / font_metrics.atlas_width as f32;
 
-            if char_code == 'A' || glyphs_map.is_empty() { // Log for 'A' and the very first glyph processed
-                debug!("LOAD_FONT GLYPH ('{}', unicode {}):", char_code, msdf_glyph.unicode);
-                debug!("  Raw atlasBounds (JSON): L{:.1} T{:.1} R{:.1} B{:.1}", ab.left, ab.top, ab.right, ab.bottom);
+            if char_code == 'A' || glyphs_map.is_empty() {
+                // Log for 'A' and the very first glyph processed
+                debug!(
+                    "LOAD_FONT GLYPH ('{}', unicode {}):",
+                    char_code, msdf_glyph.unicode
+                );
+                debug!(
+                    "  Raw atlasBounds (JSON): L{:.1} T{:.1} R{:.1} B{:.1}",
+                    ab.left, ab.top, ab.right, ab.bottom
+                );
                 debug!("  atlas_y_origin_is_bottom: {}", atlas_y_origin_is_bottom);
-                debug!("  Computed Tex UVs: u0={:.4}, v0(top)={:.4} || u1={:.4}, v1(bottom)={:.4}", u0_tex, v0_tex, u1_tex, v1_tex);
-                debug!("  PlaneBounds (JSON, norm): L{:.4} B{:.4} R{:.4} T{:.4}", pb.left, pb.bottom, pb.right, pb.top);
+                debug!(
+                    "  Computed Tex UVs: u0={:.4}, v0(top)={:.4} || u1={:.4}, v1(bottom)={:.4}",
+                    u0_tex, v0_tex, u1_tex, v1_tex
+                );
+                debug!(
+                    "  PlaneBounds (JSON, norm): L{:.4} B{:.4} R{:.4} T{:.4}",
+                    pb.left, pb.bottom, pb.right, pb.top
+                );
                 debug!("  Advance (JSON, norm): {:.4}", msdf_glyph.advance);
             }
 
             let glyph_info = GlyphInfo {
-                u0: u0_tex, 
+                u0: u0_tex,
                 v0: v0_tex, // Top V for sampling rect
-                u1: u1_tex, 
+                u1: u1_tex,
                 v1: v1_tex, // Bottom V for sampling rect
                 plane_left: pb.left as f32,
                 plane_bottom: pb.bottom as f32,
@@ -270,7 +304,7 @@ pub fn load_font(
             };
             glyphs_map.insert(char_code, glyph_info);
         } else if char_code != ' ' {
-             debug!("LOAD_FONT: Glyph '{}' (unicode {}) has no plane_bounds or atlas_bounds. Advance (norm): {:.4}", char_code, msdf_glyph.unicode, msdf_glyph.advance);
+            debug!("LOAD_FONT: Glyph '{}' (unicode {}) has no plane_bounds or atlas_bounds. Advance (norm): {:.4}", char_code, msdf_glyph.unicode, msdf_glyph.advance);
         }
     }
     info!("LOAD_FONT: Processed {} glyphs into map.", glyphs_map.len());
@@ -287,9 +321,13 @@ pub fn load_font(
             }
         }
     };
-    info!("LOAD_FONT: Final space width (normalized): {:.4}", final_space_width_normalized);
+    info!(
+        "LOAD_FONT: Final space width (normalized): {:.4}",
+        final_space_width_normalized
+    );
 
-    if !glyphs_map.contains_key(&'?') && !glyphs_map.is_empty() { // Added !glyphs_map.is_empty() to avoid warning if font is totally empty
+    if !glyphs_map.contains_key(&'?') && !glyphs_map.is_empty() {
+        // Added !glyphs_map.is_empty() to avoid warning if font is totally empty
         warn!("LOAD_FONT: Fallback character '?' not found in MSDF font. Text rendering for unknown characters might be blank or use space width.");
     }
 

@@ -54,19 +54,18 @@ impl AudioManager {
     /// Plays a loaded sound effect once.
     pub fn play_sfx(&self, id: SoundId) {
         if let Some(buffered_source) = self.sfx_buffers.get(&id) {
-             match Sink::try_new(&self.stream_handle) {
-                 Ok(sink) => {
-                     // Clone the buffered source (cheap operation)
-                     sink.append(buffered_source.clone());
-                     // Detach the sink to play in the background and clean itself up
-                     sink.detach();
-                     info!("Playing SFX '{:?}'", id);
-                 },
-                 Err(e) => {
-                     error!("Failed to create temporary sink for SFX '{:?}': {}", id, e);
-                 }
+            match Sink::try_new(&self.stream_handle) {
+                Ok(sink) => {
+                    // Clone the buffered source (cheap operation)
+                    sink.append(buffered_source.clone());
+                    // Detach the sink to play in the background and clean itself up
+                    sink.detach();
+                    info!("Playing SFX '{:?}'", id);
+                }
+                Err(e) => {
+                    error!("Failed to create temporary sink for SFX '{:?}': {}", id, e);
+                }
             }
-
         } else {
             warn!("Attempted to play unloaded SFX: {:?}", id);
         }
@@ -78,7 +77,8 @@ impl AudioManager {
         // Stop previous music first
         self.stop_music();
 
-        let file = File::open(path).map_err(|e| format!("Failed to open music file {:?}: {}", path, e))?;
+        let file =
+            File::open(path).map_err(|e| format!("Failed to open music file {:?}: {}", path, e))?;
         // Decode music on the fly (don't buffer large files)
         let source = Decoder::new(BufReader::new(file))
             .map_err(|e| format!("Failed to decode music file {:?}: {}", path, e))?;
@@ -90,16 +90,19 @@ impl AudioManager {
                 sink.append(source); // Add the decoded source to the sink
                 sink.play(); // Start playback
 
-                 // Store the new sink, replacing the old one
-                 let mut music_sink_guard = self.music_sink.lock().map_err(|_| "Failed to lock music sink mutex")?;
-                 *music_sink_guard = Some(sink);
+                // Store the new sink, replacing the old one
+                let mut music_sink_guard = self
+                    .music_sink
+                    .lock()
+                    .map_err(|_| "Failed to lock music sink mutex")?;
+                *music_sink_guard = Some(sink);
 
                 info!("Music playback started: {:?}", path);
                 Ok(())
-            },
+            }
             Err(e) => {
-                 error!("Failed to create sink for music: {}", e);
-                 Err(Box::new(e) as Box<dyn Error>)
+                error!("Failed to create sink for music: {}", e);
+                Err(Box::new(e) as Box<dyn Error>)
             }
         }
     }
@@ -109,17 +112,17 @@ impl AudioManager {
         info!("Stopping music...");
         // Lock the mutex to access the sink
         if let Ok(mut sink_guard) = self.music_sink.lock() {
-             // take() removes the sink from the Option, returning it
-             if let Some(sink) = sink_guard.take() {
-                 sink.stop(); // Stop playback
-                 info!("Music stopped.");
-                 // Sink is dropped here, releasing audio resources
-             } else {
-                  info!("No music was playing.");
-             }
-         } else {
-             error!("Failed to lock music sink mutex during stop.");
-         }
+            // take() removes the sink from the Option, returning it
+            if let Some(sink) = sink_guard.take() {
+                sink.stop(); // Stop playback
+                info!("Music stopped.");
+                // Sink is dropped here, releasing audio resources
+            } else {
+                info!("No music was playing.");
+            }
+        } else {
+            error!("Failed to lock music sink mutex during stop.");
+        }
     }
 
     // Optional: Add functions to pause, resume, set volume, etc.

@@ -2,10 +2,10 @@ use crate::graphics::font::{Font, GlyphInfo}; // GlyphInfo is used in draw_text
 use crate::graphics::texture::{self, TextureResource};
 use crate::graphics::vulkan_base::{BufferResource, UniformBufferObject, Vertex, VulkanBase};
 use crate::state::PushConstantData; // This now includes px_range
+use ash::util::read_spv;
 use ash::{vk, Device};
 use cgmath::{ortho, Matrix4, Rad, Vector3};
 use log::{debug, info, trace, warn};
-use ash::util::read_spv;
 use memoffset::offset_of;
 use std::error::Error;
 use std::{ffi::CString, mem};
@@ -29,29 +29,38 @@ pub struct Renderer {
 
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets: std::collections::HashMap<DescriptorSetId, vk::DescriptorSet>,
-    descriptor_set_layout: vk::DescriptorSetLayout, 
-    
+    descriptor_set_layout: vk::DescriptorSetLayout,
+
     quad_vertex_buffer: BufferResource,
     quad_index_buffer: BufferResource,
     quad_index_count: u32,
-    
+
     projection_ubo: BufferResource,
     current_window_size: (f32, f32),
     solid_white_texture: TextureResource,
 }
 
 impl Renderer {
-    pub fn new(
-        base: &VulkanBase,
-        initial_window_size: (f32, f32),
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn new(base: &VulkanBase, initial_window_size: (f32, f32)) -> Result<Self, Box<dyn Error>> {
         info!("Initializing Renderer...");
 
         let quad_vertices: [Vertex; 4] = [
-            Vertex { pos: [-0.5, -0.5], tex_coord: [0.0, 0.0] }, 
-            Vertex { pos: [ 0.5, -0.5], tex_coord: [1.0, 0.0] }, 
-            Vertex { pos: [ 0.5,  0.5], tex_coord: [1.0, 1.0] }, 
-            Vertex { pos: [-0.5,  0.5], tex_coord: [0.0, 1.0] }, 
+            Vertex {
+                pos: [-0.5, -0.5],
+                tex_coord: [0.0, 0.0],
+            },
+            Vertex {
+                pos: [0.5, -0.5],
+                tex_coord: [1.0, 0.0],
+            },
+            Vertex {
+                pos: [0.5, 0.5],
+                tex_coord: [1.0, 1.0],
+            },
+            Vertex {
+                pos: [-0.5, 0.5],
+                tex_coord: [0.0, 1.0],
+            },
         ];
         let vertex_buffer_size = (quad_vertices.len() * mem::size_of::<Vertex>()) as vk::DeviceSize;
         let quad_vertex_buffer = base.create_buffer(
@@ -94,16 +103,28 @@ impl Renderer {
         ];
         let dsl_create_info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&dsl_bindings);
         let descriptor_set_layout = unsafe {
-            base.device.create_descriptor_set_layout(&dsl_create_info, None)?
+            base.device
+                .create_descriptor_set_layout(&dsl_create_info, None)?
         };
 
         const MAX_SETS: u32 = 7;
         let pool_sizes = [
-            vk::DescriptorPoolSize { ty: vk::DescriptorType::UNIFORM_BUFFER, descriptor_count: MAX_SETS },
-            vk::DescriptorPoolSize { ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER, descriptor_count: MAX_SETS },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: MAX_SETS,
+            },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: MAX_SETS,
+            },
         ];
-        let pool_create_info = vk::DescriptorPoolCreateInfo::default().pool_sizes(&pool_sizes).max_sets(MAX_SETS);
-        let descriptor_pool = unsafe { base.device.create_descriptor_pool(&pool_create_info, None)? };
+        let pool_create_info = vk::DescriptorPoolCreateInfo::default()
+            .pool_sizes(&pool_sizes)
+            .max_sets(MAX_SETS);
+        let descriptor_pool = unsafe {
+            base.device
+                .create_descriptor_pool(&pool_create_info, None)?
+        };
 
         let set_layouts_vec = vec![descriptor_set_layout; MAX_SETS as usize];
         let desc_alloc_info = vk::DescriptorSetAllocateInfo::default()
@@ -129,10 +150,11 @@ impl Renderer {
             .set_layouts(std::slice::from_ref(&descriptor_set_layout))
             .push_constant_ranges(&push_constant_ranges);
         let main_pipeline_layout = unsafe {
-            base.device.create_pipeline_layout(&pipeline_layout_create_info, None)?
+            base.device
+                .create_pipeline_layout(&pipeline_layout_create_info, None)?
         };
         info!("Main Pipeline Layout created.");
-        
+
         let vert_shader_module = {
             let mut file = std::io::Cursor::new(&include_bytes!("../../shaders/msdf_vert.spv")[..]); // USE MSDF VERT
             let code = read_spv(&mut file)?;
@@ -149,35 +171,64 @@ impl Renderer {
 
         let shader_entry_name = CString::new("main").unwrap();
         let binding_descriptions = [vk::VertexInputBindingDescription {
-            binding: 0, stride: mem::size_of::<Vertex>() as u32, input_rate: vk::VertexInputRate::VERTEX,
+            binding: 0,
+            stride: mem::size_of::<Vertex>() as u32,
+            input_rate: vk::VertexInputRate::VERTEX,
         }];
         let attribute_descriptions = [
-            vk::VertexInputAttributeDescription { location: 0, binding: 0, format: vk::Format::R32G32_SFLOAT, offset: offset_of!(Vertex, pos) as u32 },
-            vk::VertexInputAttributeDescription { location: 1, binding: 0, format: vk::Format::R32G32_SFLOAT, offset: offset_of!(Vertex, tex_coord) as u32 },
+            vk::VertexInputAttributeDescription {
+                location: 0,
+                binding: 0,
+                format: vk::Format::R32G32_SFLOAT,
+                offset: offset_of!(Vertex, pos) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                location: 1,
+                binding: 0,
+                format: vk::Format::R32G32_SFLOAT,
+                offset: offset_of!(Vertex, tex_coord) as u32,
+            },
         ];
         let vertex_input_state = vk::PipelineVertexInputStateCreateInfo::default()
             .vertex_binding_descriptions(&binding_descriptions)
             .vertex_attribute_descriptions(&attribute_descriptions);
-        let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-        let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
-        let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default().polygon_mode(vk::PolygonMode::FILL).line_width(1.0).cull_mode(vk::CullModeFlags::NONE).front_face(vk::FrontFace::COUNTER_CLOCKWISE);
-        let multisample_state = vk::PipelineMultisampleStateCreateInfo::default().rasterization_samples(vk::SampleCountFlags::TYPE_1);
+        let input_assembly_state = vk::PipelineInputAssemblyStateCreateInfo::default()
+            .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+        let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+            .viewport_count(1)
+            .scissor_count(1);
+        let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
+            .polygon_mode(vk::PolygonMode::FILL)
+            .line_width(1.0)
+            .cull_mode(vk::CullModeFlags::NONE)
+            .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
+        let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
+            .rasterization_samples(vk::SampleCountFlags::TYPE_1);
         let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default()
-            .color_write_mask(vk::ColorComponentFlags::RGBA).blend_enable(true)
+            .color_write_mask(vk::ColorComponentFlags::RGBA)
+            .blend_enable(true)
             .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA) // Common for UI
             .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA) // Common for UI
             .color_blend_op(vk::BlendOp::ADD)
             .src_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA) // CHANGED for straight alpha
             .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA) // CHANGED for straight alpha
             .alpha_blend_op(vk::BlendOp::ADD);
-        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default().attachments(std::slice::from_ref(&color_blend_attachment));
+        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default()
+            .attachments(std::slice::from_ref(&color_blend_attachment));
         let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default();
         let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-        let dynamic_state_info = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
-        
+        let dynamic_state_info =
+            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+
         let shader_stages_for_main_pipeline = [
-            vk::PipelineShaderStageCreateInfo::default().module(vert_shader_module).name(&shader_entry_name).stage(vk::ShaderStageFlags::VERTEX),
-            vk::PipelineShaderStageCreateInfo::default().module(frag_shader_module).name(&shader_entry_name).stage(vk::ShaderStageFlags::FRAGMENT),
+            vk::PipelineShaderStageCreateInfo::default()
+                .module(vert_shader_module)
+                .name(&shader_entry_name)
+                .stage(vk::ShaderStageFlags::VERTEX),
+            vk::PipelineShaderStageCreateInfo::default()
+                .module(frag_shader_module)
+                .name(&shader_entry_name)
+                .stage(vk::ShaderStageFlags::FRAGMENT),
         ];
 
         let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
@@ -189,14 +240,18 @@ impl Renderer {
             .multisample_state(&multisample_state)
             .color_blend_state(&color_blend_state)
             .depth_stencil_state(&depth_stencil_state)
-            .layout(main_pipeline_layout) 
+            .layout(main_pipeline_layout)
             .render_pass(base.render_pass)
             .subpass(0)
             .dynamic_state(&dynamic_state_info);
 
         let main_pipeline = unsafe {
-            base.device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
-                .map_err(|(_p, r)| { log::error!("Main pipeline creation failed: {:?}", r); Box::new(r) as Box<dyn Error>})?[0]
+            base.device
+                .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+                .map_err(|(_p, r)| {
+                    log::error!("Main pipeline creation failed: {:?}", r);
+                    Box::new(r) as Box<dyn Error>
+                })?[0]
         };
         info!("Main Graphics Pipeline (using MSDF shaders) created.");
 
@@ -220,7 +275,11 @@ impl Renderer {
             solid_white_texture,
         };
         renderer.update_projection_matrix(base, initial_window_size)?;
-        renderer.update_texture_descriptor(&base.device, DescriptorSetId::SolidColor, &renderer.solid_white_texture);
+        renderer.update_texture_descriptor(
+            &base.device,
+            DescriptorSetId::SolidColor,
+            &renderer.solid_white_texture,
+        );
         info!("Renderer initialization complete.");
         Ok(renderer)
     }
@@ -235,7 +294,10 @@ impl Renderer {
         window_size: (f32, f32),
     ) -> Result<(), Box<dyn Error>> {
         if window_size.0 <= 0.0 || window_size.1 <= 0.0 {
-            warn!("Attempted to update projection matrix with zero or negative size: {:?}", window_size);
+            warn!(
+                "Attempted to update projection matrix with zero or negative size: {:?}",
+                window_size
+            );
             return Ok(());
         }
         self.current_window_size = window_size;
@@ -243,7 +305,10 @@ impl Renderer {
         let proj = ortho(0.0, window_size.0, 0.0, window_size.1, -1.0, 1.0);
         let ubo = UniformBufferObject { projection: proj };
         base.update_buffer(&self.projection_ubo, &[ubo])?;
-        debug!("Projection matrix UBO updated for size: {:?}, Y-DOWN (0,0 top-left)", window_size);
+        debug!(
+            "Projection matrix UBO updated for size: {:?}, Y-DOWN (0,0 top-left)",
+            window_size
+        );
         Ok(())
     }
 
@@ -253,15 +318,35 @@ impl Renderer {
         set_id: DescriptorSetId,
         texture: &TextureResource,
     ) {
-        let descriptor_set = self.descriptor_sets.get(&set_id)
+        let descriptor_set = self
+            .descriptor_sets
+            .get(&set_id)
             .unwrap_or_else(|| panic!("Invalid DescriptorSetId provided for update: {:?}", set_id));
 
-        let ubo_buffer_info = vk::DescriptorBufferInfo::default().buffer(self.projection_ubo.buffer).offset(0).range(vk::WHOLE_SIZE);
-        let write_ubo = vk::WriteDescriptorSet::default().dst_set(*descriptor_set).dst_binding(0).descriptor_type(vk::DescriptorType::UNIFORM_BUFFER).buffer_info(std::slice::from_ref(&ubo_buffer_info));
-        let image_info = vk::DescriptorImageInfo::default().image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL).image_view(texture.view).sampler(texture.sampler);
-        let write_sampler = vk::WriteDescriptorSet::default().dst_set(*descriptor_set).dst_binding(1).descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER).image_info(std::slice::from_ref(&image_info));
+        let ubo_buffer_info = vk::DescriptorBufferInfo::default()
+            .buffer(self.projection_ubo.buffer)
+            .offset(0)
+            .range(vk::WHOLE_SIZE);
+        let write_ubo = vk::WriteDescriptorSet::default()
+            .dst_set(*descriptor_set)
+            .dst_binding(0)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .buffer_info(std::slice::from_ref(&ubo_buffer_info));
+        let image_info = vk::DescriptorImageInfo::default()
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+            .image_view(texture.view)
+            .sampler(texture.sampler);
+        let write_sampler = vk::WriteDescriptorSet::default()
+            .dst_set(*descriptor_set)
+            .dst_binding(1)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .image_info(std::slice::from_ref(&image_info));
         unsafe { device.update_descriptor_sets(&[write_ubo, write_sampler], &[]) };
-        trace!("Updated descriptor set {:?} for texture view {:?}", set_id, texture.view);
+        trace!(
+            "Updated descriptor set {:?} for texture view {:?}",
+            set_id,
+            texture.view
+        );
     }
 
     pub fn begin_frame(
@@ -273,13 +358,28 @@ impl Renderer {
         unsafe {
             device.cmd_bind_pipeline(cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.main_pipeline);
 
-            let viewport = vk::Viewport { x: 0.0, y: 0.0, width: surface_extent.width as f32, height: surface_extent.height as f32, min_depth: 0.0, max_depth: 1.0 };
-            let scissor = vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent: surface_extent };
+            let viewport = vk::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: surface_extent.width as f32,
+                height: surface_extent.height as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            };
+            let scissor = vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: surface_extent,
+            };
             device.cmd_set_viewport(cmd_buf, 0, &[viewport]);
             device.cmd_set_scissor(cmd_buf, 0, &[scissor]);
 
             device.cmd_bind_vertex_buffers(cmd_buf, 0, &[self.quad_vertex_buffer.buffer], &[0]);
-            device.cmd_bind_index_buffer(cmd_buf, self.quad_index_buffer.buffer, 0, vk::IndexType::UINT32);
+            device.cmd_bind_index_buffer(
+                cmd_buf,
+                self.quad_index_buffer.buffer,
+                0,
+                vk::IndexType::UINT32,
+            );
         }
     }
 
@@ -295,7 +395,12 @@ impl Renderer {
         uv_offset: [f32; 2],
         uv_scale: [f32; 2],
     ) {
-        trace!("Drawing quad: pos={:?}, size={:?}, set={:?}", position, size, set_id);
+        trace!(
+            "Drawing quad: pos={:?}, size={:?}, set={:?}",
+            position,
+            size,
+            set_id
+        );
         let model_matrix = Matrix4::from_translation(position)
             * Matrix4::from_angle_z(rotation_rad)
             * Matrix4::from_nonuniform_scale(size.0, size.1, 1.0);
@@ -309,10 +414,29 @@ impl Renderer {
         };
 
         unsafe {
-            let descriptor_set = self.descriptor_sets.get(&set_id).unwrap_or_else(|| panic!("Invalid DescriptorSetId: {:?}", set_id));
-            device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.main_pipeline_layout, 0, &[*descriptor_set], &[]);
-            let push_data_bytes = std::slice::from_raw_parts(&push_data as *const _ as *const u8, mem::size_of::<PushConstantData>());
-            device.cmd_push_constants(cmd_buf, self.main_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, push_data_bytes);
+            let descriptor_set = self
+                .descriptor_sets
+                .get(&set_id)
+                .unwrap_or_else(|| panic!("Invalid DescriptorSetId: {:?}", set_id));
+            device.cmd_bind_descriptor_sets(
+                cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.main_pipeline_layout,
+                0,
+                &[*descriptor_set],
+                &[],
+            );
+            let push_data_bytes = std::slice::from_raw_parts(
+                &push_data as *const _ as *const u8,
+                mem::size_of::<PushConstantData>(),
+            );
+            device.cmd_push_constants(
+                cmd_buf,
+                self.main_pipeline_layout,
+                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                0,
+                push_data_bytes,
+            );
             device.cmd_draw_indexed(cmd_buf, self.quad_index_count, 1, 0, 0, 0);
         }
     }
@@ -324,10 +448,10 @@ impl Renderer {
         cmd_buf: vk::CommandBuffer,
         font: &Font,
         text: &str,
-        mut pen_x: f32, 
-        pen_y: f32,   
+        mut pen_x: f32,
+        pen_y: f32,
         color: [f32; 4],
-        scale: f32,      
+        scale: f32,
     ) {
         let start_pen_x = pen_x;
 
@@ -351,20 +475,26 @@ impl Renderer {
                 let quad_width = (glyph_info.plane_right - glyph_info.plane_left) * scale;
                 let quad_height = (glyph_info.plane_top - glyph_info.plane_bottom) * scale; // plane_top is usually > plane_bottom
 
-                if char_code == 'A' { // Log only for 'A' to reduce spam
+                if char_code == 'A' {
+                    // Log only for 'A' to reduce spam
                     debug!("DRAW_TEXT 'A': scale: {:.2}", scale);
                     debug!("  GlyphInfo: plane_left={:.2}, plane_bottom={:.2}, plane_right={:.2}, plane_top={:.2}, advance={:.2}",
                         glyph_info.plane_left, glyph_info.plane_bottom, glyph_info.plane_right, glyph_info.plane_top, glyph_info.advance);
-                    debug!("  GlyphInfo UVs: u0={:.3}, v0={:.3}, u1={:.3}, v1={:.3}",
-                        glyph_info.u0, glyph_info.v0, glyph_info.u1, glyph_info.v1);
-                    debug!("  Calculated quad_width={:.2}, quad_height={:.2}", quad_width, quad_height);
+                    debug!(
+                        "  GlyphInfo UVs: u0={:.3}, v0={:.3}, u1={:.3}, v1={:.3}",
+                        glyph_info.u0, glyph_info.v0, glyph_info.u1, glyph_info.v1
+                    );
+                    debug!(
+                        "  Calculated quad_width={:.2}, quad_height={:.2}",
+                        quad_width, quad_height
+                    );
                 }
 
-                if quad_width <= 0.0 || quad_height <= 0.0 { 
+                if quad_width <= 0.0 || quad_height <= 0.0 {
                     pen_x += glyph_info.advance * scale;
                     continue;
                 }
-                
+
                 // Quad origin (bottom-left of the glyph's visual box, relative to pen_x, pen_y baseline)
                 // For Y-down projection:
                 // pen_y is the baseline.
@@ -396,15 +526,26 @@ impl Renderer {
 
                 if char_code == 'A' {
                     debug!("  Pen_x={:.2}, Pen_y (baseline)={:.2}", pen_x, pen_y);
-                    debug!("  Quad visual_left_x={:.2}, actual_top_y={:.2}", quad_visual_left_x, quad_actual_top_y);
-                    debug!("  Quad center_x={:.2}, center_y={:.2}", quad_center_x, quad_center_y);
-                    debug!("  UV offset=[{:.3}, {:.3}], UV scale=[{:.3}, {:.3}]",
-                       glyph_info.u0, glyph_info.v0,
-                       glyph_info.u1 - glyph_info.u0, glyph_info.v1 - glyph_info.v0);
-               }
+                    debug!(
+                        "  Quad visual_left_x={:.2}, actual_top_y={:.2}",
+                        quad_visual_left_x, quad_actual_top_y
+                    );
+                    debug!(
+                        "  Quad center_x={:.2}, center_y={:.2}",
+                        quad_center_x, quad_center_y
+                    );
+                    debug!(
+                        "  UV offset=[{:.3}, {:.3}], UV scale=[{:.3}, {:.3}]",
+                        glyph_info.u0,
+                        glyph_info.v0,
+                        glyph_info.u1 - glyph_info.u0,
+                        glyph_info.v1 - glyph_info.v0
+                    );
+                }
 
-                let model_matrix = Matrix4::from_translation(Vector3::new(quad_center_x, quad_center_y, 0.0))
-                                 * Matrix4::from_nonuniform_scale(quad_width, quad_height, 1.0);
+                let model_matrix =
+                    Matrix4::from_translation(Vector3::new(quad_center_x, quad_center_y, 0.0))
+                        * Matrix4::from_nonuniform_scale(quad_width, quad_height, 1.0);
 
                 if char_code == 'A' {
                     debug!("  Model Matrix for 'A': {:?}", model_matrix);
@@ -413,7 +554,8 @@ impl Renderer {
                 let uv_offset_vals = [glyph_info.u0, glyph_info.v0];
                 let uv_scale_vals = [glyph_info.u1 - glyph_info.u0, glyph_info.v1 - glyph_info.v0];
 
-                if char_code == 'A' || text.starts_with("Scaled Text") { // Log only for first char or specific text to reduce spam
+                if char_code == 'A' || text.starts_with("Scaled Text") {
+                    // Log only for first char or specific text to reduce spam
                     debug!(
                         "DRAW_TEXT (char: {}): px_range for push_data: {:.2}",
                         char_code, font.metrics.msdf_pixel_range
@@ -427,19 +569,42 @@ impl Renderer {
                     uv_scale: uv_scale_vals,
                     px_range: font.metrics.msdf_pixel_range,
                 };
-                
+
                 unsafe {
-                    let descriptor_set = self.descriptor_sets.get(&font.descriptor_set_id)
-                        .unwrap_or_else(|| panic!("Font descriptor set {:?} not found", font.descriptor_set_id));
-                    device.cmd_bind_descriptor_sets(cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.main_pipeline_layout, 0, &[*descriptor_set], &[]);
-                    let push_data_bytes = std::slice::from_raw_parts(&push_data as *const _ as *const u8, std::mem::size_of::<PushConstantData>());
-                    device.cmd_push_constants(cmd_buf, self.main_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, push_data_bytes);
+                    let descriptor_set = self
+                        .descriptor_sets
+                        .get(&font.descriptor_set_id)
+                        .unwrap_or_else(|| {
+                            panic!("Font descriptor set {:?} not found", font.descriptor_set_id)
+                        });
+                    device.cmd_bind_descriptor_sets(
+                        cmd_buf,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        self.main_pipeline_layout,
+                        0,
+                        &[*descriptor_set],
+                        &[],
+                    );
+                    let push_data_bytes = std::slice::from_raw_parts(
+                        &push_data as *const _ as *const u8,
+                        std::mem::size_of::<PushConstantData>(),
+                    );
+                    device.cmd_push_constants(
+                        cmd_buf,
+                        self.main_pipeline_layout,
+                        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                        0,
+                        push_data_bytes,
+                    );
                     device.cmd_draw_indexed(cmd_buf, self.quad_index_count, 1, 0, 0, 0);
                 }
 
                 pen_x += glyph_info.advance * scale;
             } else {
-                warn!("Glyph for '{}' not found in MSDF font. Advancing by space width.", char_code);
+                warn!(
+                    "Glyph for '{}' not found in MSDF font. Advancing by space width.",
+                    char_code
+                );
                 pen_x += font.space_width * scale;
             }
         }

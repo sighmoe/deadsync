@@ -48,7 +48,11 @@ impl Default for SelectMusicState {
     fn default() -> Self {
         SelectMusicState {
             // TODO: Later, scan a directory for songs
-            songs: vec![config::SONG_FOLDER_PATH.split('/').last().unwrap_or("Unknown Song").to_string()], // Derive name from path for now
+            songs: vec![config::SONG_FOLDER_PATH
+                .split('/')
+                .last()
+                .unwrap_or("Unknown Song")
+                .to_string()], // Derive name from path for now
             selected_index: 0,
         }
     }
@@ -168,5 +172,5 @@ pub struct PushConstantData {
     pub uv_offset: [f32; 2],
     pub uv_scale: [f32; 2],
     pub px_range: f32, // NEW: For MSDF shader
-    // pub screen_px_range: f32, // Optional if you implement advanced aa
+                       // pub screen_px_range: f32, // Optional if you implement advanced aa
 }

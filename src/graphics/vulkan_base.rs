@@ -96,7 +96,8 @@ unsafe extern "system" fn vulkan_debug_callback(
         ffi::CStr::from_ptr(callback_data.p_message).to_string_lossy()
     };
 
-    log::debug!( // Changed to debug to reduce verbosity, can be info for more detail
+    log::debug!(
+        // Changed to debug to reduce verbosity, can be info for more detail
         "{:?}: {:?} [{}({})] : {}\n",
         message_severity,
         message_type,
@@ -311,10 +312,9 @@ impl VulkanBase {
                         })
                 })
                 .ok_or("Couldn't find suitable physical device.")?;
-            
+
             let pdevice_properties = instance.get_physical_device_properties(pdevice);
             let device_memory_properties = instance.get_physical_device_memory_properties(pdevice);
-
 
             let device_extension_names_raw = [
                 swapchain::NAME.as_ptr(),
@@ -335,7 +335,8 @@ impl VulkanBase {
                 .enabled_extension_names(&device_extension_names_raw)
                 .enabled_features(&features);
 
-            let device: Device = instance.create_device(pdevice, &device_create_info, None)
+            let device: Device = instance
+                .create_device(pdevice, &device_create_info, None)
                 .map_err(|e| format!("Device creation error: {}", e))?;
             let present_queue = device.get_device_queue(queue_family_index, 0);
 
@@ -351,7 +352,7 @@ impl VulkanBase {
                         .get_physical_device_surface_formats(pdevice, surface)
                         .unwrap()[0]
                 });
-            
+
             let swapchain_loader = swapchain::Device::new(&instance, &device);
 
             // --- Command Pool ---
@@ -363,7 +364,7 @@ impl VulkanBase {
             // --- Command Buffers (Draw + 1 Setup) ---
             // Max frames in flight - typically 2 or 3 for triple buffering.
             // This will be the number of draw command buffers and sync objects.
-            const MAX_FRAMES_IN_FLIGHT: u32 = 2; 
+            const MAX_FRAMES_IN_FLIGHT: u32 = 2;
             let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::default()
                 .command_pool(pool)
                 .level(vk::CommandBufferLevel::PRIMARY)
@@ -372,13 +373,13 @@ impl VulkanBase {
             let all_command_buffers =
                 device.allocate_command_buffers(&command_buffer_allocate_info)?;
             let setup_command_buffer = all_command_buffers[0];
-            let draw_command_buffers = all_command_buffers[1..].to_vec(); 
+            let draw_command_buffers = all_command_buffers[1..].to_vec();
             debug_assert_eq!(draw_command_buffers.len(), MAX_FRAMES_IN_FLIGHT as usize);
-
 
             // --- Render Pass (created once, assuming format doesn't change) ---
             let renderpass_attachments = [
-                vk::AttachmentDescription { // Color
+                vk::AttachmentDescription {
+                    // Color
                     format: surface_format.format,
                     samples: vk::SampleCountFlags::TYPE_1,
                     load_op: vk::AttachmentLoadOp::CLEAR,
@@ -389,7 +390,8 @@ impl VulkanBase {
                     final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
                     ..Default::default()
                 },
-                vk::AttachmentDescription { // Depth
+                vk::AttachmentDescription {
+                    // Depth
                     format: vk::Format::D16_UNORM, // Fixed depth format
                     samples: vk::SampleCountFlags::TYPE_1,
                     load_op: vk::AttachmentLoadOp::CLEAR,
@@ -412,10 +414,13 @@ impl VulkanBase {
             let dependencies = [vk::SubpassDependency {
                 src_subpass: vk::SUBPASS_EXTERNAL,
                 dst_subpass: 0,
-                src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-                dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+                dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+                    | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
                 src_access_mask: vk::AccessFlags::NONE,
-                dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE
+                    | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
                 ..Default::default()
             }];
             let subpass = vk::SubpassDescription::default()
@@ -433,19 +438,23 @@ impl VulkanBase {
                 &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED), // Start signaled
                 None,
             )?;
-            
+
             let mut present_complete_semaphores = Vec::with_capacity(MAX_FRAMES_IN_FLIGHT as usize);
-            let mut rendering_complete_semaphores = Vec::with_capacity(MAX_FRAMES_IN_FLIGHT as usize);
+            let mut rendering_complete_semaphores =
+                Vec::with_capacity(MAX_FRAMES_IN_FLIGHT as usize);
             let mut draw_commands_fences = Vec::with_capacity(MAX_FRAMES_IN_FLIGHT as usize);
 
             let semaphore_create_info = vk::SemaphoreCreateInfo::default();
-            let fence_create_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED); // Fences start signaled
+            let fence_create_info =
+                vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED); // Fences start signaled
             for _ in 0..MAX_FRAMES_IN_FLIGHT {
-                present_complete_semaphores.push(device.create_semaphore(&semaphore_create_info, None)?);
-                rendering_complete_semaphores.push(device.create_semaphore(&semaphore_create_info, None)?);
+                present_complete_semaphores
+                    .push(device.create_semaphore(&semaphore_create_info, None)?);
+                rendering_complete_semaphores
+                    .push(device.create_semaphore(&semaphore_create_info, None)?);
                 draw_commands_fences.push(device.create_fence(&fence_create_info, None)?);
             }
-            
+
             let mut base = Self {
                 entry,
                 instance,
@@ -458,10 +467,10 @@ impl VulkanBase {
                 surface_loader,
                 surface_format,
                 present_queue,
-                surface_resolution: vk::Extent2D::default(), 
+                surface_resolution: vk::Extent2D::default(),
                 swapchain_loader,
-                swapchain: vk::SwapchainKHR::null(), 
-                present_image_views: Vec::new(),     
+                swapchain: vk::SwapchainKHR::null(),
+                present_image_views: Vec::new(),
                 pool,
                 draw_command_buffers,
                 setup_command_buffer,
@@ -469,7 +478,7 @@ impl VulkanBase {
                 depth_image_view: vk::ImageView::null(),
                 depth_image_memory: vk::DeviceMemory::null(),
                 render_pass,
-                framebuffers: Vec::new(), 
+                framebuffers: Vec::new(),
                 present_complete_semaphores,
                 rendering_complete_semaphores,
                 draw_commands_fences,
@@ -482,7 +491,7 @@ impl VulkanBase {
 
             let initial_size = base.window.inner_size();
             base.rebuild_swapchain_resources(initial_size.width, initial_size.height)?;
-            
+
             Ok(base)
         }
     }
@@ -517,58 +526,82 @@ impl VulkanBase {
         }
     }
 
-    pub fn rebuild_swapchain_resources(&mut self, new_width: u32, new_height: u32) -> Result<(), Box<dyn Error>> {
+    pub fn rebuild_swapchain_resources(
+        &mut self,
+        new_width: u32,
+        new_height: u32,
+    ) -> Result<(), Box<dyn Error>> {
         self.wait_idle()?;
-        info!("Rebuilding swapchain resources for requested size: {}x{}", new_width, new_height);
+        info!(
+            "Rebuilding swapchain resources for requested size: {}x{}",
+            new_width, new_height
+        );
 
         self.destroy_swapchain_dependents();
 
-        let old_swapchain_khr = self.swapchain; 
+        let old_swapchain_khr = self.swapchain;
 
         unsafe {
-            let surface_capabilities = self.surface_loader
+            let surface_capabilities = self
+                .surface_loader
                 .get_physical_device_surface_capabilities(self.pdevice, self.surface)?;
-            
+
             self.surface_resolution = match surface_capabilities.current_extent.width {
-                u32::MAX => vk::Extent2D { width: new_width, height: new_height },
+                u32::MAX => vk::Extent2D {
+                    width: new_width,
+                    height: new_height,
+                },
                 _ => surface_capabilities.current_extent,
             };
             self.surface_resolution.width = self.surface_resolution.width.clamp(
                 surface_capabilities.min_image_extent.width.max(1), // Ensure at least 1
-                surface_capabilities.max_image_extent.width
+                surface_capabilities.max_image_extent.width,
             );
             self.surface_resolution.height = self.surface_resolution.height.clamp(
                 surface_capabilities.min_image_extent.height.max(1), // Ensure at least 1
-                surface_capabilities.max_image_extent.height
+                surface_capabilities.max_image_extent.height,
             );
 
             if self.surface_resolution.width == 0 || self.surface_resolution.height == 0 {
-                warn!("Attempting to rebuild swapchain with zero extent ({:?}). Aborting rebuild.", self.surface_resolution);
-                self.swapchain = old_swapchain_khr; 
+                warn!(
+                    "Attempting to rebuild swapchain with zero extent ({:?}). Aborting rebuild.",
+                    self.surface_resolution
+                );
+                self.swapchain = old_swapchain_khr;
                 // If we aborted, dependents are destroyed but swapchain KHR object remains.
                 // This path should ideally be prevented by App not calling with zero size.
                 // The caller (App::handle_resize) should ensure non-zero dimensions.
-                return Ok(()); 
+                return Ok(());
             }
-            info!("Actual new surface resolution: {:?}", self.surface_resolution);
+            info!(
+                "Actual new surface resolution: {:?}",
+                self.surface_resolution
+            );
 
             // Number of images for the swapchain. Try to match MAX_FRAMES_IN_FLIGHT.
             // This also dictates the number of image views and framebuffers.
-            let image_count = (self.draw_command_buffers.len() as u32)
-                .max(surface_capabilities.min_image_count);
+            let image_count =
+                (self.draw_command_buffers.len() as u32).max(surface_capabilities.min_image_count);
             let image_count = if surface_capabilities.max_image_count > 0 {
                 image_count.min(surface_capabilities.max_image_count)
             } else {
                 image_count // No max limit
             };
-            
-            let pre_transform = if surface_capabilities.supported_transforms.contains(vk::SurfaceTransformFlagsKHR::IDENTITY) {
+
+            let pre_transform = if surface_capabilities
+                .supported_transforms
+                .contains(vk::SurfaceTransformFlagsKHR::IDENTITY)
+            {
                 vk::SurfaceTransformFlagsKHR::IDENTITY
             } else {
                 surface_capabilities.current_transform
             };
-            let present_modes = self.surface_loader.get_physical_device_surface_present_modes(self.pdevice, self.surface)?;
-            let present_mode = present_modes.iter().cloned()
+            let present_modes = self
+                .surface_loader
+                .get_physical_device_surface_present_modes(self.pdevice, self.surface)?;
+            let present_mode = present_modes
+                .iter()
+                .cloned()
                 .find(|&mode| mode == vk::PresentModeKHR::MAILBOX) // Prefer Mailbox for low latency
                 .unwrap_or(vk::PresentModeKHR::FIFO); // Fallback to FIFO (guaranteed)
 
@@ -587,11 +620,17 @@ impl VulkanBase {
                 .image_array_layers(1)
                 .old_swapchain(old_swapchain_khr);
 
-            self.swapchain = self.swapchain_loader.create_swapchain(&swapchain_create_info, None)?;
-            info!("New swapchain KHR object created with {} images.", image_count);
+            self.swapchain = self
+                .swapchain_loader
+                .create_swapchain(&swapchain_create_info, None)?;
+            info!(
+                "New swapchain KHR object created with {} images.",
+                image_count
+            );
 
             if old_swapchain_khr != vk::SwapchainKHR::null() {
-                self.swapchain_loader.destroy_swapchain(old_swapchain_khr, None);
+                self.swapchain_loader
+                    .destroy_swapchain(old_swapchain_khr, None);
                 debug!("Old swapchain KHR object destroyed.");
             }
 
@@ -600,32 +639,39 @@ impl VulkanBase {
             // This should now match the new swapchain's actual image count
             self.present_image_views.clear(); // Clear old ones first (already destroyed by destroy_swapchain_dependents)
             for &image in present_images.iter() {
-                 let create_view_info = vk::ImageViewCreateInfo::default()
+                let create_view_info = vk::ImageViewCreateInfo::default()
                     .view_type(vk::ImageViewType::TYPE_2D)
                     .format(self.surface_format.format)
                     .components(vk::ComponentMapping::default()) // Default is identity
                     .subresource_range(vk::ImageSubresourceRange {
                         aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0, level_count: 1,
-                        base_array_layer: 0, layer_count: 1,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
                     })
                     .image(image);
-                self.present_image_views.push(self.device.create_image_view(&create_view_info, None)?);
+                self.present_image_views
+                    .push(self.device.create_image_view(&create_view_info, None)?);
             }
-            info!("Present image views recreated: {} views.", self.present_image_views.len());
+            info!(
+                "Present image views recreated: {} views.",
+                self.present_image_views.len()
+            );
 
             // Sync objects (semaphores, fences) count should match draw_command_buffers len (MAX_FRAMES_IN_FLIGHT)
             // They were already created with this count in `new()`. No need to recreate them here
             // unless MAX_FRAMES_IN_FLIGHT itself changed, which it doesn't.
             self.frame_index = 0;
 
-
             let depth_format = vk::Format::D16_UNORM;
             let depth_image_create_info = vk::ImageCreateInfo::default()
                 .image_type(vk::ImageType::TYPE_2D)
                 .format(depth_format)
                 .extent(self.surface_resolution.into())
-                .mip_levels(1).array_layers(1).samples(vk::SampleCountFlags::TYPE_1)
+                .mip_levels(1)
+                .array_layers(1)
+                .samples(vk::SampleCountFlags::TYPE_1)
                 .tiling(vk::ImageTiling::OPTIMAL)
                 .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
                 .sharing_mode(vk::SharingMode::EXCLUSIVE)
@@ -633,41 +679,74 @@ impl VulkanBase {
 
             self.depth_image = self.device.create_image(&depth_image_create_info, None)?;
             let depth_mem_req = self.device.get_image_memory_requirements(self.depth_image);
-            let depth_mem_idx = find_memorytype_index(&depth_mem_req, &self.device_memory_properties, vk::MemoryPropertyFlags::DEVICE_LOCAL)
-                .ok_or("Failed to find memory type for depth image")?;
-            let depth_alloc_info = vk::MemoryAllocateInfo::default().allocation_size(depth_mem_req.size).memory_type_index(depth_mem_idx);
+            let depth_mem_idx = find_memorytype_index(
+                &depth_mem_req,
+                &self.device_memory_properties,
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            )
+            .ok_or("Failed to find memory type for depth image")?;
+            let depth_alloc_info = vk::MemoryAllocateInfo::default()
+                .allocation_size(depth_mem_req.size)
+                .memory_type_index(depth_mem_idx);
             self.depth_image_memory = self.device.allocate_memory(&depth_alloc_info, None)?;
-            self.device.bind_image_memory(self.depth_image, self.depth_image_memory, 0)?;
+            self.device
+                .bind_image_memory(self.depth_image, self.depth_image_memory, 0)?;
 
             record_submit_commandbuffer(
-                &self.device, self.setup_command_buffer, self.setup_commands_reuse_fence, self.present_queue,
-                &[], &[], &[],
+                &self.device,
+                self.setup_command_buffer,
+                self.setup_commands_reuse_fence,
+                self.present_queue,
+                &[],
+                &[],
+                &[],
                 |device, cmd_buf| {
                     let barrier = vk::ImageMemoryBarrier::default()
                         .image(self.depth_image)
                         .src_access_mask(vk::AccessFlags::NONE)
-                        .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
+                        .dst_access_mask(
+                            vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ
+                                | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                        )
                         .old_layout(vk::ImageLayout::UNDEFINED)
                         .new_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
                         .subresource_range(vk::ImageSubresourceRange {
-                            aspect_mask: vk::ImageAspectFlags::DEPTH, base_mip_level: 0, level_count: 1,
-                            base_array_layer: 0, layer_count: 1,
+                            aspect_mask: vk::ImageAspectFlags::DEPTH,
+                            base_mip_level: 0,
+                            level_count: 1,
+                            base_array_layer: 0,
+                            layer_count: 1,
                         });
-                    device.cmd_pipeline_barrier(cmd_buf,
+                    device.cmd_pipeline_barrier(
+                        cmd_buf,
                         vk::PipelineStageFlags::TOP_OF_PIPE,
-                        vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
-                        vk::DependencyFlags::empty(), &[], &[], &[barrier]);
-                });
+                        vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS
+                            | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                        vk::DependencyFlags::empty(),
+                        &[],
+                        &[],
+                        &[barrier],
+                    );
+                },
+            );
             // No need to wait/reset fence here, record_submit_commandbuffer handles it.
 
             let depth_view_info = vk::ImageViewCreateInfo::default()
-                .image(self.depth_image).view_type(vk::ImageViewType::TYPE_2D).format(depth_format)
+                .image(self.depth_image)
+                .view_type(vk::ImageViewType::TYPE_2D)
+                .format(depth_format)
                 .subresource_range(vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::DEPTH, base_mip_level: 0, level_count: 1,
-                    base_array_layer: 0, layer_count: 1,
+                    aspect_mask: vk::ImageAspectFlags::DEPTH,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
                 });
             self.depth_image_view = self.device.create_image_view(&depth_view_info, None)?;
-            info!("Depth buffer recreated for extent: {:?}", self.surface_resolution);
+            info!(
+                "Depth buffer recreated for extent: {:?}",
+                self.surface_resolution
+            );
 
             // Framebuffers need to match the number of present_image_views
             self.framebuffers.clear(); // They were destroyed by destroy_swapchain_dependents
@@ -676,17 +755,20 @@ impl VulkanBase {
                 let fb_info = vk::FramebufferCreateInfo::default()
                     .render_pass(self.render_pass)
                     .attachments(&attachments)
-                    .width(self.surface_resolution.width).height(self.surface_resolution.height)
+                    .width(self.surface_resolution.width)
+                    .height(self.surface_resolution.height)
                     .layers(1);
-                self.framebuffers.push(self.device.create_framebuffer(&fb_info, None)?);
+                self.framebuffers
+                    .push(self.device.create_framebuffer(&fb_info, None)?);
             }
-            info!("Framebuffers recreated: {} framebuffers.", self.framebuffers.len());
+            info!(
+                "Framebuffers recreated: {} framebuffers.",
+                self.framebuffers.len()
+            );
             debug_assert_eq!(self.framebuffers.len(), self.present_image_views.len());
-
-        } 
+        }
         Ok(())
     }
-
 
     pub fn create_buffer(
         &self,
@@ -756,30 +838,41 @@ impl VulkanBase {
                 return Err(format!(
                     "Data size ({}) exceeds buffer size ({})",
                     data_size, buffer_resource.size
-                ).into());
+                )
+                .into());
             }
 
             if let Some(mapped_ptr) = buffer_resource.mapped_ptr {
-                ptr::copy_nonoverlapping(data.as_ptr() as *const u8, mapped_ptr as *mut u8, data_size as usize);
+                ptr::copy_nonoverlapping(
+                    data.as_ptr() as *const u8,
+                    mapped_ptr as *mut u8,
+                    data_size as usize,
+                );
 
-                let mem_requirements = self.device.get_buffer_memory_requirements(buffer_resource.buffer);
+                let mem_requirements = self
+                    .device
+                    .get_buffer_memory_requirements(buffer_resource.buffer);
                 let mem_type_index_opt = find_memorytype_index(
                     &mem_requirements,
                     &self.device_memory_properties,
-                    vk::MemoryPropertyFlags::HOST_VISIBLE, 
+                    vk::MemoryPropertyFlags::HOST_VISIBLE,
                 );
 
                 if let Some(mem_type_index) = mem_type_index_opt {
-                    let mem_type = &self.device_memory_properties.memory_types[mem_type_index as usize];
-                    if !mem_type.property_flags.contains(vk::MemoryPropertyFlags::HOST_COHERENT) {
+                    let mem_type =
+                        &self.device_memory_properties.memory_types[mem_type_index as usize];
+                    if !mem_type
+                        .property_flags
+                        .contains(vk::MemoryPropertyFlags::HOST_COHERENT)
+                    {
                         let flush_range = vk::MappedMemoryRange::default()
                             .memory(buffer_resource.memory)
                             .offset(0)
-                            .size(vk::WHOLE_SIZE); 
+                            .size(vk::WHOLE_SIZE);
                         self.device.flush_mapped_memory_ranges(&[flush_range])?;
                     }
                 } else {
-                     warn!("Could not find memory type index for a mapped buffer during update_buffer. Skipping flush check.");
+                    warn!("Could not find memory type index for a mapped buffer during update_buffer. Skipping flush check.");
                 }
             } else {
                 return Err("Buffer is not mapped (HOST_VISIBLE flag missing or map failed), cannot update directly.".into());
@@ -814,14 +907,18 @@ impl VulkanBase {
             let current_frame_sync_idx = self.frame_index % self.draw_commands_fences.len();
 
             let fence = self.draw_commands_fences[current_frame_sync_idx];
-            let present_complete_semaphore = self.present_complete_semaphores[current_frame_sync_idx];
-            let rendering_complete_semaphore = self.rendering_complete_semaphores[current_frame_sync_idx];
+            let present_complete_semaphore =
+                self.present_complete_semaphores[current_frame_sync_idx];
+            let rendering_complete_semaphore =
+                self.rendering_complete_semaphores[current_frame_sync_idx];
             let current_command_buffer = self.draw_command_buffers[current_frame_sync_idx];
-
 
             self.device.wait_for_fences(&[fence], true, u64::MAX)?;
             self.device.reset_fences(&[fence])?;
-            self.device.reset_command_buffer(current_command_buffer, vk::CommandBufferResetFlags::empty())?;
+            self.device.reset_command_buffer(
+                current_command_buffer,
+                vk::CommandBufferResetFlags::empty(),
+            )?;
 
             let acquire_result = self.swapchain_loader.acquire_next_image(
                 self.swapchain,
@@ -833,9 +930,9 @@ impl VulkanBase {
             let (present_index, suboptimal_acquire) = match acquire_result {
                 Ok((index, suboptimal)) => (index, suboptimal),
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                    return Ok(true); 
+                    return Ok(true);
                 }
-                Err(e) => return Err(e), 
+                Err(e) => return Err(e),
             };
 
             // Check if framebuffer for present_index is valid
@@ -844,22 +941,38 @@ impl VulkanBase {
                 return Err(vk::Result::ERROR_OUT_OF_DATE_KHR); // Signal for rebuild
             }
 
-
             let cmd_begin_info = vk::CommandBufferBeginInfo::default()
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-            self.device.begin_command_buffer(current_command_buffer, &cmd_begin_info)?;
+            self.device
+                .begin_command_buffer(current_command_buffer, &cmd_begin_info)?;
 
             let clear_values = [
-                vk::ClearValue { color: vk::ClearColorValue { float32: [0.1, 0.1, 0.1, 1.0] } },
-                vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 } },
+                vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: [0.1, 0.1, 0.1, 1.0],
+                    },
+                },
+                vk::ClearValue {
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: 1.0,
+                        stencil: 0,
+                    },
+                },
             ];
             let render_pass_begin_info = vk::RenderPassBeginInfo::default()
                 .render_pass(self.render_pass)
                 .framebuffer(self.framebuffers[present_index as usize])
-                .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent: self.surface_resolution })
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D::default(),
+                    extent: self.surface_resolution,
+                })
                 .clear_values(&clear_values);
 
-            self.device.cmd_begin_render_pass(current_command_buffer, &render_pass_begin_info, vk::SubpassContents::INLINE);
+            self.device.cmd_begin_render_pass(
+                current_command_buffer,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
             draw_commands_fn(&self.device, current_command_buffer);
             self.device.cmd_end_render_pass(current_command_buffer);
             self.device.end_command_buffer(current_command_buffer)?;
@@ -875,7 +988,8 @@ impl VulkanBase {
                 .command_buffers(&command_buffers_submit)
                 .signal_semaphores(&signal_semaphores);
 
-            self.device.queue_submit(self.present_queue, &[submit_info], fence)?;
+            self.device
+                .queue_submit(self.present_queue, &[submit_info], fence)?;
 
             let wait_semaphores_present = [rendering_complete_semaphore];
             let swapchains_present = [self.swapchain];
@@ -886,8 +1000,10 @@ impl VulkanBase {
                 .swapchains(&swapchains_present)
                 .image_indices(&image_indices_present);
 
-            let present_result = self.swapchain_loader.queue_present(self.present_queue, &present_info);
-            
+            let present_result = self
+                .swapchain_loader
+                .queue_present(self.present_queue, &present_info);
+
             self.frame_index = (self.frame_index + 1) % self.draw_command_buffers.len(); // Cycle through available command buffers / sync objects
 
             match present_result {
@@ -904,37 +1020,45 @@ impl Drop for VulkanBase {
         unsafe {
             // No need to check self.device.handle(), ash::Device's own Drop handles it.
             // device_wait_idle is crucial before destroying anything.
-             //if self.device.fp_v1_0().device_wait_idle != std::ptr::null_mut() { // Check if function pointer is valid
-             //    let _ = self.device.device_wait_idle(); // Call it if device likely initialized
+            //if self.device.fp_v1_0().device_wait_idle != std::ptr::null_mut() { // Check if function pointer is valid
+            //    let _ = self.device.device_wait_idle(); // Call it if device likely initialized
             // }
 
             let _ = self.device.device_wait_idle();
 
             for fence in self.draw_commands_fences.drain(..) {
-                if fence != vk::Fence::null() { self.device.destroy_fence(fence, None); }
+                if fence != vk::Fence::null() {
+                    self.device.destroy_fence(fence, None);
+                }
             }
             if self.setup_commands_reuse_fence != vk::Fence::null() {
-                self.device.destroy_fence(self.setup_commands_reuse_fence, None);
+                self.device
+                    .destroy_fence(self.setup_commands_reuse_fence, None);
             }
             for semaphore in self.present_complete_semaphores.drain(..) {
-                if semaphore != vk::Semaphore::null() { self.device.destroy_semaphore(semaphore, None); }
+                if semaphore != vk::Semaphore::null() {
+                    self.device.destroy_semaphore(semaphore, None);
+                }
             }
             for semaphore in self.rendering_complete_semaphores.drain(..) {
-                if semaphore != vk::Semaphore::null() { self.device.destroy_semaphore(semaphore, None); }
+                if semaphore != vk::Semaphore::null() {
+                    self.device.destroy_semaphore(semaphore, None);
+                }
             }
-            
-            self.destroy_swapchain_dependents(); 
+
+            self.destroy_swapchain_dependents();
 
             if self.swapchain != vk::SwapchainKHR::null() {
-                self.swapchain_loader.destroy_swapchain(self.swapchain, None);
+                self.swapchain_loader
+                    .destroy_swapchain(self.swapchain, None);
             }
             if self.render_pass != vk::RenderPass::null() {
                 self.device.destroy_render_pass(self.render_pass, None);
             }
             if self.pool != vk::CommandPool::null() {
-                self.device.destroy_command_pool(self.pool, None); 
+                self.device.destroy_command_pool(self.pool, None);
             }
-            
+
             // self.device is dropped automatically by ash::Device's Drop impl,
             // which calls vkDestroyDevice. We don't need to call it explicitly here
             // if self.device is a full ash::Device struct.
@@ -948,7 +1072,8 @@ impl Drop for VulkanBase {
             }
             if let Some(callback) = self.debug_call_back {
                 if callback != vk::DebugUtilsMessengerEXT::null() {
-                    self.debug_utils_loader.destroy_debug_utils_messenger(callback, None);
+                    self.debug_utils_loader
+                        .destroy_debug_utils_messenger(callback, None);
                 }
             }
             // self.instance is dropped automatically by ash::Instance's Drop impl.

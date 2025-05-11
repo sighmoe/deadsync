@@ -5,7 +5,7 @@ use crate::graphics::renderer::{DescriptorSetId, Renderer}; // Need Renderer to 
 use crate::graphics::texture::{load_texture, TextureResource};
 use crate::graphics::vulkan_base::VulkanBase;
 use ash::Device;
-use log::{info};
+use log::info;
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
@@ -21,8 +21,8 @@ pub enum TextureId {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FontId {
     Wendy, // Wendy (MSDF)
-    Miso, // Miso (MSDF)
-    Cjk,  // For the comprehensive Noto Sans CJK font
+    Miso,  // Miso (MSDF)
+    Cjk,   // For the comprehensive Noto Sans CJK font
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -79,7 +79,11 @@ impl AssetManager {
         )?;
         // The renderer needs to know which descriptor set to use for this font's texture.
         // Assuming FontWendy is still the correct ID.
-        renderer.update_texture_descriptor(&base.device, DescriptorSetId::FontWendy, &wendy_loaded_data.texture);
+        renderer.update_texture_descriptor(
+            &base.device,
+            DescriptorSetId::FontWendy,
+            &wendy_loaded_data.texture,
+        );
         let wendy_font = Font {
             metrics: wendy_loaded_data.metrics,
             glyphs: wendy_loaded_data.glyphs,
@@ -96,7 +100,11 @@ impl AssetManager {
             Path::new(config::MISO_MSDF_JSON_PATH), // Miso MSDF JSON
             Path::new(config::MISO_MSDF_TEXTURE_PATH), // Miso MSDF Texture
         )?;
-        renderer.update_texture_descriptor(&base.device, DescriptorSetId::FontMiso, &miso_loaded_data.texture);
+        renderer.update_texture_descriptor(
+            &base.device,
+            DescriptorSetId::FontMiso,
+            &miso_loaded_data.texture,
+        );
         let miso_font = Font {
             metrics: miso_loaded_data.metrics,
             glyphs: miso_loaded_data.glyphs,

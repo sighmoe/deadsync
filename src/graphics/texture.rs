@@ -3,9 +3,9 @@ use crate::graphics::vulkan_base::{
 };
 use ash::{vk, Device};
 use image::RgbaImage; // Keep this if load_texture still needs it elsewhere
+use log;
 use std::error::Error;
-use std::path::Path;
-use log; // Make sure log is imported
+use std::path::Path; // Make sure log is imported
 
 // TextureResource struct definition remains the same
 pub struct TextureResource {
@@ -25,11 +25,11 @@ impl TextureResource {
                 device.destroy_sampler(self.sampler, None);
                 self.sampler = vk::Sampler::null();
             }
-             if self.view != vk::ImageView::null() {
+            if self.view != vk::ImageView::null() {
                 device.destroy_image_view(self.view, None);
                 self.view = vk::ImageView::null();
             }
-             if self.image != vk::Image::null() {
+            if self.image != vk::Image::null() {
                 device.destroy_image(self.image, None);
                 self.image = vk::Image::null();
             }
@@ -41,7 +41,6 @@ impl TextureResource {
     }
 }
 
-
 // NEW FUNCTION: Create a solid color texture (e.g., 1x1 white)
 pub fn create_solid_color_texture(
     base: &VulkanBase,
@@ -49,7 +48,12 @@ pub fn create_solid_color_texture(
 ) -> Result<TextureResource, Box<dyn Error>> {
     let width = 1;
     let height = 1;
-    log::info!("Creating {}x{} solid color texture: {:?}", width, height, color);
+    log::info!(
+        "Creating {}x{} solid color texture: {:?}",
+        width,
+        height,
+        color
+    );
     let image_data = color; // Use the provided color directly
     let image_data_size = std::mem::size_of_val(&image_data) as vk::DeviceSize; // 4 bytes
 
@@ -68,7 +72,11 @@ pub fn create_solid_color_texture(
 
     // --- 3. Create Vulkan Image ---
     let format = vk::Format::R8G8B8A8_UNORM;
-    let image_extent = vk::Extent3D { width, height, depth: 1 };
+    let image_extent = vk::Extent3D {
+        width,
+        height,
+        depth: 1,
+    };
 
     let image_create_info = vk::ImageCreateInfo::default()
         .image_type(vk::ImageType::TYPE_2D)
@@ -115,7 +123,9 @@ pub fn create_solid_color_texture(
         base.setup_command_buffer,
         base.setup_commands_reuse_fence,
         base.present_queue,
-        &[], &[], &[],
+        &[],
+        &[],
+        &[],
         |device, command_buffer| {
             // Transition UNDEFINED -> TRANSFER_DST_OPTIMAL
             let barrier_to_transfer = vk::ImageMemoryBarrier::default()
@@ -128,27 +138,44 @@ pub fn create_solid_color_texture(
                 .image(image)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0, level_count: 1,
-                    base_array_layer: 0, layer_count: 1,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
                 });
-            unsafe { device.cmd_pipeline_barrier(command_buffer,
-                vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER,
-                vk::DependencyFlags::empty(), &[], &[], &[barrier_to_transfer]);
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier_to_transfer],
+                );
             }
 
             // Copy Buffer to Image
             let buffer_image_copy = vk::BufferImageCopy::default()
                 .buffer_offset(0)
-                .buffer_row_length(0).buffer_image_height(0) // Tightly packed
+                .buffer_row_length(0)
+                .buffer_image_height(0) // Tightly packed
                 .image_subresource(vk::ImageSubresourceLayers {
-                    aspect_mask: vk::ImageAspectFlags::COLOR, mip_level: 0,
-                    base_array_layer: 0, layer_count: 1,
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: 0,
+                    base_array_layer: 0,
+                    layer_count: 1,
                 })
                 .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
                 .image_extent(image_extent);
-            unsafe { device.cmd_copy_buffer_to_image(command_buffer,
-                staging_buffer.buffer, image, vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &[buffer_image_copy]);
+            unsafe {
+                device.cmd_copy_buffer_to_image(
+                    command_buffer,
+                    staging_buffer.buffer,
+                    image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[buffer_image_copy],
+                );
             }
 
             // Transition TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
@@ -162,12 +189,21 @@ pub fn create_solid_color_texture(
                 .image(image)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0, level_count: 1,
-                    base_array_layer: 0, layer_count: 1,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
                 });
-            unsafe { device.cmd_pipeline_barrier(command_buffer,
-                vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::FRAGMENT_SHADER,
-                vk::DependencyFlags::empty(), &[], &[], &[barrier_to_shader_read]);
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier_to_shader_read],
+                );
             }
         },
     );
@@ -176,9 +212,10 @@ pub fn create_solid_color_texture(
     // Wait for the copy operation to complete (important!)
     unsafe {
         log::debug!("Waiting for solid color texture copy fence...");
-        base.device.wait_for_fences(&[base.setup_commands_reuse_fence], true, u64::MAX)?;
+        base.device
+            .wait_for_fences(&[base.setup_commands_reuse_fence], true, u64::MAX)?;
         log::debug!("Fence signaled.");
-         // Don't reset the fence here, record_submit_commandbuffer handles it
+        // Don't reset the fence here, record_submit_commandbuffer handles it
     }
 
     // --- 6. Clean up Staging Buffer ---
@@ -195,8 +232,10 @@ pub fn create_solid_color_texture(
         .components(vk::ComponentMapping::default()) // Identity mapping
         .subresource_range(vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0, level_count: 1,
-            base_array_layer: 0, layer_count: 1,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
         });
     let view = unsafe { base.device.create_image_view(&image_view_info, None)? };
     log::debug!("Image view created");
@@ -219,14 +258,20 @@ pub fn create_solid_color_texture(
     log::debug!("Sampler created");
 
     log::info!("Solid color texture created successfully.");
-    Ok(TextureResource { image, memory, view, sampler, width, height })
+    Ok(TextureResource {
+        image,
+        memory,
+        view,
+        sampler,
+        width,
+        height,
+    })
 }
-
 
 // load_texture function remains here (make sure RgbaImage import is still valid)
 pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, Box<dyn Error>> {
     // ... (keep existing load_texture implementation) ...
-     // --- 1. Load Image with `image` crate ---
+    // --- 1. Load Image with `image` crate ---
     log::info!("Starting to load texture from: {:?}", path);
     let img = image::open(path).map_err(|e| format!("Failed to open image {:?}: {}", path, e))?;
     log::info!("Image file opened successfully: {:?}", path);

@@ -37,7 +37,7 @@ pub const W2_WINDOW_MS: f32 = 43.0;
 pub const W3_WINDOW_MS: f32 = 102.0;
 pub const W4_WINDOW_MS: f32 = 135.0;
 pub const MAX_HIT_WINDOW_MS: f32 = 180.0; // W4 outer edge
-pub const MISS_WINDOW_MS: f32 = 200.0;    // Time after target beat until considered a miss
+pub const MISS_WINDOW_MS: f32 = 200.0; // Time after target beat until considered a miss
 
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5]; // Default target tint
@@ -86,11 +86,11 @@ pub const MAX_DELTA_TIME: f32 = 0.1; // Clamp dt to avoid large jumps
     "#FF7D00",
 },
 
-		ITG = {
-			color("#21CCE8"),	-- blue
-			color("#e29c18"),	-- gold
-			color("#66c955"),	-- green
-			color("#b45cff"),	-- purple (greatly lightened)
-			color("#c9855e"),	-- peach?
-			color("#ff3030")	-- red (slightly lightened)
-		}, */
+        ITG = {
+            color("#21CCE8"),	-- blue
+            color("#e29c18"),	-- gold
+            color("#66c955"),	-- green
+            color("#b45cff"),	-- purple (greatly lightened)
+            color("#c9855e"),	-- peach?
+            color("#ff3030")	-- red (slightly lightened)
+        }, */
