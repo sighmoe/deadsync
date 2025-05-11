@@ -64,6 +64,7 @@ pub fn draw(
         title_baseline_y,
         config::MENU_NORMAL_COLOR,
         title_effective_scale,
+        None, // No custom spacing for this
     );
 
     // --- Draw Placeholder Text ---
@@ -88,6 +89,7 @@ pub fn draw(
         placeholder_baseline_y,
         config::MENU_NORMAL_COLOR,
         placeholder_effective_scale,
+        None, // No custom spacing for this
     );
 
     // --- Draw Help Text ---
@@ -111,5 +113,6 @@ pub fn draw(
         help_baseline_y,
         config::MENU_NORMAL_COLOR,
         help_effective_scale,
+        None, // No custom spacing for this
     );
 }

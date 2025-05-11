@@ -2,8 +2,8 @@ use std::time::Duration;
 
 // Window
 pub const WINDOW_TITLE: &str = "DeadSync";
-pub const WINDOW_WIDTH: u32 = 1024;
-pub const WINDOW_HEIGHT: u32 = 768;
+pub const WINDOW_WIDTH: u32 = 1280;
+pub const WINDOW_HEIGHT: u32 = 720;
 
 // Asset Paths
 // MSDF Fonts - NEW

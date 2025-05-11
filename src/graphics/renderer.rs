@@ -449,34 +449,39 @@ impl Renderer {
         font: &Font,
         text: &str,
         mut pen_x: f32,
-        pen_y: f32,
+        pen_y: f32, // This is the baseline Y
         color: [f32; 4],
         scale: f32,
+        // NEW: Optional letter spacing adjustment factor
+        // 1.0 = normal spacing from font
+        // < 1.0 = tighter spacing (e.g., 0.95 for 5% tighter)
+        // > 1.0 = looser spacing
+        letter_spacing_factor: Option<f32>,
     ) {
         let start_pen_x = pen_x;
+        // Use provided factor or default to 1.0 (normal spacing)
+        let actual_letter_spacing_factor = letter_spacing_factor.unwrap_or(1.0);
 
         for char_code in text.chars() {
             if char_code == '\n' {
                 pen_x = start_pen_x;
-                // The caller of draw_text should handle advancing pen_y for new lines.
-                // This function draws a single conceptual "line" of text at a given pen_y baseline.
-                // For simplicity, we'll just reset pen_x here.
-                // If true multiline rendering within one call is needed, pen_y would also be adjusted.
                 debug!("Newline in draw_text. Resetting pen_x. Caller handles pen_y advance.");
                 continue;
             }
 
+            let advance_amount;
             if char_code == ' ' {
-                pen_x += font.space_width * scale;
+                // Apply spacing factor to space width as well, if desired
+                advance_amount = font.space_width * scale * actual_letter_spacing_factor;
+                pen_x += advance_amount;
                 continue;
             }
 
             if let Some(glyph_info) = font.get_glyph(char_code) {
                 let quad_width = (glyph_info.plane_right - glyph_info.plane_left) * scale;
-                let quad_height = (glyph_info.plane_top - glyph_info.plane_bottom) * scale; // plane_top is usually > plane_bottom
+                let quad_height = (glyph_info.plane_top - glyph_info.plane_bottom) * scale;
 
                 if char_code == 'A' {
-                    // Log only for 'A' to reduce spam
                     debug!("DRAW_TEXT 'A': scale: {:.2}", scale);
                     debug!("  GlyphInfo: plane_left={:.2}, plane_bottom={:.2}, plane_right={:.2}, plane_top={:.2}, advance={:.2}",
                         glyph_info.plane_left, glyph_info.plane_bottom, glyph_info.plane_right, glyph_info.plane_top, glyph_info.advance);
@@ -491,38 +496,16 @@ impl Renderer {
                 }
 
                 if quad_width <= 0.0 || quad_height <= 0.0 {
-                    pen_x += glyph_info.advance * scale;
+                    // Still advance even if not drawing (e.g., for zero-width glyphs with advance)
+                    advance_amount = glyph_info.advance * scale * actual_letter_spacing_factor;
+                    pen_x += advance_amount;
                     continue;
                 }
 
-                // Quad origin (bottom-left of the glyph's visual box, relative to pen_x, pen_y baseline)
-                // For Y-down projection:
-                // pen_y is the baseline.
-                // plane_bottom is often negative (below baseline). plane_top is positive (above baseline).
-                // So, visual top of quad is at pen_y + plane_top*scale
-                // Visual bottom of quad is at pen_y + plane_bottom*scale
-                // (If plane_bottom is -2, and pen_y is 100, then visual bottom is at 100 - 2*scale)
-
-                // We draw quads from their center.
-                // Top-left of the glyph quad in screen space (Y-down):
                 let quad_visual_left_x = pen_x + (glyph_info.plane_left * scale);
-                // With Y-DOWN projection (0,0 is top-left screen):
-                // pen_y is the baseline.
-                // glyph_info.plane_top is distance *above* baseline (positive).
-                // So, visual top of glyph quad is at pen_y - (glyph_info.plane_top * scale)
                 let quad_actual_top_y = pen_y - (glyph_info.plane_top * scale);
-
-                // Center of the quad for translation
                 let quad_center_x = quad_visual_left_x + quad_width / 2.0;
-                // For Y-down: baseline_y is where the "pen" is.
-                // plane_top is distance *above* baseline. plane_bottom is distance *below* baseline (often negative).
-                // So, the quad's y center relative to baseline is (plane_top + plane_bottom) / 2.0
-                // Screen Y for center: pen_y + ((glyph_info.plane_top + glyph_info.plane_bottom) / 2.0) * scale
-                // No, this is simpler if we think about the quad's top-left corner.
-                // Quad top-left X: pen_x + (glyph_info.plane_left * scale)
-                // Quad top-left Y (visual top): pen_y - (glyph_info.plane_top * scale) (since plane_top is ascent from baseline)
-                //let quad_actual_top_y = pen_y - (glyph_info.plane_top * scale);
-                let quad_center_y = quad_actual_top_y + quad_height / 2.0; // Center of the quad in screen Y-down
+                let quad_center_y = quad_actual_top_y + quad_height / 2.0;
 
                 if char_code == 'A' {
                     debug!("  Pen_x={:.2}, Pen_y (baseline)={:.2}", pen_x, pen_y);
@@ -555,7 +538,6 @@ impl Renderer {
                 let uv_scale_vals = [glyph_info.u1 - glyph_info.u0, glyph_info.v1 - glyph_info.v0];
 
                 if char_code == 'A' || text.starts_with("Scaled Text") {
-                    // Log only for first char or specific text to reduce spam
                     debug!(
                         "DRAW_TEXT (char: {}): px_range for push_data: {:.2}",
                         char_code, font.metrics.msdf_pixel_range
@@ -599,13 +581,17 @@ impl Renderer {
                     device.cmd_draw_indexed(cmd_buf, self.quad_index_count, 1, 0, 0, 0);
                 }
 
-                pen_x += glyph_info.advance * scale;
+                advance_amount = glyph_info.advance * scale * actual_letter_spacing_factor; // Apply factor
+                pen_x += advance_amount;
+
             } else {
                 warn!(
                     "Glyph for '{}' not found in MSDF font. Advancing by space width.",
                     char_code
                 );
-                pen_x += font.space_width * scale;
+                // Apply spacing factor to space width if fallback used
+                advance_amount = font.space_width * scale * actual_letter_spacing_factor;
+                pen_x += advance_amount;
             }
         }
     }

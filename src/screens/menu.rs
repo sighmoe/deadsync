@@ -230,6 +230,7 @@ pub fn draw(
             actual_baseline_y_for_draw_text,
             current_color,
             current_effective_scale,
+            None, // No custom spacing for this
         );
     }
 }
