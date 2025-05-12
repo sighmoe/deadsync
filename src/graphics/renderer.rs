@@ -19,6 +19,7 @@ pub enum DescriptorSetId {
     Dancer,
     Gameplay,
     SolidColor,
+    FallbackBanner,
 }
 
 pub struct Renderer {
@@ -107,7 +108,7 @@ impl Renderer {
                 .create_descriptor_set_layout(&dsl_create_info, None)?
         };
 
-        const MAX_SETS: u32 = 7;
+        const MAX_SETS: u32 = 8;
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
@@ -140,6 +141,7 @@ impl Renderer {
         descriptor_sets.insert(DescriptorSetId::SolidColor, allocated_sets[4]);
         descriptor_sets.insert(DescriptorSetId::FontMiso, allocated_sets[5]);
         descriptor_sets.insert(DescriptorSetId::FontCjk, allocated_sets[6]);
+        descriptor_sets.insert(DescriptorSetId::FallbackBanner, allocated_sets[7]); // NEW
 
         let push_constant_ranges = [vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,

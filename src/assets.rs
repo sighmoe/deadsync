@@ -16,6 +16,7 @@ pub enum TextureId {
     Logo,
     Dancer,
     Arrows,
+    FallbackBanner,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -66,7 +67,11 @@ impl AssetManager {
         let arrow_texture = load_texture(base, Path::new(config::ARROW_TEXTURE_PATH))?;
         renderer.update_texture_descriptor(&base.device, DescriptorSetId::Gameplay, &arrow_texture);
         self.textures.insert(TextureId::Arrows, arrow_texture);
-        info!("Non-font textures loaded and descriptor sets updated.");
+
+        let fallback_banner_texture = load_texture(base, Path::new("assets/graphics/fallback_banner.png"))?;
+        renderer.update_texture_descriptor(&base.device, DescriptorSetId::FallbackBanner, &fallback_banner_texture);
+        self.textures.insert(TextureId::FallbackBanner, fallback_banner_texture);
+        info!("Fallback banner texture loaded and descriptor set updated.");
 
         // --- Load MSDF Fonts ---
         info!("Loading MSDF fonts...");
