@@ -12,6 +12,7 @@ use ash::vk;
 use log::{error, info, trace, warn};
 use std::error::Error;
 use std::path::Path;
+use std::sync::Arc; // ADD THIS LINE
 use std::time::{Duration, Instant};
 use winit::{
     dpi::PhysicalSize,
@@ -369,36 +370,53 @@ impl App {
                  info!("Initializing Gameplay State...");
                  let selected_song_info = self.select_music_state.songs.get(self.select_music_state.selected_index);
 
-                 if selected_song_info.is_none() || selected_song_info.unwrap().audio_path.is_none() {
-                      error!("Cannot start gameplay: No song selected or audio path missing for selected song. Returning to SelectMusic.");
-                      self.next_app_state = Some(AppState::SelectMusic);
-                      return;
-                  }
-                 let song_info = selected_song_info.unwrap();
-                 let audio_path = song_info.audio_path.as_ref().unwrap();
+                if selected_song_info.is_none() || selected_song_info.unwrap().audio_path.is_none() {
+                    error!("Cannot start gameplay: No song selected or audio path missing for selected song. Returning to SelectMusic.");
+                    self.next_app_state = Some(AppState::SelectMusic);
+                    return;
+                }
+                let song_info_ref = selected_song_info.unwrap(); // song_info_ref is &SongInfo
+                let audio_path = song_info_ref.audio_path.as_ref().unwrap();
 
-                 info!("Starting gameplay with song: {}", song_info.title);
-                 info!("Audio path: {:?}", audio_path);
+                info!("Starting gameplay with song: {}", song_info_ref.title);
+                info!("Audio path: {:?}", audio_path);
 
-                 let window_size_f32 = (
-                     self.vulkan_base.surface_resolution.width as f32,
-                     self.vulkan_base.surface_resolution.height as f32,
-                 );
+                let window_size_f32 = (
+                    self.vulkan_base.surface_resolution.width as f32,
+                    self.vulkan_base.surface_resolution.height as f32,
+                );
 
-                 match self.audio_manager.play_music(audio_path, 1.0) {
-                     Ok(_) => {
-                         let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
-                         self.game_state = Some(gameplay::initialize_game_state(
-                             window_size_f32.0, window_size_f32.1, start_time,
-                         ));
-                         info!("Gameplay state initialized and music started.");
-                     }
-                     Err(e) => {
-                         error!("Failed to start gameplay music: {}. Returning to SelectMusic.", e);
-                          self.next_app_state = Some(AppState::SelectMusic);
-                         return;
-                     }
-                 }
+                match self.audio_manager.play_music(audio_path, 1.0) {
+                    Ok(_) => {
+                        let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
+                        
+                        let current_song_arc = Arc::new(song_info_ref.clone()); // Clone the SongInfo data into an Arc
+
+                        // Determine a valid chart index. For now, use the first available processed chart.
+                        // You'll need a proper chart selection mechanism later.
+                        let selected_chart_idx = current_song_arc.charts.iter().position(|c| 
+                            c.processed_data.is_some() && 
+                            !c.processed_data.as_ref().unwrap().measures.is_empty()
+                        ).unwrap_or_else(|| {
+                            warn!("No processable charts found for song '{}', defaulting to chart index 0. Gameplay might be empty.", current_song_arc.title);
+                            0 
+                        });
+
+                        self.game_state = Some(gameplay::initialize_game_state(
+                            window_size_f32.0, 
+                            window_size_f32.1, 
+                            start_time,
+                            current_song_arc,    // Pass Arc<SongInfo>
+                            selected_chart_idx,  // Pass selected chart index
+                        ));
+                        info!("Gameplay state initialized and music started.");
+                    }
+                    Err(e) => {
+                        error!("Failed to start gameplay music: {}. Returning to SelectMusic.", e);
+                        self.next_app_state = Some(AppState::SelectMusic);
+                        return;
+                    }
+                }
             }
             AppState::Exiting => {}
         }
