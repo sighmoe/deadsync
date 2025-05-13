@@ -3,6 +3,7 @@ use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::Renderer;
 use crate::graphics::vulkan_base::VulkanBase;
+use crate::parsing::simfile::{scan_packs, SongInfo};
 use crate::screens::{gameplay, menu, options, select_music};
 use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState};
 use crate::utils::fps::FPSCounter;
@@ -20,16 +21,17 @@ use winit::{
     window::WindowBuilder,
 };
 
-const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0); // Increased debounce further
+const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0);
 
 pub struct App {
     vulkan_base: VulkanBase,
     renderer: Renderer,
     audio_manager: AudioManager,
     asset_manager: AssetManager,
+    song_library: Vec<SongInfo>, // <-- Add field to store parsed songs
     current_app_state: AppState,
     menu_state: MenuState,
-    select_music_state: SelectMusicState,
+    select_music_state: SelectMusicState, // Keep the state struct
     options_state: OptionsState,
     game_state: Option<GameState>,
     fps_counter: FPSCounter,
@@ -37,8 +39,6 @@ pub struct App {
     rng: rand::rngs::ThreadRng,
     next_app_state: Option<AppState>,
     pending_resize: Option<(PhysicalSize<u32>, Instant)>,
-    // Flag to indicate if the last render attempt resulted in an OOD/Suboptimal error
-    // This helps prevent trying to render again immediately if we know the swapchain is bad.
     swapchain_is_known_bad: bool,
 }
 
@@ -46,6 +46,7 @@ impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self, Box<dyn Error>> {
         info!("Creating Application...");
 
+        // --- Window and Vulkan Init --- (Same as before)
         let window = WindowBuilder::new()
             .with_title(config::WINDOW_TITLE)
             .with_inner_size(winit::dpi::LogicalSize::new(
@@ -67,13 +68,23 @@ impl App {
         )?;
         info!("Renderer Initialized.");
 
+        // --- Audio Manager --- (Same as before)
         let mut audio_manager = AudioManager::new()?;
         info!("Audio Manager Initialized.");
 
+        // --- Asset Manager --- (Same as before)
         let mut asset_manager = AssetManager::new();
         asset_manager.load_all(&vulkan_base, &renderer, &mut audio_manager)?;
         info!("Asset Manager Initialized and Assets Loaded.");
 
+        // --- Song Parsing ---
+        info!("Scanning for songs...");
+        // Scan all packs within the "songs" directory relative to executable
+        let song_library = scan_packs(Path::new("songs"));
+        info!("Found {} songs.", song_library.len());
+        // You might want to add more error checking/reporting here
+
+        // --- GPU Idle --- (Same as before)
         vulkan_base
             .wait_idle()
             .map_err(|e| format!("Error waiting for GPU idle after setup: {}", e))?;
@@ -84,8 +95,10 @@ impl App {
             renderer,
             audio_manager,
             asset_manager,
+            song_library, // <-- Store the parsed songs
             current_app_state: AppState::Menu,
             menu_state: MenuState::default(),
+            // Initialize state struct, but it will be populated on transition
             select_music_state: SelectMusicState::default(),
             options_state: OptionsState::default(),
             game_state: None,
@@ -94,7 +107,7 @@ impl App {
             rng: rand::rng(),
             next_app_state: None,
             pending_resize: None,
-            swapchain_is_known_bad: false, // Initially, assume swapchain is good
+            swapchain_is_known_bad: false,
         })
     }
 
@@ -241,36 +254,64 @@ impl App {
     }
 
     fn handle_keyboard_input(&mut self, key_event: KeyEvent) {
-        // ... (no changes) ...
         trace!("Keyboard Input: {:?}", key_event);
-        let requested_state = match self.current_app_state {
+        let mut requested_state: Option<AppState> = None;
+        let mut selection_changed_in_music = false; // Track specifically for music select
+
+        match self.current_app_state {
             AppState::Menu => {
-                menu::handle_input(&key_event, &mut self.menu_state, &self.audio_manager)
+                requested_state =
+                    menu::handle_input(&key_event, &mut self.menu_state, &self.audio_manager);
             }
-            AppState::SelectMusic => select_music::handle_input(
-                &key_event,
-                &mut self.select_music_state,
-                &self.audio_manager,
-            ),
-            AppState::Options => options::handle_input(&key_event, &mut self.options_state),
+            AppState::SelectMusic => {
+                // Get result tuple: (next_app_state, selection_changed)
+                let (next_state, selection_changed) = select_music::handle_input(
+                    &key_event,
+                    &mut self.select_music_state,
+                    &self.audio_manager,
+                    // Removed VulkanBase/Renderer args
+                );
+                requested_state = next_state;
+                selection_changed_in_music = selection_changed; // Store the flag
+            }
+            AppState::Options => {
+                requested_state = options::handle_input(&key_event, &mut self.options_state);
+            }
             AppState::Gameplay => {
                 if let Some(ref mut gs) = self.game_state {
-                    gameplay::handle_input(&key_event, gs)
+                    requested_state = gameplay::handle_input(&key_event, gs);
                 } else {
                     warn!("Received input in Gameplay state, but game_state is None.");
-                    None
+                    requested_state = None;
                 }
             }
-            AppState::Exiting => None,
-        };
+            AppState::Exiting => {
+                 requested_state = None;
+            }
+        }
 
+        // Handle state change request *after* processing input
         if requested_state.is_some() {
             self.next_app_state = requested_state;
+        }
+
+        // Handle banner loading *after* processing input and potential index change
+        if self.current_app_state == AppState::SelectMusic && selection_changed_in_music {
+            let current_index = self.select_music_state.selected_index;
+             if let Some(selected_song) = self.select_music_state.songs.get(current_index) {
+                  self.asset_manager.load_song_banner(
+                     &self.vulkan_base,
+                     &self.renderer,
+                     selected_song,
+                  );
+             } else {
+                 warn!("Selection changed in Music Select, but index {} is out of bounds ({} songs).", current_index, self.select_music_state.songs.len());
+                 // Optionally load fallback banner here if something went wrong
+             }
         }
     }
 
     fn transition_state(&mut self, new_state: AppState) {
-        // ... (no changes) ...
         if new_state == self.current_app_state {
             return;
         }
@@ -284,6 +325,8 @@ impl App {
                 self.game_state = None;
                 info!("Gameplay state cleared.");
             }
+            // Clear SelectMusic state if transitioning *away* from it? Optional.
+            // AppState::SelectMusic => { self.select_music_state = SelectMusicState::default(); }
             _ => {}
         }
 
@@ -292,43 +335,75 @@ impl App {
                 self.menu_state = MenuState::default();
             }
             AppState::SelectMusic => {
-                self.select_music_state = SelectMusicState::default();
+                self.select_music_state = SelectMusicState {
+                    songs: self.song_library.clone(),
+                    selected_index: 0,
+                };
+                 info!("Populated SelectMusic state with {} songs.", self.select_music_state.songs.len());
+
+                 // --- Load banner for the initially selected song ---
+                 if let Some(initial_song) = self.select_music_state.songs.first() {
+                      self.asset_manager.load_song_banner(
+                         &self.vulkan_base,
+                         &self.renderer,
+                         initial_song,
+                      );
+                 } else {
+                     // If no songs, ensure fallback is loaded (should already be by load_all)
+                     info!("No songs loaded, ensuring fallback banner is active for DynamicBanner set.");
+                     // We might re-update the descriptor just to be safe, though load_all should handle it.
+                     if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                          self.renderer.update_texture_descriptor(
+                              &self.vulkan_base.device,
+                              crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                              fallback_res,
+                          );
+                     }
+                 }
             }
             AppState::Options => {
                 self.options_state = OptionsState::default();
             }
             AppState::Gameplay => {
-                info!("Initializing Gameplay State...");
-                let window_size_f32 = (
-                    self.vulkan_base.surface_resolution.width as f32,
-                    self.vulkan_base.surface_resolution.height as f32,
-                );
-                let music_path =
-                    Path::new(config::SONG_FOLDER_PATH).join(config::SONG_AUDIO_FILENAME);
-                match self.audio_manager.play_music(&music_path, 1.0) {
-                    Ok(_) => {
-                        let start_time = Instant::now()
-                            + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
-                        self.game_state = Some(gameplay::initialize_game_state(
-                            window_size_f32.0,
-                            window_size_f32.1,
-                            start_time,
-                        ));
-                        info!("Gameplay state initialized and music started.");
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to start gameplay music: {}. Returning to SelectMusic.",
-                            e
-                        );
-                        self.current_app_state = AppState::SelectMusic;
-                        self.next_app_state = Some(AppState::SelectMusic);
-                        return;
-                    }
-                }
+                 // ... (Existing Gameplay transition logic - same) ...
+                 info!("Initializing Gameplay State...");
+                 let selected_song_info = self.select_music_state.songs.get(self.select_music_state.selected_index);
+
+                 if selected_song_info.is_none() || selected_song_info.unwrap().audio_path.is_none() {
+                      error!("Cannot start gameplay: No song selected or audio path missing for selected song. Returning to SelectMusic.");
+                      self.next_app_state = Some(AppState::SelectMusic);
+                      return;
+                  }
+                 let song_info = selected_song_info.unwrap();
+                 let audio_path = song_info.audio_path.as_ref().unwrap();
+
+                 info!("Starting gameplay with song: {}", song_info.title);
+                 info!("Audio path: {:?}", audio_path);
+
+                 let window_size_f32 = (
+                     self.vulkan_base.surface_resolution.width as f32,
+                     self.vulkan_base.surface_resolution.height as f32,
+                 );
+
+                 match self.audio_manager.play_music(audio_path, 1.0) {
+                     Ok(_) => {
+                         let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
+                         self.game_state = Some(gameplay::initialize_game_state(
+                             window_size_f32.0, window_size_f32.1, start_time,
+                         ));
+                         info!("Gameplay state initialized and music started.");
+                     }
+                     Err(e) => {
+                         error!("Failed to start gameplay music: {}. Returning to SelectMusic.", e);
+                          self.next_app_state = Some(AppState::SelectMusic);
+                         return;
+                     }
+                 }
             }
-            AppState::Exiting => { /* No setup */ }
+            AppState::Exiting => {}
         }
+
+        // --- Finalize Transition --- (Same as before)
         self.current_app_state = new_state;
         self.vulkan_base.window.set_title(&format!(
             "{} | {:?}",
@@ -336,6 +411,7 @@ impl App {
             self.current_app_state
         ));
     }
+
 
     fn update(&mut self, dt: f32) {
         // ... (no changes) ...

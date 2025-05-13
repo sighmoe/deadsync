@@ -1,14 +1,16 @@
-use crate::graphics::font::{Font, GlyphInfo}; // GlyphInfo is used in draw_text
+use crate::graphics::font::{Font}; // Removed GlyphInfo if truly unused elsewhere
 use crate::graphics::texture::{self, TextureResource};
 use crate::graphics::vulkan_base::{BufferResource, UniformBufferObject, Vertex, VulkanBase};
-use crate::state::PushConstantData; // This now includes px_range
+use crate::state::PushConstantData;
 use ash::util::read_spv;
 use ash::{vk, Device};
 use cgmath::{ortho, Matrix4, Rad, Vector3};
 use log::{debug, info, trace, warn};
 use memoffset::offset_of;
+use std::collections::HashMap; // Import HashMap explicitly
 use std::error::Error;
 use std::{ffi::CString, mem};
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DescriptorSetId {
@@ -20,22 +22,18 @@ pub enum DescriptorSetId {
     Gameplay,
     SolidColor,
     FallbackBanner,
+    DynamicBanner,
 }
 
 pub struct Renderer {
-    // Unified pipeline layout and pipeline for both general quads and MSDF text.
-    // The fragment shader (msdf.frag) will differentiate behavior based on pushConsts.pxRange.
     main_pipeline_layout: vk::PipelineLayout,
     main_pipeline: vk::Pipeline,
-
     descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: std::collections::HashMap<DescriptorSetId, vk::DescriptorSet>,
+    descriptor_sets: HashMap<DescriptorSetId, vk::DescriptorSet>,
     descriptor_set_layout: vk::DescriptorSetLayout,
-
     quad_vertex_buffer: BufferResource,
     quad_index_buffer: BufferResource,
     quad_index_count: u32,
-
     projection_ubo: BufferResource,
     current_window_size: (f32, f32),
     solid_white_texture: TextureResource,
@@ -64,30 +62,15 @@ impl Renderer {
             },
         ];
         let vertex_buffer_size = (quad_vertices.len() * mem::size_of::<Vertex>()) as vk::DeviceSize;
-        let quad_vertex_buffer = base.create_buffer(
-            vertex_buffer_size,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
+        let quad_vertex_buffer = base.create_buffer( vertex_buffer_size, vk::BufferUsageFlags::VERTEX_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, )?;
         base.update_buffer(&quad_vertex_buffer, &quad_vertices)?;
-
         let quad_indices: [u32; 6] = [0, 1, 2, 2, 3, 0];
         let index_buffer_size = (quad_indices.len() * mem::size_of::<u32>()) as vk::DeviceSize;
-        let quad_index_buffer = base.create_buffer(
-            index_buffer_size,
-            vk::BufferUsageFlags::INDEX_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
+        let quad_index_buffer = base.create_buffer( index_buffer_size, vk::BufferUsageFlags::INDEX_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, )?;
         base.update_buffer(&quad_index_buffer, &quad_indices)?;
         let quad_index_count = quad_indices.len() as u32;
-
         let ubo_size = mem::size_of::<UniformBufferObject>() as vk::DeviceSize;
-        let projection_ubo = base.create_buffer(
-            ubo_size,
-            vk::BufferUsageFlags::UNIFORM_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-
+        let projection_ubo = base.create_buffer( ubo_size, vk::BufferUsageFlags::UNIFORM_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT, )?;
         let solid_white_texture = texture::create_solid_color_texture(base, [255, 255, 255, 255])?;
 
         let dsl_bindings = [
@@ -108,7 +91,7 @@ impl Renderer {
                 .create_descriptor_set_layout(&dsl_create_info, None)?
         };
 
-        const MAX_SETS: u32 = 8;
+        const MAX_SETS: u32 = 9; // Increased from 8
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
@@ -121,27 +104,29 @@ impl Renderer {
         ];
         let pool_create_info = vk::DescriptorPoolCreateInfo::default()
             .pool_sizes(&pool_sizes)
-            .max_sets(MAX_SETS);
+            .max_sets(MAX_SETS); // Use the constant
         let descriptor_pool = unsafe {
             base.device
                 .create_descriptor_pool(&pool_create_info, None)?
         };
 
-        let set_layouts_vec = vec![descriptor_set_layout; MAX_SETS as usize];
+        let set_layouts_vec = vec![descriptor_set_layout; MAX_SETS as usize]; // Use the constant
         let desc_alloc_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(descriptor_pool)
             .set_layouts(&set_layouts_vec);
         let allocated_sets = unsafe { base.device.allocate_descriptor_sets(&desc_alloc_info)? };
 
-        let mut descriptor_sets = std::collections::HashMap::new();
+        // --- Store Descriptor Sets in HashMap ---
+        let mut descriptor_sets = HashMap::new(); // Use HashMap
         descriptor_sets.insert(DescriptorSetId::FontWendy, allocated_sets[0]);
         descriptor_sets.insert(DescriptorSetId::Logo, allocated_sets[1]);
         descriptor_sets.insert(DescriptorSetId::Dancer, allocated_sets[2]);
         descriptor_sets.insert(DescriptorSetId::Gameplay, allocated_sets[3]);
         descriptor_sets.insert(DescriptorSetId::SolidColor, allocated_sets[4]);
         descriptor_sets.insert(DescriptorSetId::FontMiso, allocated_sets[5]);
-        descriptor_sets.insert(DescriptorSetId::FontCjk, allocated_sets[6]);
-        descriptor_sets.insert(DescriptorSetId::FallbackBanner, allocated_sets[7]); // NEW
+        descriptor_sets.insert(DescriptorSetId::FontCjk, allocated_sets[6]); // Keep even if unused for now
+        descriptor_sets.insert(DescriptorSetId::FallbackBanner, allocated_sets[7]);
+        descriptor_sets.insert(DescriptorSetId::DynamicBanner, allocated_sets[8]); // Assign the new set
 
         let push_constant_ranges = [vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
@@ -267,7 +252,7 @@ impl Renderer {
             main_pipeline_layout,
             main_pipeline,
             descriptor_pool,
-            descriptor_sets,
+            descriptor_sets, // Store the HashMap
             descriptor_set_layout,
             quad_vertex_buffer,
             quad_index_buffer,
@@ -282,6 +267,10 @@ impl Renderer {
             DescriptorSetId::SolidColor,
             &renderer.solid_white_texture,
         );
+        // --- Initialize DynamicBanner with fallback initially ---
+        // Need access to the fallback banner texture resource later in AssetManager
+        // For now, we assume it will be updated by AssetManager shortly after creation.
+
         info!("Renderer initialization complete.");
         Ok(renderer)
     }
