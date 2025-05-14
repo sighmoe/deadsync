@@ -1,9 +1,11 @@
-use crate::assets::{AssetManager, TextureId};
+// src/screens/gameplay.rs
+use crate::assets::{AssetManager, TextureId}; // TextureId may not be directly used for explosions here if using DescriptorSetId::from_judgment
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
 use crate::parsing::simfile::{ChartInfo, NoteChar, ProcessedChartData, SongInfo};
 use crate::state::{
-    AppState, Arrow, ArrowDirection, FlashState, GameState, Judgment, TargetInfo,
+    ActiveExplosion, // CHANGED
+    AppState, Arrow, ArrowDirection, GameState, Judgment, TargetInfo,
     VirtualKeyCode, ALL_ARROW_DIRECTIONS,
 };
 use ash::vk;
@@ -11,31 +13,23 @@ use cgmath::{Rad, Vector3};
 use log::{debug, error, info, trace, warn};
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
-use std::sync::Arc; // To potentially share SongInfo/ChartInfo
+use std::sync::Arc;
 use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use rand::Rng;
 
+
 // --- Placeholder for TimingData (COPIED FROM ABOVE FOR THIS EXAMPLE) ---
 #[derive(Debug, Clone, Default)]
-pub struct BeatTimePoint {
-    pub beat: f32,
-    pub time_sec: f32,
-    pub bpm: f32,
-}
+pub struct BeatTimePoint { pub beat: f32, pub time_sec: f32, pub bpm: f32, }
 #[derive(Debug, Clone, Default)]
-pub struct TimingData {
-    pub points: Vec<BeatTimePoint>,
-    pub stops_at_beat: Vec<(f32, f32)>,
-    pub song_offset_sec: f32,
-}
+pub struct TimingData { pub points: Vec<BeatTimePoint>, pub stops_at_beat: Vec<(f32, f32)>, pub song_offset_sec: f32, }
 impl TimingData {
     pub fn get_time_for_beat(&self, target_beat: f32) -> f32 {
-        if self.points.is_empty() { return self.song_offset_sec + target_beat * 0.5; }
-        let mut current_time_sec = 0.0; // Time relative to song_offset_sec start
+        if self.points.is_empty() { return self.song_offset_sec + target_beat * 0.5; } // Default 120 BPM
+        let mut current_time_sec = 0.0;
         let mut last_beat = 0.0;
         let mut last_bpm = self.points[0].bpm;
-
         for point in &self.points {
             if point.beat <= last_beat { last_bpm = point.bpm; continue; }
             if target_beat >= point.beat {
@@ -47,9 +41,7 @@ impl TimingData {
             }
         }
         if target_beat > last_beat { current_time_sec += (target_beat - last_beat) * (60.0 / last_bpm); }
-        
         let mut final_time = self.song_offset_sec + current_time_sec;
-
         for (stop_beat, stop_duration_sec) in &self.stops_at_beat {
             if *stop_beat < target_beat { final_time += stop_duration_sec; }
         }
@@ -57,73 +49,52 @@ impl TimingData {
     }
     pub fn get_beat_for_time(&self, target_time_sec: f32) -> f32 {
         if self.points.is_empty() { return (target_time_sec - self.song_offset_sec).max(0.0) / 0.5; }
-
         let mut accumulated_stop_duration = 0.0;
         let mut beat_at_last_event = 0.0;
         let mut time_at_last_event_pre_stop = self.song_offset_sec;
         let mut current_bpm = self.points[0].bpm;
-
-        // Create a sorted list of all events (BPM changes and stops)
-        let mut events: Vec<(f32, Option<f32>, Option<f32>)> = Vec::new(); // (beat, new_bpm_opt, stop_duration_opt)
+        let mut events: Vec<(f32, Option<f32>, Option<f32>)> = Vec::new();
         for p in &self.points { events.push((p.beat, Some(p.bpm), None)); }
         for s in &self.stops_at_beat { events.push((s.0, None, Some(s.1))); }
         events.sort_by(|a,b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-        
         let mut unique_events: Vec<(f32, Option<f32>, Option<f32>)> = Vec::new();
         if !events.is_empty() {
             unique_events.push(events[0]);
             for i in 1..events.len() {
-                if events[i].0 > events[i-1].0 { // Only add if beat is different
-                    unique_events.push(events[i]);
-                } else { // Same beat, merge (prioritize BPM, then stop)
+                if events[i].0 > events[i-1].0 { unique_events.push(events[i]); }
+                else {
                     let last = unique_events.last_mut().unwrap();
                     if events[i].1.is_some() { last.1 = events[i].1; }
                     if events[i].2.is_some() { last.2 = events[i].2; }
                 }
             }
         }
-
-
         for (event_beat, new_bpm_opt, stop_duration_opt) in &unique_events {
             let time_to_reach_event_beat = (event_beat - beat_at_last_event) * (60.0 / current_bpm);
             let time_at_event_beat_no_stops = time_at_last_event_pre_stop + time_to_reach_event_beat;
-            
             if time_at_event_beat_no_stops + accumulated_stop_duration >= target_time_sec {
-                // Target time falls before or at this event
                 let remaining_effective_time = target_time_sec - (time_at_last_event_pre_stop + accumulated_stop_duration);
                 return beat_at_last_event + (remaining_effective_time / (60.0 / current_bpm));
             }
-
-            if let Some(stop_dur) = stop_duration_opt {
-                accumulated_stop_duration += stop_dur;
-            }
-            if let Some(new_bpm) = new_bpm_opt {
-                current_bpm = *new_bpm;
-            }
+            if let Some(stop_dur) = stop_duration_opt { accumulated_stop_duration += stop_dur; }
+            if let Some(new_bpm) = new_bpm_opt { current_bpm = *new_bpm; }
             beat_at_last_event = *event_beat;
             time_at_last_event_pre_stop = time_at_event_beat_no_stops;
         }
-
-        // Target time is after all defined events
         let remaining_effective_time = target_time_sec - (time_at_last_event_pre_stop + accumulated_stop_duration);
         beat_at_last_event + (remaining_effective_time / (60.0 / current_bpm))
     }
 }
-// --- End of Placeholder ---
-
 
 // --- Initialization ---
 pub fn initialize_game_state(
     win_w: f32,
     win_h: f32,
     audio_start_time: Instant,
-    song: Arc<SongInfo>,      // ADDED
-    selected_chart_idx: usize, // ADDED
+    song: Arc<SongInfo>,
+    selected_chart_idx: usize,
 ) -> GameState {
-    info!(
-        "Initializing game state for song: '{}', chart index: {}",
-        song.title, selected_chart_idx
-    );
+    info!( "Initializing game state for song: '{}', chart index: {}", song.title, selected_chart_idx );
     let center_x = win_w / 2.0;
     let target_spacing = config::TARGET_SIZE * 1.2;
     let total_targets_width = (ALL_ARROW_DIRECTIONS.len() as f32 - 1.0) * target_spacing;
@@ -144,14 +115,7 @@ pub fn initialize_game_state(
         arrows_map.insert(*dir, Vec::new());
     }
 
-    // --- TimingData and ProcessedChartData ---
-    // This is a simplified placeholder for TimingData construction.
-    // A full implementation would live in simfile.rs or timing.rs and be more robust.
-    let mut temp_timing_data = TimingData {
-        song_offset_sec: song.offset,
-        ..Default::default()
-    };
-
+    let mut temp_timing_data = TimingData { song_offset_sec: song.offset, ..Default::default() };
     let chart_info = &song.charts[selected_chart_idx];
     let mut combined_bpms = song.bpms_header.clone();
     if let Some(chart_bpms_str) = &chart_info.bpms_chart {
@@ -160,32 +124,26 @@ pub fn initialize_game_state(
         }
     }
     combined_bpms.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    combined_bpms.dedup_by_key(|k| k.0); // Keep first BPM at a given beat
+    combined_bpms.dedup_by_key(|k| k.0);
 
-    if combined_bpms.is_empty() { // Ensure there's at least one BPM, default to 120
+    if combined_bpms.is_empty() {
         warn!("No BPMs found for song {} chart {}, defaulting to 120 BPM at beat 0", song.title, selected_chart_idx);
         temp_timing_data.points.push(BeatTimePoint { beat: 0.0, time_sec: song.offset, bpm: 120.0 });
     } else {
         let mut current_time = song.offset;
         let mut last_b_beat = 0.0;
-        let mut last_b_bpm = combined_bpms[0].1; // BPM at beat 0
-        if combined_bpms[0].0 != 0.0 { // If first BPM isn't at beat 0, add a point for beat 0
+        let mut last_b_bpm = combined_bpms[0].1;
+        if combined_bpms[0].0 != 0.0 {
             temp_timing_data.points.push(BeatTimePoint { beat: 0.0, time_sec: song.offset, bpm: last_b_bpm});
         }
-
         for (beat, bpm) in &combined_bpms {
-            if *beat < last_b_beat { continue; } // Should not happen if sorted
-            if *beat > last_b_beat {
-                current_time += (*beat - last_b_beat) * (60.0 / last_b_bpm);
-            }
+            if *beat < last_b_beat { continue; }
+            if *beat > last_b_beat { current_time += (*beat - last_b_beat) * (60.0 / last_b_bpm); }
             temp_timing_data.points.push(BeatTimePoint { beat: *beat, time_sec: current_time, bpm: *bpm });
-            last_b_beat = *beat;
-            last_b_bpm = *bpm;
+            last_b_beat = *beat; last_b_bpm = *bpm;
         }
     }
     
-    // Simplified stops (assumes simfile stop values are already in seconds, which is NOT standard)
-    // A proper implementation needs to convert simfile stop beat-values to seconds based on BPM at stop.
     let mut combined_stops = song.stops_header.clone();
      if let Some(chart_stops_str) = &chart_info.stops_chart {
          if let Ok(chart_stops_vec) = crate::parsing::simfile::parse_stops(chart_stops_str) {
@@ -193,33 +151,16 @@ pub fn initialize_game_state(
          }
      }
     combined_stops.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    // For this placeholder, we directly use the second value as duration_sec
-    // In a real system: duration_sec = stop_value_from_simfile * (60.0 / bpm_at_stop_beat)
-    // And then TimingData.points[...].time_sec needs to be adjusted for all points *after* each stop.
-    // This is non-trivial and best done in the parser.
     for (beat, duration_simfile_value) in &combined_stops {
-        // Find BPM at stop_beat for duration calculation
-        let bpm_at_stop = temp_timing_data.points.iter()
-            .rfind(|p| p.beat <= *beat)
-            .map_or(120.0, |p| p.bpm); // Default if no prior BPM
+        let bpm_at_stop = temp_timing_data.points.iter().rfind(|p| p.beat <= *beat).map_or(120.0, |p| p.bpm);
         let duration_sec = duration_simfile_value * (60.0 / bpm_at_stop);
         temp_timing_data.stops_at_beat.push((*beat, duration_sec));
     }
-    // Critical: After calculating stops_at_beat with correct second durations,
-    // iterate through temp_timing_data.points AGAIN. For each point, sum up all
-    // stop_durations from stops_at_beat that occur *before* that point.beat,
-    // and add that sum to point.time_sec. This makes point.time_sec the "true"
-    // wall-clock time for that beat. This step is SKIPPED here for brevity.
 
-    let processed_chart_data = chart_info
-        .processed_data
-        .as_ref()
-        .cloned() // Clone it for GameState
-        .unwrap_or_else(|| {
-            warn!("Chart {} for song {} has no processed data! Gameplay might be empty.", selected_chart_idx, song.title);
-            ProcessedChartData::default()
-        });
-
+    let processed_chart_data = chart_info.processed_data.as_ref().cloned().unwrap_or_else(|| {
+        warn!("Chart {} for song {} has no processed data! Gameplay might be empty.", selected_chart_idx, song.title);
+        ProcessedChartData::default()
+    });
 
     let initial_display_beat_offset = (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / temp_timing_data.points[0].bpm);
 
@@ -227,42 +168,32 @@ pub fn initialize_game_state(
         targets,
         arrows: arrows_map,
         pressed_keys: HashSet::new(),
-        current_beat: -initial_display_beat_offset, // Display beat, starts negative due to offset
+        current_beat: -initial_display_beat_offset,
         window_size: (win_w, win_h),
-        flash_states: HashMap::new(),
+        active_explosions: HashMap::new(), // CHANGED
         audio_start_time: Some(audio_start_time),
-        
-        // New fields for chart-based gameplay
-        song_info: song, // Store the Arc<SongInfo>
+        song_info: song,
         selected_chart_idx,
-        timing_data: Arc::new(temp_timing_data), // Store the Arc<TimingData>
-        processed_chart: Arc::new(processed_chart_data), // Store Arc<ProcessedChartData>
+        timing_data: Arc::new(temp_timing_data),
+        processed_chart: Arc::new(processed_chart_data),
         current_measure_idx: 0,
         current_line_in_measure_idx: 0,
-        current_processed_beat: -1.0, // Start before beat 0 to ensure beat 0 notes can spawn
+        current_processed_beat: -1.0,
     }
 }
 
-// --- Input Handling --- (No changes needed for this part yet)
+// --- Input Handling ---
 pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState) -> Option<AppState> {
-    // ... (same as before) ...
     if key_event.state == ElementState::Pressed && !key_event.repeat {
-        if let Some(VirtualKeyCode::Escape) =
-            crate::state::key_to_virtual_keycode(key_event.logical_key.clone())
-        {
+        if let Some(VirtualKeyCode::Escape) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
             info!("Escape pressed in gameplay, returning to Select Music.");
             return Some(AppState::SelectMusic);
         }
     }
 
-    if let Some(virtual_keycode) =
-        crate::state::key_to_virtual_keycode(key_event.logical_key.clone())
-    {
+    if let Some(virtual_keycode) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
         match virtual_keycode {
-            VirtualKeyCode::Left
-            | VirtualKeyCode::Down
-            | VirtualKeyCode::Up
-            | VirtualKeyCode::Right => match key_event.state {
+            VirtualKeyCode::Left | VirtualKeyCode::Down | VirtualKeyCode::Up | VirtualKeyCode::Right => match key_event.state {
                 ElementState::Pressed => {
                     if game_state.pressed_keys.insert(virtual_keycode) && !key_event.repeat {
                         trace!("Gameplay Key Pressed: {:?}", virtual_keycode);
@@ -282,25 +213,19 @@ pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState) -> Option<
 }
 
 // --- Update Logic ---
-pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) { // rng no longer needed for spawning
+pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
     if let Some(start_time) = game_state.audio_start_time {
         let current_raw_time_sec = Instant::now().duration_since(start_time).as_secs_f32();
-        
         let chart_beat = game_state.timing_data.get_beat_for_time(current_raw_time_sec);
-
-        // Calculate initial display beat offset based on the BPM at beat 0
         let initial_bpm_at_zero = game_state.timing_data.points.first().map_or(120.0, |p| p.bpm);
         let initial_display_beat_offset = (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / initial_bpm_at_zero);
-        
-        game_state.current_beat = chart_beat - initial_display_beat_offset; // This is the "display" beat for judging
+        game_state.current_beat = chart_beat - initial_display_beat_offset;
         trace!("Current Raw Time: {:.3}s, Chart Beat: {:.4}, Display Beat: {:.4}", current_raw_time_sec, chart_beat, game_state.current_beat);
-
     } else {
         warn!("Audio start time not set, cannot update beat accurately!");
-        // Fallback or paused state update if needed
     }
 
-    spawn_arrows_from_chart(game_state); // MODIFIED
+    spawn_arrows_from_chart(game_state);
 
     let arrow_delta_y = config::ARROW_SPEED * dt;
     for column_arrows in game_state.arrows.values_mut() {
@@ -312,131 +237,78 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) { // rng
     check_misses(game_state);
 
     let now = Instant::now();
-    game_state
-        .flash_states
-        .retain(|_dir, flash| now < flash.end_time);
+
+    game_state.active_explosions.retain(|_dir, explosion| {
+        let should_keep = now < explosion.end_time;
+        if !should_keep {
+
+        }
+        should_keep
+    });
+
 }
 
-// --- Arrow Spawning Logic (Overhauled) ---
+// --- Arrow Spawning Logic (spawn_arrows_from_chart) ---
+// ... (This function remains the same as in your provided code) ...
 fn spawn_arrows_from_chart(state: &mut GameState) {
-    if state.processed_chart.measures.is_empty() {
-        return; // No chart data to process
-    }
-
-    // Determine the current chart time based on audio playback
+    if state.processed_chart.measures.is_empty() { return; }
     let current_audio_time_sec = if let Some(start_time) = state.audio_start_time {
         Instant::now().duration_since(start_time).as_secs_f32()
-    } else {
-        return; // Cannot determine current time
-    };
-    
-    // The beat corresponding to current_audio_time_sec according to timing data
-    // This is the "true" chart beat, not the display beat.
+    } else { return; };
     let current_chart_beat_now = state.timing_data.get_beat_for_time(current_audio_time_sec);
-
-    // Determine the latest beat we should consider spawning notes for
     let lookahead_chart_beat_limit = current_chart_beat_now + config::SPAWN_LOOKAHEAD_BEATS;
 
-    loop { // Loop to process multiple lines if they fall into the spawn window
-        if state.current_measure_idx >= state.processed_chart.measures.len() {
-            break; // End of chart
-        }
-
+    loop {
+        if state.current_measure_idx >= state.processed_chart.measures.len() { break; }
         let current_measure_data = &state.processed_chart.measures[state.current_measure_idx];
-        if current_measure_data.is_empty() { // Should not happen with proper parsing
-            state.current_measure_idx += 1;
-            state.current_line_in_measure_idx = 0;
+        if current_measure_data.is_empty() {
+            state.current_measure_idx += 1; state.current_line_in_measure_idx = 0;
             trace!("Skipping empty measure at index {}", state.current_measure_idx -1);
             continue;
         }
-
         if state.current_line_in_measure_idx >= current_measure_data.len() {
-            // Move to next measure
-            state.current_measure_idx += 1;
-            state.current_line_in_measure_idx = 0;
+            state.current_measure_idx += 1; state.current_line_in_measure_idx = 0;
             trace!("Advanced to measure {}", state.current_measure_idx);
-            continue; // Re-evaluate loop condition for end of chart
+            continue;
         }
-
         let num_lines_in_measure = current_measure_data.len() as f32;
-        // Standard simfiles: 1 measure = 4 beats (e.g. in 4/4 time)
         let measure_base_beat = state.current_measure_idx as f32 * 4.0;
         let beat_offset_in_measure = (state.current_line_in_measure_idx as f32 / num_lines_in_measure) * 4.0;
         let target_beat_for_line = measure_base_beat + beat_offset_in_measure;
 
         if target_beat_for_line <= state.current_processed_beat {
-             // This line was already processed or is from the past, advance to next line
-            state.current_line_in_measure_idx += 1;
-            continue;
+            state.current_line_in_measure_idx += 1; continue;
         }
-
-        if target_beat_for_line > lookahead_chart_beat_limit {
-            break; // This line is too far in the future to spawn yet
-        }
+        if target_beat_for_line > lookahead_chart_beat_limit { break; }
         
-        // If we're here, the line is within the spawn window and hasn't been processed.
-        let note_line = &current_measure_data[state.current_line_in_measure_idx];
-
-        // Calculate time properties for spawning
         let time_of_line_sec = state.timing_data.get_time_for_beat(target_beat_for_line);
         let time_to_target_on_screen_sec = time_of_line_sec - current_audio_time_sec;
 
-        if time_to_target_on_screen_sec < 0.0 { // Line is in the past relative to audio
-            // Mark as missed spawn, advance, and log
+        if time_to_target_on_screen_sec < 0.0 {
             trace!("Missed spawn window for line at beat {:.2} (current audio time corresponds to beat {:.2})", target_beat_for_line, current_chart_beat_now);
             state.current_processed_beat = target_beat_for_line;
             state.current_line_in_measure_idx += 1;
             continue;
         }
         
-        // Calculate spawn Y position
-        // Note: ARROW_SPEED is pixels per second.
         let distance_to_travel_pixels = config::ARROW_SPEED * time_to_target_on_screen_sec;
         let spawn_y = config::TARGET_Y_POS + distance_to_travel_pixels;
-
-        // Spawn arrows for this line
+        let note_line = &current_measure_data[state.current_line_in_measure_idx];
         let mut spawned_on_this_line = false;
         for (col_idx, &note_char) in note_line.iter().enumerate() {
-            let direction = match col_idx {
-                0 => ArrowDirection::Left, 1 => ArrowDirection::Down,
-                2 => ArrowDirection::Up,   3 => ArrowDirection::Right,
-                _ => continue, // Should not happen for a 4-char line
-            };
-
-            // Determine ArrowType (Tap, HoldStart, etc.)
-            let arrow_type_for_render = match note_char {
-                NoteChar::Tap | NoteChar::HoldStart | NoteChar::RollStart => note_char,
-                _ => NoteChar::Empty, // Only spawn visual arrows for these for now
-            };
-
+            let direction = match col_idx { 0 => ArrowDirection::Left, 1 => ArrowDirection::Down, 2 => ArrowDirection::Up, 3 => ArrowDirection::Right, _ => continue, };
+            let arrow_type_for_render = match note_char { NoteChar::Tap | NoteChar::HoldStart | NoteChar::RollStart => note_char, _ => NoteChar::Empty, };
             if arrow_type_for_render != NoteChar::Empty {
-                let target_x_pos = state.targets.iter()
-                    .find(|t| t.direction == direction)
-                    .map_or(0.0, |t| t.x);
-
+                let target_x_pos = state.targets.iter().find(|t| t.direction == direction).map_or(0.0, |t| t.x);
                 if let Some(column_arrows) = state.arrows.get_mut(&direction) {
-                    column_arrows.push(Arrow {
-                        x: target_x_pos,
-                        y: spawn_y,
-                        direction,
-                        note_char: arrow_type_for_render, // Store the NoteChar
-                        target_beat: target_beat_for_line,
-                    });
+                    column_arrows.push(Arrow { x: target_x_pos, y: spawn_y, direction, note_char: arrow_type_for_render, target_beat: target_beat_for_line, });
                     spawned_on_this_line = true;
-                    // trace!(
-                    //     "Spawned {:?} {:?} at y={:.1} (target_y={:.1}), target_beat={:.2} (line time: {:.2}s, current audio time: {:.2}s, diff: {:.2}s)",
-                    //     direction, arrow_type_for_render, spawn_y, config::TARGET_Y_POS, target_beat_for_line, time_of_line_sec, current_audio_time_sec, time_to_target_on_screen_sec
-                    // );
                 }
             }
         }
-        if spawned_on_this_line {
-            debug!("Spawned notes for line at measure {}, line_idx {}, chart_beat {:.3}", state.current_measure_idx, state.current_line_in_measure_idx, target_beat_for_line);
-        }
-
-
-        state.current_processed_beat = target_beat_for_line; // Mark this beat as processed
-        state.current_line_in_measure_idx += 1; // Advance to next line for next iteration/frame
+        if spawned_on_this_line { debug!("Spawned notes for line at measure {}, line_idx {}, chart_beat {:.3}", state.current_measure_idx, state.current_line_in_measure_idx, target_beat_for_line); }
+        state.current_processed_beat = target_beat_for_line;
+        state.current_line_in_measure_idx += 1;
     }
 }
 
@@ -453,58 +325,51 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
     if let Some(dir) = direction {
         if let Some(column_arrows) = state.arrows.get_mut(&dir) {
-            // current_beat is the "display beat", adjusted for AUDIO_SYNC_OFFSET_MS
-            // arrow.target_beat is the "chart beat"
             let current_display_beat = state.current_beat;
-
-            // Convert display beat to absolute time for fair comparison with target beat's time
-            // This is complex if AUDIO_SYNC_OFFSET_MS implies a shift in how BPMs/Stops apply.
-            // For now, let's assume current_display_beat can be directly compared against arrow.target_beat
-            // after converting both to time or by finding time diff.
-
-            // The BPM at the current display beat (or near arrow.target_beat)
-            // This is an approximation, a more accurate way would be to use time differences.
             let bpm_at_arrow_approx = state.timing_data.points.iter()
-                .rfind(|p| p.beat <= current_display_beat) // Use display beat as reference
+                .rfind(|p| p.beat <= current_display_beat)
                 .map_or(120.0, |p| p.bpm);
             let seconds_per_beat_approx = 60.0 / bpm_at_arrow_approx;
 
-
             let mut best_hit_idx: Option<usize> = None;
-            let mut min_abs_time_diff_ms = config::MAX_HIT_WINDOW_MS + 1.0;
+            let mut min_abs_time_diff_ms = config::MAX_HIT_WINDOW_MS + 1.0; // Slightly more than W5 window
 
             for (idx, arrow) in column_arrows.iter().enumerate() {
                 let beat_diff = current_display_beat - arrow.target_beat;
                 let time_diff_ms = beat_diff * seconds_per_beat_approx * 1000.0;
                 let abs_time_diff_ms = time_diff_ms.abs();
 
-                if abs_time_diff_ms <= config::MAX_HIT_WINDOW_MS
-                    && abs_time_diff_ms < min_abs_time_diff_ms
-                {
+                if abs_time_diff_ms <= config::MAX_HIT_WINDOW_MS && abs_time_diff_ms < min_abs_time_diff_ms {
                     min_abs_time_diff_ms = abs_time_diff_ms;
                     best_hit_idx = Some(idx);
                 }
             }
 
             if let Some(idx) = best_hit_idx {
-                let hit_arrow = &column_arrows[idx]; // Keep borrow valid
+                let hit_arrow = &column_arrows[idx];
                 let time_diff_for_log = (current_display_beat - hit_arrow.target_beat) * seconds_per_beat_approx * 1000.0;
-                let note_char_for_log = hit_arrow.note_char; // Use note_char
+                let note_char_for_log = hit_arrow.note_char;
 
                 let judgment = if min_abs_time_diff_ms <= config::W1_WINDOW_MS { Judgment::W1 }
                                else if min_abs_time_diff_ms <= config::W2_WINDOW_MS { Judgment::W2 }
                                else if min_abs_time_diff_ms <= config::W3_WINDOW_MS { Judgment::W3 }
                                else if min_abs_time_diff_ms <= config::W4_WINDOW_MS { Judgment::W4 }
-                               else { Judgment::W4 }; // Should be covered by MAX_HIT_WINDOW_MS
+                               else { Judgment::W5 };
 
                 info!( "HIT! {:?} {:?} ({:.1}ms) -> {:?}", dir, note_char_for_log, time_diff_for_log, judgment );
 
-                let flash_color = match judgment {
-                    Judgment::W1 => config::FLASH_COLOR_W1, Judgment::W2 => config::FLASH_COLOR_W2,
-                    Judgment::W3 => config::FLASH_COLOR_W3, Judgment::W4 => config::FLASH_COLOR_W4,
-                    Judgment::Miss => unreachable!(), // Not applicable for hits
-                };
-                state.flash_states.insert(dir, FlashState { color: flash_color, end_time: Instant::now() + config::FLASH_DURATION });
+                let explosion_end_time = Instant::now() + config::EXPLOSION_DURATION; // Calculate end time
+                state.active_explosions.insert(dir, ActiveExplosion {
+                    judgment,
+                    direction: dir,
+                    end_time: explosion_end_time, // Use calculated end time
+                });
+                // ADD THIS DEBUG LOG:
+                debug!(
+                    "Added ActiveExplosion: dir={:?}, judgment={:?}, end_time will be in {:?}. Map size: {}",
+                    dir, judgment, config::EXPLOSION_DURATION, state.active_explosions.len()
+                );
+
                 column_arrows.remove(idx);
             } else {
                 debug!( "Input {:?} registered, but no arrow within {:.1}ms hit window (Display Beat: {:.2}).", keycode, config::MAX_HIT_WINDOW_MS, current_display_beat );
@@ -513,154 +378,143 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
     }
 }
 
-// --- Miss Checking Logic ---
+
+// --- Miss Checking Logic (check_misses) ---
+// ... (This function remains the same as in your provided code) ...
 fn check_misses(state: &mut GameState) {
     let current_display_beat = state.current_beat;
     let mut missed_count = 0;
-
     for (_dir, column_arrows) in state.arrows.iter_mut() {
         column_arrows.retain(|arrow| {
-            // Approximate BPM at arrow's target beat for miss window calculation
-            let bpm_at_arrow_target = state.timing_data.points.iter()
-                .rfind(|p| p.beat <= arrow.target_beat)
-                .map_or(120.0, |p| p.bpm);
+            let bpm_at_arrow_target = state.timing_data.points.iter().rfind(|p| p.beat <= arrow.target_beat).map_or(120.0, |p| p.bpm);
             let seconds_per_beat_at_target = 60.0 / bpm_at_arrow_target;
             let miss_window_beats_dynamic = (config::MISS_WINDOW_MS / 1000.0) / seconds_per_beat_at_target;
-
-            let beat_diff = current_display_beat - arrow.target_beat; // Player is past arrow's target
+            let beat_diff = current_display_beat - arrow.target_beat;
             if beat_diff > miss_window_beats_dynamic {
-                info!(
-                    "MISSED! {:?} {:?} (TgtBeat: {:.2}, DispBeat: {:.2}, DiffBeat: {:.2} > {:.2} ({:.1}ms))",
-                    arrow.direction, arrow.note_char, arrow.target_beat, current_display_beat,
-                    beat_diff, miss_window_beats_dynamic, config::MISS_WINDOW_MS
-                );
+                info!( "MISSED! {:?} {:?} (TgtBeat: {:.2}, DispBeat: {:.2}, DiffBeat: {:.2} > {:.2} ({:.1}ms))", arrow.direction, arrow.note_char, arrow.target_beat, current_display_beat, beat_diff, miss_window_beats_dynamic, config::MISS_WINDOW_MS );
                 missed_count += 1;
-                false // Remove arrow
-            } else {
-                true // Keep arrow
-            }
+                false
+            } else { true }
         });
     }
-    if missed_count > 0 {
-        trace!("Removed {} missed arrows.", missed_count);
-    }
+    if missed_count > 0 { trace!("Removed {} missed arrows.", missed_count); }
 }
 
-
-// src/screens/gameplay.rs
-
-// ... (other use statements) ...
 
 // --- Drawing Logic ---
 pub fn draw(
     renderer: &Renderer,
     game_state: &GameState,
-    assets: &AssetManager,
+    _assets: &AssetManager, // _assets might not be needed directly for explosions if using DescriptorSetId from judgment
     device: &ash::Device,
     cmd_buf: vk::CommandBuffer,
 ) {
-    let _arrow_texture = assets.get_texture(TextureId::Arrows).expect("Arrow texture missing");
-    let now = Instant::now();
-
+    // --- Draw Targets ---
+    // Targets are drawn first, without any active tinting from hits.
     let frame_index = ((game_state.current_beat * 2.0).floor().abs() as usize) % 4;
     let uv_width = 1.0 / 4.0;
     let uv_x_start = frame_index as f32 * uv_width;
-    let base_uv_offset = [uv_x_start, 0.0];
-    let base_uv_scale = [uv_width, 1.0];
+    let base_uv_offset_arrows = [uv_x_start, 0.0]; // For animated arrows
+    let base_uv_scale_arrows = [uv_width, 1.0];   // For animated arrows
+    
+    // Targets might use a static frame or the same animation. Let's assume static part of arrows.png for now.
+    // If targets are also animated, use base_uv_offset_arrows. Otherwise, use [0.0, 0.0] and [0.25, 1.0] for first frame.
+    let target_uv_offset = [0.0, 0.0]; // Assuming first frame for static target receptors
+    let target_uv_scale = [0.25, 1.0];
 
-    // --- Draw Targets ---
+
     for target in &game_state.targets {
-        let current_tint = game_state.flash_states.get(&target.direction)
-            .filter(|flash| now < flash.end_time)
-            .map_or(config::TARGET_TINT, |flash| flash.color);
-        let rotation_angle = match target.direction { // This part was already correct for targets
+        let rotation_angle = match target.direction {
             ArrowDirection::Left => Rad(PI / 2.0),
             ArrowDirection::Down => Rad(0.0),
             ArrowDirection::Up => Rad(PI),
             ArrowDirection::Right => Rad(-PI / 2.0),
         };
-        renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay,
+        renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay, // Using Gameplay (arrow) texture for targets
             Vector3::new(target.x, target.y, 0.0),
-            (config::TARGET_SIZE, config::TARGET_SIZE), rotation_angle, current_tint,
-            base_uv_offset, base_uv_scale,
+            (config::TARGET_SIZE, config::TARGET_SIZE), rotation_angle, config::TARGET_TINT, // Default tint
+            target_uv_offset, // UVs for target receptor (e.g., first frame of arrow sheet)
+            target_uv_scale,
         );
     }
 
-    // --- Draw Arrows ---
+    // --- Draw Arrows --- (Same as before)
     for (_direction, column_arrows) in &game_state.arrows {
         for arrow in column_arrows {
             if arrow.y < (0.0 - config::ARROW_SIZE) || arrow.y > (game_state.window_size.1 + config::ARROW_SIZE) {
                 continue;
             }
-
             let measure_idx_for_arrow = (arrow.target_beat / 4.0).floor() as usize;
-            let mut arrow_tint = config::ARROW_TINT_OTHER; // Default
-
+            let mut arrow_tint = config::ARROW_TINT_OTHER;
             if measure_idx_for_arrow < game_state.processed_chart.measures.len() {
                 let measure_data = &game_state.processed_chart.measures[measure_idx_for_arrow];
                 let num_lines_in_measure = measure_data.len();
-
                 if num_lines_in_measure > 0 {
                     let measure_base_beat = measure_idx_for_arrow as f32 * 4.0;
                     let beat_offset_from_measure_start = arrow.target_beat - measure_base_beat;
                     let line_index_in_measure_float = (beat_offset_from_measure_start / 4.0) * num_lines_in_measure as f32;
                     let line_index_in_measure = (line_index_in_measure_float + 0.001).round() as usize;
-
                     match num_lines_in_measure {
-                        4 | 2 | 1 => {
-                            arrow_tint = config::ARROW_TINT_QUARTER;
-                        }
-                        8 => {
-                            if line_index_in_measure % 2 == 0 {
-                                arrow_tint = config::ARROW_TINT_QUARTER;
-                            } else {
-                                arrow_tint = config::ARROW_TINT_EIGHTH;
-                            }
-                        }
-                        16 => {
-                            if line_index_in_measure % 4 == 0 {
-                                arrow_tint = config::ARROW_TINT_QUARTER;
-                            } else if line_index_in_measure % 2 == 0 {
-                                arrow_tint = config::ARROW_TINT_EIGHTH;
-                            } else {
-                                arrow_tint = config::ARROW_TINT_SIXTEENTH;
-                            }
-                        }
-                        12 => {
-                            if line_index_in_measure % 3 == 0 {
-                                arrow_tint = config::ARROW_TINT_QUARTER;
-                            } else {
-                                arrow_tint = config::ARROW_TINT_TWELFTH;
-                            }
-                        }
-                        24 => {
-                            if line_index_in_measure % 6 == 0 {
-                                arrow_tint = config::ARROW_TINT_QUARTER;
-                            } else if line_index_in_measure % 3 == 0 {
-                                arrow_tint = config::ARROW_TINT_EIGHTH;
-                            } else {
-                                arrow_tint = config::ARROW_TINT_TWENTYFOURTH;
-                            }
-                        }
-                        _ => {
-                            // Keep ARROW_TINT_OTHER or add more specific logic
-                            // warn!( /* ... */); // Warning for unusual measure lengths is good
-                        }
+                        4 | 2 | 1 => { arrow_tint = config::ARROW_TINT_QUARTER; }
+                        8 => { if line_index_in_measure % 2 == 0 { arrow_tint = config::ARROW_TINT_QUARTER; } else { arrow_tint = config::ARROW_TINT_EIGHTH; } }
+                        16 => { if line_index_in_measure % 4 == 0 { arrow_tint = config::ARROW_TINT_QUARTER; } else if line_index_in_measure % 2 == 0 { arrow_tint = config::ARROW_TINT_EIGHTH; } else { arrow_tint = config::ARROW_TINT_SIXTEENTH; } }
+                        12 => { if line_index_in_measure % 3 == 0 { arrow_tint = config::ARROW_TINT_QUARTER; } else { arrow_tint = config::ARROW_TINT_TWELFTH; } }
+                        24 => { if line_index_in_measure % 6 == 0 { arrow_tint = config::ARROW_TINT_QUARTER; } else if line_index_in_measure % 3 == 0 { arrow_tint = config::ARROW_TINT_EIGHTH; } else { arrow_tint = config::ARROW_TINT_TWENTYFOURTH; } }
+                        _ => {}
                     }
                 }
             }
-
             let rotation_angle = match arrow.direction {
-                ArrowDirection::Left => Rad(PI / 2.0),
-                ArrowDirection::Down => Rad(0.0),
-                ArrowDirection::Up => Rad(PI),
-                ArrowDirection::Right => Rad(-PI / 2.0),
+                ArrowDirection::Left => Rad(PI / 2.0), ArrowDirection::Down => Rad(0.0),
+                ArrowDirection::Up => Rad(PI), ArrowDirection::Right => Rad(-PI / 2.0),
             };
             renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay,
                 Vector3::new(arrow.x, arrow.y, 0.0),
                 (config::ARROW_SIZE, config::ARROW_SIZE), rotation_angle, arrow_tint,
-                base_uv_offset, base_uv_scale,
+                base_uv_offset_arrows, base_uv_scale_arrows, // Use animated UVs for flying arrows
             );
+        }
+    }
+
+    // --- Draw Active Explosions ---
+    let now = Instant::now();
+
+    for (direction, explosion) in &game_state.active_explosions {
+
+        if now < explosion.end_time {
+            if let Some(explosion_set_id) = DescriptorSetId::from_judgment(explosion.judgment) {
+
+
+                if let Some(target_info) = game_state.targets.iter().find(|t| t.direction == *direction) {
+
+                    let explosion_rotation_angle = match target_info.direction {
+                        ArrowDirection::Left => Rad(PI / 2.0),
+                        ArrowDirection::Down => Rad(0.0),
+                        ArrowDirection::Up => Rad(PI),
+                        ArrowDirection::Right => Rad(-PI / 2.0),
+                    };
+
+                    renderer.draw_quad(
+                        device,
+                        cmd_buf,
+                        explosion_set_id,
+                        Vector3::new(target_info.x, target_info.y, 0.0),
+                        (config::EXPLOSION_SIZE, config::EXPLOSION_SIZE), // Use new size
+                        explosion_rotation_angle,
+                        [1.0, 1.0, 1.0, 1.0],
+                        [0.0, 0.0],
+                        [1.0, 1.0],
+                    );
+                } else {
+                    // ADD THIS DEBUG LOG:
+                    warn!(
+                        "Draw: Could not find target_info for explosion direction {:?}",
+                        *direction
+                    );
+                }
+            } else {
+
+            }
         }
     }
 }
