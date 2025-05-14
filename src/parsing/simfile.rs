@@ -1,6 +1,6 @@
-use super::stats::{ // ADDED
+use super::stats::{
     minimize_chart_and_count, ArrowStats, BreakdownMode,
-    compute_stream_counts, generate_breakdown, StreamCounts, // RunDensity not directly used here but could be
+    compute_stream_counts, generate_breakdown, StreamCounts,
 };
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
@@ -58,10 +58,10 @@ pub struct ChartInfo {
     pub difficulty: String,
     pub meter: String,
     pub credit: String,
-    pub notes_data_raw: String, // Renamed from notes_data
+    pub notes_data_raw: String,
     pub bpms_chart: Option<String>,
     pub stops_chart: Option<String>,
-    pub processed_data: Option<ProcessedChartData>, // ADDED
+    pub processed_data: Option<ProcessedChartData>,
 }
 
 #[derive(Debug, Clone)]

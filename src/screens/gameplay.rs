@@ -1,16 +1,14 @@
 use crate::assets::{AssetManager, TextureId};
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
-use crate::parsing::simfile::{ChartInfo, NoteChar, ProcessedChartData, SongInfo}; // ADDED NoteChar, ProcessedChartData
+use crate::parsing::simfile::{ChartInfo, NoteChar, ProcessedChartData, SongInfo};
 use crate::state::{
-    AppState, Arrow, ArrowDirection, FlashState, GameState, Judgment, TargetInfo, // NoteType might be replaced
+    AppState, Arrow, ArrowDirection, FlashState, GameState, Judgment, TargetInfo,
     VirtualKeyCode, ALL_ARROW_DIRECTIONS,
 };
 use ash::vk;
 use cgmath::{Rad, Vector3};
 use log::{debug, error, info, trace, warn};
-// Removed: use rand::prelude::IndexedRandom;
-// Removed: use rand::{distr::Bernoulli, prelude::{Distribution, Rng}};
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::sync::Arc; // To potentially share SongInfo/ChartInfo
@@ -549,6 +547,10 @@ fn check_misses(state: &mut GameState) {
 }
 
 
+// src/screens/gameplay.rs
+
+// ... (other use statements) ...
+
 // --- Drawing Logic ---
 pub fn draw(
     renderer: &Renderer,
@@ -560,7 +562,6 @@ pub fn draw(
     let _arrow_texture = assets.get_texture(TextureId::Arrows).expect("Arrow texture missing");
     let now = Instant::now();
 
-    // Pulsing animation for targets/arrows based on display beat
     let frame_index = ((game_state.current_beat * 2.0).floor().abs() as usize) % 4;
     let uv_width = 1.0 / 4.0;
     let uv_x_start = frame_index as f32 * uv_width;
@@ -572,9 +573,11 @@ pub fn draw(
         let current_tint = game_state.flash_states.get(&target.direction)
             .filter(|flash| now < flash.end_time)
             .map_or(config::TARGET_TINT, |flash| flash.color);
-        let rotation_angle = match target.direction {
-            ArrowDirection::Left => Rad(PI / 2.0), ArrowDirection::Down => Rad(0.0),
-            ArrowDirection::Up => Rad(PI), ArrowDirection::Right => Rad(-PI / 2.0),
+        let rotation_angle = match target.direction { // This part was already correct for targets
+            ArrowDirection::Left => Rad(PI / 2.0),
+            ArrowDirection::Down => Rad(0.0),
+            ArrowDirection::Up => Rad(PI),
+            ArrowDirection::Right => Rad(-PI / 2.0),
         };
         renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay,
             Vector3::new(target.x, target.y, 0.0),
@@ -584,34 +587,74 @@ pub fn draw(
     }
 
     // --- Draw Arrows ---
-    for column_arrows in game_state.arrows.values() {
+    for (_direction, column_arrows) in &game_state.arrows {
         for arrow in column_arrows {
             if arrow.y < (0.0 - config::ARROW_SIZE) || arrow.y > (game_state.window_size.1 + config::ARROW_SIZE) {
                 continue;
             }
 
-            // Determine tint based on arrow.note_char (which was NoteType before)
-            let arrow_tint = match arrow.note_char {
-                // For now, map Tap, HoldStart, RollStart to existing Quarter/Eighth/Sixteenth tints
-                // This needs refinement if visual distinction is desired.
-                // A simple way for now is to use target_beat quantization for color.
-                NoteChar::Tap | NoteChar::HoldStart | NoteChar::RollStart => {
-                    let beat_fraction = arrow.target_beat.fract();
-                    // This is a rough approximation for coloring
-                    if (beat_fraction * 4.0).fract() < 0.01 { // Quarter
-                        config::ARROW_TINT_QUARTER
-                    } else if (beat_fraction * 8.0).fract() < 0.01 { // Eighth
-                        config::ARROW_TINT_EIGHTH
-                    } else { // Sixteenth (or other)
-                        config::ARROW_TINT_SIXTEENTH
+            let measure_idx_for_arrow = (arrow.target_beat / 4.0).floor() as usize;
+            let mut arrow_tint = config::ARROW_TINT_OTHER; // Default
+
+            if measure_idx_for_arrow < game_state.processed_chart.measures.len() {
+                let measure_data = &game_state.processed_chart.measures[measure_idx_for_arrow];
+                let num_lines_in_measure = measure_data.len();
+
+                if num_lines_in_measure > 0 {
+                    let measure_base_beat = measure_idx_for_arrow as f32 * 4.0;
+                    let beat_offset_from_measure_start = arrow.target_beat - measure_base_beat;
+                    let line_index_in_measure_float = (beat_offset_from_measure_start / 4.0) * num_lines_in_measure as f32;
+                    let line_index_in_measure = (line_index_in_measure_float + 0.001).round() as usize;
+
+                    match num_lines_in_measure {
+                        4 | 2 | 1 => {
+                            arrow_tint = config::ARROW_TINT_QUARTER;
+                        }
+                        8 => {
+                            if line_index_in_measure % 2 == 0 {
+                                arrow_tint = config::ARROW_TINT_QUARTER;
+                            } else {
+                                arrow_tint = config::ARROW_TINT_EIGHTH;
+                            }
+                        }
+                        16 => {
+                            if line_index_in_measure % 4 == 0 {
+                                arrow_tint = config::ARROW_TINT_QUARTER;
+                            } else if line_index_in_measure % 2 == 0 {
+                                arrow_tint = config::ARROW_TINT_EIGHTH;
+                            } else {
+                                arrow_tint = config::ARROW_TINT_SIXTEENTH;
+                            }
+                        }
+                        12 => {
+                            if line_index_in_measure % 3 == 0 {
+                                arrow_tint = config::ARROW_TINT_QUARTER;
+                            } else {
+                                arrow_tint = config::ARROW_TINT_TWELFTH;
+                            }
+                        }
+                        24 => {
+                            if line_index_in_measure % 6 == 0 {
+                                arrow_tint = config::ARROW_TINT_QUARTER;
+                            } else if line_index_in_measure % 3 == 0 {
+                                arrow_tint = config::ARROW_TINT_EIGHTH;
+                            } else {
+                                arrow_tint = config::ARROW_TINT_TWENTYFOURTH;
+                            }
+                        }
+                        _ => {
+                            // Keep ARROW_TINT_OTHER or add more specific logic
+                            // warn!( /* ... */); // Warning for unusual measure lengths is good
+                        }
                     }
                 }
-                _ => [0.5, 0.5, 0.5, 0.5], // Default for unhandled NoteChar
-            };
+            }
 
             let rotation_angle = match arrow.direction {
-                ArrowDirection::Left => Rad(PI / 2.0), ArrowDirection::Down => Rad(0.0),
-                ArrowDirection::Up => Rad(PI), ArrowDirection::Right => Rad(-PI / 2.0),
+                ArrowDirection::Left => Rad(PI / 2.0),
+                ArrowDirection::Down => Rad(0.0),
+                ArrowDirection::Up => Rad(PI),
+                ArrowDirection::Right => Rad(-PI / 2.0),
             };
             renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay,
                 Vector3::new(arrow.x, arrow.y, 0.0),

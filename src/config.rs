@@ -25,11 +25,9 @@ pub const SONG_AUDIO_FILENAME: &str = "about_tonight.ogg";
 pub const TARGET_Y_POS: f32 = 150.0;
 pub const TARGET_SIZE: f32 = 120.0;
 pub const ARROW_SIZE: f32 = 120.0;
-pub const ARROW_SPEED: f32 = 600.0; // Pixels per second
-pub const SONG_BPM: f32 = 174.0;
-pub const AUDIO_SYNC_OFFSET_MS: i64 = 60;
-pub const SPAWN_LOOKAHEAD_BEATS: f32 = 4.0; // How many beats ahead to spawn notes (Reduced from 10.0)
-pub const DIFFICULTY: u32 = 2; // 0:Q, 1:Q+50%E, 2:Q+E, 3:Q+E+S+NoRepeat, 4+:Q+E+S
+pub const ARROW_SPEED: f32 = 1300.0; // Pixels per second
+pub const AUDIO_SYNC_OFFSET_MS: i64 = 30;
+pub const SPAWN_LOOKAHEAD_BEATS: f32 = 10.0; // How many beats ahead to spawn notes (Reduced from 10.0)
 
 // Judgment Windows (milliseconds)
 pub const W1_WINDOW_MS: f32 = 21.5;
@@ -41,9 +39,12 @@ pub const MISS_WINDOW_MS: f32 = 200.0; // Time after target beat until considere
 
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5]; // Default target tint
-pub const ARROW_TINT_QUARTER: [f32; 4] = [1.0, 0.6, 0.6, 1.0];
-pub const ARROW_TINT_EIGHTH: [f32; 4] = [0.6, 0.6, 1.0, 1.0];
-pub const ARROW_TINT_SIXTEENTH: [f32; 4] = [0.6, 1.0, 0.6, 1.0];
+pub const ARROW_TINT_QUARTER: [f32; 4] = [1.0, 0.6, 0.6, 1.0]; // Red-ish
+pub const ARROW_TINT_EIGHTH: [f32; 4] = [0.6, 0.6, 1.0, 1.0];  // Blue-ish
+pub const ARROW_TINT_SIXTEENTH: [f32; 4] = [0.6, 1.0, 0.6, 1.0]; // Green-ish
+pub const ARROW_TINT_TWELFTH: [f32; 4] = [0.8, 0.5, 1.0, 1.0]; // Purple-ish for 12ths (triplets)
+pub const ARROW_TINT_TWENTYFOURTH: [f32; 4] = [0.7, 0.4, 0.9, 1.0]; // Lighter Purple-ish for 24ths
+pub const ARROW_TINT_OTHER: [f32; 4] = [0.9, 0.9, 0.9, 1.0];    // White/Gray for other quantizations
 pub const FLASH_COLOR_W1: [f32; 4] = [0.2, 0.7, 1.0, 0.9]; // Marvelous
 pub const FLASH_COLOR_W2: [f32; 4] = [1.0, 0.8, 0.2, 0.9]; // Perfect
 pub const FLASH_COLOR_W3: [f32; 4] = [0.2, 1.0, 0.2, 0.9]; // Great
