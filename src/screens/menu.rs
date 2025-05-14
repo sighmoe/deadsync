@@ -89,11 +89,12 @@ pub fn draw(
     let center_x = window_width / 2.0;
     let center_y = window_height / 2.0;
 
-    // --- Logo ---
+    // --- Calculate Logo and Dancer Dimensions (Dancer width will match Logo width) ---
     let initial_logo_display_height = window_height * config::LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT;
     let aspect_ratio_logo = logo_texture.width as f32 / logo_texture.height.max(1) as f32;
     let initial_logo_display_width = initial_logo_display_height * aspect_ratio_logo;
 
+    // Final dimensions for the logo (and thus dancer width)
     let final_logo_display_width;
     let final_logo_display_height;
 
@@ -102,31 +103,20 @@ pub fn draw(
         if aspect_ratio_logo > 1e-6 {
             final_logo_display_height = final_logo_display_width / aspect_ratio_logo;
         } else {
-            final_logo_display_height = initial_logo_display_height;
+            final_logo_display_height = initial_logo_display_height; // Should not happen with real aspect ratio
         }
     } else {
         final_logo_display_width = initial_logo_display_width;
         final_logo_display_height = initial_logo_display_height;
     }
 
+    // Shared center position for logo and dancer
     let logo_center_x = center_x;
     let logo_center_y = center_y * 0.75; // Adjusted to move logo slightly higher for more menu space
     let logo_bottom_edge_y = logo_center_y + (final_logo_display_height / 2.0);
 
-    renderer.draw_quad(
-        device,
-        cmd_buf,
-        DescriptorSetId::Logo,
-        cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0),
-        (final_logo_display_width, final_logo_display_height),
-        cgmath::Rad(0.0),
-        [1.0; 4],
-        [0.0; 2],
-        [1.0; 2],
-    );
-
-    // --- Dancer ---
-    let dancer_display_width = final_logo_display_width * 0.8;
+    // --- Dancer (Draw First for correct layering) ---
+    let dancer_display_width = final_logo_display_width; // Make dancer same width as logo
     let aspect_ratio_dancer = dancer_texture.width as f32 / dancer_texture.height.max(1) as f32;
     let dancer_display_height = if aspect_ratio_dancer > 1e-6 {
         dancer_display_width / aspect_ratio_dancer
@@ -139,7 +129,7 @@ pub fn draw(
             device,
             cmd_buf,
             DescriptorSetId::Dancer,
-            cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0),
+            cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0), // Using same center as logo
             (dancer_display_width, dancer_display_height),
             cgmath::Rad(0.0),
             [1.0; 4],
@@ -147,6 +137,20 @@ pub fn draw(
             [1.0; 2],
         );
     }
+
+    // --- Logo (Draw Second, so it's on top of the dancer) ---
+    renderer.draw_quad(
+        device,
+        cmd_buf,
+        DescriptorSetId::Logo,
+        cgmath::Vector3::new(logo_center_x, logo_center_y, 0.0),
+        (final_logo_display_width, final_logo_display_height),
+        cgmath::Rad(0.0),
+        [1.0; 4],
+        [0.0; 2],
+        [1.0; 2],
+    );
+
 
     // --- Menu Options ---
     let default_item_pixel_size: f32 = 42.0 * (window_height / config::UI_REFERENCE_HEIGHT);
