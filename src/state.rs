@@ -1,4 +1,3 @@
-// src/state.rs
 use crate::parsing::simfile::{SongInfo, ProcessedChartData, NoteChar};
 use crate::screens::gameplay::{TimingData};
 use cgmath::Matrix4;
@@ -35,18 +34,17 @@ impl Default for MenuState {
     }
 }
 
-// NEW: Enum to represent entries in the music wheel
 #[derive(Debug, Clone)]
 pub enum MusicWheelEntry {
     Song(Arc<SongInfo>),
-    PackHeader(String),
+    PackHeader { name: String, color: [f32; 4] }, // MODIFIED: Include color
 }
 
 #[derive(Debug, Clone)]
 pub struct SelectMusicState {
     pub entries: Vec<MusicWheelEntry>,
     pub selected_index: usize,
-    pub expanded_pack_name: Option<String>, // NEW: Tracks the currently expanded pack
+    pub expanded_pack_name: Option<String>,
 }
 
 impl Default for SelectMusicState {
@@ -54,7 +52,7 @@ impl Default for SelectMusicState {
         SelectMusicState {
             entries: Vec::new(),
             selected_index: 0,
-            expanded_pack_name: None, // NEW: Initially no pack is expanded
+            expanded_pack_name: None,
         }
     }
 }

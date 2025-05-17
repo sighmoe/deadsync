@@ -60,14 +60,14 @@ pub fn handle_input(
                                     audio_manager.play_sfx(SoundId::MenuStart);
                                     return (Some(AppState::Gameplay), selection_changed); 
                                 }
-                                MusicWheelEntry::PackHeader(pack_name) => {
+                                MusicWheelEntry::PackHeader { name: pack_name_str, .. } => {
                                     audio_manager.play_sfx(SoundId::MenuChange); 
-                                    if state.expanded_pack_name.as_ref() == Some(&pack_name) {
+                                    if state.expanded_pack_name.as_ref() == Some(&pack_name_str) {
                                         state.expanded_pack_name = None; 
-                                        debug!("Collapsing pack: {}", pack_name);
+                                        debug!("Collapsing pack: {}", pack_name_str);
                                     } else {
-                                        state.expanded_pack_name = Some(pack_name.clone()); 
-                                        debug!("Expanding pack: {}", pack_name);
+                                        state.expanded_pack_name = Some(pack_name_str.clone()); 
+                                        debug!("Expanding pack: {}", pack_name_str);
                                     }
                                     selection_changed = true; 
                                 }
@@ -162,7 +162,7 @@ pub fn draw(
     let vertical_gap_stepartist_to_artist_current = VERTICAL_GAP_STEPARTIST_TO_ARTIST_REF * height_scale_factor;
     let vertical_gap_artist_to_banner_current = VERTICAL_GAP_ARTIST_TO_BANNER_REF * height_scale_factor;
 
-    // --- Music Wheel Box and Text Drawing (main part to change) ---
+    // --- Music Wheel Box and Text Drawing ---
     let total_music_boxes_height = NUM_MUSIC_WHEEL_BOXES as f32 * music_wheel_box_current_height;
     let total_music_gaps_height = (NUM_MUSIC_WHEEL_BOXES.saturating_sub(1)) as f32 * music_wheel_vertical_gap_current;
     let full_music_wheel_stack_height = total_music_boxes_height + total_music_gaps_height;
@@ -180,14 +180,11 @@ pub fn draw(
         let current_box_center_y = current_box_top_y + music_wheel_box_current_height / 2.0;
 
         let mut display_text = "".to_string();
-        let mut current_box_color = config::MUSIC_WHEEL_BOX_COLOR;
-        let current_text_color = if i == CENTER_MUSIC_WHEEL_SLOT_INDEX { // text color still depends on selection
-            config::MENU_SELECTED_COLOR
-        } else {
-            config::MENU_NORMAL_COLOR
-        };
+        let mut current_box_color = config::MUSIC_WHEEL_BOX_COLOR; // Default for songs
+        let mut current_text_color = config::SONG_TEXT_COLOR;    // Default for songs
 
         let num_entries = state.entries.len();
+        let is_selected_slot = i == CENTER_MUSIC_WHEEL_SLOT_INDEX;
 
         if num_entries > 0 {
             let list_index_isize = (state.selected_index as isize
@@ -206,12 +203,26 @@ pub fn draw(
                 match entry {
                     MusicWheelEntry::Song(song_info_arc) => {
                         display_text = song_info_arc.title.clone();
-                        // Box color remains default MUSIC_WHEEL_BOX_COLOR
+                        current_box_color = if is_selected_slot {
+                            config::SELECTED_SONG_BOX_COLOR
+                        } else {
+                            config::MUSIC_WHEEL_BOX_COLOR
+                        };
+                        current_text_color = config::SONG_TEXT_COLOR; // Always white for songs
                     }
-                    MusicWheelEntry::PackHeader(pack_name) => {
-                        // REMOVED [+] and [-] indicators
-                        display_text = format!("PACK: {}", pack_name);
-                        current_box_color = config::PACK_HEADER_BOX_COLOR;
+                    MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color } => {
+                        display_text = pack_name.clone(); // No "PACK: " prefix
+                        current_box_color = if is_selected_slot {
+                            config::SELECTED_PACK_HEADER_BOX_COLOR
+                        } else {
+                            config::PACK_HEADER_BOX_COLOR
+                        };
+                        current_text_color = *pack_text_color; // Use assigned palette color for text
+                                                              // If selected, box changes, text color remains from palette.
+                                                              // Or, if you want selected pack text to be white/yellow:
+                        // if is_selected_slot {
+                        //     current_text_color = config::MENU_SELECTED_COLOR;
+                        // }
                     }
                 }
             }
@@ -353,7 +364,7 @@ pub fn draw(
 
         renderer.draw_text(
             device, cmd_buf, list_font, &artist_text_full,
-            artist_text_x_pos, artist_text_baseline_y, config::MENU_NORMAL_COLOR,
+            artist_text_x_pos, artist_text_baseline_y, config::SONG_TEXT_COLOR, // Use SONG_TEXT_COLOR
             detail_text_effective_scale, None
         );
 
@@ -376,7 +387,7 @@ pub fn draw(
 
         renderer.draw_text(
             device, cmd_buf, list_font, &bpm_text_full,
-            bpm_text_x_pos, bpm_text_baseline_y, config::MENU_NORMAL_COLOR,
+            bpm_text_x_pos, bpm_text_baseline_y, config::SONG_TEXT_COLOR, // Use SONG_TEXT_COLOR
             detail_text_effective_scale, None
         );
     }
