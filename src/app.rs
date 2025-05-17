@@ -5,7 +5,7 @@ use crate::graphics::renderer::Renderer;
 use crate::graphics::vulkan_base::VulkanBase;
 use crate::parsing::simfile::{scan_packs, SongInfo};
 use crate::screens::{gameplay, menu, options, select_music};
-use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState, MusicWheelEntry}; // MODIFIED
+use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState, MusicWheelEntry, VirtualKeyCode}; // MODIFIED
 use crate::utils::fps::FPSCounter;
 
 use ash::vk;
@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::{
     dpi::PhysicalSize,
-    event::{Event, KeyEvent, WindowEvent},
+    event::{ElementState, Event, KeyEvent, WindowEvent}, // Added ElementState
     event_loop::{ControlFlow, EventLoop},
     platform::run_on_demand::EventLoopExtRunOnDemand,
     window::WindowBuilder,
@@ -45,6 +45,7 @@ pub struct App {
 
 impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self, Box<dyn Error>> {
+        // ... (constructor remains the same as your previous version)
         info!("Creating Application...");
 
         let window = WindowBuilder::new()
@@ -104,6 +105,7 @@ impl App {
         })
     }
 
+    // ... (run, try_process_pending_resize, handle_window_event remain the same) ...
     pub fn run(mut self, mut event_loop: EventLoop<()>) -> Result<(), Box<dyn Error>> {
         info!("Starting Event Loop...");
         self.last_frame_time = Instant::now();
@@ -236,6 +238,80 @@ impl App {
         }
     }
 
+
+    fn rebuild_music_wheel_entries(&mut self) {
+        let mut new_entries = Vec::new();
+        let mut current_pack_name_in_library = String::new();
+
+        // Determine which pack header was (or should be) selected to maintain focus.
+        // If a pack was just expanded/collapsed, `expanded_pack_name` reflects the *new* state.
+        // We want to select the header corresponding to `expanded_pack_name` if it's Some,
+        // or the previously selected pack header if a collapse just happened.
+        let pack_to_focus_on: Option<String> = self.select_music_state.expanded_pack_name.clone()
+            .or_else(|| {
+                // If no pack is expanded (it was just collapsed, or never expanded),
+                // try to get the name of the pack header that was at the old selected_index.
+                if let Some(entry) = self.select_music_state.entries.get(self.select_music_state.selected_index) {
+                    if let MusicWheelEntry::PackHeader(name) = entry {
+                        Some(name.clone())
+                    } else { None }
+                } else { None }
+            });
+
+
+        for song_info in &self.song_library {
+            let pack_name_for_song = song_info
+                .folder_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|name| name.to_str())
+                .unwrap_or("Unknown Pack")
+                .to_string();
+
+            if pack_name_for_song != current_pack_name_in_library {
+                new_entries.push(MusicWheelEntry::PackHeader(pack_name_for_song.clone()));
+                current_pack_name_in_library = pack_name_for_song.clone();
+            }
+
+            if let Some(expanded_name) = &self.select_music_state.expanded_pack_name {
+                if *expanded_name == pack_name_for_song {
+                    new_entries.push(MusicWheelEntry::Song(Arc::new(song_info.clone())));
+                }
+            }
+        }
+        self.select_music_state.entries = new_entries;
+
+        // Adjust selected_index
+        if let Some(focus_pack_name) = pack_to_focus_on {
+            if let Some(new_idx) = self.select_music_state.entries.iter().position(|entry| {
+                match entry {
+                    MusicWheelEntry::PackHeader(name) => name == &focus_pack_name,
+                    _ => false,
+                }
+            }) {
+                self.select_music_state.selected_index = new_idx;
+            } else {
+                // Fallback if the focused pack is somehow not in the new list (should not happen)
+                self.select_music_state.selected_index = 0;
+            }
+        } else {
+            // No specific pack to focus on, just ensure index is valid.
+            // This case might occur if the list was empty and then populated.
+            self.select_music_state.selected_index = 0;
+        }
+        
+        // Final check to prevent out-of-bounds if list became empty or very short
+        if !self.select_music_state.entries.is_empty() {
+            if self.select_music_state.selected_index >= self.select_music_state.entries.len() {
+                self.select_music_state.selected_index = self.select_music_state.entries.len() - 1;
+            }
+        } else {
+            self.select_music_state.selected_index = 0;
+        }
+        info!("Rebuilt music wheel. New #entries: {}, selected_index: {}", self.select_music_state.entries.len(), self.select_music_state.selected_index);
+    }
+
+
     fn handle_keyboard_input(&mut self, key_event: KeyEvent) {
         trace!("Keyboard Input: {:?}", key_event);
         let mut requested_state: Option<AppState> = None;
@@ -247,13 +323,36 @@ impl App {
                     menu::handle_input(&key_event, &mut self.menu_state, &self.audio_manager);
             }
             AppState::SelectMusic => {
-                let (next_state, selection_changed) = select_music::handle_input(
+                let original_selected_index = self.select_music_state.selected_index;
+                let original_expanded_pack = self.select_music_state.expanded_pack_name.clone();
+
+                let (next_state, sel_changed) = select_music::handle_input(
                     &key_event,
-                    &mut self.select_music_state,
+                    &mut self.select_music_state, // This might change expanded_pack_name
                     &self.audio_manager,
                 );
                 requested_state = next_state;
-                selection_changed_in_music = selection_changed;
+                selection_changed_in_music = sel_changed; // This is true if Up/Down/Left/Right was pressed OR if Enter on pack toggled expansion
+
+                // If Enter was pressed, and it was on a PackHeader, then rebuild.
+                // `select_music::handle_input` would have updated `expanded_pack_name`.
+                if key_event.state == ElementState::Pressed && !key_event.repeat {
+                    if let Some(VirtualKeyCode::Enter) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
+                        // Check the entry at the *original* selected index before potential rebuild changes it
+                        if let Some(entry) = self.select_music_state.entries.get(original_selected_index) {
+                            if let MusicWheelEntry::PackHeader(_) = entry {
+                                // Enter was pressed on a pack header.
+                                // `handle_input` above toggled `expanded_pack_name`.
+                                // Now, rebuild the entries list based on the new `expanded_pack_name`.
+                                self.rebuild_music_wheel_entries();
+                                // selection_changed_in_music is already true from handle_input,
+                                // which will trigger banner update.
+                            }
+                        }
+                    }
+                }
+                 // If the selected_index itself changed due to arrow keys, selection_changed_in_music is true.
+                 // If expanded_pack_name changed, selection_changed_in_music is also true.
             }
             AppState::Options => {
                 requested_state = options::handle_input(&key_event, &mut self.options_state);
@@ -287,7 +386,7 @@ impl App {
                          );
                      }
                      MusicWheelEntry::PackHeader(_) => {
-                         info!("Selected a pack header, loading fallback banner.");
+                         info!("Selected a pack header ({}), loading fallback banner.", current_index);
                          if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                               self.renderer.update_texture_descriptor(
                                   &self.vulkan_base.device,
@@ -298,7 +397,14 @@ impl App {
                      }
                  }
              } else {
-                 warn!("Selection changed in Music Select, but index {} is out of bounds ({} entries).", current_index, self.select_music_state.entries.len());
+                 warn!("Selection changed in Music Select, but index {} is out of bounds ({} entries). Loading fallback.", current_index, self.select_music_state.entries.len());
+                  if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                        self.renderer.update_texture_descriptor(
+                            &self.vulkan_base.device,
+                            crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                            fallback_res,
+                        );
+                    }
              }
         }
     }
@@ -325,37 +431,22 @@ impl App {
                 self.menu_state = MenuState::default();
             }
             AppState::SelectMusic => {
-                let mut entries = Vec::new();
-                let mut current_pack_name_processed = String::new();
-
-                for song_info in &self.song_library {
-                    let pack_name = song_info
-                        .folder_path
-                        .parent()
-                        .and_then(|p| p.file_name())
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("Unknown Pack")
-                        .to_string();
-
-                    if pack_name != current_pack_name_processed {
-                        entries.push(MusicWheelEntry::PackHeader(pack_name.clone()));
-                        current_pack_name_processed = pack_name;
-                    }
-                    entries.push(MusicWheelEntry::Song(Arc::new(song_info.clone())));
-                }
-
+                // Initialize with no pack expanded
                 self.select_music_state = SelectMusicState {
-                    entries,
+                    entries: Vec::new(), // Will be populated by rebuild
                     selected_index: 0,
+                    expanded_pack_name: None, // Start with no pack expanded
                 };
+                self.rebuild_music_wheel_entries(); // Populate entries based on collapsed state
+
                 info!(
-                    "Populated SelectMusic state with {} entries (songs and pack headers).",
+                    "Populated SelectMusic state with {} entries (initially collapsed).",
                     self.select_music_state.entries.len()
                 );
 
                  if let Some(first_entry) = self.select_music_state.entries.first() {
                       match first_entry {
-                          MusicWheelEntry::Song(initial_song_arc) => {
+                          MusicWheelEntry::Song(initial_song_arc) => { // Should not happen if all packs are initially collapsed
                               self.asset_manager.load_song_banner(
                                  &self.vulkan_base,
                                  &self.renderer,
@@ -389,6 +480,7 @@ impl App {
             }
             AppState::Gameplay => {
                  info!("Initializing Gameplay State...");
+                 // This logic needs to get the SongInfo from the currently selected MusicWheelEntry::Song
                  let selected_entry_opt = self.select_music_state.entries.get(self.select_music_state.selected_index);
 
                 if let Some(MusicWheelEntry::Song(selected_song_arc)) = selected_entry_opt {
@@ -397,7 +489,7 @@ impl App {
                         self.next_app_state = Some(AppState::SelectMusic);
                         return;
                     }
-                    let song_info_for_gameplay = selected_song_arc.clone(); // Clone the Arc for GameState
+                    let song_info_for_gameplay = selected_song_arc.clone();
                     let audio_path = song_info_for_gameplay.audio_path.as_ref().unwrap();
 
                     info!("Starting gameplay with song: {}", song_info_for_gameplay.title);
@@ -424,7 +516,7 @@ impl App {
                                 window_size_f32.0, 
                                 window_size_f32.1, 
                                 start_time,
-                                song_info_for_gameplay, // Pass the Arc<SongInfo>
+                                song_info_for_gameplay,
                                 selected_chart_idx,
                             ));
                             info!("Gameplay state initialized and music started.");
@@ -436,11 +528,8 @@ impl App {
                         }
                     }
                 } else {
-                    // This case handles if selected_entry_opt is None (index out of bounds)
-                    // or if it's a MusicWheelEntry::PackHeader.
-                    // The input handler for Enter should ideally prevent trying to start gameplay on a PackHeader.
                     error!("Cannot start gameplay: Selected item is not a song or selection is invalid. Returning to SelectMusic.");
-                    self.next_app_state = Some(AppState::SelectMusic); // Stay or go back explicitly
+                    self.next_app_state = Some(AppState::SelectMusic);
                     return;
                 }
             }
@@ -455,7 +544,7 @@ impl App {
         ));
     }
 
-
+    // ... (update, handle_actual_resize, render, Drop remain the same) ...
     fn update(&mut self, dt: f32) {
         trace!("Update Start (dt: {:.4} s)", dt);
         match self.current_app_state {

@@ -2,7 +2,7 @@ use crate::assets::{AssetManager, FontId, SoundId};
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
-use crate::state::{AppState, SelectMusicState, VirtualKeyCode, MusicWheelEntry}; // MODIFIED
+use crate::state::{AppState, SelectMusicState, VirtualKeyCode, MusicWheelEntry};
 use ash::vk;
 use cgmath::{Rad, Vector3};
 use log::debug;
@@ -50,15 +50,28 @@ pub fn handle_input(
                 }
                 VirtualKeyCode::Enter => {
                     if num_entries > 0 {
-                        if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
-                            debug!(
-                                "SelectMusic Enter: Attempting to start song '{}' at index {}",
-                                selected_song_arc.title, state.selected_index
-                            );
-                            audio_manager.play_sfx(SoundId::MenuStart);
-                            return (Some(AppState::Gameplay), selection_changed); 
-                        } else {
-                            debug!("SelectMusic Enter: Selected a Pack Header or invalid entry. No action.");
+                        if let Some(entry_clone) = state.entries.get(state.selected_index).cloned() {
+                            match entry_clone {
+                                MusicWheelEntry::Song(selected_song_arc) => {
+                                    debug!(
+                                        "SelectMusic Enter: Attempting to start song '{}' at index {}",
+                                        selected_song_arc.title, state.selected_index
+                                    );
+                                    audio_manager.play_sfx(SoundId::MenuStart);
+                                    return (Some(AppState::Gameplay), selection_changed); 
+                                }
+                                MusicWheelEntry::PackHeader(pack_name) => {
+                                    audio_manager.play_sfx(SoundId::MenuChange); 
+                                    if state.expanded_pack_name.as_ref() == Some(&pack_name) {
+                                        state.expanded_pack_name = None; 
+                                        debug!("Collapsing pack: {}", pack_name);
+                                    } else {
+                                        state.expanded_pack_name = Some(pack_name.clone()); 
+                                        debug!("Expanding pack: {}", pack_name);
+                                    }
+                                    selection_changed = true; 
+                                }
+                            }
                         }
                     }
                 }
@@ -75,6 +88,7 @@ pub fn handle_input(
 
 pub fn update(_state: &mut SelectMusicState, _dt: f32) {}
 
+
 pub fn draw(
     renderer: &Renderer,
     state: &SelectMusicState,
@@ -87,13 +101,13 @@ pub fn draw(
     let (window_width, window_height) = renderer.window_size();
     let center_x = window_width / 2.0;
 
+    // --- Constants (same as before) ---
     const TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES: f32 = 36.0;
-    const OBSERVED_PX_HEIGHT_AT_REF_FOR_30PX_TARGET_OLD_METHOD: f32 = 19.0; // Keep if used for scaling compensation
-    const ASCENDER_POSITIONING_ADJUSTMENT_FACTOR: f32 = 0.65; // Keep if used
+    const OBSERVED_PX_HEIGHT_AT_REF_FOR_30PX_TARGET_OLD_METHOD: f32 = 19.0;
+    const ASCENDER_POSITIONING_ADJUSTMENT_FACTOR: f32 = 0.65;
     const HEADER_FOOTER_LETTER_SPACING_FACTOR: f32 = 0.90;
     const MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 22.0;
     const TEXT_VERTICAL_NUDGE_PX_AT_REF_RES: f32 = 2.0;
-
     const PINK_BOX_REF_WIDTH: f32 = 625.0;
     const PINK_BOX_REF_HEIGHT: f32 = 90.0;
     const SMALL_UPPER_RIGHT_BOX_REF_WIDTH: f32 = 48.0;
@@ -104,8 +118,8 @@ pub fn draw(
     const TOPMOST_LEFT_BOX_REF_HEIGHT: f32 = 26.0;
     const ARTIST_BPM_BOX_REF_WIDTH: f32 = 480.0;
     const ARTIST_BPM_BOX_REF_HEIGHT: f32 = 75.0;
-    const FALLBACK_BANNER_REF_WIDTH: f32 = 480.0; // Used for positioning the DynamicBanner quad
-    const FALLBACK_BANNER_REF_HEIGHT: f32 = 188.0; // Used for positioning the DynamicBanner quad
+    const FALLBACK_BANNER_REF_WIDTH: f32 = 480.0;
+    const FALLBACK_BANNER_REF_HEIGHT: f32 = 188.0;
     const MUSIC_WHEEL_BOX_REF_WIDTH: f32 = 591.0;
     const MUSIC_WHEEL_BOX_REF_HEIGHT: f32 = 46.0;
     const NUM_MUSIC_WHEEL_BOXES: usize = 15;
@@ -118,6 +132,7 @@ pub fn draw(
     const VERTICAL_GAP_ARTIST_TO_BANNER_REF: f32 = 2.0;
     const MUSIC_WHEEL_VERTICAL_GAP_REF: f32 = 2.0;
 
+    // --- Scaled Dimensions (same as before) ---
     let width_scale_factor = window_width / config::LAYOUT_BOXES_REF_RES_WIDTH;
     let height_scale_factor = window_height / config::LAYOUT_BOXES_REF_RES_HEIGHT;
 
@@ -147,6 +162,7 @@ pub fn draw(
     let vertical_gap_stepartist_to_artist_current = VERTICAL_GAP_STEPARTIST_TO_ARTIST_REF * height_scale_factor;
     let vertical_gap_artist_to_banner_current = VERTICAL_GAP_ARTIST_TO_BANNER_REF * height_scale_factor;
 
+    // --- Music Wheel Box and Text Drawing (main part to change) ---
     let total_music_boxes_height = NUM_MUSIC_WHEEL_BOXES as f32 * music_wheel_box_current_height;
     let total_music_gaps_height = (NUM_MUSIC_WHEEL_BOXES.saturating_sub(1)) as f32 * music_wheel_vertical_gap_current;
     let full_music_wheel_stack_height = total_music_boxes_height + total_music_gaps_height;
@@ -165,7 +181,7 @@ pub fn draw(
 
         let mut display_text = "".to_string();
         let mut current_box_color = config::MUSIC_WHEEL_BOX_COLOR;
-        let mut current_text_color = if i == CENTER_MUSIC_WHEEL_SLOT_INDEX {
+        let current_text_color = if i == CENTER_MUSIC_WHEEL_SLOT_INDEX { // text color still depends on selection
             config::MENU_SELECTED_COLOR
         } else {
             config::MENU_NORMAL_COLOR
@@ -190,8 +206,10 @@ pub fn draw(
                 match entry {
                     MusicWheelEntry::Song(song_info_arc) => {
                         display_text = song_info_arc.title.clone();
+                        // Box color remains default MUSIC_WHEEL_BOX_COLOR
                     }
                     MusicWheelEntry::PackHeader(pack_name) => {
+                        // REMOVED [+] and [-] indicators
                         display_text = format!("PACK: {}", pack_name);
                         current_box_color = config::PACK_HEADER_BOX_COLOR;
                     }
@@ -224,6 +242,8 @@ pub fn draw(
         }
     }
 
+    // --- Draw other layout elements (Quads for UI boxes) ---
+    // (This section remains the same as before)
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, footer_y_top_edge + bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
     
@@ -280,6 +300,7 @@ pub fn draw(
     
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::DynamicBanner, Vector3::new(fallback_banner_center_x, fallback_banner_center_y, 0.0), (fallback_banner_width_to_draw, fallback_banner_current_height), Rad(0.0), [1.0, 1.0, 1.0, 1.0], [0.0,0.0], [1.0,1.0] );
 
+    // --- Header and Footer Text Drawing (same as before) ---
     let hf_target_visual_current_px_height = TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES * height_scale_factor;
     let hf_font_typographic_height_normalized = (header_footer_font.metrics.ascender - header_footer_font.metrics.descender).max(1e-5);
 
@@ -316,24 +337,19 @@ pub fn draw(
     };
     renderer.draw_text( device, cmd_buf, header_footer_font, footer_text_str, center_x - footer_text_visual_width / 2.0, footer_baseline_y, config::UI_BAR_TEXT_COLOR, hf_effective_scale, Some(HEADER_FOOTER_LETTER_SPACING_FACTOR) );
 
-    // Draw song-specific text (Artist, BPM) if a song is selected in the center slot
+    // --- Draw Artist/BPM (same as before) ---
     if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
-        // Define a text scale for artist/bpm, e.g., smaller than wheel text
-        let detail_text_target_px_height = MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * 0.8 * height_scale_factor; // Slightly smaller
+        let detail_text_target_px_height = MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * 0.8 * height_scale_factor;
         let detail_font_typographic_height_normalized = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
         let detail_text_effective_scale = detail_text_target_px_height / detail_font_typographic_height_normalized;
         
         let artist_text_full = format!("Artist: {}", selected_song_arc.artist);
-        let artist_text_width_pixels = list_font.measure_text_normalized(&artist_text_full) * detail_text_effective_scale;
-        
         let artist_bpm_box_padding_x = 10.0 * width_scale_factor;
         let artist_text_x_pos = artist_bpm_box_left_x + artist_bpm_box_padding_x;
 
-        // Vertical centering for artist_text (top part of artist_bpm_box)
         let artist_visual_height = detail_font_typographic_height_normalized * detail_text_effective_scale;
-        let artist_visual_top_y = artist_bpm_box_top_y + (artist_bpm_box_current_height / 2.0 - artist_visual_height) / 2.0 ; // Center in top half
-        let mut artist_text_baseline_y = artist_visual_top_y + (list_font.metrics.ascender * detail_text_effective_scale) + text_vertical_nudge_current;
-
+        let artist_visual_top_y = artist_bpm_box_top_y + (artist_bpm_box_current_height / 2.0 - artist_visual_height) / 2.0 ;
+        let artist_text_baseline_y = artist_visual_top_y + (list_font.metrics.ascender * detail_text_effective_scale) + text_vertical_nudge_current;
 
         renderer.draw_text(
             device, cmd_buf, list_font, &artist_text_full,
@@ -354,13 +370,9 @@ pub fn draw(
         } else {
             "BPM: ???".to_string()
         };
-        let bpm_text_width_pixels = list_font.measure_text_normalized(&bpm_text_full) * detail_text_effective_scale;
         let bpm_text_x_pos = artist_bpm_box_left_x + artist_bpm_box_padding_x;
-
-        // Vertical centering for bpm_text (bottom part of artist_bpm_box)
-        let bpm_visual_top_y = artist_bpm_box_top_y + artist_bpm_box_current_height / 2.0 + (artist_bpm_box_current_height / 2.0 - artist_visual_height) / 2.0; // Center in bottom half
-        let mut bpm_text_baseline_y = bpm_visual_top_y + (list_font.metrics.ascender * detail_text_effective_scale) + text_vertical_nudge_current;
-
+        let bpm_visual_top_y = artist_bpm_box_top_y + artist_bpm_box_current_height / 2.0 + (artist_bpm_box_current_height / 2.0 - artist_visual_height) / 2.0;
+        let bpm_text_baseline_y = bpm_visual_top_y + (list_font.metrics.ascender * detail_text_effective_scale) + text_vertical_nudge_current;
 
         renderer.draw_text(
             device, cmd_buf, list_font, &bpm_text_full,

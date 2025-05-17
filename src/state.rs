@@ -1,5 +1,6 @@
+// src/state.rs
 use crate::parsing::simfile::{SongInfo, ProcessedChartData, NoteChar};
-use crate::screens::gameplay::{TimingData}; // TimingData might not be needed here if GameState doesn't directly hold it. Review if it's used.
+use crate::screens::gameplay::{TimingData};
 use cgmath::Matrix4;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -37,21 +38,23 @@ impl Default for MenuState {
 // NEW: Enum to represent entries in the music wheel
 #[derive(Debug, Clone)]
 pub enum MusicWheelEntry {
-    Song(Arc<SongInfo>), // Store Arc<SongInfo> for efficiency
-    PackHeader(String),  // Pack name
+    Song(Arc<SongInfo>),
+    PackHeader(String),
 }
 
 #[derive(Debug, Clone)]
 pub struct SelectMusicState {
-    pub entries: Vec<MusicWheelEntry>, // MODIFIED: The wheel will now hold these entries
+    pub entries: Vec<MusicWheelEntry>,
     pub selected_index: usize,
+    pub expanded_pack_name: Option<String>, // NEW: Tracks the currently expanded pack
 }
 
 impl Default for SelectMusicState {
     fn default() -> Self {
         SelectMusicState {
-            entries: Vec::new(), // MODIFIED
+            entries: Vec::new(),
             selected_index: 0,
+            expanded_pack_name: None, // NEW: Initially no pack is expanded
         }
     }
 }
@@ -71,10 +74,10 @@ pub struct GameState {
     pub window_size: (f32, f32),
     pub active_explosions: HashMap<ArrowDirection, ActiveExplosion>,
     pub audio_start_time: Option<Instant>,
-    pub song_info: Arc<SongInfo>, // Arc for efficient cloning if GameState is cloned
+    pub song_info: Arc<SongInfo>,
     pub selected_chart_idx: usize,
-    pub timing_data: Arc<TimingData>, // Arc for efficient cloning
-    pub processed_chart: Arc<ProcessedChartData>, // Arc for efficient cloning
+    pub timing_data: Arc<TimingData>,
+    pub processed_chart: Arc<ProcessedChartData>,
     pub current_measure_idx: usize,
     pub current_line_in_measure_idx: usize,
     pub current_processed_beat: f32,
