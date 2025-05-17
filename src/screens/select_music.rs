@@ -1,36 +1,32 @@
-// src/screens/select_music.rs
-
 use crate::assets::{AssetManager, FontId, SoundId};
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
-use crate::state::{AppState, SelectMusicState, VirtualKeyCode};
+use crate::state::{AppState, SelectMusicState, VirtualKeyCode, MusicWheelEntry}; // MODIFIED
 use ash::vk;
 use cgmath::{Rad, Vector3};
 use log::debug;
 use winit::event::{ElementState, KeyEvent};
 
-// --- Input Handling ---
-// (This function remains the same)
 pub fn handle_input(
     key_event: &KeyEvent,
     state: &mut SelectMusicState,
     audio_manager: &AudioManager,
-) -> (Option<AppState>, bool) {
+) -> (Option<AppState>, bool) { 
     let mut selection_changed = false;
 
     if key_event.state == ElementState::Pressed && !key_event.repeat {
         if let Some(virtual_keycode) =
             crate::state::key_to_virtual_keycode(key_event.logical_key.clone())
         {
-            let num_songs = state.songs.len();
+            let num_entries = state.entries.len(); 
 
             match virtual_keycode {
-                VirtualKeyCode::Left => {
-                    if num_songs > 0 {
+                VirtualKeyCode::Left | VirtualKeyCode::Up => { 
+                    if num_entries > 0 {
                         let old_index = state.selected_index;
                         state.selected_index = if state.selected_index == 0 {
-                            num_songs - 1
+                            num_entries - 1
                         } else {
                             state.selected_index - 1
                         };
@@ -38,36 +34,37 @@ pub fn handle_input(
                             audio_manager.play_sfx(SoundId::MenuChange);
                             selection_changed = true;
                         }
-                        debug!("SelectMusic Left: Selected index {}", state.selected_index);
+                        debug!("SelectMusic {:?}: Selected index {}", virtual_keycode, state.selected_index);
                     }
                 }
-                VirtualKeyCode::Right => {
-                    if num_songs > 0 {
+                VirtualKeyCode::Right | VirtualKeyCode::Down => { 
+                    if num_entries > 0 {
                         let old_index = state.selected_index;
-                        state.selected_index = (state.selected_index + 1) % num_songs;
+                        state.selected_index = (state.selected_index + 1) % num_entries;
                         if state.selected_index != old_index {
                             audio_manager.play_sfx(SoundId::MenuChange);
                             selection_changed = true;
                         }
-                        debug!("SelectMusic Right: Selected index {}", state.selected_index);
+                        debug!("SelectMusic {:?}: Selected index {}", virtual_keycode, state.selected_index);
                     }
                 }
-                VirtualKeyCode::Up | VirtualKeyCode::Down => {
-                    debug!("Up/Down pressed on Select Music (reserved for difficulty).");
-                }
                 VirtualKeyCode::Enter => {
-                    if num_songs > 0 {
-                        debug!(
-                            "SelectMusic Enter: Selected song '{}' at index {}",
-                            state.songs[state.selected_index].title, state.selected_index
-                        );
-                        audio_manager.play_sfx(SoundId::MenuStart);
-                        return (Some(AppState::Gameplay), selection_changed);
+                    if num_entries > 0 {
+                        if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
+                            debug!(
+                                "SelectMusic Enter: Attempting to start song '{}' at index {}",
+                                selected_song_arc.title, state.selected_index
+                            );
+                            audio_manager.play_sfx(SoundId::MenuStart);
+                            return (Some(AppState::Gameplay), selection_changed); 
+                        } else {
+                            debug!("SelectMusic Enter: Selected a Pack Header or invalid entry. No action.");
+                        }
                     }
                 }
                 VirtualKeyCode::Escape => {
                     debug!("SelectMusic Escape: Returning to Main Menu");
-                    return (Some(AppState::Menu), selection_changed);
+                    return (Some(AppState::Menu), selection_changed); 
                 }
                 _ => {}
             }
@@ -76,10 +73,8 @@ pub fn handle_input(
     (None, selection_changed)
 }
 
-// --- Update Logic ---
 pub fn update(_state: &mut SelectMusicState, _dt: f32) {}
 
-// --- Drawing Logic ---
 pub fn draw(
     renderer: &Renderer,
     state: &SelectMusicState,
@@ -87,22 +82,18 @@ pub fn draw(
     device: &ash::Device,
     cmd_buf: vk::CommandBuffer,
 ) {
-   let header_footer_font = assets.get_font(FontId::Wendy).expect("Wendy font missing");
+    let header_footer_font = assets.get_font(FontId::Wendy).expect("Wendy font missing");
     let list_font = assets.get_font(FontId::Miso).expect("Miso font missing");
     let (window_width, window_height) = renderer.window_size();
     let center_x = window_width / 2.0;
 
-    // --- Constants ---
     const TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES: f32 = 36.0;
-    const OBSERVED_PX_HEIGHT_AT_REF_FOR_30PX_TARGET_OLD_METHOD: f32 = 19.0;
-    const ASCENDER_POSITIONING_ADJUSTMENT_FACTOR: f32 = 0.65;
+    const OBSERVED_PX_HEIGHT_AT_REF_FOR_30PX_TARGET_OLD_METHOD: f32 = 19.0; // Keep if used for scaling compensation
+    const ASCENDER_POSITIONING_ADJUSTMENT_FACTOR: f32 = 0.65; // Keep if used
     const HEADER_FOOTER_LETTER_SPACING_FACTOR: f32 = 0.90;
     const MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 22.0;
-
-    // NEW: Vertical nudge amount (at reference resolution)
     const TEXT_VERTICAL_NUDGE_PX_AT_REF_RES: f32 = 2.0;
 
-    // ... (Other constants remain the same) ...
     const PINK_BOX_REF_WIDTH: f32 = 625.0;
     const PINK_BOX_REF_HEIGHT: f32 = 90.0;
     const SMALL_UPPER_RIGHT_BOX_REF_WIDTH: f32 = 48.0;
@@ -113,8 +104,8 @@ pub fn draw(
     const TOPMOST_LEFT_BOX_REF_HEIGHT: f32 = 26.0;
     const ARTIST_BPM_BOX_REF_WIDTH: f32 = 480.0;
     const ARTIST_BPM_BOX_REF_HEIGHT: f32 = 75.0;
-    const FALLBACK_BANNER_REF_WIDTH: f32 = 480.0;
-    const FALLBACK_BANNER_REF_HEIGHT: f32 = 188.0;
+    const FALLBACK_BANNER_REF_WIDTH: f32 = 480.0; // Used for positioning the DynamicBanner quad
+    const FALLBACK_BANNER_REF_HEIGHT: f32 = 188.0; // Used for positioning the DynamicBanner quad
     const MUSIC_WHEEL_BOX_REF_WIDTH: f32 = 591.0;
     const MUSIC_WHEEL_BOX_REF_HEIGHT: f32 = 46.0;
     const NUM_MUSIC_WHEEL_BOXES: usize = 15;
@@ -126,25 +117,17 @@ pub fn draw(
     const VERTICAL_GAP_STEPARTIST_TO_ARTIST_REF: f32 = 5.0;
     const VERTICAL_GAP_ARTIST_TO_BANNER_REF: f32 = 2.0;
     const MUSIC_WHEEL_VERTICAL_GAP_REF: f32 = 2.0;
-    const UI_BOX_DARK_COLOR: [f32;4] = [30.0/255.0, 40.0/255.0, 47.0/255.0, 1.0];
-    const MUSIC_WHEEL_BOX_COLOR: [f32;4] = [10.0/255.0, 20.0/255.0, 27.0/255.0, 1.0];
-    const PINK_BOX_COLOR: [f32; 4] = [1.0, 71.0 / 255.0, 179.0 / 255.0, 1.0];
-    const TOP_LEFT_BOX_COLOR: [f32; 4] = [230.0 / 255.0, 230.0 / 255.0, 250.0 / 255.0, 1.0];
-    const LAYOUT_BOXES_REF_RES_WIDTH: f32 = 1280.0;
-    const LAYOUT_BOXES_REF_RES_HEIGHT: f32 = 720.0; // This is config::UI_REFERENCE_HEIGHT
 
-    let width_scale_factor = window_width / LAYOUT_BOXES_REF_RES_WIDTH;
-    let height_scale_factor = window_height / LAYOUT_BOXES_REF_RES_HEIGHT; // Use LAYOUT_BOXES_REF_RES_HEIGHT or config::UI_REFERENCE_HEIGHT
+    let width_scale_factor = window_width / config::LAYOUT_BOXES_REF_RES_WIDTH;
+    let height_scale_factor = window_height / config::LAYOUT_BOXES_REF_RES_HEIGHT;
 
-    // Scaled nudge amount
     let text_vertical_nudge_current = TEXT_VERTICAL_NUDGE_PX_AT_REF_RES * height_scale_factor;
-
     let music_wheel_box_current_width = MUSIC_WHEEL_BOX_REF_WIDTH * width_scale_factor;
     let music_wheel_box_current_height = MUSIC_WHEEL_BOX_REF_HEIGHT * height_scale_factor;
     let music_wheel_vertical_gap_current = MUSIC_WHEEL_VERTICAL_GAP_REF * height_scale_factor;
     let bar_height = (window_height / config::UI_REFERENCE_HEIGHT) * config::UI_BAR_REFERENCE_HEIGHT;
     let footer_y_top_edge = window_height - bar_height;
-    // ... (other scaled dimensions)
+
     let pink_box_current_width = PINK_BOX_REF_WIDTH * width_scale_factor;
     let pink_box_current_height = PINK_BOX_REF_HEIGHT * height_scale_factor;
     let small_upper_right_box_current_width = SMALL_UPPER_RIGHT_BOX_REF_WIDTH * width_scale_factor;
@@ -164,7 +147,6 @@ pub fn draw(
     let vertical_gap_stepartist_to_artist_current = VERTICAL_GAP_STEPARTIST_TO_ARTIST_REF * height_scale_factor;
     let vertical_gap_artist_to_banner_current = VERTICAL_GAP_ARTIST_TO_BANNER_REF * height_scale_factor;
 
-    // --- Music Wheel Box and Text Drawing ---
     let total_music_boxes_height = NUM_MUSIC_WHEEL_BOXES as f32 * music_wheel_box_current_height;
     let total_music_gaps_height = (NUM_MUSIC_WHEEL_BOXES.saturating_sub(1)) as f32 * music_wheel_vertical_gap_current;
     let full_music_wheel_stack_height = total_music_boxes_height + total_music_gaps_height;
@@ -181,95 +163,123 @@ pub fn draw(
         let current_box_top_y = music_wheel_stack_top_y + (i as f32 * (music_wheel_box_current_height + music_wheel_vertical_gap_current));
         let current_box_center_y = current_box_top_y + music_wheel_box_current_height / 2.0;
 
+        let mut display_text = "".to_string();
+        let mut current_box_color = config::MUSIC_WHEEL_BOX_COLOR;
+        let mut current_text_color = if i == CENTER_MUSIC_WHEEL_SLOT_INDEX {
+            config::MENU_SELECTED_COLOR
+        } else {
+            config::MENU_NORMAL_COLOR
+        };
+
+        let num_entries = state.entries.len();
+
+        if num_entries > 0 {
+            let list_index_isize = (state.selected_index as isize
+                + i as isize
+                - CENTER_MUSIC_WHEEL_SLOT_INDEX as isize
+                + num_entries as isize) 
+                % num_entries as isize; 
+            
+            let list_index = if list_index_isize < 0 {
+                (list_index_isize + num_entries as isize) as usize
+            } else {
+                list_index_isize as usize
+            };
+
+            if let Some(entry) = state.entries.get(list_index) {
+                match entry {
+                    MusicWheelEntry::Song(song_info_arc) => {
+                        display_text = song_info_arc.title.clone();
+                    }
+                    MusicWheelEntry::PackHeader(pack_name) => {
+                        display_text = format!("PACK: {}", pack_name);
+                        current_box_color = config::PACK_HEADER_BOX_COLOR;
+                    }
+                }
+            }
+        }
+
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::SolidColor,
             Vector3::new(music_box_center_x, current_box_center_y, 0.0),
-            (music_wheel_box_current_width, music_wheel_box_current_height), Rad(0.0), MUSIC_WHEEL_BOX_COLOR,
+            (music_wheel_box_current_width, music_wheel_box_current_height), Rad(0.0), current_box_color,
             [0.0,0.0], [1.0,1.0]
         );
 
-        let num_songs = state.songs.len();
-        if num_songs > 0 {
-            let song_list_index = (state.selected_index as isize
-                + i as isize
-                - CENTER_MUSIC_WHEEL_SLOT_INDEX as isize
-                + num_songs as isize)
-                % num_songs as isize;
+        if !display_text.is_empty() {
+            let text_width_pixels = list_font.measure_text_normalized(&display_text) * wheel_text_effective_scale;
+            let text_x_pos = music_box_left_x + (music_wheel_box_current_width - text_width_pixels) / 2.0;
 
-            if let Some(song_info) = state.songs.get(song_list_index as usize) {
-                let song_title = &song_info.title;
-                let text_width_pixels = list_font.measure_text_normalized(song_title) * wheel_text_effective_scale;
-                let text_x_pos = music_box_left_x + (music_wheel_box_current_width - text_width_pixels) / 2.0;
+            let current_visual_height = wheel_font_typographic_height_normalized * wheel_text_effective_scale;
+            let visual_text_top_y = current_box_center_y - (current_visual_height / 2.0);
+            let mut text_baseline_y = visual_text_top_y + (list_font.metrics.ascender * wheel_text_effective_scale);
+            
+            text_baseline_y += text_vertical_nudge_current;
 
-                let current_visual_height = wheel_font_typographic_height_normalized * wheel_text_effective_scale;
-                let visual_text_top_y = current_box_center_y - (current_visual_height / 2.0);
-                let mut text_baseline_y = visual_text_top_y + (list_font.metrics.ascender * wheel_text_effective_scale);
-                
-                text_baseline_y += text_vertical_nudge_current; // Apply nudge
-
-                let text_color = if i == CENTER_MUSIC_WHEEL_SLOT_INDEX { config::MENU_SELECTED_COLOR } else { config::MENU_NORMAL_COLOR };
-
-                renderer.draw_text(
-                    device, cmd_buf, list_font, song_title,
-                    text_x_pos, text_baseline_y, text_color,
-                    wheel_text_effective_scale, None
-                );
-
-            }
+            renderer.draw_text(
+                device, cmd_buf, list_font, &display_text,
+                text_x_pos, text_baseline_y, current_text_color,
+                wheel_text_effective_scale, None
+            );
         }
     }
 
-    // --- Draw other layout elements (Quads for UI boxes) ---
-    // (This section remains the same)
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, footer_y_top_edge + bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
+    
     let pink_box_left_x = 0.0;
     let pink_box_right_x = pink_box_left_x + pink_box_current_width;
     let pink_box_top_y = footer_y_top_edge - pink_box_current_height;
     let pink_box_center_x = pink_box_left_x + pink_box_current_width / 2.0;
     let pink_box_center_y = pink_box_top_y + pink_box_current_height / 2.0;
-    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(pink_box_center_x, pink_box_center_y, 0.0), (pink_box_current_width, pink_box_current_height), Rad(0.0), PINK_BOX_COLOR, [0.0,0.0], [1.0,1.0] );
+    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(pink_box_center_x, pink_box_center_y, 0.0), (pink_box_current_width, pink_box_current_height), Rad(0.0), config::PINK_BOX_COLOR, [0.0,0.0], [1.0,1.0] );
+    
     let small_upper_right_box_bottom_y = pink_box_top_y - vertical_gap_pink_to_upper_current;
     let small_upper_right_box_top_y = small_upper_right_box_bottom_y - small_upper_right_box_current_height;
     let small_upper_right_box_right_x = pink_box_right_x;
     let small_upper_right_box_left_x = small_upper_right_box_right_x - small_upper_right_box_current_width;
     let small_upper_right_box_center_x = small_upper_right_box_left_x + small_upper_right_box_current_width / 2.0;
     let small_upper_right_box_center_y = small_upper_right_box_top_y + small_upper_right_box_current_height / 2.0;
-    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(small_upper_right_box_center_x, small_upper_right_box_center_y, 0.0), (small_upper_right_box_current_width, small_upper_right_box_current_height), Rad(0.0), UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0] );
+    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(small_upper_right_box_center_x, small_upper_right_box_center_y, 0.0), (small_upper_right_box_current_width, small_upper_right_box_current_height), Rad(0.0), config::UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0] );
+    
     let bottom_left_box_right_x = small_upper_right_box_left_x - horizontal_gap_left_to_right_current;
     let bottom_left_box_left_x = bottom_left_box_right_x - left_boxes_current_width;
     let bottom_left_box_bottom_y = small_upper_right_box_bottom_y;
     let bottom_left_box_top_y = bottom_left_box_bottom_y - left_box_current_height;
     let bottom_left_box_center_x = bottom_left_box_left_x + left_boxes_current_width / 2.0;
     let bottom_left_box_center_y = bottom_left_box_top_y + left_box_current_height / 2.0;
-    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(bottom_left_box_center_x, bottom_left_box_center_y, 0.0), (left_boxes_current_width, left_box_current_height), Rad(0.0), UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0] );
+    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(bottom_left_box_center_x, bottom_left_box_center_y, 0.0), (left_boxes_current_width, left_box_current_height), Rad(0.0), config::UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0] );
+    
     let top_left_box_left_x = bottom_left_box_left_x;
     let top_left_box_bottom_y = bottom_left_box_top_y - vertical_gap_between_left_boxes_current;
     let top_left_box_top_y = top_left_box_bottom_y - left_box_current_height;
     let top_left_box_center_x = top_left_box_left_x + left_boxes_current_width / 2.0;
     let top_left_box_center_y = top_left_box_top_y + left_box_current_height / 2.0;
-    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(top_left_box_center_x, top_left_box_center_y, 0.0), (left_boxes_current_width, left_box_current_height), Rad(0.0), TOP_LEFT_BOX_COLOR, [0.0,0.0], [1.0,1.0] );
+    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(top_left_box_center_x, top_left_box_center_y, 0.0), (left_boxes_current_width, left_box_current_height), Rad(0.0), config::TOP_LEFT_BOX_COLOR, [0.0,0.0], [1.0,1.0] );
+    
     let topmost_left_box_left_x = top_left_box_left_x;
     let topmost_left_box_bottom_y = top_left_box_top_y - vertical_gap_topleft_to_topmost_current;
     let topmost_left_box_top_y = topmost_left_box_bottom_y - topmost_left_box_current_height;
     let topmost_left_box_center_x = topmost_left_box_left_x + topmost_left_box_current_width / 2.0;
     let topmost_left_box_center_y = topmost_left_box_top_y + topmost_left_box_current_height / 2.0;
-    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(topmost_left_box_center_x, topmost_left_box_center_y, 0.0), (topmost_left_box_current_width, topmost_left_box_current_height), Rad(0.0), PINK_BOX_COLOR, [0.0,0.0], [1.0,1.0] );
+    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(topmost_left_box_center_x, topmost_left_box_center_y, 0.0), (topmost_left_box_current_width, topmost_left_box_current_height), Rad(0.0), config::PINK_BOX_COLOR, [0.0,0.0], [1.0,1.0] );
+    
     let artist_bpm_box_left_x = topmost_left_box_left_x;
     let artist_bpm_box_bottom_y = topmost_left_box_top_y - vertical_gap_stepartist_to_artist_current;
     let artist_bpm_box_top_y = artist_bpm_box_bottom_y - artist_bpm_box_current_height;
     let artist_bpm_box_center_x = artist_bpm_box_left_x + artist_bpm_box_current_width / 2.0;
     let artist_bpm_box_center_y = artist_bpm_box_top_y + artist_bpm_box_current_height / 2.0;
-    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(artist_bpm_box_center_x, artist_bpm_box_center_y, 0.0), (artist_bpm_box_current_width, artist_bpm_box_current_height), Rad(0.0), UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0] );
+    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(artist_bpm_box_center_x, artist_bpm_box_center_y, 0.0), (artist_bpm_box_current_width, artist_bpm_box_current_height), Rad(0.0), config::UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0] );
+    
     let fallback_banner_left_x = artist_bpm_box_left_x;
     let fallback_banner_width_to_draw = fallback_banner_current_width;
     let fallback_banner_bottom_y = artist_bpm_box_top_y - vertical_gap_artist_to_banner_current;
     let fallback_banner_top_y = fallback_banner_bottom_y - fallback_banner_current_height;
     let fallback_banner_center_x = fallback_banner_left_x + fallback_banner_width_to_draw / 2.0;
     let fallback_banner_center_y = fallback_banner_top_y + fallback_banner_current_height / 2.0;
+    
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::DynamicBanner, Vector3::new(fallback_banner_center_x, fallback_banner_center_y, 0.0), (fallback_banner_width_to_draw, fallback_banner_current_height), Rad(0.0), [1.0, 1.0, 1.0, 1.0], [0.0,0.0], [1.0,1.0] );
 
-    // --- Header and Footer Text Drawing (Using the original working method) ---
     let hf_target_visual_current_px_height = TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES * height_scale_factor;
     let hf_font_typographic_height_normalized = (header_footer_font.metrics.ascender - header_footer_font.metrics.descender).max(1e-5);
 
@@ -289,7 +299,6 @@ pub fn draw(
     let mut header_baseline_y = hf_padding_from_bar_top_to_text_visual_top + hf_scaled_ascender_for_positioning;
     let mut footer_baseline_y = footer_y_top_edge + hf_padding_from_bar_top_to_text_visual_top + hf_scaled_ascender_for_positioning;
 
-    // Apply nudge to header and footer
     header_baseline_y += text_vertical_nudge_current;
     footer_baseline_y += text_vertical_nudge_current;
 
@@ -307,8 +316,56 @@ pub fn draw(
     };
     renderer.draw_text( device, cmd_buf, header_footer_font, footer_text_str, center_x - footer_text_visual_width / 2.0, footer_baseline_y, config::UI_BAR_TEXT_COLOR, hf_effective_scale, Some(HEADER_FOOTER_LETTER_SPACING_FACTOR) );
 
+    // Draw song-specific text (Artist, BPM) if a song is selected in the center slot
+    if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
+        // Define a text scale for artist/bpm, e.g., smaller than wheel text
+        let detail_text_target_px_height = MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * 0.8 * height_scale_factor; // Slightly smaller
+        let detail_font_typographic_height_normalized = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
+        let detail_text_effective_scale = detail_text_target_px_height / detail_font_typographic_height_normalized;
+        
+        let artist_text_full = format!("Artist: {}", selected_song_arc.artist);
+        let artist_text_width_pixels = list_font.measure_text_normalized(&artist_text_full) * detail_text_effective_scale;
+        
+        let artist_bpm_box_padding_x = 10.0 * width_scale_factor;
+        let artist_text_x_pos = artist_bpm_box_left_x + artist_bpm_box_padding_x;
 
-    if let Some(_selected_song) = state.songs.get(state.selected_index) {
-        // TODO: Draw Artist/BPM etc.
+        // Vertical centering for artist_text (top part of artist_bpm_box)
+        let artist_visual_height = detail_font_typographic_height_normalized * detail_text_effective_scale;
+        let artist_visual_top_y = artist_bpm_box_top_y + (artist_bpm_box_current_height / 2.0 - artist_visual_height) / 2.0 ; // Center in top half
+        let mut artist_text_baseline_y = artist_visual_top_y + (list_font.metrics.ascender * detail_text_effective_scale) + text_vertical_nudge_current;
+
+
+        renderer.draw_text(
+            device, cmd_buf, list_font, &artist_text_full,
+            artist_text_x_pos, artist_text_baseline_y, config::MENU_NORMAL_COLOR,
+            detail_text_effective_scale, None
+        );
+
+        let bpm_text_full = if selected_song_arc.bpms_header.len() == 1 {
+            format!("BPM: {:.0}", selected_song_arc.bpms_header[0].1)
+        } else if !selected_song_arc.bpms_header.is_empty() {
+            let min_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::INFINITY, f32::min);
+            let max_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::NEG_INFINITY, f32::max);
+            if (min_bpm - max_bpm).abs() < 0.1 {
+                format!("BPM: {:.0}", min_bpm)
+            } else {
+                format!("BPM: {:.0} - {:.0}", min_bpm, max_bpm)
+            }
+        } else {
+            "BPM: ???".to_string()
+        };
+        let bpm_text_width_pixels = list_font.measure_text_normalized(&bpm_text_full) * detail_text_effective_scale;
+        let bpm_text_x_pos = artist_bpm_box_left_x + artist_bpm_box_padding_x;
+
+        // Vertical centering for bpm_text (bottom part of artist_bpm_box)
+        let bpm_visual_top_y = artist_bpm_box_top_y + artist_bpm_box_current_height / 2.0 + (artist_bpm_box_current_height / 2.0 - artist_visual_height) / 2.0; // Center in bottom half
+        let mut bpm_text_baseline_y = bpm_visual_top_y + (list_font.metrics.ascender * detail_text_effective_scale) + text_vertical_nudge_current;
+
+
+        renderer.draw_text(
+            device, cmd_buf, list_font, &bpm_text_full,
+            bpm_text_x_pos, bpm_text_baseline_y, config::MENU_NORMAL_COLOR,
+            detail_text_effective_scale, None
+        );
     }
 }

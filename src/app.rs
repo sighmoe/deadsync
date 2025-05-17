@@ -5,14 +5,14 @@ use crate::graphics::renderer::Renderer;
 use crate::graphics::vulkan_base::VulkanBase;
 use crate::parsing::simfile::{scan_packs, SongInfo};
 use crate::screens::{gameplay, menu, options, select_music};
-use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState};
+use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState, MusicWheelEntry}; // MODIFIED
 use crate::utils::fps::FPSCounter;
 
 use ash::vk;
 use log::{error, info, trace, warn};
 use std::error::Error;
 use std::path::Path;
-use std::sync::Arc; // ADD THIS LINE
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::{
     dpi::PhysicalSize,
@@ -29,10 +29,10 @@ pub struct App {
     renderer: Renderer,
     audio_manager: AudioManager,
     asset_manager: AssetManager,
-    song_library: Vec<SongInfo>, // <-- Add field to store parsed songs
+    song_library: Vec<SongInfo>,
     current_app_state: AppState,
     menu_state: MenuState,
-    select_music_state: SelectMusicState, // Keep the state struct
+    select_music_state: SelectMusicState,
     options_state: OptionsState,
     game_state: Option<GameState>,
     fps_counter: FPSCounter,
@@ -47,7 +47,6 @@ impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self, Box<dyn Error>> {
         info!("Creating Application...");
 
-        // --- Window and Vulkan Init --- (Same as before)
         let window = WindowBuilder::new()
             .with_title(config::WINDOW_TITLE)
             .with_inner_size(winit::dpi::LogicalSize::new(
@@ -69,23 +68,17 @@ impl App {
         )?;
         info!("Renderer Initialized.");
 
-        // --- Audio Manager --- (Same as before)
         let mut audio_manager = AudioManager::new()?;
         info!("Audio Manager Initialized.");
 
-        // --- Asset Manager --- (Same as before)
         let mut asset_manager = AssetManager::new();
         asset_manager.load_all(&vulkan_base, &renderer, &mut audio_manager)?;
         info!("Asset Manager Initialized and Assets Loaded.");
 
-        // --- Song Parsing ---
         info!("Scanning for songs...");
-        // Scan all packs within the "songs" directory relative to executable
         let song_library = scan_packs(Path::new("songs"));
         info!("Found {} songs.", song_library.len());
-        // You might want to add more error checking/reporting here
 
-        // --- GPU Idle --- (Same as before)
         vulkan_base
             .wait_idle()
             .map_err(|e| format!("Error waiting for GPU idle after setup: {}", e))?;
@@ -96,10 +89,9 @@ impl App {
             renderer,
             audio_manager,
             asset_manager,
-            song_library, // <-- Store the parsed songs
+            song_library,
             current_app_state: AppState::Menu,
             menu_state: MenuState::default(),
-            // Initialize state struct, but it will be populated on transition
             select_music_state: SelectMusicState::default(),
             options_state: OptionsState::default(),
             game_state: None,
@@ -125,7 +117,6 @@ impl App {
                         WindowEvent::RedrawRequested => {
                             if self.swapchain_is_known_bad {
                                 trace!("Skipping render because swapchain is known to be bad. Waiting for resize.");
-                                // Request another redraw to re-evaluate after potential resize in AboutToWait
                                 self.vulkan_base.window.request_redraw();
                             } else {
                                 match self.render() {
@@ -136,7 +127,7 @@ impl App {
                                             self.pending_resize = Some((current_size, Instant::now()));
                                             self.swapchain_is_known_bad = true;
                                         } else {
-                                            self.swapchain_is_known_bad = false; // Render was successful
+                                            self.swapchain_is_known_bad = false;
                                         }
                                     }
                                     Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
@@ -167,9 +158,6 @@ impl App {
                         return;
                     }
 
-                    // Only update and request redraw if we don't have a pending resize
-                    // or if the swapchain isn't known to be bad.
-                    // If a resize just happened, swapchain_is_known_bad became false.
                     if self.pending_resize.is_none() && !self.swapchain_is_known_bad {
                         let now = Instant::now();
                         let dt = (now - self.last_frame_time).as_secs_f32().max(0.0).min(config::MAX_DELTA_TIME);
@@ -177,9 +165,6 @@ impl App {
                         self.update(dt);
                         self.vulkan_base.window.request_redraw();
                     } else if self.pending_resize.is_some() || self.swapchain_is_known_bad {
-                        // If resize is pending or swapchain is bad, still request redraw.
-                        // RedrawRequested will skip render if bad, or handle resize if pending.
-                        // This ensures we keep polling for the debounce timer.
                         self.vulkan_base.window.request_redraw();
                     }
                 },
@@ -206,20 +191,18 @@ impl App {
                     "Debounce time elapsed, processing resize to {:?}.",
                     target_size
                 );
-                let actual_target_size = self.pending_resize.take().unwrap().0; // Consume the pending resize
+                let actual_target_size = self.pending_resize.take().unwrap().0;
 
                 match self.handle_actual_resize(actual_target_size) {
                     Ok(_) => {
-                        self.swapchain_is_known_bad = false; // Resize successful, swapchain should be good
+                        self.swapchain_is_known_bad = false;
                         info!("Resize processed successfully.");
                     }
                     Err(e) => {
-                        // If resize failed, keep swapchain_is_known_bad = true (or re-set it)
-                        // and re-queue the resize to try again.
                         error!("handle_actual_resize failed: {}. Re-queueing resize.", e);
                         self.pending_resize = Some((actual_target_size, Instant::now()));
                         self.swapchain_is_known_bad = true;
-                        return Err(e); // Propagate error if critical, or just log and retry
+                        return Err(e);
                     }
                 }
             }
@@ -243,7 +226,6 @@ impl App {
                     new_size
                 );
                 self.pending_resize = Some((new_size, Instant::now()));
-                // No need to set swapchain_is_known_bad here, render will determine that.
             }
             WindowEvent::KeyboardInput {
                 event: key_event, ..
@@ -257,7 +239,7 @@ impl App {
     fn handle_keyboard_input(&mut self, key_event: KeyEvent) {
         trace!("Keyboard Input: {:?}", key_event);
         let mut requested_state: Option<AppState> = None;
-        let mut selection_changed_in_music = false; // Track specifically for music select
+        let mut selection_changed_in_music = false;
 
         match self.current_app_state {
             AppState::Menu => {
@@ -265,15 +247,13 @@ impl App {
                     menu::handle_input(&key_event, &mut self.menu_state, &self.audio_manager);
             }
             AppState::SelectMusic => {
-                // Get result tuple: (next_app_state, selection_changed)
                 let (next_state, selection_changed) = select_music::handle_input(
                     &key_event,
                     &mut self.select_music_state,
                     &self.audio_manager,
-                    // Removed VulkanBase/Renderer args
                 );
                 requested_state = next_state;
-                selection_changed_in_music = selection_changed; // Store the flag
+                selection_changed_in_music = selection_changed;
             }
             AppState::Options => {
                 requested_state = options::handle_input(&key_event, &mut self.options_state);
@@ -291,23 +271,34 @@ impl App {
             }
         }
 
-        // Handle state change request *after* processing input
         if requested_state.is_some() {
             self.next_app_state = requested_state;
         }
 
-        // Handle banner loading *after* processing input and potential index change
         if self.current_app_state == AppState::SelectMusic && selection_changed_in_music {
             let current_index = self.select_music_state.selected_index;
-             if let Some(selected_song) = self.select_music_state.songs.get(current_index) {
-                  self.asset_manager.load_song_banner(
-                     &self.vulkan_base,
-                     &self.renderer,
-                     selected_song,
-                  );
+             if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
+                 match selected_entry {
+                     MusicWheelEntry::Song(selected_song_arc) => {
+                         self.asset_manager.load_song_banner(
+                            &self.vulkan_base,
+                            &self.renderer,
+                            selected_song_arc,
+                         );
+                     }
+                     MusicWheelEntry::PackHeader(_) => {
+                         info!("Selected a pack header, loading fallback banner.");
+                         if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                              self.renderer.update_texture_descriptor(
+                                  &self.vulkan_base.device,
+                                  crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                                  fallback_res,
+                              );
+                         }
+                     }
+                 }
              } else {
-                 warn!("Selection changed in Music Select, but index {} is out of bounds ({} songs).", current_index, self.select_music_state.songs.len());
-                 // Optionally load fallback banner here if something went wrong
+                 warn!("Selection changed in Music Select, but index {} is out of bounds ({} entries).", current_index, self.select_music_state.entries.len());
              }
         }
     }
@@ -326,8 +317,6 @@ impl App {
                 self.game_state = None;
                 info!("Gameplay state cleared.");
             }
-            // Clear SelectMusic state if transitioning *away* from it? Optional.
-            // AppState::SelectMusic => { self.select_music_state = SelectMusicState::default(); }
             _ => {}
         }
 
@@ -336,23 +325,56 @@ impl App {
                 self.menu_state = MenuState::default();
             }
             AppState::SelectMusic => {
+                let mut entries = Vec::new();
+                let mut current_pack_name_processed = String::new();
+
+                for song_info in &self.song_library {
+                    let pack_name = song_info
+                        .folder_path
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("Unknown Pack")
+                        .to_string();
+
+                    if pack_name != current_pack_name_processed {
+                        entries.push(MusicWheelEntry::PackHeader(pack_name.clone()));
+                        current_pack_name_processed = pack_name;
+                    }
+                    entries.push(MusicWheelEntry::Song(Arc::new(song_info.clone())));
+                }
+
                 self.select_music_state = SelectMusicState {
-                    songs: self.song_library.clone(),
+                    entries,
                     selected_index: 0,
                 };
-                 info!("Populated SelectMusic state with {} songs.", self.select_music_state.songs.len());
+                info!(
+                    "Populated SelectMusic state with {} entries (songs and pack headers).",
+                    self.select_music_state.entries.len()
+                );
 
-                 // --- Load banner for the initially selected song ---
-                 if let Some(initial_song) = self.select_music_state.songs.first() {
-                      self.asset_manager.load_song_banner(
-                         &self.vulkan_base,
-                         &self.renderer,
-                         initial_song,
-                      );
+                 if let Some(first_entry) = self.select_music_state.entries.first() {
+                      match first_entry {
+                          MusicWheelEntry::Song(initial_song_arc) => {
+                              self.asset_manager.load_song_banner(
+                                 &self.vulkan_base,
+                                 &self.renderer,
+                                 initial_song_arc,
+                              );
+                          }
+                          MusicWheelEntry::PackHeader(_) => {
+                              info!("Initial selection is a pack header, ensuring fallback banner.");
+                              if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                                   self.renderer.update_texture_descriptor(
+                                       &self.vulkan_base.device,
+                                       crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                                       fallback_res,
+                                   );
+                              }
+                          }
+                      }
                  } else {
-                     // If no songs, ensure fallback is loaded (should already be by load_all)
-                     info!("No songs loaded, ensuring fallback banner is active for DynamicBanner set.");
-                     // We might re-update the descriptor just to be safe, though load_all should handle it.
+                     info!("No songs or packs loaded, ensuring fallback banner is active for DynamicBanner set.");
                      if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                           self.renderer.update_texture_descriptor(
                               &self.vulkan_base.device,
@@ -366,62 +388,65 @@ impl App {
                 self.options_state = OptionsState::default();
             }
             AppState::Gameplay => {
-                 // ... (Existing Gameplay transition logic - same) ...
                  info!("Initializing Gameplay State...");
-                 let selected_song_info = self.select_music_state.songs.get(self.select_music_state.selected_index);
+                 let selected_entry_opt = self.select_music_state.entries.get(self.select_music_state.selected_index);
 
-                if selected_song_info.is_none() || selected_song_info.unwrap().audio_path.is_none() {
-                    error!("Cannot start gameplay: No song selected or audio path missing for selected song. Returning to SelectMusic.");
-                    self.next_app_state = Some(AppState::SelectMusic);
-                    return;
-                }
-                let song_info_ref = selected_song_info.unwrap(); // song_info_ref is &SongInfo
-                let audio_path = song_info_ref.audio_path.as_ref().unwrap();
-
-                info!("Starting gameplay with song: {}", song_info_ref.title);
-                info!("Audio path: {:?}", audio_path);
-
-                let window_size_f32 = (
-                    self.vulkan_base.surface_resolution.width as f32,
-                    self.vulkan_base.surface_resolution.height as f32,
-                );
-
-                match self.audio_manager.play_music(audio_path, 1.0) {
-                    Ok(_) => {
-                        let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
-                        
-                        let current_song_arc = Arc::new(song_info_ref.clone()); // Clone the SongInfo data into an Arc
-
-                        // Determine a valid chart index. For now, use the first available processed chart.
-                        // You'll need a proper chart selection mechanism later.
-                        let selected_chart_idx = current_song_arc.charts.iter().position(|c| 
-                            c.processed_data.is_some() && 
-                            !c.processed_data.as_ref().unwrap().measures.is_empty()
-                        ).unwrap_or_else(|| {
-                            warn!("No processable charts found for song '{}', defaulting to chart index 0. Gameplay might be empty.", current_song_arc.title);
-                            0 
-                        });
-
-                        self.game_state = Some(gameplay::initialize_game_state(
-                            window_size_f32.0, 
-                            window_size_f32.1, 
-                            start_time,
-                            current_song_arc,    // Pass Arc<SongInfo>
-                            selected_chart_idx,  // Pass selected chart index
-                        ));
-                        info!("Gameplay state initialized and music started.");
-                    }
-                    Err(e) => {
-                        error!("Failed to start gameplay music: {}. Returning to SelectMusic.", e);
+                if let Some(MusicWheelEntry::Song(selected_song_arc)) = selected_entry_opt {
+                    if selected_song_arc.audio_path.is_none() {
+                        error!("Cannot start gameplay: Audio path missing for selected song '{}'. Returning to SelectMusic.", selected_song_arc.title);
                         self.next_app_state = Some(AppState::SelectMusic);
                         return;
                     }
+                    let song_info_for_gameplay = selected_song_arc.clone(); // Clone the Arc for GameState
+                    let audio_path = song_info_for_gameplay.audio_path.as_ref().unwrap();
+
+                    info!("Starting gameplay with song: {}", song_info_for_gameplay.title);
+                    info!("Audio path: {:?}", audio_path);
+
+                    let window_size_f32 = (
+                        self.vulkan_base.surface_resolution.width as f32,
+                        self.vulkan_base.surface_resolution.height as f32,
+                    );
+
+                    match self.audio_manager.play_music(audio_path, 1.0) {
+                        Ok(_) => {
+                            let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
+                            
+                            let selected_chart_idx = song_info_for_gameplay.charts.iter().position(|c| 
+                                c.processed_data.is_some() && 
+                                !c.processed_data.as_ref().unwrap().measures.is_empty()
+                            ).unwrap_or_else(|| {
+                                warn!("No processable charts found for song '{}', defaulting to chart index 0. Gameplay might be empty.", song_info_for_gameplay.title);
+                                0 
+                            });
+
+                            self.game_state = Some(gameplay::initialize_game_state(
+                                window_size_f32.0, 
+                                window_size_f32.1, 
+                                start_time,
+                                song_info_for_gameplay, // Pass the Arc<SongInfo>
+                                selected_chart_idx,
+                            ));
+                            info!("Gameplay state initialized and music started.");
+                        }
+                        Err(e) => {
+                            error!("Failed to start gameplay music: {}. Returning to SelectMusic.", e);
+                            self.next_app_state = Some(AppState::SelectMusic);
+                            return;
+                        }
+                    }
+                } else {
+                    // This case handles if selected_entry_opt is None (index out of bounds)
+                    // or if it's a MusicWheelEntry::PackHeader.
+                    // The input handler for Enter should ideally prevent trying to start gameplay on a PackHeader.
+                    error!("Cannot start gameplay: Selected item is not a song or selection is invalid. Returning to SelectMusic.");
+                    self.next_app_state = Some(AppState::SelectMusic); // Stay or go back explicitly
+                    return;
                 }
             }
             AppState::Exiting => {}
         }
 
-        // --- Finalize Transition --- (Same as before)
         self.current_app_state = new_state;
         self.vulkan_base.window.set_title(&format!(
             "{} | {:?}",
@@ -432,7 +457,6 @@ impl App {
 
 
     fn update(&mut self, dt: f32) {
-        // ... (no changes) ...
         trace!("Update Start (dt: {:.4} s)", dt);
         match self.current_app_state {
             AppState::Menu => menu::update(&mut self.menu_state, dt),
@@ -479,16 +503,12 @@ impl App {
                 target_size
             );
             self.pending_resize = Some((target_size, Instant::now()));
-            self.swapchain_is_known_bad = true; // Still bad if we can't resize
+            self.swapchain_is_known_bad = true;
             return Ok(());
         }
 
-        // Attempt to rebuild
         self.vulkan_base
             .rebuild_swapchain_resources(target_size.width, target_size.height)?;
-        // If successful, swapchain is no longer known to be bad from this path.
-        // (It might become bad on the next render, but this attempt was "successful")
-        // This is handled in try_process_pending_resize or RedrawRequested.
 
         let new_vulkan_surface_extent = self.vulkan_base.surface_resolution;
         let new_vulkan_size_f32 = (
@@ -514,7 +534,7 @@ impl App {
         let current_surface_resolution = self.vulkan_base.surface_resolution;
         if current_surface_resolution.width == 0 || current_surface_resolution.height == 0 {
             trace!("Skipping render due to zero-sized surface resolution.");
-            return Ok(true); // Needs resize
+            return Ok(true);
         }
 
         let draw_result = self.vulkan_base.draw_frame(|device, cmd_buf| {

@@ -1,3 +1,4 @@
+// src/assets.rs
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::font::{load_font, Font, LoadedFontData};
@@ -10,6 +11,7 @@ use log::{error, info, warn};
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
+use std::sync::Arc;
 
 // TextureId
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -34,8 +36,8 @@ pub enum TextureId {
 pub struct AssetManager {
     textures: HashMap<TextureId, TextureResource>,
     fonts: HashMap<FontId, Font>,
-    current_banner: Option<TextureResource>,
-    current_banner_is_fallback: bool,
+    current_banner: Option<TextureResource>, // Stores the currently loaded song-specific banner
+    current_banner_is_fallback: bool, // Tracks if current_banner is actually the fallback
 }
 
 impl AssetManager {
@@ -44,7 +46,7 @@ impl AssetManager {
             textures: HashMap::new(),
             fonts: HashMap::new(),
             current_banner: None,
-            current_banner_is_fallback: true,
+            current_banner_is_fallback: true, // Initially, dynamic banner points to fallback
         }
     }
 
@@ -75,13 +77,14 @@ impl AssetManager {
         self.textures.insert(TextureId::FallbackBanner, fallback_banner_texture);
         info!("Fallback banner texture loaded and its static descriptor set updated.");
 
+        // Initialize DynamicBanner descriptor set to point to the fallback banner initially
         if let Some(fallback_res) = self.textures.get(&TextureId::FallbackBanner) {
              renderer.update_texture_descriptor(
                  &base.device,
-                 DescriptorSetId::DynamicBanner,
+                 DescriptorSetId::DynamicBanner, // This is the one that changes
                  fallback_res,
              );
-             self.current_banner_is_fallback = true;
+             self.current_banner_is_fallback = true; // Mark that DynamicBanner currently uses fallback
              info!("Initialized DynamicBanner descriptor set with Fallback Banner.");
         } else {
             error!("Fallback banner failed to load, DynamicBanner descriptor not initialized!");
@@ -168,17 +171,18 @@ impl AssetManager {
         &mut self,
         base: &VulkanBase,
         renderer: &Renderer,
-        song_info: &SongInfo,
+        song_info: &Arc<SongInfo>, // MODIFIED
     ) {
         info!("Attempting to load banner for song: {}", song_info.title);
+        // If a previous song-specific banner was loaded, destroy it
         if !self.current_banner_is_fallback {
             if let Some(mut old_banner) = self.current_banner.take() {
-                info!("Destroying previous dynamic banner texture.");
+                info!("Destroying previous dynamic (song-specific) banner texture.");
                 old_banner.destroy(&base.device);
             }
         }
-        self.current_banner = None;
-        self.current_banner_is_fallback = false;
+        self.current_banner = None; // Reset current banner field
+        self.current_banner_is_fallback = false; // Assume we'll load a new one
 
         let mut loaded_successfully = false;
         if let Some(banner_path) = &song_info.banner_path {
@@ -191,8 +195,8 @@ impl AssetManager {
                         DescriptorSetId::DynamicBanner,
                         &new_banner_texture,
                     );
-                    self.current_banner = Some(new_banner_texture);
-                    self.current_banner_is_fallback = false;
+                    self.current_banner = Some(new_banner_texture); // Store the new song-specific banner
+                    // self.current_banner_is_fallback remains false
                     loaded_successfully = true;
                 }
                 Err(e) => {
@@ -204,18 +208,19 @@ impl AssetManager {
         }
 
         if !loaded_successfully {
-            info!("Using fallback banner.");
+            info!("Using fallback banner for DynamicBanner set.");
             if let Some(fallback_res) = self.textures.get(&TextureId::FallbackBanner) {
                  renderer.update_texture_descriptor(
                      &base.device,
                      DescriptorSetId::DynamicBanner,
-                     fallback_res,
+                     fallback_res, // Use the already loaded fallback texture
                  );
-                 self.current_banner = None;
+                 // self.current_banner remains None, as it's not a song-specific banner
                  self.current_banner_is_fallback = true;
             } else {
-                error!("Fallback banner resource not found in textures map!");
-                self.current_banner_is_fallback = true;
+                error!("Fallback banner resource not found in textures map! DynamicBanner set might be invalid.");
+                // self.current_banner remains None
+                self.current_banner_is_fallback = true; // Still true, as we failed to load a specific one AND fallback
             }
         }
     }
@@ -234,11 +239,12 @@ impl AssetManager {
             texture.destroy(device);
         }
         self.textures.clear();
-        info!("Static textures (including explosions) destroyed.");
+        info!("Static textures (including explosions and fallback banner) destroyed.");
 
+        // Destroy the currently loaded song-specific banner if it's not the fallback
         if !self.current_banner_is_fallback {
             if let Some(mut banner) = self.current_banner.take() {
-                info!("Destroying dynamic banner texture.");
+                info!("Destroying dynamic (song-specific) banner texture.");
                 banner.destroy(device);
             }
         }

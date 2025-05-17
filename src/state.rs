@@ -1,7 +1,5 @@
-// src/state.rs
-use crate::config;
 use crate::parsing::simfile::{SongInfo, ProcessedChartData, NoteChar};
-use crate::screens::gameplay::{TimingData};
+use crate::screens::gameplay::{TimingData}; // TimingData might not be needed here if GameState doesn't directly hold it. Review if it's used.
 use cgmath::Matrix4;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -36,17 +34,23 @@ impl Default for MenuState {
     }
 }
 
+// NEW: Enum to represent entries in the music wheel
+#[derive(Debug, Clone)]
+pub enum MusicWheelEntry {
+    Song(Arc<SongInfo>), // Store Arc<SongInfo> for efficiency
+    PackHeader(String),  // Pack name
+}
 
 #[derive(Debug, Clone)]
 pub struct SelectMusicState {
-    pub songs: Vec<SongInfo>,
+    pub entries: Vec<MusicWheelEntry>, // MODIFIED: The wheel will now hold these entries
     pub selected_index: usize,
 }
 
 impl Default for SelectMusicState {
     fn default() -> Self {
         SelectMusicState {
-            songs: Vec::new(),
+            entries: Vec::new(), // MODIFIED
             selected_index: 0,
         }
     }
@@ -65,13 +69,12 @@ pub struct GameState {
     pub pressed_keys: HashSet<VirtualKeyCode>,
     pub current_beat: f32,
     pub window_size: (f32, f32),
-    // pub flash_states: HashMap<ArrowDirection, FlashState>, // REPLACED
-    pub active_explosions: HashMap<ArrowDirection, ActiveExplosion>, // ADDED
+    pub active_explosions: HashMap<ArrowDirection, ActiveExplosion>,
     pub audio_start_time: Option<Instant>,
-    pub song_info: Arc<SongInfo>,
+    pub song_info: Arc<SongInfo>, // Arc for efficient cloning if GameState is cloned
     pub selected_chart_idx: usize,
-    pub timing_data: Arc<TimingData>,
-    pub processed_chart: Arc<ProcessedChartData>,
+    pub timing_data: Arc<TimingData>, // Arc for efficient cloning
+    pub processed_chart: Arc<ProcessedChartData>, // Arc for efficient cloning
     pub current_measure_idx: usize,
     pub current_line_in_measure_idx: usize,
     pub current_processed_beat: f32,
@@ -83,10 +86,8 @@ pub struct GameState {
 pub enum ArrowDirection { Left, Down, Up, Right, }
 pub const ALL_ARROW_DIRECTIONS: [ArrowDirection; 4] = [ ArrowDirection::Left, ArrowDirection::Down, ArrowDirection::Up, ArrowDirection::Right, ];
 
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum NoteType { Quarter, Eighth, Sixteenth, } // No longer used here
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)] // Added Hash
-pub enum Judgment { W1, W2, W3, W4, W5, Miss } // Added W5
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Judgment { W1, W2, W3, W4, W5, Miss }
 
 #[derive(Debug, Clone)] pub struct TargetInfo { pub x: f32, pub y: f32, pub direction: ArrowDirection, }
 #[derive(Debug, Clone)]
@@ -98,11 +99,10 @@ pub struct Arrow {
     pub target_beat: f32,
 }
 
-// pub struct FlashState { pub color: [f32; 4], pub end_time: Instant, } // REPLACED
-#[derive(Debug, Clone, Copy)] // Added Copy
-pub struct ActiveExplosion { // New struct
+#[derive(Debug, Clone, Copy)]
+pub struct ActiveExplosion {
     pub judgment: Judgment,
-    pub direction: ArrowDirection, // Though map key also has it, might be useful
+    pub direction: ArrowDirection,
     pub end_time: Instant,
 }
 

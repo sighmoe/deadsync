@@ -1,4 +1,3 @@
-// src/config.rs
 use std::time::Duration;
 
 // Window
@@ -42,11 +41,6 @@ pub const AUDIO_SYNC_OFFSET_MS: i64 = 30;
 pub const SPAWN_LOOKAHEAD_BEATS: f32 = 10.0;
 
 // Judgment Windows (milliseconds)
-// W1 (Marvelous) : 0 to W1_WINDOW_MS
-// W2 (Perfect)   : >W1_WINDOW_MS to W2_WINDOW_MS
-// W3 (Great)     : >W2_WINDOW_MS to W3_WINDOW_MS
-// W4 (Good)      : >W3_WINDOW_MS to W4_WINDOW_MS
-// W5 (Okay/Boo)  : >W4_WINDOW_MS to MAX_HIT_WINDOW_MS (formerly W4 outer range)
 pub const W1_WINDOW_MS: f32 = 21.5;  // Marvelous
 pub const W2_WINDOW_MS: f32 = 43.0;  // Perfect
 pub const W3_WINDOW_MS: f32 = 102.0; // Great
@@ -62,12 +56,6 @@ pub const ARROW_TINT_SIXTEENTH: [f32; 4] = [0.6, 1.0, 0.6, 1.0]; // Green-ish
 pub const ARROW_TINT_TWELFTH: [f32; 4] = [0.8, 0.5, 1.0, 1.0]; // Purple-ish for 12ths (triplets)
 pub const ARROW_TINT_TWENTYFOURTH: [f32; 4] = [0.7, 0.4, 0.9, 1.0]; // Lighter Purple-ish for 24ths
 pub const ARROW_TINT_OTHER: [f32; 4] = [0.9, 0.9, 0.9, 1.0];    // White/Gray for other quantizations
-
-// pub const FLASH_COLOR_W1: [f32; 4] = [0.2, 0.7, 1.0, 0.9]; // Marvelous // No longer used for receptor
-// pub const FLASH_COLOR_W2: [f32; 4] = [1.0, 0.8, 0.2, 0.9]; // Perfect   // No longer used for receptor
-// pub const FLASH_COLOR_W3: [f32; 4] = [0.2, 1.0, 0.2, 0.9]; // Great     // No longer used for receptor
-// pub const FLASH_COLOR_W4: [f32; 4] = [0.8, 0.4, 1.0, 0.9]; // Good      // No longer used for receptor
-// pub const FLASH_DURATION: Duration = Duration::from_millis(120); // REPLACED by EXPLOSION_DURATION
 
 pub const EXPLOSION_DURATION: Duration = Duration::from_millis(80); // How long explosion images stay on screen
 pub const EXPLOSION_SIZE: f32 = TARGET_SIZE * 1.5;
@@ -89,6 +77,17 @@ pub const MSDF_PX_RANGE: f32 = 4.0;
 
 // Misc
 pub const MAX_DELTA_TIME: f32 = 0.1;
+
+// Select Music Screen Colors
+pub const MUSIC_WHEEL_BOX_COLOR: [f32;4] = [10.0/255.0, 20.0/255.0, 27.0/255.0, 1.0];
+pub const PACK_HEADER_BOX_COLOR: [f32; 4] = [83.0/255.0, 92.0/255.0, 99.0/255.0, 1.0]; // Hex: #535c63
+pub const PINK_BOX_COLOR: [f32; 4] = [1.0, 71.0 / 255.0, 179.0 / 255.0, 1.0];
+pub const TOP_LEFT_BOX_COLOR: [f32; 4] = [230.0 / 255.0, 230.0 / 255.0, 250.0 / 255.0, 1.0];
+pub const UI_BOX_DARK_COLOR: [f32;4] = [30.0/255.0, 40.0/255.0, 47.0/255.0, 1.0];
+
+// Reference resolution for select_music.rs layout calculations
+pub const LAYOUT_BOXES_REF_RES_WIDTH: f32 = 1280.0;
+pub const LAYOUT_BOXES_REF_RES_HEIGHT: f32 = 720.0;
 
 // Colors
 /* Colors = {
