@@ -10,7 +10,7 @@ use crate::utils::fps::FPSCounter;
 
 use ash::vk;
 use log::{error, info, trace, warn};
-use std::collections::HashMap; // Added for pack color mapping
+use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
@@ -42,7 +42,7 @@ pub struct App {
     next_app_state: Option<AppState>,
     pending_resize: Option<(PhysicalSize<u32>, Instant)>,
     swapchain_is_known_bad: bool,
-    pack_colors: HashMap<String, [f32; 4]>, // Store assigned pack colors
+    pack_colors: HashMap<String, [f32; 4]>,
 }
 
 impl App {
@@ -81,11 +81,10 @@ impl App {
         let song_library = scan_packs(Path::new("songs"));
         info!("Found {} songs.", song_library.len());
 
-        // Assign colors to packs
         let mut unique_pack_names: Vec<String> = song_library.iter()
             .map(|s| s.folder_path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or("Unknown Pack").to_string())
             .collect();
-        unique_pack_names.sort_unstable_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase())); // Sort alphabetically for consistent color assignment
+        unique_pack_names.sort_unstable_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         unique_pack_names.dedup();
 
         let mut pack_colors = HashMap::new();
@@ -109,7 +108,12 @@ impl App {
             song_library,
             current_app_state: AppState::Menu,
             menu_state: MenuState::default(),
-            select_music_state: SelectMusicState::default(),
+            select_music_state: SelectMusicState { // MODIFIED: Initialize with all fields
+                entries: Vec::new(),
+                selected_index: 0,
+                expanded_pack_name: None,
+                selection_animation_timer: 0.0,
+            },
             options_state: OptionsState::default(),
             game_state: None,
             fps_counter: FPSCounter::new(),
@@ -118,11 +122,11 @@ impl App {
             next_app_state: None,
             pending_resize: None,
             swapchain_is_known_bad: false,
-            pack_colors, // Store the map
+            pack_colors,
         })
     }
 
-    // ... (run, try_process_pending_resize, handle_window_event remain the same)
+    // ... (run, try_process_pending_resize, handle_window_event, rebuild_music_wheel_entries, handle_keyboard_input remain the same) ...
     pub fn run(mut self, mut event_loop: EventLoop<()>) -> Result<(), Box<dyn Error>> {
         info!("Starting Event Loop...");
         self.last_frame_time = Instant::now();
@@ -257,14 +261,10 @@ impl App {
 
     fn rebuild_music_wheel_entries(&mut self) {
         let mut new_entries = Vec::new();
-        let mut current_pack_name_in_library = String::new(); // Tracks the last pack header added during iteration of self.song_library
+        let mut current_pack_name_in_library = String::new();
 
-        // Get the name of the pack that should be focused or was just interacted with
         let pack_to_focus_on: Option<String> = self.select_music_state.expanded_pack_name.clone()
             .or_else(|| {
-                // If no pack is currently set to be expanded (e.g., it was just collapsed),
-                // try to find the name of the pack header that was at the *old* selected_index.
-                // This helps keep selection on the pack that was just collapsed.
                 self.select_music_state.entries.get(self.select_music_state.selected_index)
                     .and_then(|entry| match entry {
                         MusicWheelEntry::PackHeader { name, .. } => Some(name.clone()),
@@ -272,7 +272,6 @@ impl App {
                     })
             });
 
-        // Iterate through all songs in the library (which are inherently sorted by pack, then song)
         for song_info in &self.song_library {
             let pack_name_for_song = song_info
                 .folder_path
@@ -282,16 +281,14 @@ impl App {
                 .unwrap_or("Unknown Pack")
                 .to_string();
 
-            // If this song belongs to a new pack (compared to the last one processed)
             if pack_name_for_song != current_pack_name_in_library {
                 let color = self.pack_colors.get(&pack_name_for_song)
                                 .cloned()
-                                .unwrap_or(config::MENU_NORMAL_COLOR); // Fallback color
+                                .unwrap_or(config::MENU_NORMAL_COLOR); 
                 new_entries.push(MusicWheelEntry::PackHeader { name: pack_name_for_song.clone(), color });
                 current_pack_name_in_library = pack_name_for_song.clone();
             }
 
-            // If the current pack being processed is the one that should be expanded
             if let Some(expanded_name) = &self.select_music_state.expanded_pack_name {
                 if *expanded_name == pack_name_for_song {
                     new_entries.push(MusicWheelEntry::Song(Arc::new(song_info.clone())));
@@ -300,8 +297,7 @@ impl App {
         }
         self.select_music_state.entries = new_entries;
 
-        // Adjust selected_index to try and keep focus
-        let mut new_selected_idx = 0; // Default to first item
+        let mut new_selected_idx = 0;
         if let Some(focus_pack_name_str) = pack_to_focus_on {
             if let Some(idx) = self.select_music_state.entries.iter().position(|entry| {
                 match entry {
@@ -346,14 +342,9 @@ impl App {
 
                 if key_event.state == ElementState::Pressed && !key_event.repeat {
                      if let Some(VirtualKeyCode::Enter) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
-                        // Check the entry at the original selected index because `handle_input` might have changed `expanded_pack_name`
-                        if let Some(entry) = self.select_music_state.entries.get(original_selected_index_before_input) {
+                        if let Some(entry) = self.select_music_state.entries.get(original_selected_index_before_input) { // Use original index for the check
                             if let MusicWheelEntry::PackHeader { .. } = entry {
-                                // Enter was pressed on a pack header.
-                                // `select_music::handle_input` toggled `expanded_pack_name`.
                                 self.rebuild_music_wheel_entries();
-                                // selection_changed_in_music is already true from handle_input if expansion state changed.
-                                // The list structure definitely changed, so banner logic below will re-evaluate.
                             }
                         }
                     }
@@ -390,7 +381,7 @@ impl App {
                             selected_song_arc,
                          );
                      }
-                     MusicWheelEntry::PackHeader { .. }=> { // Match any PackHeader
+                     MusicWheelEntry::PackHeader { .. }=> {
                          info!("Selected a pack header ({}), loading fallback banner.", current_index);
                          if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                               self.renderer.update_texture_descriptor(
@@ -401,7 +392,7 @@ impl App {
                          }
                      }
                  }
-             } else { // Index out of bounds, likely after a list rebuild
+             } else { 
                  warn!("Selection changed in Music Select, but index {} is out of bounds ({} entries). Loading fallback.", current_index, self.select_music_state.entries.len());
                   if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                         self.renderer.update_texture_descriptor(
@@ -413,6 +404,7 @@ impl App {
              }
         }
     }
+
 
     fn transition_state(&mut self, new_state: AppState) {
         if new_state == self.current_app_state {
@@ -436,10 +428,11 @@ impl App {
                 self.menu_state = MenuState::default();
             }
             AppState::SelectMusic => {
-                self.select_music_state = SelectMusicState {
+                self.select_music_state = SelectMusicState { // MODIFIED: Initialize with all fields
                     entries: Vec::new(),
                     selected_index: 0,
                     expanded_pack_name: None,
+                    selection_animation_timer: 0.0,
                 };
                 self.rebuild_music_wheel_entries();
 
@@ -551,7 +544,7 @@ impl App {
         trace!("Update Start (dt: {:.4} s)", dt);
         match self.current_app_state {
             AppState::Menu => menu::update(&mut self.menu_state, dt),
-            AppState::SelectMusic => select_music::update(&mut self.select_music_state, dt),
+            AppState::SelectMusic => select_music::update(&mut self.select_music_state, dt), // Pass state for update
             AppState::Options => options::update(&mut self.options_state, dt),
             AppState::Gameplay => {
                 if let Some(ref mut gs) = self.game_state {

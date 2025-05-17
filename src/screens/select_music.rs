@@ -1,12 +1,26 @@
+// src/screens/select_music.rs
+
 use crate::assets::{AssetManager, FontId, SoundId};
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
 use crate::state::{AppState, SelectMusicState, VirtualKeyCode, MusicWheelEntry};
 use ash::vk;
-use cgmath::{Rad, Vector3};
+use cgmath::{Rad, Vector3, InnerSpace}; // Added InnerSpace for Lerp
 use log::debug;
+use std::f32::consts::PI; // Added PI
 use winit::event::{ElementState, KeyEvent};
+
+// Helper for color interpolation
+fn lerp_color(color_a: [f32; 4], color_b: [f32; 4], t: f32) -> [f32; 4] {
+    [
+        color_a[0] * (1.0 - t) + color_b[0] * t,
+        color_a[1] * (1.0 - t) + color_b[1] * t,
+        color_a[2] * (1.0 - t) + color_b[2] * t,
+        color_a[3] * (1.0 - t) + color_b[3] * t, // Assuming alpha is also interpolated
+    ]
+}
+
 
 pub fn handle_input(
     key_event: &KeyEvent,
@@ -33,6 +47,7 @@ pub fn handle_input(
                         if state.selected_index != old_index {
                             audio_manager.play_sfx(SoundId::MenuChange);
                             selection_changed = true;
+                            state.selection_animation_timer = 0.0; // Reset animation on selection change
                         }
                         debug!("SelectMusic {:?}: Selected index {}", virtual_keycode, state.selected_index);
                     }
@@ -44,6 +59,7 @@ pub fn handle_input(
                         if state.selected_index != old_index {
                             audio_manager.play_sfx(SoundId::MenuChange);
                             selection_changed = true;
+                            state.selection_animation_timer = 0.0; // Reset animation on selection change
                         }
                         debug!("SelectMusic {:?}: Selected index {}", virtual_keycode, state.selected_index);
                     }
@@ -70,6 +86,7 @@ pub fn handle_input(
                                         debug!("Expanding pack: {}", pack_name_str);
                                     }
                                     selection_changed = true; 
+                                    state.selection_animation_timer = 0.0; // Reset animation
                                 }
                             }
                         }
@@ -86,7 +103,13 @@ pub fn handle_input(
     (None, selection_changed)
 }
 
-pub fn update(_state: &mut SelectMusicState, _dt: f32) {}
+pub fn update(state: &mut SelectMusicState, dt: f32) {
+    const ANIMATION_CYCLE_DURATION: f32 = 1.0; // Full cycle (base -> highlight -> base) in 1 second
+    state.selection_animation_timer += dt;
+    if state.selection_animation_timer > ANIMATION_CYCLE_DURATION {
+        state.selection_animation_timer -= ANIMATION_CYCLE_DURATION; // Loop the timer
+    }
+}
 
 
 pub fn draw(
@@ -175,13 +198,18 @@ pub fn draw(
     let wheel_font_typographic_height_normalized = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
     let wheel_text_effective_scale = wheel_text_current_target_visual_height / wheel_font_typographic_height_normalized;
 
+    // Animation factor for selected item (0.0 to 1.0 to 0.0 over 1 second)
+    const ANIMATION_CYCLE_DURATION: f32 = 1.0;
+    let anim_t_unscaled = (state.selection_animation_timer / ANIMATION_CYCLE_DURATION) * PI * 2.0; // Full sine wave over 1 sec
+    let anim_t = (anim_t_unscaled.sin() + 1.0) / 2.0; // Ranges from 0.0 to 1.0
+
     for i in 0..NUM_MUSIC_WHEEL_BOXES {
         let current_box_top_y = music_wheel_stack_top_y + (i as f32 * (music_wheel_box_current_height + music_wheel_vertical_gap_current));
         let current_box_center_y = current_box_top_y + music_wheel_box_current_height / 2.0;
 
         let mut display_text = "".to_string();
-        let mut current_box_color = config::MUSIC_WHEEL_BOX_COLOR; // Default for songs
-        let mut current_text_color = config::SONG_TEXT_COLOR;    // Default for songs
+        let mut current_box_color;
+        let mut current_text_color = config::SONG_TEXT_COLOR; // Default for songs
 
         let num_entries = state.entries.len();
         let is_selected_slot = i == CENTER_MUSIC_WHEEL_SLOT_INDEX;
@@ -201,32 +229,34 @@ pub fn draw(
 
             if let Some(entry) = state.entries.get(list_index) {
                 match entry {
-                    MusicWheelEntry::Song(song_info_arc) => {
-                        display_text = song_info_arc.title.clone();
+                    MusicWheelEntry::Song(_) => {
+                        if let MusicWheelEntry::Song(song_info_arc) = entry { // Re-match to get data
+                           display_text = song_info_arc.title.clone();
+                        }
                         current_box_color = if is_selected_slot {
-                            config::SELECTED_SONG_BOX_COLOR
+                            lerp_color(config::MUSIC_WHEEL_BOX_COLOR, config::SELECTED_SONG_BOX_COLOR, anim_t)
                         } else {
                             config::MUSIC_WHEEL_BOX_COLOR
                         };
-                        current_text_color = config::SONG_TEXT_COLOR; // Always white for songs
+                        current_text_color = config::SONG_TEXT_COLOR;
                     }
-                    MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color } => {
-                        display_text = pack_name.clone(); // No "PACK: " prefix
+                    MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color_val } => {
+                        display_text = pack_name.clone();
                         current_box_color = if is_selected_slot {
-                            config::SELECTED_PACK_HEADER_BOX_COLOR
+                            lerp_color(config::PACK_HEADER_BOX_COLOR, config::SELECTED_PACK_HEADER_BOX_COLOR, anim_t)
                         } else {
                             config::PACK_HEADER_BOX_COLOR
                         };
-                        current_text_color = *pack_text_color; // Use assigned palette color for text
-                                                              // If selected, box changes, text color remains from palette.
-                                                              // Or, if you want selected pack text to be white/yellow:
-                        // if is_selected_slot {
-                        //     current_text_color = config::MENU_SELECTED_COLOR;
-                        // }
+                        current_text_color = *pack_text_color_val;
                     }
                 }
+            } else { // Should not happen if list_index is calculated correctly
+                 current_box_color = config::MUSIC_WHEEL_BOX_COLOR; // Fallback
             }
+        } else { // No entries
+            current_box_color = config::MUSIC_WHEEL_BOX_COLOR; // Fallback
         }
+
 
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::SolidColor,
@@ -254,7 +284,6 @@ pub fn draw(
     }
 
     // --- Draw other layout elements (Quads for UI boxes) ---
-    // (This section remains the same as before)
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, footer_y_top_edge + bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
     
@@ -311,7 +340,7 @@ pub fn draw(
     
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::DynamicBanner, Vector3::new(fallback_banner_center_x, fallback_banner_center_y, 0.0), (fallback_banner_width_to_draw, fallback_banner_current_height), Rad(0.0), [1.0, 1.0, 1.0, 1.0], [0.0,0.0], [1.0,1.0] );
 
-    // --- Header and Footer Text Drawing (same as before) ---
+    // --- Header and Footer Text Drawing ---
     let hf_target_visual_current_px_height = TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES * height_scale_factor;
     let hf_font_typographic_height_normalized = (header_footer_font.metrics.ascender - header_footer_font.metrics.descender).max(1e-5);
 
@@ -348,7 +377,7 @@ pub fn draw(
     };
     renderer.draw_text( device, cmd_buf, header_footer_font, footer_text_str, center_x - footer_text_visual_width / 2.0, footer_baseline_y, config::UI_BAR_TEXT_COLOR, hf_effective_scale, Some(HEADER_FOOTER_LETTER_SPACING_FACTOR) );
 
-    // --- Draw Artist/BPM (same as before) ---
+    // --- Draw Artist/BPM ---
     if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
         let detail_text_target_px_height = MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * 0.8 * height_scale_factor;
         let detail_font_typographic_height_normalized = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
@@ -364,7 +393,7 @@ pub fn draw(
 
         renderer.draw_text(
             device, cmd_buf, list_font, &artist_text_full,
-            artist_text_x_pos, artist_text_baseline_y, config::SONG_TEXT_COLOR, // Use SONG_TEXT_COLOR
+            artist_text_x_pos, artist_text_baseline_y, config::SONG_TEXT_COLOR,
             detail_text_effective_scale, None
         );
 
@@ -387,7 +416,7 @@ pub fn draw(
 
         renderer.draw_text(
             device, cmd_buf, list_font, &bpm_text_full,
-            bpm_text_x_pos, bpm_text_baseline_y, config::SONG_TEXT_COLOR, // Use SONG_TEXT_COLOR
+            bpm_text_x_pos, bpm_text_baseline_y, config::SONG_TEXT_COLOR,
             detail_text_effective_scale, None
         );
     }

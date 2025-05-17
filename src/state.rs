@@ -37,7 +37,7 @@ impl Default for MenuState {
 #[derive(Debug, Clone)]
 pub enum MusicWheelEntry {
     Song(Arc<SongInfo>),
-    PackHeader { name: String, color: [f32; 4] }, // MODIFIED: Include color
+    PackHeader { name: String, color: [f32; 4] },
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +45,7 @@ pub struct SelectMusicState {
     pub entries: Vec<MusicWheelEntry>,
     pub selected_index: usize,
     pub expanded_pack_name: Option<String>,
+    pub selection_animation_timer: f32, // NEW: For animating the selected item
 }
 
 impl Default for SelectMusicState {
@@ -53,6 +54,7 @@ impl Default for SelectMusicState {
             entries: Vec::new(),
             selected_index: 0,
             expanded_pack_name: None,
+            selection_animation_timer: 0.0, // NEW: Initialize timer
         }
     }
 }
