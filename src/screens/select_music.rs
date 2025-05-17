@@ -4,20 +4,21 @@ use crate::assets::{AssetManager, FontId, SoundId};
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
-use crate::state::{AppState, SelectMusicState, VirtualKeyCode, MusicWheelEntry};
+use crate::state::{AppState, SelectMusicState, VirtualKeyCode, MusicWheelEntry, NavDirection}; // Added NavDirection
 use ash::vk;
-use cgmath::{Rad, Vector3, InnerSpace}; // Added InnerSpace for Lerp
+use cgmath::{Rad, Vector3, InnerSpace};
 use log::debug;
-use std::f32::consts::PI; // Added PI
+use std::f32::consts::PI;
+use std::time::{Instant, Duration}; // Added Duration and Instant
 use winit::event::{ElementState, KeyEvent};
 
-// Helper for color interpolation
+// Helper for color interpolation (same as before)
 fn lerp_color(color_a: [f32; 4], color_b: [f32; 4], t: f32) -> [f32; 4] {
     [
         color_a[0] * (1.0 - t) + color_b[0] * t,
         color_a[1] * (1.0 - t) + color_b[1] * t,
         color_a[2] * (1.0 - t) + color_b[2] * t,
-        color_a[3] * (1.0 - t) + color_b[3] * t, // Assuming alpha is also interpolated
+        color_a[3] * (1.0 - t) + color_b[3] * t,
     ]
 }
 
@@ -26,89 +27,156 @@ pub fn handle_input(
     key_event: &KeyEvent,
     state: &mut SelectMusicState,
     audio_manager: &AudioManager,
-) -> (Option<AppState>, bool) { 
-    let mut selection_changed = false;
+) -> (Option<AppState>, bool) {
+    let mut selection_changed_this_frame = false;
 
-    if key_event.state == ElementState::Pressed && !key_event.repeat {
-        if let Some(virtual_keycode) =
-            crate::state::key_to_virtual_keycode(key_event.logical_key.clone())
-        {
-            let num_entries = state.entries.len(); 
+    if let Some(virtual_keycode) =
+        crate::state::key_to_virtual_keycode(key_event.logical_key.clone())
+    {
+        let num_entries = state.entries.len();
 
-            match virtual_keycode {
-                VirtualKeyCode::Left | VirtualKeyCode::Up => { 
-                    if num_entries > 0 {
-                        let old_index = state.selected_index;
-                        state.selected_index = if state.selected_index == 0 {
-                            num_entries - 1
-                        } else {
-                            state.selected_index - 1
-                        };
-                        if state.selected_index != old_index {
-                            audio_manager.play_sfx(SoundId::MenuChange);
-                            selection_changed = true;
-                            state.selection_animation_timer = 0.0; // Reset animation on selection change
-                        }
-                        debug!("SelectMusic {:?}: Selected index {}", virtual_keycode, state.selected_index);
-                    }
-                }
-                VirtualKeyCode::Right | VirtualKeyCode::Down => { 
-                    if num_entries > 0 {
-                        let old_index = state.selected_index;
-                        state.selected_index = (state.selected_index + 1) % num_entries;
-                        if state.selected_index != old_index {
-                            audio_manager.play_sfx(SoundId::MenuChange);
-                            selection_changed = true;
-                            state.selection_animation_timer = 0.0; // Reset animation on selection change
-                        }
-                        debug!("SelectMusic {:?}: Selected index {}", virtual_keycode, state.selected_index);
-                    }
-                }
-                VirtualKeyCode::Enter => {
-                    if num_entries > 0 {
-                        if let Some(entry_clone) = state.entries.get(state.selected_index).cloned() {
-                            match entry_clone {
-                                MusicWheelEntry::Song(selected_song_arc) => {
-                                    debug!(
-                                        "SelectMusic Enter: Attempting to start song '{}' at index {}",
-                                        selected_song_arc.title, state.selected_index
-                                    );
-                                    audio_manager.play_sfx(SoundId::MenuStart);
-                                    return (Some(AppState::Gameplay), selection_changed); 
+        match key_event.state {
+            ElementState::Pressed => {
+                if !key_event.repeat { // Handle initial press for single scroll and setting up hold
+                    match virtual_keycode {
+                        VirtualKeyCode::Left | VirtualKeyCode::Up => {
+                            if num_entries > 0 {
+                                let old_index = state.selected_index;
+                                state.selected_index = if state.selected_index == 0 {
+                                    num_entries - 1
+                                } else {
+                                    state.selected_index - 1
+                                };
+                                if state.selected_index != old_index {
+                                    audio_manager.play_sfx(SoundId::MenuChange);
+                                    selection_changed_this_frame = true;
+                                    state.selection_animation_timer = 0.0;
                                 }
-                                MusicWheelEntry::PackHeader { name: pack_name_str, .. } => {
-                                    audio_manager.play_sfx(SoundId::MenuChange); 
-                                    if state.expanded_pack_name.as_ref() == Some(&pack_name_str) {
-                                        state.expanded_pack_name = None; 
-                                        debug!("Collapsing pack: {}", pack_name_str);
-                                    } else {
-                                        state.expanded_pack_name = Some(pack_name_str.clone()); 
-                                        debug!("Expanding pack: {}", pack_name_str);
+                                state.nav_key_held_direction = Some(NavDirection::Up);
+                                state.nav_key_held_since = Some(Instant::now());
+                                state.nav_key_last_scrolled_at = Some(Instant::now());
+                                debug!("SelectMusic {:?} (Press): Selected index {}", virtual_keycode, state.selected_index);
+                            }
+                        }
+                        VirtualKeyCode::Right | VirtualKeyCode::Down => {
+                            if num_entries > 0 {
+                                let old_index = state.selected_index;
+                                state.selected_index = (state.selected_index + 1) % num_entries;
+                                if state.selected_index != old_index {
+                                    audio_manager.play_sfx(SoundId::MenuChange);
+                                    selection_changed_this_frame = true;
+                                    state.selection_animation_timer = 0.0;
+                                }
+                                state.nav_key_held_direction = Some(NavDirection::Down);
+                                state.nav_key_held_since = Some(Instant::now());
+                                state.nav_key_last_scrolled_at = Some(Instant::now());
+                                debug!("SelectMusic {:?} (Press): Selected index {}", virtual_keycode, state.selected_index);
+                            }
+                        }
+                        VirtualKeyCode::Enter => {
+                            if num_entries > 0 {
+                                if let Some(entry_clone) = state.entries.get(state.selected_index).cloned() {
+                                    match entry_clone {
+                                        MusicWheelEntry::Song(selected_song_arc) => {
+                                            debug!(
+                                                "SelectMusic Enter: Attempting to start song '{}' at index {}",
+                                                selected_song_arc.title, state.selected_index
+                                            );
+                                            audio_manager.play_sfx(SoundId::MenuStart);
+                                            return (Some(AppState::Gameplay), selection_changed_this_frame);
+                                        }
+                                        MusicWheelEntry::PackHeader { name: pack_name_str, .. } => {
+                                            audio_manager.play_sfx(SoundId::MenuChange);
+                                            if state.expanded_pack_name.as_ref() == Some(&pack_name_str) {
+                                                state.expanded_pack_name = None;
+                                                debug!("Collapsing pack: {}", pack_name_str);
+                                            } else {
+                                                state.expanded_pack_name = Some(pack_name_str.clone());
+                                                debug!("Expanding pack: {}", pack_name_str);
+                                            }
+                                            selection_changed_this_frame = true;
+                                            state.selection_animation_timer = 0.0;
+                                        }
                                     }
-                                    selection_changed = true; 
-                                    state.selection_animation_timer = 0.0; // Reset animation
                                 }
                             }
                         }
+                        VirtualKeyCode::Escape => {
+                            debug!("SelectMusic Escape: Returning to Main Menu");
+                            return (Some(AppState::Menu), selection_changed_this_frame);
+                        }
                     }
                 }
-                VirtualKeyCode::Escape => {
-                    debug!("SelectMusic Escape: Returning to Main Menu");
-                    return (Some(AppState::Menu), selection_changed); 
+            }
+            ElementState::Released => {
+                match virtual_keycode {
+                    VirtualKeyCode::Left | VirtualKeyCode::Up => {
+                        if state.nav_key_held_direction == Some(NavDirection::Up) {
+                            state.nav_key_held_direction = None;
+                            state.nav_key_held_since = None;
+                            state.nav_key_last_scrolled_at = None;
+                        }
+                    }
+                    VirtualKeyCode::Right | VirtualKeyCode::Down => {
+                        if state.nav_key_held_direction == Some(NavDirection::Down) {
+                            state.nav_key_held_direction = None;
+                            state.nav_key_held_since = None;
+                            state.nav_key_last_scrolled_at = None;
+                        }
+                    }
+                    _ => {} // Other keys released
                 }
-                _ => {}
             }
         }
     }
-    (None, selection_changed)
+    (None, selection_changed_this_frame)
 }
 
-pub fn update(state: &mut SelectMusicState, dt: f32) {
-    const ANIMATION_CYCLE_DURATION: f32 = 1.0; // Full cycle (base -> highlight -> base) in 1 second
+pub fn update(state: &mut SelectMusicState, dt: f32, audio_manager: &AudioManager) -> bool {
+    let mut selection_changed_by_update = false;
+    const ANIMATION_CYCLE_DURATION: f32 = 1.0;
     state.selection_animation_timer += dt;
     if state.selection_animation_timer > ANIMATION_CYCLE_DURATION {
-        state.selection_animation_timer -= ANIMATION_CYCLE_DURATION; // Loop the timer
+        state.selection_animation_timer -= ANIMATION_CYCLE_DURATION;
     }
+
+    const INITIAL_HOLD_DELAY: Duration = Duration::from_millis(300);
+    const REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(70);
+
+    if let (Some(direction), Some(held_since), Some(last_scrolled_at)) = (
+        state.nav_key_held_direction,
+        state.nav_key_held_since,
+        state.nav_key_last_scrolled_at,
+    ) {
+        let now = Instant::now();
+        if now.duration_since(held_since) > INITIAL_HOLD_DELAY {
+            if now.duration_since(last_scrolled_at) >= REPEAT_SCROLL_INTERVAL {
+                let num_entries = state.entries.len();
+                if num_entries > 0 {
+                    let old_index = state.selected_index;
+                    match direction {
+                        NavDirection::Up => {
+                            state.selected_index = if state.selected_index == 0 {
+                                num_entries - 1
+                            } else {
+                                state.selected_index - 1
+                            };
+                        }
+                        NavDirection::Down => {
+                            state.selected_index = (state.selected_index + 1) % num_entries;
+                        }
+                    }
+                    if state.selected_index != old_index {
+                         audio_manager.play_sfx(SoundId::MenuChange);
+                         selection_changed_by_update = true;
+                         state.selection_animation_timer = 0.0;
+                    }
+                    state.nav_key_last_scrolled_at = Some(now);
+                }
+            }
+        }
+    }
+    selection_changed_by_update
 }
 
 
@@ -124,7 +192,6 @@ pub fn draw(
     let (window_width, window_height) = renderer.window_size();
     let center_x = window_width / 2.0;
 
-    // --- Constants (same as before) ---
     const TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES: f32 = 36.0;
     const OBSERVED_PX_HEIGHT_AT_REF_FOR_30PX_TARGET_OLD_METHOD: f32 = 19.0;
     const ASCENDER_POSITIONING_ADJUSTMENT_FACTOR: f32 = 0.65;
@@ -155,7 +222,6 @@ pub fn draw(
     const VERTICAL_GAP_ARTIST_TO_BANNER_REF: f32 = 2.0;
     const MUSIC_WHEEL_VERTICAL_GAP_REF: f32 = 2.0;
 
-    // --- Scaled Dimensions (same as before) ---
     let width_scale_factor = window_width / config::LAYOUT_BOXES_REF_RES_WIDTH;
     let height_scale_factor = window_height / config::LAYOUT_BOXES_REF_RES_HEIGHT;
 
@@ -185,7 +251,6 @@ pub fn draw(
     let vertical_gap_stepartist_to_artist_current = VERTICAL_GAP_STEPARTIST_TO_ARTIST_REF * height_scale_factor;
     let vertical_gap_artist_to_banner_current = VERTICAL_GAP_ARTIST_TO_BANNER_REF * height_scale_factor;
 
-    // --- Music Wheel Box and Text Drawing ---
     let total_music_boxes_height = NUM_MUSIC_WHEEL_BOXES as f32 * music_wheel_box_current_height;
     let total_music_gaps_height = (NUM_MUSIC_WHEEL_BOXES.saturating_sub(1)) as f32 * music_wheel_vertical_gap_current;
     let full_music_wheel_stack_height = total_music_boxes_height + total_music_gaps_height;
@@ -198,10 +263,9 @@ pub fn draw(
     let wheel_font_typographic_height_normalized = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
     let wheel_text_effective_scale = wheel_text_current_target_visual_height / wheel_font_typographic_height_normalized;
 
-    // Animation factor for selected item (0.0 to 1.0 to 0.0 over 1 second)
     const ANIMATION_CYCLE_DURATION: f32 = 1.0;
-    let anim_t_unscaled = (state.selection_animation_timer / ANIMATION_CYCLE_DURATION) * PI * 2.0; // Full sine wave over 1 sec
-    let anim_t = (anim_t_unscaled.sin() + 1.0) / 2.0; // Ranges from 0.0 to 1.0
+    let anim_t_unscaled = (state.selection_animation_timer / ANIMATION_CYCLE_DURATION) * PI * 2.0;
+    let anim_t = (anim_t_unscaled.sin() + 1.0) / 2.0;
 
     for i in 0..NUM_MUSIC_WHEEL_BOXES {
         let current_box_top_y = music_wheel_stack_top_y + (i as f32 * (music_wheel_box_current_height + music_wheel_vertical_gap_current));
@@ -209,7 +273,7 @@ pub fn draw(
 
         let mut display_text = "".to_string();
         let mut current_box_color;
-        let mut current_text_color = config::SONG_TEXT_COLOR; // Default for songs
+        let mut current_text_color = config::SONG_TEXT_COLOR;
 
         let num_entries = state.entries.len();
         let is_selected_slot = i == CENTER_MUSIC_WHEEL_SLOT_INDEX;
@@ -229,10 +293,8 @@ pub fn draw(
 
             if let Some(entry) = state.entries.get(list_index) {
                 match entry {
-                    MusicWheelEntry::Song(_) => {
-                        if let MusicWheelEntry::Song(song_info_arc) = entry { // Re-match to get data
-                           display_text = song_info_arc.title.clone();
-                        }
+                    MusicWheelEntry::Song(song_info_arc) => {
+                        display_text = song_info_arc.title.clone();
                         current_box_color = if is_selected_slot {
                             lerp_color(config::MUSIC_WHEEL_BOX_COLOR, config::SELECTED_SONG_BOX_COLOR, anim_t)
                         } else {
@@ -250,13 +312,12 @@ pub fn draw(
                         current_text_color = *pack_text_color_val;
                     }
                 }
-            } else { // Should not happen if list_index is calculated correctly
-                 current_box_color = config::MUSIC_WHEEL_BOX_COLOR; // Fallback
+            } else { 
+                 current_box_color = config::MUSIC_WHEEL_BOX_COLOR;
             }
-        } else { // No entries
-            current_box_color = config::MUSIC_WHEEL_BOX_COLOR; // Fallback
+        } else { 
+            current_box_color = config::MUSIC_WHEEL_BOX_COLOR;
         }
-
 
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::SolidColor,
@@ -283,7 +344,6 @@ pub fn draw(
         }
     }
 
-    // --- Draw other layout elements (Quads for UI boxes) ---
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, footer_y_top_edge + bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
     
@@ -340,7 +400,6 @@ pub fn draw(
     
     renderer.draw_quad( device, cmd_buf, DescriptorSetId::DynamicBanner, Vector3::new(fallback_banner_center_x, fallback_banner_center_y, 0.0), (fallback_banner_width_to_draw, fallback_banner_current_height), Rad(0.0), [1.0, 1.0, 1.0, 1.0], [0.0,0.0], [1.0,1.0] );
 
-    // --- Header and Footer Text Drawing ---
     let hf_target_visual_current_px_height = TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES * height_scale_factor;
     let hf_font_typographic_height_normalized = (header_footer_font.metrics.ascender - header_footer_font.metrics.descender).max(1e-5);
 
@@ -377,7 +436,6 @@ pub fn draw(
     };
     renderer.draw_text( device, cmd_buf, header_footer_font, footer_text_str, center_x - footer_text_visual_width / 2.0, footer_baseline_y, config::UI_BAR_TEXT_COLOR, hf_effective_scale, Some(HEADER_FOOTER_LETTER_SPACING_FACTOR) );
 
-    // --- Draw Artist/BPM ---
     if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
         let detail_text_target_px_height = MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * 0.8 * height_scale_factor;
         let detail_font_typographic_height_normalized = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);

@@ -5,7 +5,7 @@ use crate::graphics::renderer::Renderer;
 use crate::graphics::vulkan_base::VulkanBase;
 use crate::parsing::simfile::{scan_packs, SongInfo};
 use crate::screens::{gameplay, menu, options, select_music};
-use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState, MusicWheelEntry, VirtualKeyCode};
+use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState, MusicWheelEntry, VirtualKeyCode, NavDirection}; // Added NavDirection
 use crate::utils::fps::FPSCounter;
 
 use ash::vk;
@@ -108,12 +108,7 @@ impl App {
             song_library,
             current_app_state: AppState::Menu,
             menu_state: MenuState::default(),
-            select_music_state: SelectMusicState { // MODIFIED: Initialize with all fields
-                entries: Vec::new(),
-                selected_index: 0,
-                expanded_pack_name: None,
-                selection_animation_timer: 0.0,
-            },
+            select_music_state: SelectMusicState::default(), // Default will init timer and nav state
             options_state: OptionsState::default(),
             game_state: None,
             fps_counter: FPSCounter::new(),
@@ -126,7 +121,6 @@ impl App {
         })
     }
 
-    // ... (run, try_process_pending_resize, handle_window_event, rebuild_music_wheel_entries, handle_keyboard_input remain the same) ...
     pub fn run(mut self, mut event_loop: EventLoop<()>) -> Result<(), Box<dyn Error>> {
         info!("Starting Event Loop...");
         self.last_frame_time = Instant::now();
@@ -185,7 +179,7 @@ impl App {
                         let now = Instant::now();
                         let dt = (now - self.last_frame_time).as_secs_f32().max(0.0).min(config::MAX_DELTA_TIME);
                         self.last_frame_time = now;
-                        self.update(dt);
+                        self.update(dt); // This now calls the select_music::update
                         self.vulkan_base.window.request_redraw();
                     } else if self.pending_resize.is_some() || self.swapchain_is_known_bad {
                         self.vulkan_base.window.request_redraw();
@@ -322,7 +316,7 @@ impl App {
     fn handle_keyboard_input(&mut self, key_event: KeyEvent) {
         trace!("Keyboard Input: {:?}", key_event);
         let mut requested_state: Option<AppState> = None;
-        let mut selection_changed_in_music = false;
+        let mut selection_changed_in_music_by_input = false; // Renamed for clarity
 
         match self.current_app_state {
             AppState::Menu => {
@@ -338,13 +332,14 @@ impl App {
                     &self.audio_manager,
                 );
                 requested_state = next_state;
-                selection_changed_in_music = sel_changed_by_nav_or_toggle;
+                selection_changed_in_music_by_input = sel_changed_by_nav_or_toggle;
 
                 if key_event.state == ElementState::Pressed && !key_event.repeat {
                      if let Some(VirtualKeyCode::Enter) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
-                        if let Some(entry) = self.select_music_state.entries.get(original_selected_index_before_input) { // Use original index for the check
+                        if let Some(entry) = self.select_music_state.entries.get(original_selected_index_before_input) {
                             if let MusicWheelEntry::PackHeader { .. } = entry {
                                 self.rebuild_music_wheel_entries();
+                                // selection_changed_in_music_by_input is already true from handle_input if expansion state changed.
                             }
                         }
                     }
@@ -370,7 +365,8 @@ impl App {
             self.next_app_state = requested_state;
         }
 
-        if self.current_app_state == AppState::SelectMusic && selection_changed_in_music {
+        // Banner update logic based on input-driven changes
+        if self.current_app_state == AppState::SelectMusic && selection_changed_in_music_by_input {
             let current_index = self.select_music_state.selected_index;
              if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
                  match selected_entry {
@@ -382,7 +378,7 @@ impl App {
                          );
                      }
                      MusicWheelEntry::PackHeader { .. }=> {
-                         info!("Selected a pack header ({}), loading fallback banner.", current_index);
+                         info!("Selected a pack header ({}) due to input, loading fallback banner.", current_index);
                          if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                               self.renderer.update_texture_descriptor(
                                   &self.vulkan_base.device,
@@ -393,7 +389,7 @@ impl App {
                      }
                  }
              } else { 
-                 warn!("Selection changed in Music Select, but index {} is out of bounds ({} entries). Loading fallback.", current_index, self.select_music_state.entries.len());
+                 warn!("Selection changed by input in Music Select, but index {} is out of bounds ({} entries). Loading fallback.", current_index, self.select_music_state.entries.len());
                   if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                         self.renderer.update_texture_descriptor(
                             &self.vulkan_base.device,
@@ -404,7 +400,6 @@ impl App {
              }
         }
     }
-
 
     fn transition_state(&mut self, new_state: AppState) {
         if new_state == self.current_app_state {
@@ -428,12 +423,7 @@ impl App {
                 self.menu_state = MenuState::default();
             }
             AppState::SelectMusic => {
-                self.select_music_state = SelectMusicState { // MODIFIED: Initialize with all fields
-                    entries: Vec::new(),
-                    selected_index: 0,
-                    expanded_pack_name: None,
-                    selection_animation_timer: 0.0,
-                };
+                self.select_music_state = SelectMusicState::default(); // This initializes all fields including timer and nav state
                 self.rebuild_music_wheel_entries();
 
                 info!(
@@ -542,9 +532,15 @@ impl App {
 
     fn update(&mut self, dt: f32) {
         trace!("Update Start (dt: {:.4} s)", dt);
+        let mut selection_changed_by_update = false;
+
         match self.current_app_state {
             AppState::Menu => menu::update(&mut self.menu_state, dt),
-            AppState::SelectMusic => select_music::update(&mut self.select_music_state, dt), // Pass state for update
+            AppState::SelectMusic => {
+                if select_music::update(&mut self.select_music_state, dt, &self.audio_manager) {
+                    selection_changed_by_update = true;
+                }
+            }
             AppState::Options => options::update(&mut self.options_state, dt),
             AppState::Gameplay => {
                 if let Some(ref mut gs) = self.game_state {
@@ -553,6 +549,42 @@ impl App {
             }
             AppState::Exiting => {}
         }
+
+        // If select_music::update caused a selection change (due to held key scroll)
+        if self.current_app_state == AppState::SelectMusic && selection_changed_by_update {
+            let current_index = self.select_music_state.selected_index;
+             if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
+                 match selected_entry {
+                     MusicWheelEntry::Song(selected_song_arc) => {
+                         self.asset_manager.load_song_banner(
+                            &self.vulkan_base,
+                            &self.renderer,
+                            selected_song_arc,
+                         );
+                     }
+                     MusicWheelEntry::PackHeader { .. }=> {
+                         info!("Selected a pack header ({}) due to update scroll, loading fallback banner.", current_index);
+                         if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                              self.renderer.update_texture_descriptor(
+                                  &self.vulkan_base.device,
+                                  crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                                  fallback_res,
+                              );
+                         }
+                     }
+                 }
+             } else {
+                 warn!("Selection changed by update in Music Select, but index {} is out of bounds ({} entries). Loading fallback.", current_index, self.select_music_state.entries.len());
+                  if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                        self.renderer.update_texture_descriptor(
+                            &self.vulkan_base.device,
+                            crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                            fallback_res,
+                        );
+                    }
+             }
+        }
+
 
         if let Some(fps) = self.fps_counter.update() {
             let title_suffix = match self.current_app_state {

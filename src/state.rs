@@ -40,12 +40,23 @@ pub enum MusicWheelEntry {
     PackHeader { name: String, color: [f32; 4] },
 }
 
+// NEW: Enum for navigation direction due to held key
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavDirection {
+    Up, // Or Previous
+    Down, // Or Next
+}
+
 #[derive(Debug, Clone)]
 pub struct SelectMusicState {
     pub entries: Vec<MusicWheelEntry>,
     pub selected_index: usize,
     pub expanded_pack_name: Option<String>,
-    pub selection_animation_timer: f32, // NEW: For animating the selected item
+    pub selection_animation_timer: f32,
+    // NEW: Fields for held key navigation
+    pub nav_key_held_direction: Option<NavDirection>,
+    pub nav_key_held_since: Option<Instant>,
+    pub nav_key_last_scrolled_at: Option<Instant>,
 }
 
 impl Default for SelectMusicState {
@@ -54,7 +65,11 @@ impl Default for SelectMusicState {
             entries: Vec::new(),
             selected_index: 0,
             expanded_pack_name: None,
-            selection_animation_timer: 0.0, // NEW: Initialize timer
+            selection_animation_timer: 0.0,
+            // NEW: Initialize held key state
+            nav_key_held_direction: None,
+            nav_key_held_since: None,
+            nav_key_last_scrolled_at: None,
         }
     }
 }
