@@ -1,4 +1,3 @@
-// src/assets.rs
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::font::{load_font, Font, LoadedFontData};

@@ -25,6 +25,7 @@ use winit::{
 
 const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0);
 const PREVIEW_RESTART_DELAY: f32 = 1.0; // Seconds
+const SELECTION_PREVIEW_DELAY: Duration = Duration::from_millis(500); // New constant for selection delay
 
 pub struct App {
     vulkan_base: VulkanBase,
@@ -256,7 +257,6 @@ impl App {
         }
     }
 
-
     fn rebuild_music_wheel_entries(&mut self) {
         let mut new_entries = Vec::new();
         let mut current_pack_name_in_library = String::new();
@@ -313,10 +313,12 @@ impl App {
             self.select_music_state.selected_index = 0;
         }
         // Reset preview state as the list structure changed significantly
+        self.audio_manager.stop_preview();
         self.select_music_state.preview_audio_path = None;
         self.select_music_state.preview_playback_started_at = None;
         self.select_music_state.is_awaiting_preview_restart = false;
-        self.audio_manager.stop_preview();
+        self.select_music_state.selection_landed_at = None; // Reset delay timer
+        self.select_music_state.is_preview_play_scheduled = false; // Cancel scheduled play
 
 
         info!("Rebuilt music wheel. New #entries: {}, selected_index: {}", self.select_music_state.entries.len(), self.select_music_state.selected_index);
@@ -325,7 +327,7 @@ impl App {
     fn start_or_schedule_preview(&mut self) {
         self.audio_manager.stop_preview(); // Stop any current preview first
         self.select_music_state.preview_playback_started_at = None;
-        self.select_music_state.is_awaiting_preview_restart = false;
+        self.select_music_state.is_awaiting_preview_restart = false; // Also reset restart state
 
         if let Some(audio_path) = &self.select_music_state.preview_audio_path {
             if let Some(start_sec) = self.select_music_state.preview_sample_start_sec {
@@ -340,6 +342,81 @@ impl App {
             } else {
                 warn!("No sample start time for song, cannot play preview.");
             }
+        }
+    }
+
+    fn handle_music_selection_change(&mut self) {
+        // Stop any ongoing preview or scheduled play immediately
+        self.audio_manager.stop_preview();
+        self.select_music_state.preview_playback_started_at = None;
+        self.select_music_state.is_awaiting_preview_restart = false;
+        self.select_music_state.is_preview_play_scheduled = false; // Cancel any pending play
+
+        let current_index = self.select_music_state.selected_index;
+        if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
+            match selected_entry {
+                MusicWheelEntry::Song(selected_song_arc) => {
+                    self.asset_manager.load_song_banner( // Banner loads immediately
+                        &self.vulkan_base,
+                        &self.renderer,
+                        selected_song_arc,
+                    );
+                    // Update preview metadata
+                    self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
+                    self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
+                    self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
+
+                    // Schedule the preview play
+                    self.select_music_state.selection_landed_at = Some(Instant::now());
+                    self.select_music_state.is_preview_play_scheduled = true;
+                    info!(
+                        "Selection changed to song: '{}'. Preview play scheduled in {}ms.",
+                        selected_song_arc.title, SELECTION_PREVIEW_DELAY.as_millis()
+                    );
+                }
+                MusicWheelEntry::PackHeader { .. } => {
+                    info!(
+                        "Selected a pack header ({}), loading fallback banner and stopping/cancelling preview.",
+                        current_index
+                    );
+                    if let Some(fallback_res) =
+                        self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner)
+                    {
+                        self.renderer.update_texture_descriptor(
+                            &self.vulkan_base.device,
+                            crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                            fallback_res,
+                        );
+                    }
+                    // Clear all preview states
+                    self.select_music_state.preview_audio_path = None;
+                    self.select_music_state.preview_playback_started_at = None;
+                    self.select_music_state.is_awaiting_preview_restart = false;
+                    self.select_music_state.selection_landed_at = None;
+                    self.select_music_state.is_preview_play_scheduled = false;
+                }
+            }
+        } else {
+            warn!(
+                "Selection changed in Music Select, but index {} is out of bounds ({} entries). Loading fallback and stopping/cancelling preview.",
+                current_index,
+                self.select_music_state.entries.len()
+            );
+            if let Some(fallback_res) =
+                self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner)
+            {
+                self.renderer.update_texture_descriptor(
+                    &self.vulkan_base.device,
+                    crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                    fallback_res,
+                );
+            }
+            // Clear all preview states
+            self.select_music_state.preview_audio_path = None;
+            self.select_music_state.preview_playback_started_at = None;
+            self.select_music_state.is_awaiting_preview_restart = false;
+            self.select_music_state.selection_landed_at = None;
+            self.select_music_state.is_preview_play_scheduled = false;
         }
     }
 
@@ -399,50 +476,7 @@ impl App {
         }
 
         if self.current_app_state == AppState::SelectMusic && selection_changed_in_music_by_input {
-            let current_index = self.select_music_state.selected_index;
-             if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
-                 match selected_entry {
-                     MusicWheelEntry::Song(selected_song_arc) => {
-                         self.asset_manager.load_song_banner(
-                            &self.vulkan_base,
-                            &self.renderer,
-                            selected_song_arc,
-                         );
-                         // Update preview state for the newly selected song
-                         self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
-                         self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
-                         self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
-                         self.start_or_schedule_preview();
-                     }
-                     MusicWheelEntry::PackHeader { .. }=> {
-                         info!("Selected a pack header ({}), loading fallback banner and stopping preview.", current_index);
-                         if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                              self.renderer.update_texture_descriptor(
-                                  &self.vulkan_base.device,
-                                  crate::graphics::renderer::DescriptorSetId::DynamicBanner,
-                                  fallback_res,
-                              );
-                         }
-                         self.audio_manager.stop_preview();
-                         self.select_music_state.preview_audio_path = None;
-                         self.select_music_state.preview_playback_started_at = None;
-                         self.select_music_state.is_awaiting_preview_restart = false;
-                     }
-                 }
-             } else { 
-                 warn!("Selection changed by input in Music Select, but index {} is out of bounds ({} entries). Loading fallback and stopping preview.", current_index, self.select_music_state.entries.len());
-                  if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                        self.renderer.update_texture_descriptor(
-                            &self.vulkan_base.device,
-                            crate::graphics::renderer::DescriptorSetId::DynamicBanner,
-                            fallback_res,
-                        );
-                    }
-                    self.audio_manager.stop_preview();
-                    self.select_music_state.preview_audio_path = None;
-                    self.select_music_state.preview_playback_started_at = None;
-                    self.select_music_state.is_awaiting_preview_restart = false;
-             }
+            self.handle_music_selection_change();
         }
     }
 
@@ -461,6 +495,8 @@ impl App {
             self.select_music_state.preview_audio_path = None;
             self.select_music_state.preview_playback_started_at = None;
             self.select_music_state.is_awaiting_preview_restart = false;
+            self.select_music_state.selection_landed_at = None;
+            self.select_music_state.is_preview_play_scheduled = false;
         }
 
 
@@ -479,7 +515,7 @@ impl App {
             }
             AppState::SelectMusic => {
                 self.select_music_state = SelectMusicState::default(); 
-                self.rebuild_music_wheel_entries(); // This now also resets preview
+                self.rebuild_music_wheel_entries(); // This now also resets preview scheduling flags
 
                 info!(
                     "Populated SelectMusic state with {} entries (initially collapsed).",
@@ -498,10 +534,14 @@ impl App {
                              self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
                              self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
                              self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
-                             self.start_or_schedule_preview();
+                             
+                             // Schedule the preview play for the initial item
+                             self.select_music_state.selection_landed_at = Some(Instant::now());
+                             self.select_music_state.is_preview_play_scheduled = true;
+                             info!("Transitioned to SelectMusic. Initial song: {}. Preview play scheduled in {}ms.", selected_song_arc.title, SELECTION_PREVIEW_DELAY.as_millis());
                          }
                          MusicWheelEntry::PackHeader {..} => {
-                             info!("Initial selection is a pack header, ensuring fallback banner and no preview.");
+                             info!("Initial selection is a pack header, ensuring fallback banner and no preview scheduled.");
                              if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                                   self.renderer.update_texture_descriptor(
                                       &self.vulkan_base.device,
@@ -509,11 +549,11 @@ impl App {
                                       fallback_res,
                                   );
                              }
-                             // Preview state already reset by SelectMusicState::default()
+                             // Preview scheduling state already reset by SelectMusicState::default() & rebuild_music_wheel_entries
                          }
                      }
                 } else {
-                     info!("No songs or packs loaded, ensuring fallback banner is active and no preview.");
+                     info!("No songs or packs loaded, ensuring fallback banner is active and no preview scheduled.");
                      if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                           self.renderer.update_texture_descriptor(
                               &self.vulkan_base.device,
@@ -521,6 +561,7 @@ impl App {
                               fallback_res,
                           );
                      }
+                     // Preview scheduling state already reset
                 }
             }
             AppState::Options => {
@@ -535,6 +576,9 @@ impl App {
                     self.select_music_state.preview_audio_path = None; // Clear preview state
                     self.select_music_state.preview_playback_started_at = None;
                     self.select_music_state.is_awaiting_preview_restart = false;
+                    self.select_music_state.selection_landed_at = None;
+                    self.select_music_state.is_preview_play_scheduled = false;
+
 
                     if selected_song_arc.audio_path.is_none() {
                         error!("Cannot start gameplay: Audio path missing for selected song '{}'. Returning to SelectMusic.", selected_song_arc.title);
@@ -606,16 +650,36 @@ impl App {
                 if select_music::update(&mut self.select_music_state, dt, &self.audio_manager) {
                     selection_changed_by_held_key_scroll = true;
                 }
-                // Preview restart logic
+
+                // Delayed preview start logic
+                if self.select_music_state.is_preview_play_scheduled {
+                    if let Some(landed_at) = self.select_music_state.selection_landed_at {
+                        if Instant::now().duration_since(landed_at) >= SELECTION_PREVIEW_DELAY {
+                            info!("{}ms delay elapsed. Attempting to start preview.", SELECTION_PREVIEW_DELAY.as_millis());
+                            self.start_or_schedule_preview(); // This function now means "start if possible"
+                            self.select_music_state.is_preview_play_scheduled = false;
+                            self.select_music_state.selection_landed_at = None; // Clear landed_at once used
+                        }
+                    } else {
+                        // This case should ideally not happen if is_preview_play_scheduled is true.
+                        warn!("Preview was scheduled but selection_landed_at is None. Cancelling preview.");
+                        self.select_music_state.is_preview_play_scheduled = false;
+                    }
+                }
+                
+                // Preview restart logic (after a preview finishes)
                 if self.select_music_state.is_awaiting_preview_restart {
                     self.select_music_state.preview_restart_delay_timer -= dt;
                     if self.select_music_state.preview_restart_delay_timer <= 0.0 {
-                        self.start_or_schedule_preview();
+                        self.start_or_schedule_preview(); // Start the next loop of the preview
                     }
                 } else if self.select_music_state.preview_audio_path.is_some() &&
                            self.select_music_state.preview_playback_started_at.is_some() &&
-                           !self.audio_manager.is_preview_playing() {
-                    // Preview was playing but now isn't, and not already awaiting restart
+                           !self.audio_manager.is_preview_playing() &&
+                           !self.select_music_state.is_preview_play_scheduled // Don't restart if a new selection already scheduled a play
+                           {
+                    // Preview was playing but now isn't, and not already awaiting restart,
+                    // and a new preview play isn't already scheduled from selection change.
                     info!("Preview finished, scheduling restart.");
                     self.select_music_state.is_awaiting_preview_restart = true;
                     self.select_music_state.preview_restart_delay_timer = PREVIEW_RESTART_DELAY;
@@ -632,50 +696,7 @@ impl App {
         }
 
         if self.current_app_state == AppState::SelectMusic && selection_changed_by_held_key_scroll {
-            let current_index = self.select_music_state.selected_index;
-             if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
-                 match selected_entry {
-                     MusicWheelEntry::Song(selected_song_arc) => {
-                         self.asset_manager.load_song_banner(
-                            &self.vulkan_base,
-                            &self.renderer,
-                            selected_song_arc,
-                         );
-                         self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
-                         self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
-                         self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
-                         self.start_or_schedule_preview();
-                     }
-                     MusicWheelEntry::PackHeader { .. }=> {
-                         info!("Selected a pack header ({}) due to update scroll, loading fallback banner and stopping preview.", current_index);
-                         if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                              self.renderer.update_texture_descriptor(
-                                  &self.vulkan_base.device,
-                                  crate::graphics::renderer::DescriptorSetId::DynamicBanner,
-                                  fallback_res,
-                              );
-                         }
-                         self.audio_manager.stop_preview();
-                         self.select_music_state.preview_audio_path = None;
-                         self.select_music_state.preview_playback_started_at = None;
-                         self.select_music_state.is_awaiting_preview_restart = false;
-                     }
-                 }
-             } else {
-                 warn!("Selection changed by update in Music Select, but index {} is out of bounds ({} entries). Loading fallback and stopping preview.", current_index, self.select_music_state.entries.len());
-                  if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                        self.renderer.update_texture_descriptor(
-                            &self.vulkan_base.device,
-                            crate::graphics::renderer::DescriptorSetId::DynamicBanner,
-                            fallback_res,
-                        );
-                    }
-                    self.audio_manager.stop_preview();
-                    self.select_music_state.preview_audio_path = None;
-                    self.select_music_state.preview_playback_started_at = None;
-                    self.select_music_state.is_awaiting_preview_restart = false;
-
-             }
+            self.handle_music_selection_change();
         }
 
 

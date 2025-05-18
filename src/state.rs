@@ -1,9 +1,8 @@
-// src/state.rs
 use crate::parsing::simfile::{SongInfo, ProcessedChartData, NoteChar};
 use crate::screens::gameplay::{TimingData};
 use cgmath::Matrix4;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf; // NEW for preview_audio_path
+use std::path::PathBuf; 
 use std::sync::Arc;
 use std::time::Instant;
 use winit::keyboard::{Key, NamedKey};
@@ -59,13 +58,17 @@ pub struct SelectMusicState {
     pub nav_key_held_since: Option<Instant>,
     pub nav_key_last_scrolled_at: Option<Instant>,
 
-    // NEW: Fields for music preview
+    // Music preview fields
     pub preview_audio_path: Option<PathBuf>,
     pub preview_sample_start_sec: Option<f32>,
     pub preview_sample_length_sec: Option<f32>,
     pub preview_playback_started_at: Option<Instant>, // When the current preview segment began
     pub is_awaiting_preview_restart: bool,          // True if preview finished and waiting for delay
     pub preview_restart_delay_timer: f32,           // Countdown for the 1-second break
+
+    // NEW fields for delayed preview start
+    pub selection_landed_at: Option<Instant>,       // When the current item was selected/landed on
+    pub is_preview_play_scheduled: bool,            // True if a preview is pending after the 500ms delay
 }
 
 impl Default for SelectMusicState {
@@ -78,13 +81,16 @@ impl Default for SelectMusicState {
             nav_key_held_direction: None,
             nav_key_held_since: None,
             nav_key_last_scrolled_at: None,
-            // NEW: Initialize preview state
+            
             preview_audio_path: None,
             preview_sample_start_sec: None,
             preview_sample_length_sec: None,
             preview_playback_started_at: None,
             is_awaiting_preview_restart: false,
             preview_restart_delay_timer: 0.0,
+
+            selection_landed_at: None,
+            is_preview_play_scheduled: false,
         }
     }
 }
