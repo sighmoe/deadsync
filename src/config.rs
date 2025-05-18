@@ -23,7 +23,6 @@ pub const EXPLOSION_W3_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explo
 pub const EXPLOSION_W4_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w4.png";
 pub const EXPLOSION_W5_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w5.png";
 
-
 // Gameplay Constants
 pub const TARGET_Y_POS: f32 = 150.0;
 pub const TARGET_SIZE: f32 = 120.0;
@@ -57,7 +56,7 @@ pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 
 // --- UI Constants ---
 pub const UI_BAR_COLOR: [f32; 4] = [166.0 / 255.0, 166.0 / 255.0, 166.0 / 255.0, 1.0];
-pub const UI_BAR_TEXT_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
+pub const UI_BAR_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 pub const UI_REFERENCE_HEIGHT: f32 = 768.0;
 pub const UI_BAR_REFERENCE_HEIGHT: f32 = 51.0;
 
@@ -66,7 +65,6 @@ pub const MSDF_PX_RANGE: f32 = 4.0;
 
 // Misc
 pub const MAX_DELTA_TIME: f32 = 0.1;
-
 
 // Select Music Screen Colors & Palette
 pub const MUSIC_WHEEL_BOX_COLOR: [f32;4] = [10.0/255.0, 20.0/255.0, 27.0/255.0, 1.0]; 
