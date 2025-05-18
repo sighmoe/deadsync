@@ -17,8 +17,6 @@ pub const DANCE_TEXTURE_PATH: &str = "assets/graphics/dance.png";
 pub const ARROW_TEXTURE_PATH: &str = "assets/noteskins/cel/down_arrow_cel.png";
 pub const SFX_CHANGE_PATH: &str = "assets/sounds/change.ogg";
 pub const SFX_START_PATH: &str = "assets/sounds/start.ogg";
-pub const SONG_FOLDER_PATH: &str = "songs/Pack/About Tonight";
-pub const SONG_AUDIO_FILENAME: &str = "about_tonight.ogg";
 pub const EXPLOSION_W1_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w1.png";
 pub const EXPLOSION_W2_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w2.png";
 pub const EXPLOSION_W3_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w3.png";
@@ -54,8 +52,8 @@ pub const EXPLOSION_SIZE: f32 = TARGET_SIZE * 1.5;
 // Menu Constants
 pub const LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT: f32 = 0.55;
 pub const MENU_OPTIONS: [&str; 3] = ["GAMEPLAY", "OPTIONS", "EXIT"];
-pub const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0]; // Yellowish for general selected text (now mainly for menu)
-pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0]; // Light gray for general normal text
+pub const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0]; 
+pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0]; 
 
 // --- UI Constants ---
 pub const UI_BAR_COLOR: [f32; 4] = [166.0 / 255.0, 166.0 / 255.0, 166.0 / 255.0, 1.0];
@@ -71,12 +69,12 @@ pub const MAX_DELTA_TIME: f32 = 0.1;
 
 
 // Select Music Screen Colors & Palette
-pub const MUSIC_WHEEL_BOX_COLOR: [f32;4] = [10.0/255.0, 20.0/255.0, 27.0/255.0, 1.0]; // Default song box
-pub const PACK_HEADER_BOX_COLOR: [f32; 4] = [83.0/255.0, 92.0/255.0, 99.0/255.0, 1.0]; // Default pack box (#535c63)
-pub const SELECTED_PACK_HEADER_BOX_COLOR: [f32; 4] = [95.0/255.0, 104.0/255.0, 110.0/255.0, 1.0]; // #5f686e
-pub const SELECTED_SONG_BOX_COLOR: [f32; 4] = [39.0/255.0, 47.0/255.0, 53.0/255.0, 1.0];      // #272f35
-pub const SONG_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // White for song titles
-pub const MUSIC_WHEEL_SONG_TEXT_LEFT_PADDING_REF: f32 = 118.0; // CORRECTED VALUE
+pub const MUSIC_WHEEL_BOX_COLOR: [f32;4] = [10.0/255.0, 20.0/255.0, 27.0/255.0, 1.0]; 
+pub const PACK_HEADER_BOX_COLOR: [f32; 4] = [83.0/255.0, 92.0/255.0, 99.0/255.0, 1.0]; 
+pub const SELECTED_PACK_HEADER_BOX_COLOR: [f32; 4] = [95.0/255.0, 104.0/255.0, 110.0/255.0, 1.0]; 
+pub const SELECTED_SONG_BOX_COLOR: [f32; 4] = [39.0/255.0, 47.0/255.0, 53.0/255.0, 1.0];      
+pub const SONG_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; 
+pub const MUSIC_WHEEL_SONG_TEXT_LEFT_PADDING_REF: f32 = 118.0;
 
 pub const PINK_BOX_COLOR: [f32; 4] = [1.0, 71.0 / 255.0, 179.0 / 255.0, 1.0];
 pub const TOP_LEFT_BOX_COLOR: [f32; 4] = [230.0 / 255.0, 230.0 / 255.0, 250.0 / 255.0, 1.0];
@@ -85,6 +83,19 @@ pub const UI_BOX_DARK_COLOR: [f32;4] = [30.0/255.0, 40.0/255.0, 47.0/255.0, 1.0]
 // Reference resolution for select_music.rs layout calculations
 pub const LAYOUT_BOXES_REF_RES_WIDTH: f32 = 1280.0;
 pub const LAYOUT_BOXES_REF_RES_HEIGHT: f32 = 720.0;
+
+// Gaps for Select Music Screen Layout
+pub const VERTICAL_GAP_TOPMOST_TO_ARTIST_BOX_REF: f32 = 5.0; // NEW CONSTANT for the gap
+
+// Artist/BPM Detail Area
+pub const DETAIL_HEADER_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 27.0;
+pub const DETAIL_VALUE_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 27.0; 
+pub const DETAIL_HEADER_TEXT_COLOR: [f32; 4] = [128.0/255.0, 128.0/255.0, 128.0/255.0, 1.0]; 
+pub const ARTIST_HEADER_LEFT_PADDING_REF: f32 = 11.0;
+pub const ARTIST_HEADER_TOP_PADDING_REF: f32 = 10.0;
+pub const BPM_HEADER_LEFT_PADDING_REF: f32 = 36.0;
+pub const HEADER_TO_VALUE_HORIZONTAL_GAP_REF: f32 = 6.0;
+pub const ARTIST_TO_BPM_VERTICAL_GAP_REF: f32 = 5.0;
 
 // Simply Love / ITGMania Color Palette for Pack Name TEXTS
 pub const PACK_NAME_COLOR_PALETTE: [[f32; 4]; 12] = [
