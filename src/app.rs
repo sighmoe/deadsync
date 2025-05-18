@@ -24,8 +24,11 @@ use winit::{
 };
 
 const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0);
-const PREVIEW_RESTART_DELAY: f32 = 1.0; // Seconds
-const SELECTION_PREVIEW_DELAY: Duration = Duration::from_millis(500); // New constant for selection delay
+const PREVIEW_RESTART_DELAY: f32 = 0.25; // Seconds
+// const SELECTION_PREVIEW_DELAY: Duration = Duration::from_millis(500); // Old constant
+const SELECTION_PRELOAD_AUDIO_DELAY: Duration = Duration::from_millis(250);
+const SELECTION_START_PLAY_DELAY: Duration = Duration::from_millis(500);
+
 
 pub struct App {
     vulkan_base: VulkanBase,
@@ -49,7 +52,7 @@ pub struct App {
 
 impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self, Box<dyn Error>> {
-        // ... (Constructor largely unchanged, make sure SelectMusicState::default() is used for init)
+        // ... (Constructor largely unchanged)
         info!("Creating Application...");
 
         let window = WindowBuilder::new()
@@ -257,6 +260,7 @@ impl App {
         }
     }
 
+
     fn rebuild_music_wheel_entries(&mut self) {
         let mut new_entries = Vec::new();
         let mut current_pack_name_in_library = String::new();
@@ -312,22 +316,25 @@ impl App {
         } else {
             self.select_music_state.selected_index = 0;
         }
+        
         // Reset preview state as the list structure changed significantly
-        self.audio_manager.stop_preview();
+        self.audio_manager.stop_preview(); // Will also clear preloaded
         self.select_music_state.preview_audio_path = None;
         self.select_music_state.preview_playback_started_at = None;
         self.select_music_state.is_awaiting_preview_restart = false;
-        self.select_music_state.selection_landed_at = None; // Reset delay timer
-        self.select_music_state.is_preview_play_scheduled = false; // Cancel scheduled play
+        self.select_music_state.selection_landed_at = None; 
+        self.select_music_state.is_preview_actions_scheduled = false;
+        self.select_music_state.is_preview_audio_loaded = false;
 
 
         info!("Rebuilt music wheel. New #entries: {}, selected_index: {}", self.select_music_state.entries.len(), self.select_music_state.selected_index);
     }
-
-    fn start_or_schedule_preview(&mut self) {
-        self.audio_manager.stop_preview(); // Stop any current preview first
-        self.select_music_state.preview_playback_started_at = None;
-        self.select_music_state.is_awaiting_preview_restart = false; // Also reset restart state
+    
+    // This function will now be called when the 500ms timer is up AND audio is loaded
+    fn start_actual_preview_playback(&mut self) {
+        // `stop_preview` was already called by `handle_music_selection_change` or by itself if restarting.
+        // `is_awaiting_preview_restart` should be false if we are in the initial play path.
+        self.select_music_state.preview_playback_started_at = None; // Clear before attempting to play
 
         if let Some(audio_path) = &self.select_music_state.preview_audio_path {
             if let Some(start_sec) = self.select_music_state.preview_sample_start_sec {
@@ -335,9 +342,9 @@ impl App {
                  match self.audio_manager.play_preview(audio_path, 0.7, start_sec, duration_sec) {
                     Ok(_) => {
                         self.select_music_state.preview_playback_started_at = Some(Instant::now());
-                        info!("Preview started for {:?} at {:.2}s", audio_path.file_name().unwrap_or_default(), start_sec);
+                        info!("Preview playback started for {:?} at {:.2}s", audio_path.file_name().unwrap_or_default(), start_sec);
                     }
-                    Err(e) => error!("Failed to start preview: {}", e),
+                    Err(e) => error!("Failed to start preview playback: {}", e),
                 }
             } else {
                 warn!("No sample start time for song, cannot play preview.");
@@ -345,12 +352,14 @@ impl App {
         }
     }
 
+
     fn handle_music_selection_change(&mut self) {
-        // Stop any ongoing preview or scheduled play immediately
-        self.audio_manager.stop_preview();
+        // Stop any ongoing preview, clear preloaded audio, and reset flags
+        self.audio_manager.stop_preview(); // This now also calls audio_manager.clear_preloaded_preview()
         self.select_music_state.preview_playback_started_at = None;
         self.select_music_state.is_awaiting_preview_restart = false;
-        self.select_music_state.is_preview_play_scheduled = false; // Cancel any pending play
+        self.select_music_state.is_preview_actions_scheduled = false;
+        self.select_music_state.is_preview_audio_loaded = false; // Reset loaded flag
 
         let current_index = self.select_music_state.selected_index;
         if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
@@ -361,22 +370,22 @@ impl App {
                         &self.renderer,
                         selected_song_arc,
                     );
-                    // Update preview metadata
+                    // Store preview metadata
                     self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
                     self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
                     self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
 
-                    // Schedule the preview play
+                    // Schedule preview actions (load then play)
                     self.select_music_state.selection_landed_at = Some(Instant::now());
-                    self.select_music_state.is_preview_play_scheduled = true;
+                    self.select_music_state.is_preview_actions_scheduled = true;
                     info!(
-                        "Selection changed to song: '{}'. Preview play scheduled in {}ms.",
-                        selected_song_arc.title, SELECTION_PREVIEW_DELAY.as_millis()
+                        "Selection changed to song: '{}'. Preview actions (load@{}ms, play@{}ms) scheduled.",
+                        selected_song_arc.title, SELECTION_PRELOAD_AUDIO_DELAY.as_millis(), SELECTION_START_PLAY_DELAY.as_millis()
                     );
                 }
                 MusicWheelEntry::PackHeader { .. } => {
                     info!(
-                        "Selected a pack header ({}), loading fallback banner and stopping/cancelling preview.",
+                        "Selected a pack header ({}), loading fallback banner and clearing preview actions.",
                         current_index
                     );
                     if let Some(fallback_res) =
@@ -388,17 +397,15 @@ impl App {
                             fallback_res,
                         );
                     }
-                    // Clear all preview states
+                    // Clear all preview-related states
                     self.select_music_state.preview_audio_path = None;
-                    self.select_music_state.preview_playback_started_at = None;
-                    self.select_music_state.is_awaiting_preview_restart = false;
                     self.select_music_state.selection_landed_at = None;
-                    self.select_music_state.is_preview_play_scheduled = false;
+                    // is_preview_actions_scheduled and is_preview_audio_loaded already false or will be reset
                 }
             }
         } else {
             warn!(
-                "Selection changed in Music Select, but index {} is out of bounds ({} entries). Loading fallback and stopping/cancelling preview.",
+                "Selection changed in Music Select, but index {} is out of bounds ({} entries). Loading fallback and clearing preview actions.",
                 current_index,
                 self.select_music_state.entries.len()
             );
@@ -411,12 +418,8 @@ impl App {
                     fallback_res,
                 );
             }
-            // Clear all preview states
             self.select_music_state.preview_audio_path = None;
-            self.select_music_state.preview_playback_started_at = None;
-            self.select_music_state.is_awaiting_preview_restart = false;
             self.select_music_state.selection_landed_at = None;
-            self.select_music_state.is_preview_play_scheduled = false;
         }
     }
 
@@ -489,14 +492,15 @@ impl App {
             self.current_app_state, new_state
         );
 
-        // Stop preview if leaving SelectMusic state
+        // Stop preview and clear preloads if leaving SelectMusic state
         if self.current_app_state == AppState::SelectMusic && new_state != AppState::SelectMusic {
-            self.audio_manager.stop_preview();
+            self.audio_manager.stop_preview(); // This also clears preloaded audio
             self.select_music_state.preview_audio_path = None;
             self.select_music_state.preview_playback_started_at = None;
             self.select_music_state.is_awaiting_preview_restart = false;
             self.select_music_state.selection_landed_at = None;
-            self.select_music_state.is_preview_play_scheduled = false;
+            self.select_music_state.is_preview_actions_scheduled = false;
+            self.select_music_state.is_preview_audio_loaded = false;
         }
 
 
@@ -515,54 +519,16 @@ impl App {
             }
             AppState::SelectMusic => {
                 self.select_music_state = SelectMusicState::default(); 
-                self.rebuild_music_wheel_entries(); // This now also resets preview scheduling flags
+                self.rebuild_music_wheel_entries(); 
 
                 info!(
                     "Populated SelectMusic state with {} entries (initially collapsed).",
                     self.select_music_state.entries.len()
                 );
 
-                 // Initial banner and preview for the first item (if any)
-                if let Some(selected_entry) = self.select_music_state.entries.get(self.select_music_state.selected_index) {
-                     match selected_entry {
-                         MusicWheelEntry::Song(selected_song_arc) => {
-                             self.asset_manager.load_song_banner(
-                                &self.vulkan_base,
-                                &self.renderer,
-                                selected_song_arc,
-                             );
-                             self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
-                             self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
-                             self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
-                             
-                             // Schedule the preview play for the initial item
-                             self.select_music_state.selection_landed_at = Some(Instant::now());
-                             self.select_music_state.is_preview_play_scheduled = true;
-                             info!("Transitioned to SelectMusic. Initial song: {}. Preview play scheduled in {}ms.", selected_song_arc.title, SELECTION_PREVIEW_DELAY.as_millis());
-                         }
-                         MusicWheelEntry::PackHeader {..} => {
-                             info!("Initial selection is a pack header, ensuring fallback banner and no preview scheduled.");
-                             if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                                  self.renderer.update_texture_descriptor(
-                                      &self.vulkan_base.device,
-                                      crate::graphics::renderer::DescriptorSetId::DynamicBanner,
-                                      fallback_res,
-                                  );
-                             }
-                             // Preview scheduling state already reset by SelectMusicState::default() & rebuild_music_wheel_entries
-                         }
-                     }
-                } else {
-                     info!("No songs or packs loaded, ensuring fallback banner is active and no preview scheduled.");
-                     if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                          self.renderer.update_texture_descriptor(
-                              &self.vulkan_base.device,
-                              crate::graphics::renderer::DescriptorSetId::DynamicBanner,
-                              fallback_res,
-                          );
-                     }
-                     // Preview scheduling state already reset
-                }
+                // Initial banner and preview scheduling for the first item (if any)
+                // This is now handled by calling handle_music_selection_change after rebuild
+                self.handle_music_selection_change(); 
             }
             AppState::Options => {
                 self.options_state = OptionsState::default();
@@ -572,13 +538,8 @@ impl App {
                  let selected_entry_opt = self.select_music_state.entries.get(self.select_music_state.selected_index);
 
                 if let Some(MusicWheelEntry::Song(selected_song_arc)) = selected_entry_opt {
-                    self.audio_manager.stop_preview(); // Stop preview before starting main music
-                    self.select_music_state.preview_audio_path = None; // Clear preview state
-                    self.select_music_state.preview_playback_started_at = None;
-                    self.select_music_state.is_awaiting_preview_restart = false;
-                    self.select_music_state.selection_landed_at = None;
-                    self.select_music_state.is_preview_play_scheduled = false;
-
+                    // stop_preview and flag clearing already done when transitioning FROM SelectMusic
+                    // or will be done if this transition is from another state.
 
                     if selected_song_arc.audio_path.is_none() {
                         error!("Cannot start gameplay: Audio path missing for selected song '{}'. Returning to SelectMusic.", selected_song_arc.title);
@@ -651,19 +612,39 @@ impl App {
                     selection_changed_by_held_key_scroll = true;
                 }
 
-                // Delayed preview start logic
-                if self.select_music_state.is_preview_play_scheduled {
+                // Delayed preview actions logic
+                if self.select_music_state.is_preview_actions_scheduled {
                     if let Some(landed_at) = self.select_music_state.selection_landed_at {
-                        if Instant::now().duration_since(landed_at) >= SELECTION_PREVIEW_DELAY {
-                            info!("{}ms delay elapsed. Attempting to start preview.", SELECTION_PREVIEW_DELAY.as_millis());
-                            self.start_or_schedule_preview(); // This function now means "start if possible"
-                            self.select_music_state.is_preview_play_scheduled = false;
-                            self.select_music_state.selection_landed_at = None; // Clear landed_at once used
+                        let elapsed_since_landed = Instant::now().duration_since(landed_at);
+
+                        // Try to preload audio
+                        if !self.select_music_state.is_preview_audio_loaded &&
+                           elapsed_since_landed >= SELECTION_PRELOAD_AUDIO_DELAY {
+                            if let Some(ref audio_path) = self.select_music_state.preview_audio_path {
+                                match self.audio_manager.preload_preview(audio_path) {
+                                    Ok(_) => {
+                                        self.select_music_state.is_preview_audio_loaded = true;
+                                        info!("Preview audio preloaded for {:?}.", audio_path.file_name().unwrap_or_default());
+                                    }
+                                    Err(e) => error!("Failed to preload preview audio: {}", e),
+                                }
+                            } else {
+                                warn!("Preview actions scheduled, but no audio path available for preload.");
+                                self.select_music_state.is_preview_actions_scheduled = false; // Cancel if no path
+                            }
+                        }
+
+                        // Try to play preloaded audio
+                        if self.select_music_state.is_preview_audio_loaded &&
+                           elapsed_since_landed >= SELECTION_START_PLAY_DELAY {
+                            info!("{}ms play delay elapsed. Attempting to start preview playback.", SELECTION_START_PLAY_DELAY.as_millis());
+                            self.start_actual_preview_playback(); 
+                            self.select_music_state.is_preview_actions_scheduled = false; // Actions complete for this selection
+                            self.select_music_state.selection_landed_at = None; // Clear landed_at once used for this cycle
                         }
                     } else {
-                        // This case should ideally not happen if is_preview_play_scheduled is true.
-                        warn!("Preview was scheduled but selection_landed_at is None. Cancelling preview.");
-                        self.select_music_state.is_preview_play_scheduled = false;
+                        warn!("Preview actions scheduled but selection_landed_at is None. Cancelling.");
+                        self.select_music_state.is_preview_actions_scheduled = false;
                     }
                 }
                 
@@ -671,19 +652,19 @@ impl App {
                 if self.select_music_state.is_awaiting_preview_restart {
                     self.select_music_state.preview_restart_delay_timer -= dt;
                     if self.select_music_state.preview_restart_delay_timer <= 0.0 {
-                        self.start_or_schedule_preview(); // Start the next loop of the preview
+                        // For restart, directly try to play. AudioManager's play_preview will use preloaded if available.
+                        self.start_actual_preview_playback(); 
+                        self.select_music_state.is_awaiting_preview_restart = false; // Reset flag
                     }
                 } else if self.select_music_state.preview_audio_path.is_some() &&
                            self.select_music_state.preview_playback_started_at.is_some() &&
                            !self.audio_manager.is_preview_playing() &&
-                           !self.select_music_state.is_preview_play_scheduled // Don't restart if a new selection already scheduled a play
+                           !self.select_music_state.is_preview_actions_scheduled // Don't restart if new actions are already scheduled
                            {
-                    // Preview was playing but now isn't, and not already awaiting restart,
-                    // and a new preview play isn't already scheduled from selection change.
                     info!("Preview finished, scheduling restart.");
                     self.select_music_state.is_awaiting_preview_restart = true;
                     self.select_music_state.preview_restart_delay_timer = PREVIEW_RESTART_DELAY;
-                    self.select_music_state.preview_playback_started_at = None; // Clear it so this condition isn't met again until it plays
+                    self.select_music_state.preview_playback_started_at = None; 
                 }
             }
             AppState::Options => options::update(&mut self.options_state, dt),
@@ -835,7 +816,7 @@ impl Drop for App {
         }
 
         self.audio_manager.stop_music();
-        self.audio_manager.stop_preview(); // Ensure preview stops on app exit
+        self.audio_manager.stop_preview(); 
         info!("Audio stopped.");
 
         self.asset_manager.destroy(&self.vulkan_base.device);

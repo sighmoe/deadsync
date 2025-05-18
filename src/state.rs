@@ -62,13 +62,14 @@ pub struct SelectMusicState {
     pub preview_audio_path: Option<PathBuf>,
     pub preview_sample_start_sec: Option<f32>,
     pub preview_sample_length_sec: Option<f32>,
-    pub preview_playback_started_at: Option<Instant>, // When the current preview segment began
-    pub is_awaiting_preview_restart: bool,          // True if preview finished and waiting for delay
-    pub preview_restart_delay_timer: f32,           // Countdown for the 1-second break
+    pub preview_playback_started_at: Option<Instant>, 
+    pub is_awaiting_preview_restart: bool,          
+    pub preview_restart_delay_timer: f32,           
 
-    // NEW fields for delayed preview start
-    pub selection_landed_at: Option<Instant>,       // When the current item was selected/landed on
-    pub is_preview_play_scheduled: bool,            // True if a preview is pending after the 500ms delay
+    // Fields for delayed preview actions
+    pub selection_landed_at: Option<Instant>,       
+    pub is_preview_actions_scheduled: bool,       // True if load/play actions are pending for current selection
+    pub is_preview_audio_loaded: bool,          // True if audio manager has preloaded current preview_audio_path
 }
 
 impl Default for SelectMusicState {
@@ -90,7 +91,8 @@ impl Default for SelectMusicState {
             preview_restart_delay_timer: 0.0,
 
             selection_landed_at: None,
-            is_preview_play_scheduled: false,
+            is_preview_actions_scheduled: false,
+            is_preview_audio_loaded: false,
         }
     }
 }
