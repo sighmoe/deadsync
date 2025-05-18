@@ -1,7 +1,9 @@
+// src/state.rs
 use crate::parsing::simfile::{SongInfo, ProcessedChartData, NoteChar};
 use crate::screens::gameplay::{TimingData};
 use cgmath::Matrix4;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf; // NEW for preview_audio_path
 use std::sync::Arc;
 use std::time::Instant;
 use winit::keyboard::{Key, NamedKey};
@@ -18,7 +20,7 @@ pub enum AppState {
 
 // --- Screen Specific States ---
 
-// MenuState
+// MenuState (remains the same)
 #[derive(Debug, Clone)]
 pub struct MenuState {
     pub options: Vec<String>,
@@ -34,17 +36,17 @@ impl Default for MenuState {
     }
 }
 
+
 #[derive(Debug, Clone)]
 pub enum MusicWheelEntry {
     Song(Arc<SongInfo>),
     PackHeader { name: String, color: [f32; 4] },
 }
 
-// NEW: Enum for navigation direction due to held key
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavDirection {
-    Up, // Or Previous
-    Down, // Or Next
+    Up,
+    Down,
 }
 
 #[derive(Debug, Clone)]
@@ -53,10 +55,17 @@ pub struct SelectMusicState {
     pub selected_index: usize,
     pub expanded_pack_name: Option<String>,
     pub selection_animation_timer: f32,
-    // NEW: Fields for held key navigation
     pub nav_key_held_direction: Option<NavDirection>,
     pub nav_key_held_since: Option<Instant>,
     pub nav_key_last_scrolled_at: Option<Instant>,
+
+    // NEW: Fields for music preview
+    pub preview_audio_path: Option<PathBuf>,
+    pub preview_sample_start_sec: Option<f32>,
+    pub preview_sample_length_sec: Option<f32>,
+    pub preview_playback_started_at: Option<Instant>, // When the current preview segment began
+    pub is_awaiting_preview_restart: bool,          // True if preview finished and waiting for delay
+    pub preview_restart_delay_timer: f32,           // Countdown for the 1-second break
 }
 
 impl Default for SelectMusicState {
@@ -66,20 +75,27 @@ impl Default for SelectMusicState {
             selected_index: 0,
             expanded_pack_name: None,
             selection_animation_timer: 0.0,
-            // NEW: Initialize held key state
             nav_key_held_direction: None,
             nav_key_held_since: None,
             nav_key_last_scrolled_at: None,
+            // NEW: Initialize preview state
+            preview_audio_path: None,
+            preview_sample_start_sec: None,
+            preview_sample_length_sec: None,
+            preview_playback_started_at: None,
+            is_awaiting_preview_restart: false,
+            preview_restart_delay_timer: 0.0,
         }
     }
 }
 
-// OptionsState
+// OptionsState (remains the same)
 #[derive(Debug, Clone, Default)]
 pub struct OptionsState {
     pub placeholder: bool,
 }
 
+// GameState (remains the same)
 #[derive(Debug, Clone)]
 pub struct GameState {
     pub targets: Vec<TargetInfo>,
@@ -98,7 +114,7 @@ pub struct GameState {
     pub current_processed_beat: f32,
 }
 
-// --- Gameplay Elements ---
+// --- Gameplay Elements (remain the same) ---
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum ArrowDirection { Left, Down, Up, Right, }
@@ -125,7 +141,7 @@ pub struct ActiveExplosion {
 }
 
 
-// --- Input ---
+// --- Input (remains the same) ---
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)] #[repr(u32)] pub enum VirtualKeyCode { Left, Down, Up, Right, Enter, Escape, }
 pub fn key_to_virtual_keycode(key: Key) -> Option<VirtualKeyCode> {
     match key {
@@ -139,7 +155,7 @@ pub fn key_to_virtual_keycode(key: Key) -> Option<VirtualKeyCode> {
     }
  }
 
-// --- Graphics Related ---
+// --- Graphics Related (remains the same) ---
 #[repr(C)] #[derive(Debug, Clone, Copy)] pub struct PushConstantData {
     pub model: Matrix4<f32>,
     pub color: [f32; 4],

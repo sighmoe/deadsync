@@ -80,11 +80,12 @@ pub struct SongInfo {
     pub folder_path: PathBuf,
     pub audio_path: Option<PathBuf>,
     pub banner_path: Option<PathBuf>,
+    pub sample_start: Option<f32>,    // NEW
+    pub sample_length: Option<f32>,   // NEW
 }
 
-// This is YOUR ParseError
 pub enum ParseError {
-    Io(io::Error), // This variant is key
+    Io(io::Error), 
     NotFound(PathBuf),
     UnsupportedExtension(String),
     Utf8Error {
@@ -103,12 +104,6 @@ fn clean_tag(tag_content: &str) -> String {
         .collect::<String>()
         .trim()
         .to_string()
-}
-
-fn parse_simple_tag<'a>(lines: &mut impl Iterator<Item = &'a str>, tag: &str) -> Option<String> {
-    lines
-        .find(|line| line.trim_start().starts_with(tag))
-        .map(|line| line.trim_start()[tag.len()..].trim_end_matches(';').trim().to_string())
 }
 
 pub fn parse_bpms(bpm_string: &str) -> Result<Vec<(f32, f32)>, ParseError> {
@@ -168,8 +163,6 @@ pub fn parse_stops(stop_string: &str) -> Result<Vec<(f32, f32)>, ParseError> {
 
 
 fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo, ParseError> {
-    // ... (Existing logic to parse header tags like #TITLE, #ARTIST, #BPMS, etc.) ...
-    // ... (This part remains mostly the same, collecting raw chart strings) ...
     let mut title = String::new();
     let mut subtitle = String::new();
     let mut artist = String::new();
@@ -181,7 +174,9 @@ fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo,
     let mut stops_str = String::new();
     let mut audio_filename: Option<String> = None;
     let mut banner_filename: Option<String> = None;
-    let mut charts_raw_tuples = Vec::new(); // Stores (HashMap<String, String>, notes_data_string, bpms_string_opt, stops_string_opt)
+    let mut sample_start_str: Option<String> = None; // NEW
+    let mut sample_length_str: Option<String> = None; // NEW
+    let mut charts_raw_tuples = Vec::new(); 
 
     let mut current_chart_map_opt: Option<HashMap<String, String>> = None;
 
@@ -192,10 +187,9 @@ fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo,
         }
 
         if trimmed_line.starts_with('#') {
-            // End of a multi-line #NOTES block for .sm files
             if trimmed_line == ";" && current_chart_map_opt.is_some() {
                 if let Some(mut chart_map) = current_chart_map_opt.take() {
-                    if chart_map.contains_key("#NOTES") { // Ensure #NOTES was started
+                    if chart_map.contains_key("#NOTES") { 
                         let notes_data_str = chart_map.remove("#NOTES").unwrap_or_default();
                         let chart_bpms_str = chart_map.remove("#BPMS");
                         let chart_stops_str = chart_map.remove("#STOPS");
@@ -214,30 +208,24 @@ fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo,
                 let value = parts[1].trim_end_matches(';').trim();
 
                 if let Some(ref mut chart_map_mut) = current_chart_map_opt {
-                    // We are inside a chart definition
                     chart_map_mut.insert(tag.clone(), value.to_string());
-                    if tag == "#NOTES" && value.contains(';') { // SSC single-line #NOTES or end of notes
+                    if tag == "#NOTES" && value.contains(';') { 
                         let notes_value_cleaned = value.trim_end_matches(';').trim();
-                        chart_map_mut.insert(tag.clone(), notes_value_cleaned.to_string()); // update with cleaned value
+                        chart_map_mut.insert(tag.clone(), notes_value_cleaned.to_string()); 
 
-                        let final_chart_map = current_chart_map_opt.take().unwrap(); // We know it's Some
-                        let notes_data_str = final_chart_map.get("#NOTES").cloned().unwrap_or_default(); // Should exist
+                        let final_chart_map = current_chart_map_opt.take().unwrap(); 
+                        let notes_data_str = final_chart_map.get("#NOTES").cloned().unwrap_or_default(); 
                         let chart_bpms_str = final_chart_map.get("#BPMS").cloned();
                         let chart_stops_str = final_chart_map.get("#STOPS").cloned();
-                        // Create a new map for metadata, excluding #NOTES, #BPMS, #STOPS
                         let mut metadata_map = final_chart_map;
                         metadata_map.remove("#NOTES");
                         metadata_map.remove("#BPMS");
                         metadata_map.remove("#STOPS");
                         charts_raw_tuples.push((metadata_map, notes_data_str, chart_bpms_str, chart_stops_str));
                     } else if tag == "#NOTES" {
-                        // Start of a multi-line .sm #NOTES, value is usually empty after colon or contains first few fields.
-                        // The actual note data will follow on subsequent lines.
-                        // Store the partial value, it will be appended.
                          chart_map_mut.insert(tag.clone(), value.to_string());
                     }
                 } else {
-                    // Header tags
                     match tag.as_str() {
                         "#TITLE" => title = clean_tag(value),
                         "#SUBTITLE" => subtitle = clean_tag(value),
@@ -250,57 +238,51 @@ fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo,
                         "#STOPS" => stops_str = value.to_string(),
                         "#MUSIC" => audio_filename = Some(value.to_string()),
                         "#BANNER" => banner_filename = Some(value.to_string()),
-                        "#NOTES" | "#NOTEDATA" => { // Start of a new chart
+                        "#SAMPLESTART" => sample_start_str = Some(value.to_string()), // NEW
+                        "#SAMPLELENGTH" => sample_length_str = Some(value.to_string()), // NEW
+                        "#NOTES" | "#NOTEDATA" => { 
                             if current_chart_map_opt.is_some() {
                                 warn!("Unexpected start of new chart block ('{}') before previous one finished in {:?}. Discarding previous.", tag_raw, simfile_path);
                             }
                             let mut new_chart_map = HashMap::new();
-                            if (tag == "#NOTES" || tag == "#NOTEDATA") && !value.is_empty() && value.contains(':') { // Likely .sm chart definition line
+                            if (tag == "#NOTES" || tag == "#NOTEDATA") && !value.is_empty() && value.contains(':') { 
                                 let note_parts : Vec<&str> = value.split(':').collect();
-                                if note_parts.len() >= 5 { // StepsType:Description:Difficulty:Meter:GrooveRadarAndNotes
+                                if note_parts.len() >= 5 { 
                                     new_chart_map.insert("#STEPSTYPE".to_string(), note_parts[0].trim().to_string());
                                     new_chart_map.insert("#DESCRIPTION".to_string(), note_parts[1].trim().to_string());
                                     new_chart_map.insert("#DIFFICULTY".to_string(), note_parts[2].trim().to_string());
                                     new_chart_map.insert("#METER".to_string(), note_parts[3].trim().to_string());
-                                    // new_chart_map.insert("#CREDIT".to_string(), ???); // .sm doesn't have #CREDIT in this line.
-                                    // The actual note data is after the 5th colon (index 4 of parts split by ':')
-                                    // This will be handled by subsequent lines if it's multi-line.
-                                    // For now, just initialize #NOTES field.
-                                    if note_parts.len() >= 6 { // if there's content after radar
+                                    if note_parts.len() >= 6 { 
                                         let notes_content = note_parts[5..].join(":");
                                         new_chart_map.insert("#NOTES".to_string(), notes_content.trim().to_string());
                                     } else {
-                                        new_chart_map.insert("#NOTES".to_string(), String::new()); // Init empty for appending
+                                        new_chart_map.insert("#NOTES".to_string(), String::new()); 
                                     }
                                 } else {
                                     warn!("Malformed legacy #NOTES tag line in {:?}: {}", simfile_path, value);
-                                    // Don't set current_chart_map_opt if malformed
                                     continue;
                                 }
-                            } else { // SSC style or empty #NOTES:
-                               new_chart_map.insert("#NOTES".to_string(), String::new()); // Init empty for appending
+                            } else { 
+                               new_chart_map.insert("#NOTES".to_string(), String::new()); 
                             }
                             current_chart_map_opt = Some(new_chart_map);
                         }
-                        _ => {} // Unknown header tag
+                        _ => {} 
                     }
                 }
             }
         } else if let Some(ref mut chart_map_mut_ref) = current_chart_map_opt {
-            // This line is part of a multi-line #NOTES block (typically .sm)
             if let Some(notes_val_mut) = chart_map_mut_ref.get_mut("#NOTES") {
-                if !notes_val_mut.is_empty() { // Add newline if not the first line of notes
+                if !notes_val_mut.is_empty() { 
                     notes_val_mut.push('\n');
                 }
-                notes_val_mut.push_str(trimmed_line); // Append the whole trimmed line
+                notes_val_mut.push_str(trimmed_line); 
             } else {
-                // This case should ideally not be hit if #NOTES was initialized
                 warn!("Appending to non-existent #NOTES field in chart in {:?}, line: '{}'", simfile_path, trimmed_line);
             }
         }
     }
 
-    // Finalize any pending chart that might not have ended with ';' (e.g. EOF)
     if let Some(mut chart_map) = current_chart_map_opt.take() {
         warn!("Simfile {:?} ended mid-chart definition. Attempting to finalize.", simfile_path);
         if chart_map.contains_key("#NOTES") {
@@ -319,6 +301,9 @@ fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo,
     let bpms_header = parse_bpms(&bpms_str)?;
     let stops_header = parse_stops(&stops_str)?;
 
+    let sample_start = sample_start_str.and_then(|s| s.parse::<f32>().ok()); // NEW
+    let sample_length = sample_length_str.and_then(|s| s.parse::<f32>().ok()); // NEW
+
     let mut charts = Vec::new();
     for (metadata_map, notes_data_raw_str, chart_bpms_str_opt, chart_stops_str_opt) in charts_raw_tuples {
         let chart_info = ChartInfo {
@@ -330,7 +315,7 @@ fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo,
             notes_data_raw: notes_data_raw_str,
             bpms_chart: chart_bpms_str_opt,
             stops_chart: chart_stops_str_opt,
-            processed_data: None, // Will be filled later
+            processed_data: None, 
         };
         if chart_info.stepstype.is_empty() || chart_info.difficulty.is_empty() || chart_info.meter.is_empty() || chart_info.notes_data_raw.trim().is_empty() {
             warn!("Skipping chart in {:?} (type: '{}', diff: '{}', meter: '{}') due to missing essential fields or empty notes.",
@@ -340,19 +325,19 @@ fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo,
         charts.push(chart_info);
     }
 
-    if title.is_empty() { return Err(ParseError::MissingTag("#TITLE".to_string())); } // Explicitly qualify
+    if title.is_empty() { return Err(ParseError::MissingTag("#TITLE".to_string())); } 
     if bpms_header.is_empty() && charts.iter().all(|c| c.bpms_chart.as_deref().unwrap_or("").trim().is_empty()) {
-        if charts.is_empty() { return Err(ParseError::MissingTag("#BPMS".to_string())); } // Explicitly qualify
+        if charts.is_empty() { return Err(ParseError::MissingTag("#BPMS".to_string())); } 
         else {
             warn!("Simfile {:?} has no #BPMS defined in the header or any chart.", simfile_path);
-            return Err(ParseError::MissingTag("#BPMS".to_string())); // Explicitly qualify
+            return Err(ParseError::MissingTag("#BPMS".to_string())); 
         }
     }
-    if charts.is_empty() { return Err(ParseError::NoCharts); } // Explicitly qualify
+    if charts.is_empty() { return Err(ParseError::NoCharts); } 
 
     let folder_path = simfile_path.parent()
-        .ok_or_else(|| ParseError::Io(io::Error::new(io::ErrorKind::InvalidInput, "Invalid simfile path")))? // Remove semicolon here
-        .to_path_buf(); // Now this can chain
+        .ok_or_else(|| ParseError::Io(io::Error::new(io::ErrorKind::InvalidInput, "Invalid simfile path")))? 
+        .to_path_buf(); 
     let audio_path = audio_filename.map(|f| folder_path.join(f)).filter(|p| p.exists());
     let banner_path = banner_filename.map(|f| folder_path.join(f)).filter(|p| p.exists());
 
@@ -360,6 +345,7 @@ fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo,
         title, subtitle, artist, title_translit, subtitle_translit, artist_translit,
         offset, bpms_header, stops_header, charts,
         simfile_path: simfile_path.to_path_buf(), folder_path, audio_path, banner_path,
+        sample_start, sample_length, // NEW
     })
 }
 
@@ -368,31 +354,24 @@ fn parse_minimized_bytes_to_measures(minimized_bytes: &[u8]) -> Vec<Vec<NoteLine
     let mut all_measures: Vec<Vec<NoteLine>> = Vec::new();
     let mut current_measure_lines: Vec<NoteLine> = Vec::new();
 
-    // Assuming minimized_bytes contains lines separated by '\n', and measures by ",\n"
-    // Splitting by '\n' will give individual lines or comma for separator
     for line_segment in minimized_bytes.split(|&b| b == b'\n') {
         if line_segment.is_empty() {
-            continue; // Skip empty segments that might arise from multiple newlines
+            continue; 
         }
-        if line_segment == b"," { // Measure separator
+        if line_segment == b"," { 
             if !current_measure_lines.is_empty() {
                 all_measures.push(std::mem::take(&mut current_measure_lines));
             }
-            // New measure starts after this, current_measure_lines is now empty
         } else if line_segment.starts_with(b"//") {
-            // Comment line, ignore
         } else if line_segment.len() >= 4 {
-            // Assumed to be a note data line (e.g., "1000", "0M00")
             let mut note_line_arr: NoteLine = [NoteChar::Empty; 4];
             for (i, &byte_char) in line_segment.iter().take(4).enumerate() {
                 note_line_arr[i] = NoteChar::from(byte_char);
             }
             current_measure_lines.push(note_line_arr);
         }
-        // Silently ignore other malformed lines for robustness
     }
 
-    // Add the last measure if it has any lines and wasn't followed by a separator
     if !current_measure_lines.is_empty() {
         all_measures.push(current_measure_lines);
     }
@@ -400,7 +379,7 @@ fn parse_minimized_bytes_to_measures(minimized_bytes: &[u8]) -> Vec<Vec<NoteLine
     all_measures
 }
 
-pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> { // Explicitly qualify
+pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> { 
     info!("Parsing simfile: {:?}", simfile_path);
     let content_bytes = fs::read(simfile_path)?;
 
@@ -416,7 +395,7 @@ pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> { // E
                 }
                 Err(parse_err) => {
                     error!("Failed to parse {:?} even with latin1 fallback: {}", simfile_path, parse_err);
-                    Err(ParseError::Utf8Error { // Explicitly qualify
+                    Err(ParseError::Utf8Error { 
                         tag: "file content".to_string(),
                         source: e,
                     })
@@ -430,7 +409,6 @@ pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> { // E
             if chart.notes_data_raw.trim().is_empty() {
                 warn!("Chart (type: '{}', difficulty: '{}') in {:?} has empty notes data, skipping processing.",
                     chart.stepstype, chart.difficulty, simfile_path);
-                // Populate with default empty ProcessedChartData to avoid Option::unwrap() issues later
                 chart.processed_data = Some(ProcessedChartData::default());
                 continue;
             }
@@ -488,7 +466,7 @@ pub fn parse_song_folder(folder_path: &Path) -> Result<SongInfo, ParseError> {
     } else if let Some(path) = sm_path {
         parse_simfile(&path)
     } else {
-        Err(ParseError::NotFound(folder_path.join("*.ssc/*.sm"))) // Explicitly qualify
+        Err(ParseError::NotFound(folder_path.join("*.ssc/*.sm"))) 
     }
 }
 
@@ -553,9 +531,9 @@ pub fn scan_packs(packs_root_dir: &Path) -> Vec<SongInfo> {
     all_songs
 }
 
-impl From<io::Error> for ParseError { // This is the implementation
+impl From<io::Error> for ParseError { 
     fn from(err: io::Error) -> Self {
-        ParseError::Io(err) // This looks correct
+        ParseError::Io(err) 
     }
 }
 

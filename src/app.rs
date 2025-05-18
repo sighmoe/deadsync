@@ -5,7 +5,7 @@ use crate::graphics::renderer::Renderer;
 use crate::graphics::vulkan_base::VulkanBase;
 use crate::parsing::simfile::{scan_packs, SongInfo};
 use crate::screens::{gameplay, menu, options, select_music};
-use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState, MusicWheelEntry, VirtualKeyCode, NavDirection}; // Added NavDirection
+use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState, MusicWheelEntry, VirtualKeyCode, NavDirection};
 use crate::utils::fps::FPSCounter;
 
 use ash::vk;
@@ -24,6 +24,7 @@ use winit::{
 };
 
 const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0);
+const PREVIEW_RESTART_DELAY: f32 = 1.0; // Seconds
 
 pub struct App {
     vulkan_base: VulkanBase,
@@ -47,6 +48,7 @@ pub struct App {
 
 impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self, Box<dyn Error>> {
+        // ... (Constructor largely unchanged, make sure SelectMusicState::default() is used for init)
         info!("Creating Application...");
 
         let window = WindowBuilder::new()
@@ -108,7 +110,7 @@ impl App {
             song_library,
             current_app_state: AppState::Menu,
             menu_state: MenuState::default(),
-            select_music_state: SelectMusicState::default(), // Default will init timer and nav state
+            select_music_state: SelectMusicState::default(),
             options_state: OptionsState::default(),
             game_state: None,
             fps_counter: FPSCounter::new(),
@@ -121,6 +123,7 @@ impl App {
         })
     }
 
+    // ... (run, try_process_pending_resize, handle_window_event remain largely the same)
     pub fn run(mut self, mut event_loop: EventLoop<()>) -> Result<(), Box<dyn Error>> {
         info!("Starting Event Loop...");
         self.last_frame_time = Instant::now();
@@ -179,7 +182,7 @@ impl App {
                         let now = Instant::now();
                         let dt = (now - self.last_frame_time).as_secs_f32().max(0.0).min(config::MAX_DELTA_TIME);
                         self.last_frame_time = now;
-                        self.update(dt); // This now calls the select_music::update
+                        self.update(dt);
                         self.vulkan_base.window.request_redraw();
                     } else if self.pending_resize.is_some() || self.swapchain_is_known_bad {
                         self.vulkan_base.window.request_redraw();
@@ -253,6 +256,7 @@ impl App {
         }
     }
 
+
     fn rebuild_music_wheel_entries(&mut self) {
         let mut new_entries = Vec::new();
         let mut current_pack_name_in_library = String::new();
@@ -278,7 +282,7 @@ impl App {
             if pack_name_for_song != current_pack_name_in_library {
                 let color = self.pack_colors.get(&pack_name_for_song)
                                 .cloned()
-                                .unwrap_or(config::MENU_NORMAL_COLOR); 
+                                .unwrap_or(config::MENU_NORMAL_COLOR);
                 new_entries.push(MusicWheelEntry::PackHeader { name: pack_name_for_song.clone(), color });
                 current_pack_name_in_library = pack_name_for_song.clone();
             }
@@ -308,15 +312,42 @@ impl App {
         } else {
             self.select_music_state.selected_index = 0;
         }
+        // Reset preview state as the list structure changed significantly
+        self.select_music_state.preview_audio_path = None;
+        self.select_music_state.preview_playback_started_at = None;
+        self.select_music_state.is_awaiting_preview_restart = false;
+        self.audio_manager.stop_preview();
+
 
         info!("Rebuilt music wheel. New #entries: {}, selected_index: {}", self.select_music_state.entries.len(), self.select_music_state.selected_index);
+    }
+
+    fn start_or_schedule_preview(&mut self) {
+        self.audio_manager.stop_preview(); // Stop any current preview first
+        self.select_music_state.preview_playback_started_at = None;
+        self.select_music_state.is_awaiting_preview_restart = false;
+
+        if let Some(audio_path) = &self.select_music_state.preview_audio_path {
+            if let Some(start_sec) = self.select_music_state.preview_sample_start_sec {
+                let duration_sec = self.select_music_state.preview_sample_length_sec;
+                 match self.audio_manager.play_preview(audio_path, 0.7, start_sec, duration_sec) {
+                    Ok(_) => {
+                        self.select_music_state.preview_playback_started_at = Some(Instant::now());
+                        info!("Preview started for {:?} at {:.2}s", audio_path.file_name().unwrap_or_default(), start_sec);
+                    }
+                    Err(e) => error!("Failed to start preview: {}", e),
+                }
+            } else {
+                warn!("No sample start time for song, cannot play preview.");
+            }
+        }
     }
 
 
     fn handle_keyboard_input(&mut self, key_event: KeyEvent) {
         trace!("Keyboard Input: {:?}", key_event);
         let mut requested_state: Option<AppState> = None;
-        let mut selection_changed_in_music_by_input = false; // Renamed for clarity
+        let mut selection_changed_in_music_by_input = false;
 
         match self.current_app_state {
             AppState::Menu => {
@@ -339,7 +370,9 @@ impl App {
                         if let Some(entry) = self.select_music_state.entries.get(original_selected_index_before_input) {
                             if let MusicWheelEntry::PackHeader { .. } = entry {
                                 self.rebuild_music_wheel_entries();
-                                // selection_changed_in_music_by_input is already true from handle_input if expansion state changed.
+                                // After rebuilding, the selected item might be different,
+                                // so we need to re-evaluate preview state.
+                                selection_changed_in_music_by_input = true; // Force banner/preview update
                             }
                         }
                     }
@@ -365,7 +398,6 @@ impl App {
             self.next_app_state = requested_state;
         }
 
-        // Banner update logic based on input-driven changes
         if self.current_app_state == AppState::SelectMusic && selection_changed_in_music_by_input {
             let current_index = self.select_music_state.selected_index;
              if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
@@ -376,9 +408,14 @@ impl App {
                             &self.renderer,
                             selected_song_arc,
                          );
+                         // Update preview state for the newly selected song
+                         self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
+                         self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
+                         self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
+                         self.start_or_schedule_preview();
                      }
                      MusicWheelEntry::PackHeader { .. }=> {
-                         info!("Selected a pack header ({}) due to input, loading fallback banner.", current_index);
+                         info!("Selected a pack header ({}), loading fallback banner and stopping preview.", current_index);
                          if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                               self.renderer.update_texture_descriptor(
                                   &self.vulkan_base.device,
@@ -386,10 +423,14 @@ impl App {
                                   fallback_res,
                               );
                          }
+                         self.audio_manager.stop_preview();
+                         self.select_music_state.preview_audio_path = None;
+                         self.select_music_state.preview_playback_started_at = None;
+                         self.select_music_state.is_awaiting_preview_restart = false;
                      }
                  }
              } else { 
-                 warn!("Selection changed by input in Music Select, but index {} is out of bounds ({} entries). Loading fallback.", current_index, self.select_music_state.entries.len());
+                 warn!("Selection changed by input in Music Select, but index {} is out of bounds ({} entries). Loading fallback and stopping preview.", current_index, self.select_music_state.entries.len());
                   if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                         self.renderer.update_texture_descriptor(
                             &self.vulkan_base.device,
@@ -397,6 +438,10 @@ impl App {
                             fallback_res,
                         );
                     }
+                    self.audio_manager.stop_preview();
+                    self.select_music_state.preview_audio_path = None;
+                    self.select_music_state.preview_playback_started_at = None;
+                    self.select_music_state.is_awaiting_preview_restart = false;
              }
         }
     }
@@ -409,9 +454,19 @@ impl App {
             "Transitioning state from {:?} -> {:?}",
             self.current_app_state, new_state
         );
+
+        // Stop preview if leaving SelectMusic state
+        if self.current_app_state == AppState::SelectMusic && new_state != AppState::SelectMusic {
+            self.audio_manager.stop_preview();
+            self.select_music_state.preview_audio_path = None;
+            self.select_music_state.preview_playback_started_at = None;
+            self.select_music_state.is_awaiting_preview_restart = false;
+        }
+
+
         match self.current_app_state {
             AppState::Gameplay => {
-                self.audio_manager.stop_music();
+                self.audio_manager.stop_music(); // Main music
                 self.game_state = None;
                 info!("Gameplay state cleared.");
             }
@@ -423,36 +478,42 @@ impl App {
                 self.menu_state = MenuState::default();
             }
             AppState::SelectMusic => {
-                self.select_music_state = SelectMusicState::default(); // This initializes all fields including timer and nav state
-                self.rebuild_music_wheel_entries();
+                self.select_music_state = SelectMusicState::default(); 
+                self.rebuild_music_wheel_entries(); // This now also resets preview
 
                 info!(
                     "Populated SelectMusic state with {} entries (initially collapsed).",
                     self.select_music_state.entries.len()
                 );
 
-                 if let Some(first_entry) = self.select_music_state.entries.first() {
-                      match first_entry {
-                          MusicWheelEntry::Song(initial_song_arc) => {
-                              self.asset_manager.load_song_banner(
-                                 &self.vulkan_base,
-                                 &self.renderer,
-                                 initial_song_arc,
-                              );
-                          }
-                          MusicWheelEntry::PackHeader {..} => {
-                              info!("Initial selection is a pack header, ensuring fallback banner.");
-                              if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                                   self.renderer.update_texture_descriptor(
-                                       &self.vulkan_base.device,
-                                       crate::graphics::renderer::DescriptorSetId::DynamicBanner,
-                                       fallback_res,
-                                   );
-                              }
-                          }
-                      }
-                 } else {
-                     info!("No songs or packs loaded, ensuring fallback banner is active for DynamicBanner set.");
+                 // Initial banner and preview for the first item (if any)
+                if let Some(selected_entry) = self.select_music_state.entries.get(self.select_music_state.selected_index) {
+                     match selected_entry {
+                         MusicWheelEntry::Song(selected_song_arc) => {
+                             self.asset_manager.load_song_banner(
+                                &self.vulkan_base,
+                                &self.renderer,
+                                selected_song_arc,
+                             );
+                             self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
+                             self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
+                             self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
+                             self.start_or_schedule_preview();
+                         }
+                         MusicWheelEntry::PackHeader {..} => {
+                             info!("Initial selection is a pack header, ensuring fallback banner and no preview.");
+                             if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                                  self.renderer.update_texture_descriptor(
+                                      &self.vulkan_base.device,
+                                      crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                                      fallback_res,
+                                  );
+                             }
+                             // Preview state already reset by SelectMusicState::default()
+                         }
+                     }
+                } else {
+                     info!("No songs or packs loaded, ensuring fallback banner is active and no preview.");
                      if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                           self.renderer.update_texture_descriptor(
                               &self.vulkan_base.device,
@@ -460,7 +521,7 @@ impl App {
                               fallback_res,
                           );
                      }
-                 }
+                }
             }
             AppState::Options => {
                 self.options_state = OptionsState::default();
@@ -470,6 +531,11 @@ impl App {
                  let selected_entry_opt = self.select_music_state.entries.get(self.select_music_state.selected_index);
 
                 if let Some(MusicWheelEntry::Song(selected_song_arc)) = selected_entry_opt {
+                    self.audio_manager.stop_preview(); // Stop preview before starting main music
+                    self.select_music_state.preview_audio_path = None; // Clear preview state
+                    self.select_music_state.preview_playback_started_at = None;
+                    self.select_music_state.is_awaiting_preview_restart = false;
+
                     if selected_song_arc.audio_path.is_none() {
                         error!("Cannot start gameplay: Audio path missing for selected song '{}'. Returning to SelectMusic.", selected_song_arc.title);
                         self.next_app_state = Some(AppState::SelectMusic);
@@ -486,7 +552,7 @@ impl App {
                         self.vulkan_base.surface_resolution.height as f32,
                     );
 
-                    match self.audio_manager.play_music(audio_path, 1.0) {
+                    match self.audio_manager.play_music(audio_path, 1.0) { // Main music
                         Ok(_) => {
                             let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
                             
@@ -532,13 +598,28 @@ impl App {
 
     fn update(&mut self, dt: f32) {
         trace!("Update Start (dt: {:.4} s)", dt);
-        let mut selection_changed_by_update = false;
+        let mut selection_changed_by_held_key_scroll = false;
 
         match self.current_app_state {
             AppState::Menu => menu::update(&mut self.menu_state, dt),
             AppState::SelectMusic => {
                 if select_music::update(&mut self.select_music_state, dt, &self.audio_manager) {
-                    selection_changed_by_update = true;
+                    selection_changed_by_held_key_scroll = true;
+                }
+                // Preview restart logic
+                if self.select_music_state.is_awaiting_preview_restart {
+                    self.select_music_state.preview_restart_delay_timer -= dt;
+                    if self.select_music_state.preview_restart_delay_timer <= 0.0 {
+                        self.start_or_schedule_preview();
+                    }
+                } else if self.select_music_state.preview_audio_path.is_some() &&
+                           self.select_music_state.preview_playback_started_at.is_some() &&
+                           !self.audio_manager.is_preview_playing() {
+                    // Preview was playing but now isn't, and not already awaiting restart
+                    info!("Preview finished, scheduling restart.");
+                    self.select_music_state.is_awaiting_preview_restart = true;
+                    self.select_music_state.preview_restart_delay_timer = PREVIEW_RESTART_DELAY;
+                    self.select_music_state.preview_playback_started_at = None; // Clear it so this condition isn't met again until it plays
                 }
             }
             AppState::Options => options::update(&mut self.options_state, dt),
@@ -550,8 +631,7 @@ impl App {
             AppState::Exiting => {}
         }
 
-        // If select_music::update caused a selection change (due to held key scroll)
-        if self.current_app_state == AppState::SelectMusic && selection_changed_by_update {
+        if self.current_app_state == AppState::SelectMusic && selection_changed_by_held_key_scroll {
             let current_index = self.select_music_state.selected_index;
              if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
                  match selected_entry {
@@ -561,9 +641,13 @@ impl App {
                             &self.renderer,
                             selected_song_arc,
                          );
+                         self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
+                         self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
+                         self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
+                         self.start_or_schedule_preview();
                      }
                      MusicWheelEntry::PackHeader { .. }=> {
-                         info!("Selected a pack header ({}) due to update scroll, loading fallback banner.", current_index);
+                         info!("Selected a pack header ({}) due to update scroll, loading fallback banner and stopping preview.", current_index);
                          if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                               self.renderer.update_texture_descriptor(
                                   &self.vulkan_base.device,
@@ -571,10 +655,14 @@ impl App {
                                   fallback_res,
                               );
                          }
+                         self.audio_manager.stop_preview();
+                         self.select_music_state.preview_audio_path = None;
+                         self.select_music_state.preview_playback_started_at = None;
+                         self.select_music_state.is_awaiting_preview_restart = false;
                      }
                  }
              } else {
-                 warn!("Selection changed by update in Music Select, but index {} is out of bounds ({} entries). Loading fallback.", current_index, self.select_music_state.entries.len());
+                 warn!("Selection changed by update in Music Select, but index {} is out of bounds ({} entries). Loading fallback and stopping preview.", current_index, self.select_music_state.entries.len());
                   if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                         self.renderer.update_texture_descriptor(
                             &self.vulkan_base.device,
@@ -582,6 +670,11 @@ impl App {
                             fallback_res,
                         );
                     }
+                    self.audio_manager.stop_preview();
+                    self.select_music_state.preview_audio_path = None;
+                    self.select_music_state.preview_playback_started_at = None;
+                    self.select_music_state.is_awaiting_preview_restart = false;
+
              }
         }
 
@@ -721,6 +814,7 @@ impl Drop for App {
         }
 
         self.audio_manager.stop_music();
+        self.audio_manager.stop_preview(); // Ensure preview stops on app exit
         info!("Audio stopped.");
 
         self.asset_manager.destroy(&self.vulkan_base.device);
