@@ -96,6 +96,7 @@ pub const ARTIST_HEADER_TOP_PADDING_REF: f32 = 10.0;
 pub const BPM_HEADER_LEFT_PADDING_REF: f32 = 36.0;
 pub const HEADER_TO_VALUE_HORIZONTAL_GAP_REF: f32 = 6.0;
 pub const ARTIST_TO_BPM_VERTICAL_GAP_REF: f32 = 5.0;
+pub const DETAIL_RIGHT_PADDING_REF: f32 = 21.0; // For right-aligned text in the detail box
 
 // Simply Love / ITGMania Color Palette for Pack Name TEXTS
 pub const PACK_NAME_COLOR_PALETTE: [[f32; 4]; 12] = [
