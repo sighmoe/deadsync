@@ -214,12 +214,10 @@ pub fn draw(
     let center_x = window_width / 2.0;
 
     // Existing constants
-    const TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES: f32 = 36.0;
+    const TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES: f32 = 34.0;
     const OBSERVED_PX_HEIGHT_AT_REF_FOR_30PX_TARGET_OLD_METHOD: f32 = 19.0;
     const ASCENDER_POSITIONING_ADJUSTMENT_FACTOR: f32 = 0.65;
     const HEADER_FOOTER_LETTER_SPACING_FACTOR: f32 = 0.90;
-    const MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 22.0;
-    const TEXT_VERTICAL_NUDGE_PX_AT_REF_RES: f32 = 2.0;
     const PINK_BOX_REF_WIDTH: f32 = 625.0;
     const PINK_BOX_REF_HEIGHT: f32 = 90.0;
     const SMALL_UPPER_RIGHT_BOX_REF_WIDTH: f32 = 48.0;
@@ -246,8 +244,10 @@ pub fn draw(
     let width_scale_factor = window_width / config::LAYOUT_BOXES_REF_RES_WIDTH;
     let height_scale_factor = window_height / config::LAYOUT_BOXES_REF_RES_HEIGHT;
 
-    // Scale existing constants
-    let text_vertical_nudge_current = TEXT_VERTICAL_NUDGE_PX_AT_REF_RES * height_scale_factor;
+    // Scaled constants
+    let bar_text_vertical_nudge_current = config::BAR_TEXT_VERTICAL_NUDGE_PX_AT_REF_RES * height_scale_factor;
+    let music_wheel_text_vertical_nudge_current = config::MUSIC_WHEEL_TEXT_VERTICAL_NUDGE_PX_AT_REF_RES * height_scale_factor;
+
     let music_wheel_box_current_width = MUSIC_WHEEL_BOX_REF_WIDTH * width_scale_factor;
     let music_wheel_box_current_height = MUSIC_WHEEL_BOX_REF_HEIGHT * height_scale_factor;
     let music_wheel_vertical_gap_current = MUSIC_WHEEL_VERTICAL_GAP_REF * height_scale_factor;
@@ -294,7 +294,7 @@ pub fn draw(
     let music_box_left_x = music_box_right_x - music_wheel_box_current_width;
     let music_box_center_x = music_box_left_x + music_wheel_box_current_width / 2.0;
 
-    let wheel_text_current_target_visual_height = MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * height_scale_factor;
+    let wheel_text_current_target_visual_height = config::MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * height_scale_factor;
     let wheel_font_typographic_height_normalized = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
     let wheel_text_effective_scale = wheel_text_current_target_visual_height / wheel_font_typographic_height_normalized;
 
@@ -370,7 +370,7 @@ pub fn draw(
             let visual_text_top_y = current_box_center_y - (current_visual_height / 2.0);
             let mut text_baseline_y = visual_text_top_y + (list_font.metrics.ascender * wheel_text_effective_scale);
             
-            text_baseline_y += text_vertical_nudge_current;
+            text_baseline_y += music_wheel_text_vertical_nudge_current; // Use music wheel specific nudge
 
             renderer.draw_text(
                 device, cmd_buf, list_font, &display_text,
@@ -444,8 +444,8 @@ pub fn draw(
     let hf_padding_from_bar_top_to_text_visual_top = hf_empty_vertical_space / 2.0;
     let mut header_baseline_y = hf_padding_from_bar_top_to_text_visual_top + hf_scaled_ascender_for_positioning;
     let mut footer_baseline_y = footer_y_top_edge + hf_padding_from_bar_top_to_text_visual_top + hf_scaled_ascender_for_positioning;
-    header_baseline_y += text_vertical_nudge_current;
-    footer_baseline_y += text_vertical_nudge_current;
+    header_baseline_y += bar_text_vertical_nudge_current; // Use bar text specific nudge
+    footer_baseline_y += bar_text_vertical_nudge_current; // Use bar text specific nudge
     let header_text_left_padding_px = 14.0 * width_scale_factor;
     let header_text_str = "SELECT MUSIC";
     renderer.draw_text( device, cmd_buf, header_footer_font, header_text_str, header_text_left_padding_px, header_baseline_y, config::UI_BAR_TEXT_COLOR, hf_effective_scale, Some(HEADER_FOOTER_LETTER_SPACING_FACTOR) );
@@ -472,7 +472,7 @@ pub fn draw(
         let artist_header_baseline_y = artist_bpm_box_actual_top_y 
                                      + artist_header_top_padding_current 
                                      + (list_font.metrics.ascender * detail_header_effective_scale)
-                                     + text_vertical_nudge_current;
+                                     + music_wheel_text_vertical_nudge_current; // Assuming Miso font details should use same nudge as wheel
         renderer.draw_text(
             device, cmd_buf, list_font, artist_header_str,
             artist_header_x, artist_header_baseline_y, 
@@ -485,7 +485,7 @@ pub fn draw(
         let artist_value_baseline_y = artist_bpm_box_actual_top_y 
                                     + artist_header_top_padding_current 
                                     + (list_font.metrics.ascender * detail_value_effective_scale) 
-                                    + text_vertical_nudge_current; 
+                                    + music_wheel_text_vertical_nudge_current; // Assuming Miso font details should use same nudge as wheel
         renderer.draw_text(
             device, cmd_buf, list_font, artist_value_str,
             artist_value_x, artist_value_baseline_y, 
@@ -506,7 +506,7 @@ pub fn draw(
         let bpm_header_baseline_y = artist_bpm_box_actual_top_y 
                                   + second_row_top_padding_y
                                   + (list_font.metrics.ascender * detail_header_effective_scale) 
-                                  + text_vertical_nudge_current;
+                                  + music_wheel_text_vertical_nudge_current; // Assuming Miso font details should use same nudge as wheel
         renderer.draw_text(
             device, cmd_buf, list_font, bpm_header_str,
             bpm_header_x, bpm_header_baseline_y,
@@ -532,7 +532,7 @@ pub fn draw(
         let bpm_value_baseline_y = artist_bpm_box_actual_top_y
                                  + second_row_top_padding_y
                                  + (list_font.metrics.ascender * detail_value_effective_scale)
-                                 + text_vertical_nudge_current;
+                                 + music_wheel_text_vertical_nudge_current; // Assuming Miso font details should use same nudge as wheel
         renderer.draw_text(
             device, cmd_buf, list_font, &bpm_value_str,
             bpm_value_x, bpm_value_baseline_y, 
