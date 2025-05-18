@@ -1,5 +1,3 @@
-// src/screens/select_music.rs
-
 use crate::assets::{AssetManager, FontId, SoundId};
 use crate::audio::AudioManager;
 use crate::config;
@@ -250,6 +248,8 @@ pub fn draw(
     let vertical_gap_topleft_to_topmost_current = VERTICAL_GAP_TOPLEFT_TO_TOPMOST_REF * height_scale_factor;
     let vertical_gap_stepartist_to_artist_current = VERTICAL_GAP_STEPARTIST_TO_ARTIST_REF * height_scale_factor;
     let vertical_gap_artist_to_banner_current = VERTICAL_GAP_ARTIST_TO_BANNER_REF * height_scale_factor;
+    let song_text_left_padding_current = config::MUSIC_WHEEL_SONG_TEXT_LEFT_PADDING_REF * width_scale_factor;
+
 
     let total_music_boxes_height = NUM_MUSIC_WHEEL_BOXES as f32 * music_wheel_box_current_height;
     let total_music_gaps_height = (NUM_MUSIC_WHEEL_BOXES.saturating_sub(1)) as f32 * music_wheel_vertical_gap_current;
@@ -274,6 +274,7 @@ pub fn draw(
         let mut display_text = "".to_string();
         let mut current_box_color;
         let mut current_text_color = config::SONG_TEXT_COLOR;
+        let mut text_x_pos = music_box_left_x; // Default to left for safety, will be overridden
 
         let num_entries = state.entries.len();
         let is_selected_slot = i == CENTER_MUSIC_WHEEL_SLOT_INDEX;
@@ -301,6 +302,7 @@ pub fn draw(
                             config::MUSIC_WHEEL_BOX_COLOR
                         };
                         current_text_color = config::SONG_TEXT_COLOR;
+                        text_x_pos = music_box_left_x + song_text_left_padding_current;
                     }
                     MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color_val } => {
                         display_text = pack_name.clone();
@@ -310,6 +312,9 @@ pub fn draw(
                             config::PACK_HEADER_BOX_COLOR
                         };
                         current_text_color = *pack_text_color_val;
+                        // Center pack names
+                        let text_width_pixels = list_font.measure_text_normalized(&display_text) * wheel_text_effective_scale;
+                        text_x_pos = music_box_left_x + (music_wheel_box_current_width - text_width_pixels) / 2.0;
                     }
                 }
             } else { 
@@ -327,9 +332,7 @@ pub fn draw(
         );
 
         if !display_text.is_empty() {
-            let text_width_pixels = list_font.measure_text_normalized(&display_text) * wheel_text_effective_scale;
-            let text_x_pos = music_box_left_x + (music_wheel_box_current_width - text_width_pixels) / 2.0;
-
+            // text_x_pos is now calculated in the match block above based on entry type
             let current_visual_height = wheel_font_typographic_height_normalized * wheel_text_effective_scale;
             let visual_text_top_y = current_box_center_y - (current_visual_height / 2.0);
             let mut text_baseline_y = visual_text_top_y + (list_font.metrics.ascender * wheel_text_effective_scale);

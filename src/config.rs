@@ -76,6 +76,7 @@ pub const PACK_HEADER_BOX_COLOR: [f32; 4] = [83.0/255.0, 92.0/255.0, 99.0/255.0,
 pub const SELECTED_PACK_HEADER_BOX_COLOR: [f32; 4] = [95.0/255.0, 104.0/255.0, 110.0/255.0, 1.0]; // #5f686e
 pub const SELECTED_SONG_BOX_COLOR: [f32; 4] = [39.0/255.0, 47.0/255.0, 53.0/255.0, 1.0];      // #272f35
 pub const SONG_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // White for song titles
+pub const MUSIC_WHEEL_SONG_TEXT_LEFT_PADDING_REF: f32 = 118.0; // CORRECTED VALUE
 
 pub const PINK_BOX_COLOR: [f32; 4] = [1.0, 71.0 / 255.0, 179.0 / 255.0, 1.0];
 pub const TOP_LEFT_BOX_COLOR: [f32; 4] = [230.0 / 255.0, 230.0 / 255.0, 250.0 / 255.0, 1.0];
