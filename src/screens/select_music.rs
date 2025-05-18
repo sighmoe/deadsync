@@ -22,6 +22,28 @@ fn lerp_color(color_a: [f32; 4], color_b: [f32; 4], t: f32) -> [f32; 4] {
     ]
 }
 
+// Helper to format seconds into H:MM:SS or M:SS or MM:SS
+fn format_duration_flexible(total_seconds_f: f32) -> String {
+    if total_seconds_f < 0.0 {
+        return "0:00".to_string(); // Or handle error appropriately
+    }
+
+    let total_seconds = total_seconds_f.round() as u32;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{}:{:02}:{:02}", hours, minutes, seconds)
+    } else if minutes >= 10 || minutes == 0 { // Show 00:SS or 10:SS, 12:SS etc.
+        format!("{:02}:{:02}", minutes, seconds)
+    }
+    else { // Show M:SS for 1-9 minutes
+        format!("{}:{:02}", minutes, seconds)
+    }
+}
+
+
 pub fn handle_input(
     key_event: &KeyEvent,
     state: &mut SelectMusicState,
@@ -249,7 +271,7 @@ pub fn draw(
     let vertical_gap_topleft_to_topmost_current = VERTICAL_GAP_TOPLEFT_TO_TOPMOST_REF * height_scale_factor;
     let vertical_gap_artist_to_banner_current = VERTICAL_GAP_ARTIST_TO_BANNER_REF * height_scale_factor;
     let song_text_left_padding_current = config::MUSIC_WHEEL_SONG_TEXT_LEFT_PADDING_REF * width_scale_factor;
-    let vertical_gap_topmost_to_artist_box_current = config::VERTICAL_GAP_TOPMOST_TO_ARTIST_BOX_REF * height_scale_factor; // Use new constant
+    let vertical_gap_topmost_to_artist_box_current = config::VERTICAL_GAP_TOPMOST_TO_ARTIST_BOX_REF * height_scale_factor; 
 
 
     // Scale new detail area constants
@@ -257,9 +279,10 @@ pub fn draw(
     let detail_value_text_target_current_px_height = config::DETAIL_VALUE_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * height_scale_factor;
     let artist_header_left_padding_current = config::ARTIST_HEADER_LEFT_PADDING_REF * width_scale_factor;
     let artist_header_top_padding_current = config::ARTIST_HEADER_TOP_PADDING_REF * height_scale_factor;
-    // let bpm_header_left_padding_current = config::BPM_HEADER_LEFT_PADDING_REF * width_scale_factor; // No longer needed for BPM, but kept for reference.
+    let bpm_header_left_padding_current = config::BPM_HEADER_LEFT_PADDING_REF * width_scale_factor; 
     let header_to_value_horizontal_gap_current = config::HEADER_TO_VALUE_HORIZONTAL_GAP_REF * width_scale_factor;
-    let detail_right_padding_current = config::DETAIL_RIGHT_PADDING_REF * width_scale_factor;
+    // let detail_info_block_right_padding_current = config::DETAIL_INFO_BLOCK_RIGHT_PADDING_REF * width_scale_factor; // Not strictly needed if LENGTH is relative to BPM
+    let bpm_to_length_horizontal_gap_current = config::BPM_TO_LENGTH_HORIZONTAL_GAP_REF * width_scale_factor; 
     let artist_to_bpm_vertical_gap_current = config::ARTIST_TO_BPM_VERTICAL_GAP_REF * height_scale_factor;
 
 
@@ -434,7 +457,7 @@ pub fn draw(
     } else { footer_text_glyph_width };
     renderer.draw_text( device, cmd_buf, header_footer_font, footer_text_str, center_x - footer_text_visual_width / 2.0, footer_baseline_y, config::UI_BAR_TEXT_COLOR, hf_effective_scale, Some(HEADER_FOOTER_LETTER_SPACING_FACTOR) );
 
-    // --- New Artist/BPM/Length Drawing Logic ---
+    // --- Artist/BPM/Length Drawing Logic ---
     if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
         let detail_header_font_typographic_h_norm = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
         let detail_header_effective_scale = detail_header_text_target_current_px_height / detail_header_font_typographic_h_norm;
@@ -459,7 +482,6 @@ pub fn draw(
         // Artist Value
         let artist_value_str = &selected_song_arc.artist;
         let artist_value_x = artist_header_x + artist_header_width + header_to_value_horizontal_gap_current;
-        // Baseline Y for value text is calculated using its own scale for ascender part
         let artist_value_baseline_y = artist_bpm_box_actual_top_y 
                                     + artist_header_top_padding_current 
                                     + (list_font.metrics.ascender * detail_value_effective_scale) 
@@ -479,7 +501,8 @@ pub fn draw(
         // BPM Header
         let bpm_header_str = "BPM";
         let bpm_header_width = list_font.measure_text_normalized(bpm_header_str) * detail_header_effective_scale;
-        let bpm_header_x = artist_bpm_box_left_x + artist_header_left_padding_current; // Use same left padding as artist for BPM header
+        // Use bpm_header_left_padding_current for BPM header for indentation
+        let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current; 
         let bpm_header_baseline_y = artist_bpm_box_actual_top_y 
                                   + second_row_top_padding_y
                                   + (list_font.metrics.ascender * detail_header_effective_scale) 
@@ -496,7 +519,7 @@ pub fn draw(
         } else if !selected_song_arc.bpms_header.is_empty() {
             let min_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::INFINITY, f32::min);
             let max_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::NEG_INFINITY, f32::max);
-            if (min_bpm - max_bpm).abs() < 0.1 { // Consider them same if very close
+            if (min_bpm - max_bpm).abs() < 0.1 { 
                 format!("{:.0}", min_bpm)
             } else {
                 format!("{:.0}-{:.0}", min_bpm, max_bpm)
@@ -504,8 +527,8 @@ pub fn draw(
         } else {
             "???".to_string()
         };
+        let bpm_value_width = list_font.measure_text_normalized(&bpm_value_str) * detail_value_effective_scale;
         let bpm_value_x = bpm_header_x + bpm_header_width + header_to_value_horizontal_gap_current;
-        // BPM value baseline Y uses detail_value_effective_scale for its ascender part
         let bpm_value_baseline_y = artist_bpm_box_actual_top_y
                                  + second_row_top_padding_y
                                  + (list_font.metrics.ascender * detail_value_effective_scale)
@@ -516,22 +539,24 @@ pub fn draw(
             config::SONG_TEXT_COLOR, detail_value_effective_scale, None
         );
 
-        // --- Length Section (Header on Left, Value on Right, Block is Right-Aligned) ---
+        // --- Length Section (Header on Left, Value on Right, placed after BPM Header) ---
         let length_header_str = "LENGTH";
-        let length_value_str = "1:03:23"; // Placeholder
+        let length_value_str = selected_song_arc.charts.iter()
+            .find(|c| c.processed_data.is_some() && c.calculated_length_sec.is_some())
+            .and_then(|c| c.calculated_length_sec)
+            .map_or_else(
+                || "??:??".to_string(),
+                |secs| format_duration_flexible(secs)
+            );
 
         let length_header_width = list_font.measure_text_normalized(length_header_str) * detail_header_effective_scale;
-        let length_value_width = list_font.measure_text_normalized(length_value_str) * detail_value_effective_scale;
         
-        // Total width of the "LENGTH 01:03:23" block
-        let total_length_block_width = length_header_width + header_to_value_horizontal_gap_current + length_value_width;
-
-        // X position for the start of the "LENGTH" header string
-        let length_header_x = artist_bpm_box_left_x + artist_bpm_box_current_width // Right edge of the box
-                              - detail_right_padding_current                 // Padding from the right
-                              - total_length_block_width;                    // Shift left by the total block width
-
-        // X position for the start of the "01:03:23" value string
+        // X position for the "LENGTH" header:
+        // Start from the right edge of the BPM *Header*, then add the defined gap.
+        let length_header_x = bpm_header_x + bpm_header_width + bpm_to_length_horizontal_gap_current;
+        
+        // X position for the duration string:
+        // To the right of the LENGTH header, with the standard header-to-value gap.
         let length_value_x = length_header_x + length_header_width + header_to_value_horizontal_gap_current;
         
         // Baselines are the same as BPM's second row
@@ -547,7 +572,7 @@ pub fn draw(
 
         // Draw Length Value
         renderer.draw_text(
-            device, cmd_buf, list_font, length_value_str,
+            device, cmd_buf, list_font, &length_value_str,
             length_value_x, length_value_baseline_y, 
             config::SONG_TEXT_COLOR, detail_value_effective_scale, None
         );

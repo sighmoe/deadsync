@@ -62,6 +62,7 @@ pub struct ChartInfo {
     pub bpms_chart: Option<String>,
     pub stops_chart: Option<String>,
     pub processed_data: Option<ProcessedChartData>,
+    pub calculated_length_sec: Option<f32>, // NEW FIELD
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +317,7 @@ fn parse_simfile_content(content: &str, simfile_path: &Path) -> Result<SongInfo,
             bpms_chart: chart_bpms_str_opt,
             stops_chart: chart_stops_str_opt,
             processed_data: None, 
+            calculated_length_sec: None, // Initialize new field
         };
         if chart_info.stepstype.is_empty() || chart_info.difficulty.is_empty() || chart_info.meter.is_empty() || chart_info.notes_data_raw.trim().is_empty() {
             warn!("Skipping chart in {:?} (type: '{}', diff: '{}', meter: '{}') due to missing essential fields or empty notes.",
@@ -410,6 +412,7 @@ pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> {
                 warn!("Chart (type: '{}', difficulty: '{}') in {:?} has empty notes data, skipping processing.",
                     chart.stepstype, chart.difficulty, simfile_path);
                 chart.processed_data = Some(ProcessedChartData::default());
+                chart.calculated_length_sec = Some(0.0); // Set default for empty chart
                 continue;
             }
 
@@ -429,6 +432,36 @@ pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> {
                 breakdown_detailed,
                 breakdown_simplified,
             });
+            
+            // Determine BPM map for this specific chart for duration calculation
+            let mut chart_specific_bpm_map_for_duration = song_info.bpms_header.clone();
+            if let Some(chart_bpms_str) = &chart.bpms_chart {
+                if !chart_bpms_str.trim().is_empty() {
+                    match parse_bpms(chart_bpms_str) { // Assuming parse_bpms is defined in this module
+                        Ok(parsed_chart_bpms) => {
+                            // If chart has its own BPMs, they take precedence for its duration.
+                            chart_specific_bpm_map_for_duration = parsed_chart_bpms;
+                        }
+                        Err(e) => {
+                            warn!("Failed to parse chart-specific BPMs for chart '{} {}' in {:?}: {}. Using header BPMs for duration.", chart.stepstype, chart.difficulty, simfile_path, e);
+                        }
+                    }
+                }
+            }
+            // Ensure it's sorted and deduped
+            chart_specific_bpm_map_for_duration.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            chart_specific_bpm_map_for_duration.dedup_by_key(|k| k.0);
+
+
+            if let Some(pd) = &chart.processed_data {
+                if !chart_specific_bpm_map_for_duration.is_empty() {
+                     chart.calculated_length_sec = Some(calculate_chart_duration_seconds(pd, &chart_specific_bpm_map_for_duration));
+                } else {
+                    warn!("No BPMs available (header or chart) for chart '{} {}' in {:?}. Cannot calculate duration.", chart.stepstype, chart.difficulty, simfile_path);
+                    chart.calculated_length_sec = None;
+                }
+            }
+
             debug!("Processed chart (type: '{}', difficulty: '{}') for song '{}': {} measures, {} arrows. Detailed Breakdown: [{}], Simplified: [{}]",
                 chart.stepstype, chart.difficulty, song_info.title,
                 chart.processed_data.as_ref().unwrap().measures.len(),
@@ -441,6 +474,40 @@ pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> {
     song_info_result
 }
 
+// Helper function similar to rssp's get_current_bpm or get_bpm_at_beat
+pub fn get_bpm_at_beat(bpm_map: &[(f32, f32)], beat: f32) -> f32 {
+    let mut current_bpm = if !bpm_map.is_empty() { bpm_map[0].1 } else { 120.0 }; // Default if empty or beat is before first BPM change
+    for &(b_beat, b_bpm) in bpm_map {
+        if beat >= b_beat {
+            current_bpm = b_bpm;
+        } else {
+            break; // BPMs are sorted by beat
+        }
+    }
+    current_bpm
+}
+
+// Helper function similar to rssp's compute_total_chart_length
+pub fn calculate_chart_duration_seconds(
+    processed_data: &ProcessedChartData,
+    bpm_map: &[(f32, f32)],
+) -> f32 {
+    if bpm_map.is_empty() {
+        // Estimate based on 120 BPM if no BPMs provided.
+        return processed_data.measures.len() as f32 * 2.0; // 4 beats/measure, 2 sec/measure @ 120BPM
+    }
+
+    let mut total_length_seconds = 0.0;
+    for (i, _measure_lines) in processed_data.measures.iter().enumerate() {
+        let measure_start_beat = i as f32 * 4.0; // Assuming 4 beats per measure standard
+        let current_bpm = get_bpm_at_beat(bpm_map, measure_start_beat);
+
+        if current_bpm <= 0.0 { continue; } // Skip if BPM is invalid
+        let measure_length_s = (4.0 / current_bpm) * 60.0; // (beats_per_measure / BPM) * 60_sec_per_min
+        total_length_seconds += measure_length_s;
+    }
+    total_length_seconds
+}
 
 pub fn parse_song_folder(folder_path: &Path) -> Result<SongInfo, ParseError> {
     debug!("Scanning song folder: {:?}", folder_path);
