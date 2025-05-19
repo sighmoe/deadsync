@@ -25,7 +25,7 @@ use winit::{
 
 const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0);
 const PREVIEW_RESTART_DELAY: f32 = 0.25; // Seconds
-const SELECTION_PRELOAD_AUDIO_DELAY: Duration = Duration::from_millis(250);
+const SELECTION_PRELOAD_AUDIO_DELAY: Duration = Duration::from_millis(250); // No longer used for preloading, but keep for now if other logic depends on it
 const SELECTION_START_PLAY_DELAY: Duration = Duration::from_millis(500);
 
 
@@ -315,14 +315,13 @@ impl App {
         }
 
         // Reset preview state as the list structure changed significantly
-        self.audio_manager.stop_preview(); // Will also clear preloaded
+        self.audio_manager.stop_preview();
         self.select_music_state.preview_audio_path = None;
         self.select_music_state.preview_playback_started_at = None;
         self.select_music_state.is_awaiting_preview_restart = false;
         self.select_music_state.selection_landed_at = None;
         self.select_music_state.is_preview_actions_scheduled = false;
         // current_graph_texture and key will be handled by handle_music_selection_change if needed
-        self.select_music_state.is_preview_audio_loaded = false;
 
 
         info!("Rebuilt music wheel. New #entries: {}, selected_index: {}", self.select_music_state.entries.len(), self.select_music_state.selected_index);
@@ -353,7 +352,6 @@ impl App {
         self.select_music_state.preview_playback_started_at = None;
         self.select_music_state.is_awaiting_preview_restart = false;
         self.select_music_state.is_preview_actions_scheduled = false;
-        self.select_music_state.is_preview_audio_loaded = false;
 
         let mut new_graph_key_for_current_selection: Option<String> = None;
         let mut chart_data_for_graph_generation: Option<Arc<crate::parsing::simfile::ProcessedChartData>> = None;
@@ -374,8 +372,8 @@ impl App {
                     self.select_music_state.selection_landed_at = Some(Instant::now());
                     self.select_music_state.is_preview_actions_scheduled = true;
                     info!(
-                        "Selection changed to song: '{}'. Preview actions (load@{}ms, play@{}ms) scheduled.",
-                        selected_song_arc.title, SELECTION_PRELOAD_AUDIO_DELAY.as_millis(), SELECTION_START_PLAY_DELAY.as_millis()
+                        "Selection changed to song: '{}'. Preview actions (play@{}ms) scheduled.",
+                        selected_song_arc.title, SELECTION_START_PLAY_DELAY.as_millis()
                     );
 
                     // Prepare key for graph generation if applicable
@@ -548,7 +546,6 @@ impl App {
             self.select_music_state.is_awaiting_preview_restart = false;
             self.select_music_state.selection_landed_at = None;
             self.select_music_state.is_preview_actions_scheduled = false;
-            self.select_music_state.is_preview_audio_loaded = false;
 
             if let Some(mut graph_tex) = self.select_music_state.current_graph_texture.take() {
                 info!("Destroying NPS graph texture on state transition from SelectMusic.");
@@ -665,27 +662,12 @@ impl App {
                     if let Some(landed_at) = self.select_music_state.selection_landed_at {
                         let elapsed_since_landed = Instant::now().duration_since(landed_at);
 
-                        if !self.select_music_state.is_preview_audio_loaded &&
-                           elapsed_since_landed >= SELECTION_PRELOAD_AUDIO_DELAY {
-                            if let Some(ref audio_path) = self.select_music_state.preview_audio_path {
-                                match self.audio_manager.preload_preview(audio_path) {
-                                    Ok(_) => {
-                                        self.select_music_state.is_preview_audio_loaded = true;
-                                        info!("Preview audio preloaded for {:?}.", audio_path.file_name().unwrap_or_default());
-                                    }
-                                    Err(e) => error!("Failed to preload preview audio: {}", e),
-                                }
-                            } else {
-                                warn!("Preview actions scheduled, but no audio path available for preload.");
-                                self.select_music_state.is_preview_actions_scheduled = false;
-                            }
-                        }
-
-                        if self.select_music_state.is_preview_audio_loaded &&
-                           elapsed_since_landed >= SELECTION_START_PLAY_DELAY {
+                        // The SELECTION_PRELOAD_AUDIO_DELAY is effectively bypassed now.
+                        // We directly wait for SELECTION_START_PLAY_DELAY.
+                        if elapsed_since_landed >= SELECTION_START_PLAY_DELAY {
                             info!("{}ms play delay elapsed. Attempting to start preview playback.", SELECTION_START_PLAY_DELAY.as_millis());
                             self.start_actual_preview_playback();
-                            self.select_music_state.is_preview_actions_scheduled = false;
+                            self.select_music_state.is_preview_actions_scheduled = false; // Mark actions as done
                             self.select_music_state.selection_landed_at = None;
                         }
                     } else {

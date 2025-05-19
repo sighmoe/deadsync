@@ -70,7 +70,6 @@ pub struct SelectMusicState {
     // Fields for delayed preview actions
     pub selection_landed_at: Option<Instant>,
     pub is_preview_actions_scheduled: bool,
-    pub is_preview_audio_loaded: bool,
 
     // NPS Graph texture
     pub current_graph_texture: Option<TextureResource>, // This is why SelectMusicState can't derive Clone
@@ -97,7 +96,6 @@ impl Default for SelectMusicState {
 
             selection_landed_at: None,
             is_preview_actions_scheduled: false,
-            is_preview_audio_loaded: false,
             current_graph_texture: None,
             current_graph_song_chart_key: None,
         }
