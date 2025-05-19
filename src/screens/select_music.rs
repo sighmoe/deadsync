@@ -150,8 +150,8 @@ pub fn update(state: &mut SelectMusicState, dt: f32, audio_manager: &AudioManage
         state.selection_animation_timer -= ANIMATION_CYCLE_DURATION;
     }
 
-    const INITIAL_HOLD_DELAY: Duration = Duration::from_millis(300);
-    const REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(70);
+    let initial_hold_delay = Duration::from_millis(config::MUSIC_WHEEL_NAV_INITIAL_HOLD_DELAY_MS);
+    let repeat_scroll_interval = Duration::from_millis(config::MUSIC_WHEEL_NAV_REPEAT_SCROLL_INTERVAL_MS);
 
     if let (Some(direction), Some(held_since), Some(last_scrolled_at)) = (
         state.nav_key_held_direction,
@@ -159,8 +159,8 @@ pub fn update(state: &mut SelectMusicState, dt: f32, audio_manager: &AudioManage
         state.nav_key_last_scrolled_at,
     ) {
         let now = Instant::now();
-        if now.duration_since(held_since) > INITIAL_HOLD_DELAY {
-            if now.duration_since(last_scrolled_at) >= REPEAT_SCROLL_INTERVAL {
+        if now.duration_since(held_since) > initial_hold_delay {
+            if now.duration_since(last_scrolled_at) >= repeat_scroll_interval {
                 let num_entries = state.entries.len();
                 if num_entries > 0 {
                     let old_index = state.selected_index;
