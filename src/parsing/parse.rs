@@ -138,7 +138,7 @@ fn parse_tag(data: &[u8], tag_len: usize) -> Option<&[u8]> {
 
 }
 
-fn parse_subtag(data: &[u8], tag: &[u8]) -> Option<Vec<u8>> {
+pub fn parse_subtag(data: &[u8], tag: &[u8]) -> Option<Vec<u8>> {
     data.windows(tag.len())
         .position(|w| w == tag)
         .and_then(|pos| parse_tag(&data[pos + tag.len()..], 0))
