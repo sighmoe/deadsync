@@ -25,7 +25,6 @@ use winit::{
 
 const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0);
 const PREVIEW_RESTART_DELAY: f32 = 0.25; // Seconds
-// const SELECTION_PREVIEW_DELAY: Duration = Duration::from_millis(500); // Old constant
 const SELECTION_PRELOAD_AUDIO_DELAY: Duration = Duration::from_millis(250);
 const SELECTION_START_PLAY_DELAY: Duration = Duration::from_millis(500);
 
@@ -52,7 +51,6 @@ pub struct App {
 
 impl App {
     pub fn new(event_loop: &EventLoop<()>) -> Result<Self, Box<dyn Error>> {
-        // ... (Constructor largely unchanged)
         info!("Creating Application...");
 
         let window = WindowBuilder::new()
@@ -127,7 +125,6 @@ impl App {
         })
     }
 
-    // ... (run, try_process_pending_resize, handle_window_event remain largely the same)
     pub fn run(mut self, mut event_loop: EventLoop<()>) -> Result<(), Box<dyn Error>> {
         info!("Starting Event Loop...");
         self.last_frame_time = Instant::now();
@@ -310,31 +307,29 @@ impl App {
                 new_selected_idx = idx;
             }
         }
-        
+
         if !self.select_music_state.entries.is_empty() {
             self.select_music_state.selected_index = new_selected_idx.min(self.select_music_state.entries.len() - 1);
         } else {
             self.select_music_state.selected_index = 0;
         }
-        
+
         // Reset preview state as the list structure changed significantly
         self.audio_manager.stop_preview(); // Will also clear preloaded
         self.select_music_state.preview_audio_path = None;
         self.select_music_state.preview_playback_started_at = None;
         self.select_music_state.is_awaiting_preview_restart = false;
-        self.select_music_state.selection_landed_at = None; 
+        self.select_music_state.selection_landed_at = None;
         self.select_music_state.is_preview_actions_scheduled = false;
+        // current_graph_texture and key will be handled by handle_music_selection_change if needed
         self.select_music_state.is_preview_audio_loaded = false;
 
 
         info!("Rebuilt music wheel. New #entries: {}, selected_index: {}", self.select_music_state.entries.len(), self.select_music_state.selected_index);
     }
-    
-    // This function will now be called when the 500ms timer is up AND audio is loaded
+
     fn start_actual_preview_playback(&mut self) {
-        // `stop_preview` was already called by `handle_music_selection_change` or by itself if restarting.
-        // `is_awaiting_preview_restart` should be false if we are in the initial play path.
-        self.select_music_state.preview_playback_started_at = None; // Clear before attempting to play
+        self.select_music_state.preview_playback_started_at = None;
 
         if let Some(audio_path) = &self.select_music_state.preview_audio_path {
             if let Some(start_sec) = self.select_music_state.preview_sample_start_sec {
@@ -354,34 +349,44 @@ impl App {
 
 
     fn handle_music_selection_change(&mut self) {
-        // Stop any ongoing preview, clear preloaded audio, and reset flags
-        self.audio_manager.stop_preview(); // This now also calls audio_manager.clear_preloaded_preview()
+        self.audio_manager.stop_preview();
         self.select_music_state.preview_playback_started_at = None;
         self.select_music_state.is_awaiting_preview_restart = false;
         self.select_music_state.is_preview_actions_scheduled = false;
-        self.select_music_state.is_preview_audio_loaded = false; // Reset loaded flag
+        self.select_music_state.is_preview_audio_loaded = false;
+
+        let mut new_graph_key_for_current_selection: Option<String> = None;
+        let mut chart_data_for_graph_generation: Option<Arc<crate::parsing::simfile::ProcessedChartData>> = None;
 
         let current_index = self.select_music_state.selected_index;
         if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
             match selected_entry {
                 MusicWheelEntry::Song(selected_song_arc) => {
-                    self.asset_manager.load_song_banner( // Banner loads immediately
+                    self.asset_manager.load_song_banner(
                         &self.vulkan_base,
                         &self.renderer,
                         selected_song_arc,
                     );
-                    // Store preview metadata
                     self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
                     self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
                     self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
 
-                    // Schedule preview actions (load then play)
                     self.select_music_state.selection_landed_at = Some(Instant::now());
                     self.select_music_state.is_preview_actions_scheduled = true;
                     info!(
                         "Selection changed to song: '{}'. Preview actions (load@{}ms, play@{}ms) scheduled.",
                         selected_song_arc.title, SELECTION_PRELOAD_AUDIO_DELAY.as_millis(), SELECTION_START_PLAY_DELAY.as_millis()
                     );
+
+                    // Prepare key for graph generation if applicable
+                    if let Some(chart_info) = selected_song_arc.charts.iter().find(|c|
+                        c.processed_data.as_ref().map_or(false, |pd| !pd.measure_nps_vec.is_empty() && pd.max_nps > 0.001)
+                    ) {
+                        if let Some(pd) = &chart_info.processed_data {
+                             new_graph_key_for_current_selection = Some(format!("{}//{}", selected_song_arc.title, chart_info.difficulty));
+                             chart_data_for_graph_generation = Some(Arc::new(pd.clone()));
+                        }
+                    }
                 }
                 MusicWheelEntry::PackHeader { .. } => {
                     info!(
@@ -397,10 +402,8 @@ impl App {
                             fallback_res,
                         );
                     }
-                    // Clear all preview-related states
                     self.select_music_state.preview_audio_path = None;
                     self.select_music_state.selection_landed_at = None;
-                    // is_preview_actions_scheduled and is_preview_audio_loaded already false or will be reset
                 }
             }
         } else {
@@ -420,6 +423,54 @@ impl App {
             }
             self.select_music_state.preview_audio_path = None;
             self.select_music_state.selection_landed_at = None;
+        }
+
+        // --- NPS Graph Texture Management ---
+        // Destroy old graph texture if the key has changed or if no graph is needed for the current selection
+        if self.select_music_state.current_graph_song_chart_key != new_graph_key_for_current_selection {
+            if let Some(mut old_graph_tex) = self.select_music_state.current_graph_texture.take() {
+                info!("Destroying old NPS graph texture (key change or no graph needed).");
+                old_graph_tex.destroy(&self.vulkan_base.device);
+            }
+            self.select_music_state.current_graph_song_chart_key = new_graph_key_for_current_selection.clone();
+        }
+
+        // Generate and load new graph texture if a new key is set and no texture currently exists for it
+        if let (Some(key_str), Some(pd_arc)) = (new_graph_key_for_current_selection, chart_data_for_graph_generation) {
+            if self.select_music_state.current_graph_texture.is_none() {
+                info!("Generating NPS graph for: {}", key_str);
+                let nps_vec_f64: Vec<f64> = pd_arc.measure_nps_vec.iter().map(|&f| f as f64).collect();
+                match crate::parsing::graph::generate_density_graph_rgba(&nps_vec_f64, pd_arc.max_nps as f64) {
+                    Ok(graph_image_data) => {
+                        match crate::graphics::texture::create_texture_from_rgba_data(
+                            &self.vulkan_base,
+                            graph_image_data.width,
+                            graph_image_data.height,
+                            &graph_image_data.data,
+                            "NPS_Graph_Texture", // Give it a debug name
+                        ) {
+                            Ok(tex_res) => {
+                                self.renderer.update_texture_descriptor(
+                                    &self.vulkan_base.device,
+                                    crate::graphics::renderer::DescriptorSetId::NpsGraph,
+                                    &tex_res,
+                                );
+                                self.select_music_state.current_graph_texture = Some(tex_res);
+                                info!("NPS graph texture created and descriptor updated.");
+                            }
+                            Err(e) => error!("Failed to create NPS graph texture from data: {}", e),
+                        }
+                    }
+                    Err(e) => error!("Failed to generate NPS graph image data: {}", e),
+                }
+            }
+        } else if self.select_music_state.current_graph_texture.is_some() { // No graph needed, but one exists
+             if let Some(mut old_graph_tex) = self.select_music_state.current_graph_texture.take() {
+                info!("Clearing NPS graph texture as current selection does not require one.");
+                old_graph_tex.destroy(&self.vulkan_base.device);
+            }
+            // Set NpsGraph descriptor to a fallback (e.g., transparent or default texture)
+             self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::NpsGraph, &self.renderer.solid_white_texture);
         }
     }
 
@@ -450,9 +501,7 @@ impl App {
                         if let Some(entry) = self.select_music_state.entries.get(original_selected_index_before_input) {
                             if let MusicWheelEntry::PackHeader { .. } = entry {
                                 self.rebuild_music_wheel_entries();
-                                // After rebuilding, the selected item might be different,
-                                // so we need to re-evaluate preview state.
-                                selection_changed_in_music_by_input = true; // Force banner/preview update
+                                selection_changed_in_music_by_input = true;
                             }
                         }
                     }
@@ -492,21 +541,26 @@ impl App {
             self.current_app_state, new_state
         );
 
-        // Stop preview and clear preloads if leaving SelectMusic state
         if self.current_app_state == AppState::SelectMusic && new_state != AppState::SelectMusic {
-            self.audio_manager.stop_preview(); // This also clears preloaded audio
+            self.audio_manager.stop_preview();
             self.select_music_state.preview_audio_path = None;
             self.select_music_state.preview_playback_started_at = None;
             self.select_music_state.is_awaiting_preview_restart = false;
             self.select_music_state.selection_landed_at = None;
             self.select_music_state.is_preview_actions_scheduled = false;
             self.select_music_state.is_preview_audio_loaded = false;
+
+            if let Some(mut graph_tex) = self.select_music_state.current_graph_texture.take() {
+                info!("Destroying NPS graph texture on state transition from SelectMusic.");
+                graph_tex.destroy(&self.vulkan_base.device);
+            }
+            self.select_music_state.current_graph_song_chart_key = None;
         }
 
 
         match self.current_app_state {
             AppState::Gameplay => {
-                self.audio_manager.stop_music(); // Main music
+                self.audio_manager.stop_music();
                 self.game_state = None;
                 info!("Gameplay state cleared.");
             }
@@ -518,17 +572,14 @@ impl App {
                 self.menu_state = MenuState::default();
             }
             AppState::SelectMusic => {
-                self.select_music_state = SelectMusicState::default(); 
-                self.rebuild_music_wheel_entries(); 
+                self.select_music_state = SelectMusicState::default();
+                self.rebuild_music_wheel_entries();
 
                 info!(
                     "Populated SelectMusic state with {} entries (initially collapsed).",
                     self.select_music_state.entries.len()
                 );
-
-                // Initial banner and preview scheduling for the first item (if any)
-                // This is now handled by calling handle_music_selection_change after rebuild
-                self.handle_music_selection_change(); 
+                self.handle_music_selection_change();
             }
             AppState::Options => {
                 self.options_state = OptionsState::default();
@@ -538,8 +589,6 @@ impl App {
                  let selected_entry_opt = self.select_music_state.entries.get(self.select_music_state.selected_index);
 
                 if let Some(MusicWheelEntry::Song(selected_song_arc)) = selected_entry_opt {
-                    // stop_preview and flag clearing already done when transitioning FROM SelectMusic
-                    // or will be done if this transition is from another state.
 
                     if selected_song_arc.audio_path.is_none() {
                         error!("Cannot start gameplay: Audio path missing for selected song '{}'. Returning to SelectMusic.", selected_song_arc.title);
@@ -557,21 +606,21 @@ impl App {
                         self.vulkan_base.surface_resolution.height as f32,
                     );
 
-                    match self.audio_manager.play_music(audio_path, 1.0) { // Main music
+                    match self.audio_manager.play_music(audio_path, 1.0) {
                         Ok(_) => {
                             let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
-                            
-                            let selected_chart_idx = song_info_for_gameplay.charts.iter().position(|c| 
-                                c.processed_data.is_some() && 
+
+                            let selected_chart_idx = song_info_for_gameplay.charts.iter().position(|c|
+                                c.processed_data.is_some() &&
                                 !c.processed_data.as_ref().unwrap().measures.is_empty()
                             ).unwrap_or_else(|| {
                                 warn!("No processable charts found for song '{}', defaulting to chart index 0. Gameplay might be empty.", song_info_for_gameplay.title);
-                                0 
+                                0
                             });
 
                             self.game_state = Some(gameplay::initialize_game_state(
-                                window_size_f32.0, 
-                                window_size_f32.1, 
+                                window_size_f32.0,
+                                window_size_f32.1,
                                 start_time,
                                 song_info_for_gameplay,
                                 selected_chart_idx,
@@ -612,12 +661,10 @@ impl App {
                     selection_changed_by_held_key_scroll = true;
                 }
 
-                // Delayed preview actions logic
                 if self.select_music_state.is_preview_actions_scheduled {
                     if let Some(landed_at) = self.select_music_state.selection_landed_at {
                         let elapsed_since_landed = Instant::now().duration_since(landed_at);
 
-                        // Try to preload audio
                         if !self.select_music_state.is_preview_audio_loaded &&
                            elapsed_since_landed >= SELECTION_PRELOAD_AUDIO_DELAY {
                             if let Some(ref audio_path) = self.select_music_state.preview_audio_path {
@@ -630,41 +677,38 @@ impl App {
                                 }
                             } else {
                                 warn!("Preview actions scheduled, but no audio path available for preload.");
-                                self.select_music_state.is_preview_actions_scheduled = false; // Cancel if no path
+                                self.select_music_state.is_preview_actions_scheduled = false;
                             }
                         }
 
-                        // Try to play preloaded audio
                         if self.select_music_state.is_preview_audio_loaded &&
                            elapsed_since_landed >= SELECTION_START_PLAY_DELAY {
                             info!("{}ms play delay elapsed. Attempting to start preview playback.", SELECTION_START_PLAY_DELAY.as_millis());
-                            self.start_actual_preview_playback(); 
-                            self.select_music_state.is_preview_actions_scheduled = false; // Actions complete for this selection
-                            self.select_music_state.selection_landed_at = None; // Clear landed_at once used for this cycle
+                            self.start_actual_preview_playback();
+                            self.select_music_state.is_preview_actions_scheduled = false;
+                            self.select_music_state.selection_landed_at = None;
                         }
                     } else {
                         warn!("Preview actions scheduled but selection_landed_at is None. Cancelling.");
                         self.select_music_state.is_preview_actions_scheduled = false;
                     }
                 }
-                
-                // Preview restart logic (after a preview finishes)
+
                 if self.select_music_state.is_awaiting_preview_restart {
                     self.select_music_state.preview_restart_delay_timer -= dt;
                     if self.select_music_state.preview_restart_delay_timer <= 0.0 {
-                        // For restart, directly try to play. AudioManager's play_preview will use preloaded if available.
-                        self.start_actual_preview_playback(); 
-                        self.select_music_state.is_awaiting_preview_restart = false; // Reset flag
+                        self.start_actual_preview_playback();
+                        self.select_music_state.is_awaiting_preview_restart = false;
                     }
                 } else if self.select_music_state.preview_audio_path.is_some() &&
                            self.select_music_state.preview_playback_started_at.is_some() &&
                            !self.audio_manager.is_preview_playing() &&
-                           !self.select_music_state.is_preview_actions_scheduled // Don't restart if new actions are already scheduled
+                           !self.select_music_state.is_preview_actions_scheduled
                            {
                     info!("Preview finished, scheduling restart.");
                     self.select_music_state.is_awaiting_preview_restart = true;
                     self.select_music_state.preview_restart_delay_timer = PREVIEW_RESTART_DELAY;
-                    self.select_music_state.preview_playback_started_at = None; 
+                    self.select_music_state.preview_playback_started_at = None;
                 }
             }
             AppState::Options => options::update(&mut self.options_state, dt),
@@ -816,8 +860,14 @@ impl Drop for App {
         }
 
         self.audio_manager.stop_music();
-        self.audio_manager.stop_preview(); 
+        self.audio_manager.stop_preview();
         info!("Audio stopped.");
+
+        // Destroy graph texture if it exists
+        if let Some(mut graph_tex) = self.select_music_state.current_graph_texture.take() {
+            info!("Destroying NPS graph texture during App drop.");
+            graph_tex.destroy(&self.vulkan_base.device);
+        }
 
         self.asset_manager.destroy(&self.vulkan_base.device);
         info!("Assets destroyed.");

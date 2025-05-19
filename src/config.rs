@@ -115,6 +115,9 @@ pub const PACK_NAME_COLOR_PALETTE: [[f32; 4]; 12] = [
     [1.0, 125.0 / 255.0, 0.0, 1.0],           // #FF7D00
 ];
 
+pub const GRAPH_BOTTOM_COLOR: [f32; 4] = [0.0 / 255.0, 184.0 / 255.0, 204.0 / 255.0, 1.0]; // Cyan
+pub const GRAPH_TOP_COLOR: [f32; 4]    = [130.0 / 255.0, 0.0 / 255.0, 161.0 / 255.0, 1.0]; // Purple
+
      /*   ITG = {
             color("#21CCE8"),	-- blue
             color("#e29c18"),	-- gold

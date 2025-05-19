@@ -1,8 +1,9 @@
 use crate::parsing::simfile::{SongInfo, ProcessedChartData, NoteChar};
 use crate::screens::gameplay::{TimingData};
+use crate::graphics::texture::TextureResource; // Added for graph texture
 use cgmath::Matrix4;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf; 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::keyboard::{Key, NamedKey};
@@ -19,8 +20,8 @@ pub enum AppState {
 
 // --- Screen Specific States ---
 
-// MenuState (remains the same)
-#[derive(Debug, Clone)]
+// MenuState
+#[derive(Debug, Clone)] // MenuState can remain Clone if needed
 pub struct MenuState {
     pub options: Vec<String>,
     pub selected_index: usize,
@@ -36,40 +37,44 @@ impl Default for MenuState {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone)] // MusicWheelEntry can be Clone
 pub enum MusicWheelEntry {
     Song(Arc<SongInfo>),
     PackHeader { name: String, color: [f32; 4] },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)] // NavDirection can be Clone
 pub enum NavDirection {
     Up,
     Down,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)] // SelectMusicState is NOT Clone because of TextureResource
 pub struct SelectMusicState {
-    pub entries: Vec<MusicWheelEntry>,
+    pub entries: Vec<MusicWheelEntry>, // Vec<T> is Clone if T is Clone
     pub selected_index: usize,
-    pub expanded_pack_name: Option<String>,
+    pub expanded_pack_name: Option<String>, // Option<String> is Clone
     pub selection_animation_timer: f32,
-    pub nav_key_held_direction: Option<NavDirection>,
-    pub nav_key_held_since: Option<Instant>,
-    pub nav_key_last_scrolled_at: Option<Instant>,
+    pub nav_key_held_direction: Option<NavDirection>, // Option<T> is Clone if T is Clone
+    pub nav_key_held_since: Option<Instant>,       // Option<Instant> is Clone
+    pub nav_key_last_scrolled_at: Option<Instant>,   // Option<Instant> is Clone
 
     // Music preview fields
-    pub preview_audio_path: Option<PathBuf>,
+    pub preview_audio_path: Option<PathBuf>,    // Option<PathBuf> is Clone
     pub preview_sample_start_sec: Option<f32>,
     pub preview_sample_length_sec: Option<f32>,
-    pub preview_playback_started_at: Option<Instant>, 
-    pub is_awaiting_preview_restart: bool,          
-    pub preview_restart_delay_timer: f32,           
+    pub preview_playback_started_at: Option<Instant>,
+    pub is_awaiting_preview_restart: bool,
+    pub preview_restart_delay_timer: f32,
 
     // Fields for delayed preview actions
-    pub selection_landed_at: Option<Instant>,       
-    pub is_preview_actions_scheduled: bool,       // True if load/play actions are pending for current selection
-    pub is_preview_audio_loaded: bool,          // True if audio manager has preloaded current preview_audio_path
+    pub selection_landed_at: Option<Instant>,
+    pub is_preview_actions_scheduled: bool,
+    pub is_preview_audio_loaded: bool,
+
+    // NPS Graph texture
+    pub current_graph_texture: Option<TextureResource>, // This is why SelectMusicState can't derive Clone
+    pub current_graph_song_chart_key: Option<String>,
 }
 
 impl Default for SelectMusicState {
@@ -82,7 +87,7 @@ impl Default for SelectMusicState {
             nav_key_held_direction: None,
             nav_key_held_since: None,
             nav_key_last_scrolled_at: None,
-            
+
             preview_audio_path: None,
             preview_sample_start_sec: None,
             preview_sample_length_sec: None,
@@ -93,18 +98,20 @@ impl Default for SelectMusicState {
             selection_landed_at: None,
             is_preview_actions_scheduled: false,
             is_preview_audio_loaded: false,
+            current_graph_texture: None,
+            current_graph_song_chart_key: None,
         }
     }
 }
 
-// OptionsState (remains the same)
-#[derive(Debug, Clone, Default)]
+// OptionsState
+#[derive(Debug, Clone, Default)] // Can be Clone if it only contains cloneable data
 pub struct OptionsState {
     pub placeholder: bool,
 }
 
-// GameState (remains the same)
-#[derive(Debug, Clone)]
+// GameState
+#[derive(Debug)] // GameState also contains Arcs and non-Clone resources effectively
 pub struct GameState {
     pub targets: Vec<TargetInfo>,
     pub arrows: HashMap<ArrowDirection, Vec<Arrow>>,

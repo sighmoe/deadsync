@@ -7,7 +7,7 @@ use log;
 use std::error::Error;
 use std::path::Path; // Make sure log is imported
 
-// TextureResource struct definition remains the same
+#[derive(Debug)]
 pub struct TextureResource {
     pub image: vk::Image,
     pub memory: vk::DeviceMemory,
@@ -39,6 +39,177 @@ impl TextureResource {
             }
         }
     }
+}
+
+pub fn create_texture_from_rgba_data(
+    base: &VulkanBase,
+    width: u32,
+    height: u32,
+    rgba_data: &[u8],
+    debug_name: &str, // For logging
+) -> Result<TextureResource, Box<dyn Error>> {
+    log::info!(
+        "Creating {}x{} texture from RGBA data (debug_name: {})",
+        width,
+        height,
+        debug_name
+    );
+    let image_data_size = (width * height * 4) as vk::DeviceSize;
+
+    if rgba_data.len() != image_data_size as usize {
+        return Err(format!(
+            "RGBA data size mismatch for texture {}: expected {}, got {}",
+            debug_name,
+            image_data_size,
+            rgba_data.len()
+        )
+        .into());
+    }
+
+    let mut staging_buffer = base.create_buffer(
+        image_data_size,
+        vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+    )?;
+
+    // Assuming base.update_buffer is generic or handles &[u8].
+    // The `Copy` trait bound on `T` in `update_buffer<T: Copy>` means `u8` is fine.
+    base.update_buffer(&staging_buffer, rgba_data)
+        .map_err(|e| format!("Failed to update staging buffer for {}: {}", debug_name, e))?;
+
+
+    let format = vk::Format::R8G8B8A8_UNORM;
+    let image_extent = vk::Extent3D { width, height, depth: 1 };
+
+    let image_create_info = vk::ImageCreateInfo::default()
+        .image_type(vk::ImageType::TYPE_2D)
+        .format(format)
+        .extent(image_extent)
+        .mip_levels(1)
+        .array_layers(1)
+        .samples(vk::SampleCountFlags::TYPE_1)
+        .tiling(vk::ImageTiling::OPTIMAL)
+        .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
+        .sharing_mode(vk::SharingMode::EXCLUSIVE)
+        .initial_layout(vk::ImageLayout::UNDEFINED);
+
+    let image = unsafe { base.device.create_image(&image_create_info, None)? };
+
+    let mem_requirements = unsafe { base.device.get_image_memory_requirements(image) };
+    let mem_type_index = find_memorytype_index(
+        &mem_requirements,
+        &base.device_memory_properties,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+    )
+    .ok_or(format!("Failed to find suitable memory type for image {}", debug_name))?;
+
+    let alloc_info = vk::MemoryAllocateInfo::default()
+        .allocation_size(mem_requirements.size)
+        .memory_type_index(mem_type_index);
+    let memory = unsafe { base.device.allocate_memory(&alloc_info, None)? };
+    unsafe { base.device.bind_image_memory(image, memory, 0)? };
+
+    record_submit_commandbuffer(
+        &base.device,
+        base.setup_command_buffer,
+        base.setup_commands_reuse_fence,
+        base.present_queue,
+        &[], &[], &[],
+        |device, command_buffer| {
+            let barrier_to_transfer = vk::ImageMemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::NONE)
+                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .image(image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0, level_count: 1,
+                    base_array_layer: 0, layer_count: 1,
+                });
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[], &[], &[barrier_to_transfer],
+                );
+            }
+
+            let buffer_image_copy = vk::BufferImageCopy::default()
+                .buffer_offset(0)
+                .buffer_row_length(0) // Tightly packed
+                .buffer_image_height(0) // Tightly packed
+                .image_subresource(vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: 0, base_array_layer: 0, layer_count: 1,
+                })
+                .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
+                .image_extent(image_extent);
+            unsafe {
+                device.cmd_copy_buffer_to_image(
+                    command_buffer,
+                    staging_buffer.buffer,
+                    image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[buffer_image_copy],
+                );
+            }
+
+            let barrier_to_shader_read = vk::ImageMemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(vk::AccessFlags::SHADER_READ)
+                .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+                .image(image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0, level_count: 1,
+                    base_array_layer: 0, layer_count: 1,
+                });
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::FRAGMENT_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &[], &[], &[barrier_to_shader_read],
+                );
+            }
+        },
+    );
+    unsafe {
+        // Wait for the fence associated with setup_command_buffer
+        base.device.wait_for_fences(&[base.setup_commands_reuse_fence], true, u64::MAX)?;
+        // Resetting the fence is handled by record_submit_commandbuffer
+    }
+
+    staging_buffer.destroy(&base.device);
+
+    let image_view_info = vk::ImageViewCreateInfo::default()
+        .image(image)
+        .view_type(vk::ImageViewType::TYPE_2D)
+        .format(format)
+        .components(vk::ComponentMapping::default())
+        .subresource_range(vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            base_mip_level: 0, level_count: 1,
+            base_array_layer: 0, layer_count: 1,
+        });
+    let view = unsafe { base.device.create_image_view(&image_view_info, None)? };
+
+    let sampler_info = vk::SamplerCreateInfo::default()
+        .mag_filter(vk::Filter::LINEAR) // Linear filtering might be good for the graph
+        .min_filter(vk::Filter::LINEAR)
+        .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+        .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+        .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
+        .anisotropy_enable(false)
+        .unnormalized_coordinates(false)
+        .mipmap_mode(vk::SamplerMipmapMode::LINEAR); // No mipmaps
+    let sampler = unsafe { base.device.create_sampler(&sampler_info, None)? };
+
+    log::info!("Texture {} created successfully from RGBA data.", debug_name);
+    Ok(TextureResource { image, memory, view, sampler, width, height })
 }
 
 // NEW FUNCTION: Create a solid color texture (e.g., 1x1 white)
