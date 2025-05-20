@@ -24,10 +24,10 @@ pub const EXPLOSION_W4_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explo
 pub const EXPLOSION_W5_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w5.png";
 
 // Gameplay Constants
-pub const TARGET_Y_POS: f32 = 150.0;
-pub const TARGET_SIZE: f32 = 120.0;
-pub const ARROW_SIZE: f32 = 120.0;
-pub const ARROW_SPEED: f32 = 1300.0;
+// pub const TARGET_Y_POS: f32 = 150.0; // Replaced by dynamic calculation
+// pub const TARGET_SIZE: f32 = 120.0;  // Replaced by dynamic calculation
+// pub const ARROW_SIZE: f32 = 120.0;   // Replaced by dynamic calculation
+pub const ARROW_SPEED: f32 = 1300.0; // Speed of arrows scrolling up
 pub const AUDIO_SYNC_OFFSET_MS: i64 = 30;
 pub const SPAWN_LOOKAHEAD_BEATS: f32 = 10.0;
 pub const W1_WINDOW_MS: f32 = 21.5;
@@ -36,6 +36,25 @@ pub const W3_WINDOW_MS: f32 = 102.0;
 pub const W4_WINDOW_MS: f32 = 135.0;
 pub const MAX_HIT_WINDOW_MS: f32 = 180.0;
 pub const MISS_WINDOW_MS: f32 = 200.0;
+
+// Gameplay Layout Reference Constants (for 1280x720)
+pub const GAMEPLAY_REF_WIDTH: f32 = 1280.0;
+pub const GAMEPLAY_REF_HEIGHT: f32 = 720.0;
+pub const TARGET_VISUAL_SIZE_REF: f32 = 96.0; // Visual size (height and width assuming square) of target receptor at reference resolution
+pub const TARGET_TOP_MARGIN_REF: f32 = 125.0; // Distance from window top to target's top edge at reference resolution
+pub const TARGET_SPACING_REF: f32 = 0.0;      // Horizontal gap between targets at reference resolution
+pub const FIRST_TARGET_LEFT_MARGIN_REF: f32 = 128.0; // Distance from window left to first target's left edge at reference resolution
+pub const EXPLOSION_SIZE_MULTIPLIER: f32 = 1.5; // Explosion size relative to target size
+
+// Health Meter Reference Constants (for 1280x720)
+pub const HEALTH_METER_LEFT_MARGIN_REF: f32 = 103.0;
+pub const HEALTH_METER_TOP_MARGIN_REF: f32 = 14.0;
+pub const HEALTH_METER_WIDTH_REF: f32 = 210.0;
+pub const HEALTH_METER_HEIGHT_REF: f32 = 33.0;
+pub const HEALTH_METER_BORDER_THICKNESS_REF: f32 = 3.0;
+pub const HEALTH_METER_BORDER_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // White
+pub const HEALTH_METER_FILL_COLOR: [f32; 4] = [193.0/255.0, 0.0/255.0, 111.0/255.0, 1.0]; // c1006f
+pub const HEALTH_METER_EMPTY_COLOR: [f32; 4] = UI_BOX_DARK_COLOR; // Use existing dark box color
 
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5];
@@ -46,18 +65,17 @@ pub const ARROW_TINT_TWELFTH: [f32; 4] = [0.8, 0.5, 1.0, 1.0];
 pub const ARROW_TINT_TWENTYFOURTH: [f32; 4] = [0.7, 0.4, 0.9, 1.0];
 pub const ARROW_TINT_OTHER: [f32; 4] = [0.9, 0.9, 0.9, 1.0];
 pub const EXPLOSION_DURATION: Duration = Duration::from_millis(80);
-pub const EXPLOSION_SIZE: f32 = TARGET_SIZE * 1.5;
 
 // Menu Constants
 pub const LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT: f32 = 0.55;
 pub const MENU_OPTIONS: [&str; 3] = ["GAMEPLAY", "OPTIONS", "EXIT"];
-pub const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0]; 
-pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0]; 
+pub const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0];
+pub const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 
 // --- UI Constants ---
 pub const UI_BAR_COLOR: [f32; 4] = [166.0 / 255.0, 166.0 / 255.0, 166.0 / 255.0, 1.0];
 pub const UI_BAR_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-pub const UI_REFERENCE_HEIGHT: f32 = 768.0;
+pub const UI_REFERENCE_HEIGHT: f32 = 768.0; // General UI reference height, gameplay might use its own
 pub const UI_BAR_REFERENCE_HEIGHT: f32 = 51.0;
 
 // MSDF Shader Parameters
@@ -67,13 +85,13 @@ pub const MSDF_PX_RANGE: f32 = 4.0;
 pub const MAX_DELTA_TIME: f32 = 0.1;
 
 // Select Music Screen Colors & Palette
-pub const MUSIC_WHEEL_BOX_COLOR: [f32;4] = [10.0/255.0, 20.0/255.0, 27.0/255.0, 1.0]; 
-pub const PACK_HEADER_BOX_COLOR: [f32; 4] = [83.0/255.0, 92.0/255.0, 99.0/255.0, 1.0]; 
-pub const SELECTED_PACK_HEADER_BOX_COLOR: [f32; 4] = [95.0/255.0, 104.0/255.0, 110.0/255.0, 1.0]; 
+pub const MUSIC_WHEEL_BOX_COLOR: [f32;4] = [10.0/255.0, 20.0/255.0, 27.0/255.0, 1.0];
+pub const PACK_HEADER_BOX_COLOR: [f32; 4] = [83.0/255.0, 92.0/255.0, 99.0/255.0, 1.0];
+pub const SELECTED_PACK_HEADER_BOX_COLOR: [f32; 4] = [95.0/255.0, 104.0/255.0, 110.0/255.0, 1.0];
 pub const SELECTED_SONG_BOX_COLOR: [f32; 4] = [39.0/255.0, 47.0/255.0, 53.0/255.0, 1.0];
 pub const MUSIC_WHEEL_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 23.0;
 pub const MUSIC_WHEEL_TEXT_VERTICAL_NUDGE_PX_AT_REF_RES: f32 = 2.0;
-pub const SONG_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; 
+pub const SONG_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 pub const MUSIC_WHEEL_SONG_TEXT_LEFT_PADDING_REF: f32 = 118.0;
 pub const MUSIC_WHEEL_NAV_INITIAL_HOLD_DELAY_MS: u64 = 300;
 pub const MUSIC_WHEEL_NAV_REPEAT_SCROLL_INTERVAL_MS: u64 = 40;
@@ -93,7 +111,7 @@ pub const BAR_TEXT_VERTICAL_NUDGE_PX_AT_REF_RES: f32 = 2.0;
 // Artist/BPM Detail Area
 pub const DETAIL_HEADER_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 27.0;
 pub const DETAIL_VALUE_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 27.0;
-pub const DETAIL_HEADER_TEXT_COLOR: [f32; 4] = [128.0/255.0, 128.0/255.0, 128.0/255.0, 1.0]; 
+pub const DETAIL_HEADER_TEXT_COLOR: [f32; 4] = [128.0/255.0, 128.0/255.0, 128.0/255.0, 1.0];
 pub const ARTIST_HEADER_LEFT_PADDING_REF: f32 = 11.0;
 pub const ARTIST_HEADER_TOP_PADDING_REF: f32 = 10.0;
 pub const BPM_HEADER_LEFT_PADDING_REF: f32 = 36.0;

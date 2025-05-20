@@ -1,10 +1,10 @@
 // src/screens/gameplay.rs
-use crate::assets::{AssetManager, TextureId}; // TextureId may not be directly used for explosions here if using DescriptorSetId::from_judgment
+use crate::assets::{AssetManager, TextureId};
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
 use crate::parsing::simfile::{ChartInfo, NoteChar, ProcessedChartData, SongInfo};
 use crate::state::{
-    ActiveExplosion, // CHANGED
+    ActiveExplosion,
     AppState, Arrow, ArrowDirection, GameState, Judgment, TargetInfo,
     VirtualKeyCode, ALL_ARROW_DIRECTIONS,
 };
@@ -19,14 +19,14 @@ use winit::event::{ElementState, KeyEvent};
 use rand::Rng;
 
 
-// --- Placeholder for TimingData (COPIED FROM ABOVE FOR THIS EXAMPLE) ---
+// --- Placeholder for TimingData ---
 #[derive(Debug, Clone, Default)]
 pub struct BeatTimePoint { pub beat: f32, pub time_sec: f32, pub bpm: f32, }
 #[derive(Debug, Clone, Default)]
 pub struct TimingData { pub points: Vec<BeatTimePoint>, pub stops_at_beat: Vec<(f32, f32)>, pub song_offset_sec: f32, }
 impl TimingData {
     pub fn get_time_for_beat(&self, target_beat: f32) -> f32 {
-        if self.points.is_empty() { return self.song_offset_sec + target_beat * 0.5; } // Default 120 BPM
+        if self.points.is_empty() { return self.song_offset_sec + target_beat * 0.5; } 
         let mut current_time_sec = 0.0;
         let mut last_beat = 0.0;
         let mut last_bpm = self.points[0].bpm;
@@ -95,17 +95,34 @@ pub fn initialize_game_state(
     selected_chart_idx: usize,
 ) -> GameState {
     info!( "Initializing game state for song: '{}', chart index: {}", song.title, selected_chart_idx );
-    let center_x = win_w / 2.0;
-    let target_spacing = config::TARGET_SIZE * 1.2;
-    let total_targets_width = (ALL_ARROW_DIRECTIONS.len() as f32 - 1.0) * target_spacing;
-    let start_x_targets = center_x - total_targets_width / 2.0;
+
+    let width_scale = win_w / config::GAMEPLAY_REF_WIDTH;
+    let height_scale = win_h / config::GAMEPLAY_REF_HEIGHT;
+    
+    // These represent the desired *on-screen* dimensions after any rotation.
+    let desired_on_screen_width = config::TARGET_VISUAL_SIZE_REF * width_scale; 
+    let desired_on_screen_height = config::TARGET_VISUAL_SIZE_REF * height_scale;
+
+    // Horizontal dimension for layout: how wide is the "lane" or "cell" for each arrow.
+    // This should be based on the desired on-screen width of an unrotated arrow (like Up/Down).
+    let arrow_lane_width = desired_on_screen_width; 
+    let current_target_spacing = config::TARGET_SPACING_REF * width_scale; 
+
+    let current_target_top_margin = config::TARGET_TOP_MARGIN_REF * height_scale;
+    let current_first_target_left_margin = config::FIRST_TARGET_LEFT_MARGIN_REF * width_scale;
+
+    // Y position is center of the target, based on its desired on-screen height.
+    let target_center_y = current_target_top_margin + desired_on_screen_height / 2.0;
+    
+    // X position of the *center of the first lane*.
+    let first_lane_center_x = current_first_target_left_margin + arrow_lane_width / 2.0;
 
     let targets = ALL_ARROW_DIRECTIONS
         .iter()
         .enumerate()
         .map(|(i, &dir)| TargetInfo {
-            x: start_x_targets + i as f32 * target_spacing,
-            y: config::TARGET_Y_POS,
+            x: first_lane_center_x + i as f32 * (arrow_lane_width + current_target_spacing),
+            y: target_center_y,
             direction: dir,
         })
         .collect();
@@ -133,11 +150,11 @@ pub fn initialize_game_state(
         let mut current_time = song.offset;
         let mut last_b_beat = 0.0;
         let mut last_b_bpm = combined_bpms[0].1;
-        if combined_bpms[0].0 != 0.0 {
+        if combined_bpms[0].0 != 0.0 { 
             temp_timing_data.points.push(BeatTimePoint { beat: 0.0, time_sec: song.offset, bpm: last_b_bpm});
         }
         for (beat, bpm) in &combined_bpms {
-            if *beat < last_b_beat { continue; }
+            if *beat < last_b_beat { continue; } 
             if *beat > last_b_beat { current_time += (*beat - last_b_beat) * (60.0 / last_b_bpm); }
             temp_timing_data.points.push(BeatTimePoint { beat: *beat, time_sec: current_time, bpm: *bpm });
             last_b_beat = *beat; last_b_bpm = *bpm;
@@ -153,7 +170,7 @@ pub fn initialize_game_state(
     combined_stops.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     for (beat, duration_simfile_value) in &combined_stops {
         let bpm_at_stop = temp_timing_data.points.iter().rfind(|p| p.beat <= *beat).map_or(120.0, |p| p.bpm);
-        let duration_sec = duration_simfile_value * (60.0 / bpm_at_stop);
+        let duration_sec = duration_simfile_value * (60.0 / bpm_at_stop); 
         temp_timing_data.stops_at_beat.push((*beat, duration_sec));
     }
 
@@ -162,7 +179,13 @@ pub fn initialize_game_state(
         ProcessedChartData::default()
     });
 
-    let initial_display_beat_offset = (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / temp_timing_data.points[0].bpm);
+    let initial_bpm_at_zero = temp_timing_data.points.iter()
+        .find(|p| p.beat == 0.0)
+        .map_or_else(
+            || temp_timing_data.points.first().map_or(120.0, |p|p.bpm),
+            |p| p.bpm
+        );
+    let initial_display_beat_offset = (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / initial_bpm_at_zero);
 
     GameState {
         targets,
@@ -170,7 +193,7 @@ pub fn initialize_game_state(
         pressed_keys: HashSet::new(),
         current_beat: -initial_display_beat_offset,
         window_size: (win_w, win_h),
-        active_explosions: HashMap::new(), // CHANGED
+        active_explosions: HashMap::new(),
         audio_start_time: Some(audio_start_time),
         song_info: song,
         selected_chart_idx,
@@ -217,8 +240,15 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
     if let Some(start_time) = game_state.audio_start_time {
         let current_raw_time_sec = Instant::now().duration_since(start_time).as_secs_f32();
         let chart_beat = game_state.timing_data.get_beat_for_time(current_raw_time_sec);
-        let initial_bpm_at_zero = game_state.timing_data.points.first().map_or(120.0, |p| p.bpm);
+        
+        let initial_bpm_at_zero = game_state.timing_data.points.iter()
+            .find(|p| p.beat == 0.0)
+            .map_or_else(
+                || game_state.timing_data.points.first().map_or(120.0, |p|p.bpm),
+                |p| p.bpm
+            );
         let initial_display_beat_offset = (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / initial_bpm_at_zero);
+        
         game_state.current_beat = chart_beat - initial_display_beat_offset;
         trace!("Current Raw Time: {:.3}s, Chart Beat: {:.4}, Display Beat: {:.4}", current_raw_time_sec, chart_beat, game_state.current_beat);
     } else {
@@ -227,7 +257,9 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
 
     spawn_arrows_from_chart(game_state);
 
-    let arrow_delta_y = config::ARROW_SPEED * dt;
+    let current_arrow_speed = config::ARROW_SPEED * (game_state.window_size.1 / config::GAMEPLAY_REF_HEIGHT);
+
+    let arrow_delta_y = current_arrow_speed * dt;
     for column_arrows in game_state.arrows.values_mut() {
         for arrow in column_arrows.iter_mut() {
             arrow.y -= arrow_delta_y;
@@ -237,19 +269,12 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
     check_misses(game_state);
 
     let now = Instant::now();
-
     game_state.active_explosions.retain(|_dir, explosion| {
-        let should_keep = now < explosion.end_time;
-        if !should_keep {
-
-        }
-        should_keep
+        now < explosion.end_time
     });
-
 }
 
-// --- Arrow Spawning Logic (spawn_arrows_from_chart) ---
-// ... (This function remains the same as in your provided code) ...
+// --- Arrow Spawning Logic ---
 fn spawn_arrows_from_chart(state: &mut GameState) {
     if state.processed_chart.measures.is_empty() { return; }
     let current_audio_time_sec = if let Some(start_time) = state.audio_start_time {
@@ -291,8 +316,11 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
             continue;
         }
         
-        let distance_to_travel_pixels = config::ARROW_SPEED * time_to_target_on_screen_sec;
-        let spawn_y = config::TARGET_Y_POS + distance_to_travel_pixels;
+        let target_y_pos = state.targets.first().map_or(0.0, |t| t.y);
+        let current_arrow_speed = config::ARROW_SPEED * (state.window_size.1 / config::GAMEPLAY_REF_HEIGHT);
+        let distance_to_travel_pixels = current_arrow_speed * time_to_target_on_screen_sec;
+        let spawn_y = target_y_pos + distance_to_travel_pixels;
+
         let note_line = &current_measure_data[state.current_line_in_measure_idx];
         let mut spawned_on_this_line = false;
         for (col_idx, &note_char) in note_line.iter().enumerate() {
@@ -311,7 +339,6 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
         state.current_line_in_measure_idx += 1;
     }
 }
-
 
 // --- Hit Checking Logic ---
 fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
@@ -332,7 +359,7 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
             let seconds_per_beat_approx = 60.0 / bpm_at_arrow_approx;
 
             let mut best_hit_idx: Option<usize> = None;
-            let mut min_abs_time_diff_ms = config::MAX_HIT_WINDOW_MS + 1.0; // Slightly more than W5 window
+            let mut min_abs_time_diff_ms = config::MAX_HIT_WINDOW_MS + 1.0; 
 
             for (idx, arrow) in column_arrows.iter().enumerate() {
                 let beat_diff = current_display_beat - arrow.target_beat;
@@ -358,13 +385,13 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
                 info!( "HIT! {:?} {:?} ({:.1}ms) -> {:?}", dir, note_char_for_log, time_diff_for_log, judgment );
 
-                let explosion_end_time = Instant::now() + config::EXPLOSION_DURATION; // Calculate end time
+                let explosion_end_time = Instant::now() + config::EXPLOSION_DURATION; 
                 state.active_explosions.insert(dir, ActiveExplosion {
                     judgment,
                     direction: dir,
-                    end_time: explosion_end_time, // Use calculated end time
+                    end_time: explosion_end_time, 
                 });
-                // ADD THIS DEBUG LOG:
+                
                 debug!(
                     "Added ActiveExplosion: dir={:?}, judgment={:?}, end_time will be in {:?}. Map size: {}",
                     dir, judgment, config::EXPLOSION_DURATION, state.active_explosions.len()
@@ -378,9 +405,7 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
     }
 }
 
-
-// --- Miss Checking Logic (check_misses) ---
-// ... (This function remains the same as in your provided code) ...
+// --- Miss Checking Logic ---
 fn check_misses(state: &mut GameState) {
     let current_display_beat = state.current_beat;
     let mut missed_count = 0;
@@ -400,29 +425,96 @@ fn check_misses(state: &mut GameState) {
     if missed_count > 0 { trace!("Removed {} missed arrows.", missed_count); }
 }
 
-
 // --- Drawing Logic ---
 pub fn draw(
     renderer: &Renderer,
     game_state: &GameState,
-    _assets: &AssetManager, // _assets might not be needed directly for explosions if using DescriptorSetId from judgment
+    _assets: &AssetManager, 
     device: &ash::Device,
     cmd_buf: vk::CommandBuffer,
 ) {
-    // --- Draw Targets ---
-    // Targets are drawn first, without any active tinting from hits.
+    let (win_w, win_h) = renderer.window_size();
+    let width_scale = win_w / config::GAMEPLAY_REF_WIDTH;
+    let height_scale = win_h / config::GAMEPLAY_REF_HEIGHT;
+    
+    // These are the *desired final on-screen dimensions* for an unrotated (Up/Down) arrow.
+    let desired_on_screen_width = config::TARGET_VISUAL_SIZE_REF * width_scale;
+    let desired_on_screen_height = config::TARGET_VISUAL_SIZE_REF * height_scale;
+    
+    // Explosions will also use these as their base, scaled by the multiplier.
+    let desired_explosion_on_screen_width = desired_on_screen_width * config::EXPLOSION_SIZE_MULTIPLIER; 
+    let desired_explosion_on_screen_height = desired_on_screen_height * config::EXPLOSION_SIZE_MULTIPLIER;
+
+
+    // --- Draw Health Meter ---
+    let health_meter_width = config::HEALTH_METER_WIDTH_REF * width_scale;
+    let health_meter_height = config::HEALTH_METER_HEIGHT_REF * height_scale;
+    let health_meter_border_thickness = config::HEALTH_METER_BORDER_THICKNESS_REF * width_scale.min(height_scale); 
+
+    let health_meter_outer_left_x = config::HEALTH_METER_LEFT_MARGIN_REF * width_scale;
+    let health_meter_outer_top_y = config::HEALTH_METER_TOP_MARGIN_REF * height_scale;
+
+    renderer.draw_quad(
+        device, cmd_buf, DescriptorSetId::SolidColor,
+        Vector3::new(
+            health_meter_outer_left_x + health_meter_width / 2.0,
+            health_meter_outer_top_y + health_meter_height / 2.0,
+            0.0
+        ),
+        (health_meter_width, health_meter_height),
+        Rad(0.0),
+        config::HEALTH_METER_BORDER_COLOR,
+        [0.0, 0.0], [1.0, 1.0]
+    );
+
+    let inner_width = (health_meter_width - 2.0 * health_meter_border_thickness).max(0.0);
+    let inner_height = (health_meter_height - 2.0 * health_meter_border_thickness).max(0.0);
+    let inner_left_x = health_meter_outer_left_x + health_meter_border_thickness;
+    let inner_top_y = health_meter_outer_top_y + health_meter_border_thickness;
+
+    if inner_width > 0.0 && inner_height > 0.0 {
+        renderer.draw_quad(
+            device, cmd_buf, DescriptorSetId::SolidColor,
+            Vector3::new(
+                inner_left_x + inner_width / 2.0,
+                inner_top_y + inner_height / 2.0,
+                0.0
+            ),
+            (inner_width, inner_height),
+            Rad(0.0),
+            config::HEALTH_METER_EMPTY_COLOR,
+            [0.0, 0.0], [1.0, 1.0]
+        );
+
+        let current_health_percentage = 0.5; 
+        let fill_width = (inner_width * current_health_percentage).max(0.0);
+        if fill_width > 0.0 {
+            renderer.draw_quad(
+                device, cmd_buf, DescriptorSetId::SolidColor,
+                Vector3::new(
+                    inner_left_x + fill_width / 2.0, 
+                    inner_top_y + inner_height / 2.0,
+                    0.0
+                ),
+                (fill_width, inner_height),
+                Rad(0.0),
+                config::HEALTH_METER_FILL_COLOR,
+                [0.0, 0.0], [1.0, 1.0]
+            );
+        }
+    }
+
+    // --- Draw Targets & Arrows ---
     let frame_index = ((game_state.current_beat * 2.0).floor().abs() as usize) % 4;
     let uv_width = 1.0 / 4.0;
     let uv_x_start = frame_index as f32 * uv_width;
-    let base_uv_offset_arrows = [uv_x_start, 0.0]; // For animated arrows
-    let base_uv_scale_arrows = [uv_width, 1.0];   // For animated arrows
+    let base_uv_offset_arrows = [uv_x_start, 0.0]; 
+    let base_uv_scale_arrows = [uv_width, 1.0];   
     
-    // Targets might use a static frame or the same animation. Let's assume static part of arrows.png for now.
-    // If targets are also animated, use base_uv_offset_arrows. Otherwise, use [0.0, 0.0] and [0.25, 1.0] for first frame.
-    let target_uv_offset = [0.0, 0.0]; // Assuming first frame for static target receptors
+    let target_uv_offset = [0.0, 0.0]; 
     let target_uv_scale = [0.25, 1.0];
 
-
+    // Draw Targets
     for target in &game_state.targets {
         let rotation_angle = match target.direction {
             ArrowDirection::Left => Rad(PI / 2.0),
@@ -430,22 +522,39 @@ pub fn draw(
             ArrowDirection::Up => Rad(PI),
             ArrowDirection::Right => Rad(-PI / 2.0),
         };
-        renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay, // Using Gameplay (arrow) texture for targets
+
+        // Determine pre-rotation scale for draw_quad
+        let quad_size_for_draw_quad = match target.direction {
+            ArrowDirection::Up | ArrowDirection::Down => {
+                (desired_on_screen_width, desired_on_screen_height)
+            }
+            ArrowDirection::Left | ArrowDirection::Right => {
+                // Swap: local width becomes screen height, local height becomes screen width
+                (desired_on_screen_height, desired_on_screen_width) 
+            }
+        };
+
+        renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay, 
             Vector3::new(target.x, target.y, 0.0),
-            (config::TARGET_SIZE, config::TARGET_SIZE), rotation_angle, config::TARGET_TINT, // Default tint
-            target_uv_offset, // UVs for target receptor (e.g., first frame of arrow sheet)
+            quad_size_for_draw_quad, 
+            rotation_angle, config::TARGET_TINT, 
+            target_uv_offset, 
             target_uv_scale,
         );
     }
 
-    // --- Draw Arrows --- (Same as before)
+    // Draw Arrows 
     for (_direction, column_arrows) in &game_state.arrows {
         for arrow in column_arrows {
-            if arrow.y < (0.0 - config::ARROW_SIZE) || arrow.y > (game_state.window_size.1 + config::ARROW_SIZE) {
+            let culling_margin_w = desired_on_screen_width; // Use max potential screen extent for culling
+            let culling_margin_h = desired_on_screen_height;
+            if arrow.y < (0.0 - culling_margin_h) || arrow.y > (win_h + culling_margin_h) { // Culling based on Y and screen height
                 continue;
             }
+            
             let measure_idx_for_arrow = (arrow.target_beat / 4.0).floor() as usize;
             let mut arrow_tint = config::ARROW_TINT_OTHER;
+            // ... (tint logic remains the same) ...
             if measure_idx_for_arrow < game_state.processed_chart.measures.len() {
                 let measure_data = &game_state.processed_chart.measures[measure_idx_for_arrow];
                 let num_lines_in_measure = measure_data.len();
@@ -464,29 +573,37 @@ pub fn draw(
                     }
                 }
             }
+
             let rotation_angle = match arrow.direction {
                 ArrowDirection::Left => Rad(PI / 2.0), ArrowDirection::Down => Rad(0.0),
                 ArrowDirection::Up => Rad(PI), ArrowDirection::Right => Rad(-PI / 2.0),
             };
+
+            // Determine pre-rotation scale for draw_quad for this arrow
+            let quad_size_for_draw_quad = match arrow.direction {
+                ArrowDirection::Up | ArrowDirection::Down => {
+                    (desired_on_screen_width, desired_on_screen_height)
+                }
+                ArrowDirection::Left | ArrowDirection::Right => {
+                    (desired_on_screen_height, desired_on_screen_width)
+                }
+            };
+
             renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay,
                 Vector3::new(arrow.x, arrow.y, 0.0),
-                (config::ARROW_SIZE, config::ARROW_SIZE), rotation_angle, arrow_tint,
-                base_uv_offset_arrows, base_uv_scale_arrows, // Use animated UVs for flying arrows
+                quad_size_for_draw_quad, 
+                rotation_angle, arrow_tint,
+                base_uv_offset_arrows, base_uv_scale_arrows, 
             );
         }
     }
 
     // --- Draw Active Explosions ---
     let now = Instant::now();
-
     for (direction, explosion) in &game_state.active_explosions {
-
         if now < explosion.end_time {
             if let Some(explosion_set_id) = DescriptorSetId::from_judgment(explosion.judgment) {
-
-
                 if let Some(target_info) = game_state.targets.iter().find(|t| t.direction == *direction) {
-
                     let explosion_rotation_angle = match target_info.direction {
                         ArrowDirection::Left => Rad(PI / 2.0),
                         ArrowDirection::Down => Rad(0.0),
@@ -494,26 +611,33 @@ pub fn draw(
                         ArrowDirection::Right => Rad(-PI / 2.0),
                     };
 
+                    // Determine pre-rotation scale for draw_quad for this explosion
+                    let quad_size_for_draw_quad = match target_info.direction {
+                        ArrowDirection::Up | ArrowDirection::Down => {
+                            (desired_explosion_on_screen_width, desired_explosion_on_screen_height)
+                        }
+                        ArrowDirection::Left | ArrowDirection::Right => {
+                            (desired_explosion_on_screen_height, desired_explosion_on_screen_width)
+                        }
+                    };
+
                     renderer.draw_quad(
                         device,
                         cmd_buf,
                         explosion_set_id,
                         Vector3::new(target_info.x, target_info.y, 0.0),
-                        (config::EXPLOSION_SIZE, config::EXPLOSION_SIZE), // Use new size
+                        quad_size_for_draw_quad, 
                         explosion_rotation_angle,
-                        [1.0, 1.0, 1.0, 1.0],
-                        [0.0, 0.0],
-                        [1.0, 1.0],
+                        [1.0, 1.0, 1.0, 1.0], // Tint
+                        [0.0, 0.0], // UV offset
+                        [1.0, 1.0], // UV scale
                     );
                 } else {
-                    // ADD THIS DEBUG LOG:
                     warn!(
                         "Draw: Could not find target_info for explosion direction {:?}",
                         *direction
                     );
                 }
-            } else {
-
             }
         }
     }
