@@ -1,5 +1,5 @@
 // src/screens/gameplay.rs
-use crate::assets::{AssetManager, TextureId};
+use crate::assets::{AssetManager, FontId, TextureId}; // Added FontId
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
 use crate::parsing::simfile::{ChartInfo, NoteChar, ProcessedChartData, SongInfo};
@@ -99,22 +99,16 @@ pub fn initialize_game_state(
     let width_scale = win_w / config::GAMEPLAY_REF_WIDTH;
     let height_scale = win_h / config::GAMEPLAY_REF_HEIGHT;
     
-    // These represent the desired *on-screen* dimensions after any rotation.
-    let desired_on_screen_width = config::TARGET_VISUAL_SIZE_REF * width_scale; 
-    let desired_on_screen_height = config::TARGET_VISUAL_SIZE_REF * height_scale;
+    let desired_on_screen_width_for_layout = config::TARGET_VISUAL_SIZE_REF * width_scale; 
+    let desired_on_screen_height_for_layout = config::TARGET_VISUAL_SIZE_REF * height_scale;
 
-    // Horizontal dimension for layout: how wide is the "lane" or "cell" for each arrow.
-    // This should be based on the desired on-screen width of an unrotated arrow (like Up/Down).
-    let arrow_lane_width = desired_on_screen_width; 
+    let arrow_lane_width = desired_on_screen_width_for_layout; 
     let current_target_spacing = config::TARGET_SPACING_REF * width_scale; 
 
     let current_target_top_margin = config::TARGET_TOP_MARGIN_REF * height_scale;
     let current_first_target_left_margin = config::FIRST_TARGET_LEFT_MARGIN_REF * width_scale;
 
-    // Y position is center of the target, based on its desired on-screen height.
-    let target_center_y = current_target_top_margin + desired_on_screen_height / 2.0;
-    
-    // X position of the *center of the first lane*.
+    let target_center_y = current_target_top_margin + desired_on_screen_height_for_layout / 2.0;
     let first_lane_center_x = current_first_target_left_margin + arrow_lane_width / 2.0;
 
     let targets = ALL_ARROW_DIRECTIONS
@@ -429,7 +423,7 @@ fn check_misses(state: &mut GameState) {
 pub fn draw(
     renderer: &Renderer,
     game_state: &GameState,
-    _assets: &AssetManager, 
+    assets: &AssetManager, // Changed to use assets
     device: &ash::Device,
     cmd_buf: vk::CommandBuffer,
 ) {
@@ -437,14 +431,11 @@ pub fn draw(
     let width_scale = win_w / config::GAMEPLAY_REF_WIDTH;
     let height_scale = win_h / config::GAMEPLAY_REF_HEIGHT;
     
-    // These are the *desired final on-screen dimensions* for an unrotated (Up/Down) arrow.
     let desired_on_screen_width = config::TARGET_VISUAL_SIZE_REF * width_scale;
     let desired_on_screen_height = config::TARGET_VISUAL_SIZE_REF * height_scale;
     
-    // Explosions will also use these as their base, scaled by the multiplier.
     let desired_explosion_on_screen_width = desired_on_screen_width * config::EXPLOSION_SIZE_MULTIPLIER; 
     let desired_explosion_on_screen_height = desired_on_screen_height * config::EXPLOSION_SIZE_MULTIPLIER;
-
 
     // --- Draw Health Meter ---
     let health_meter_width = config::HEALTH_METER_WIDTH_REF * width_scale;
@@ -467,42 +458,135 @@ pub fn draw(
         [0.0, 0.0], [1.0, 1.0]
     );
 
-    let inner_width = (health_meter_width - 2.0 * health_meter_border_thickness).max(0.0);
-    let inner_height = (health_meter_height - 2.0 * health_meter_border_thickness).max(0.0);
-    let inner_left_x = health_meter_outer_left_x + health_meter_border_thickness;
-    let inner_top_y = health_meter_outer_top_y + health_meter_border_thickness;
+    let hm_inner_width = (health_meter_width - 2.0 * health_meter_border_thickness).max(0.0);
+    let hm_inner_height = (health_meter_height - 2.0 * health_meter_border_thickness).max(0.0);
+    let hm_inner_left_x = health_meter_outer_left_x + health_meter_border_thickness;
+    let hm_inner_top_y = health_meter_outer_top_y + health_meter_border_thickness;
 
-    if inner_width > 0.0 && inner_height > 0.0 {
+    if hm_inner_width > 0.0 && hm_inner_height > 0.0 {
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::SolidColor,
             Vector3::new(
-                inner_left_x + inner_width / 2.0,
-                inner_top_y + inner_height / 2.0,
+                hm_inner_left_x + hm_inner_width / 2.0,
+                hm_inner_top_y + hm_inner_height / 2.0,
                 0.0
             ),
-            (inner_width, inner_height),
+            (hm_inner_width, hm_inner_height),
             Rad(0.0),
             config::HEALTH_METER_EMPTY_COLOR,
             [0.0, 0.0], [1.0, 1.0]
         );
 
         let current_health_percentage = 0.5; 
-        let fill_width = (inner_width * current_health_percentage).max(0.0);
-        if fill_width > 0.0 {
+        let hm_fill_width = (hm_inner_width * current_health_percentage).max(0.0);
+        if hm_fill_width > 0.0 {
             renderer.draw_quad(
                 device, cmd_buf, DescriptorSetId::SolidColor,
                 Vector3::new(
-                    inner_left_x + fill_width / 2.0, 
-                    inner_top_y + inner_height / 2.0,
+                    hm_inner_left_x + hm_fill_width / 2.0, 
+                    hm_inner_top_y + hm_inner_height / 2.0,
                     0.0
                 ),
-                (fill_width, inner_height),
+                (hm_fill_width, hm_inner_height),
                 Rad(0.0),
                 config::HEALTH_METER_FILL_COLOR,
                 [0.0, 0.0], [1.0, 1.0]
             );
         }
     }
+
+    // --- Draw Song Duration Meter ---
+    let duration_meter_width = config::DURATION_METER_WIDTH_REF * width_scale;
+    let duration_meter_height = config::DURATION_METER_HEIGHT_REF * height_scale;
+    let duration_meter_border_thickness = config::DURATION_METER_BORDER_THICKNESS_REF * width_scale.min(height_scale);
+
+    let duration_meter_outer_left_x = config::DURATION_METER_LEFT_MARGIN_REF * width_scale;
+    let duration_meter_outer_top_y = config::DURATION_METER_TOP_MARGIN_REF * height_scale;
+
+    renderer.draw_quad(
+        device, cmd_buf, DescriptorSetId::SolidColor,
+        Vector3::new(
+            duration_meter_outer_left_x + duration_meter_width / 2.0,
+            duration_meter_outer_top_y + duration_meter_height / 2.0,
+            0.0
+        ),
+        (duration_meter_width, duration_meter_height),
+        Rad(0.0),
+        config::DURATION_METER_BORDER_COLOR,
+        [0.0, 0.0], [1.0, 1.0]
+    );
+
+    let dm_inner_width = (duration_meter_width - 2.0 * duration_meter_border_thickness).max(0.0);
+    let dm_inner_height = (duration_meter_height - 2.0 * duration_meter_border_thickness).max(0.0);
+    let dm_inner_left_x = duration_meter_outer_left_x + duration_meter_border_thickness;
+    let dm_inner_top_y = duration_meter_outer_top_y + duration_meter_border_thickness;
+
+    if dm_inner_width > 0.0 && dm_inner_height > 0.0 {
+        renderer.draw_quad(
+            device, cmd_buf, DescriptorSetId::SolidColor,
+            Vector3::new(
+                dm_inner_left_x + dm_inner_width / 2.0,
+                dm_inner_top_y + dm_inner_height / 2.0,
+                0.0
+            ),
+            (dm_inner_width, dm_inner_height),
+            Rad(0.0),
+            config::DURATION_METER_EMPTY_COLOR,
+            [0.0, 0.0], [1.0, 1.0]
+        );
+        
+        let current_song_progress_percentage = 0.5; 
+        let dm_fill_width = (dm_inner_width * current_song_progress_percentage).max(0.0);
+        if dm_fill_width > 0.0 {
+            renderer.draw_quad(
+                device, cmd_buf, DescriptorSetId::SolidColor,
+                Vector3::new(
+                    dm_inner_left_x + dm_fill_width / 2.0, 
+                    dm_inner_top_y + dm_inner_height / 2.0,
+                    0.0
+                ),
+                (dm_fill_width, dm_inner_height),
+                Rad(0.0),
+                config::DURATION_METER_FILL_COLOR,
+                [0.0, 0.0], [1.0, 1.0]
+            );
+        }
+
+        // Draw Song Title in Duration Meter
+        if let Some(font) = assets.get_font(FontId::Miso) {
+            let song_title = &game_state.song_info.title;
+            
+            // Target a visual height for the text within the bar, e.g., 60% of inner height
+            let target_text_visual_height = dm_inner_height * 0.80;
+            let font_typographic_height_norm = (font.metrics.ascender - font.metrics.descender).max(1e-5);
+            let text_scale = target_text_visual_height / font_typographic_height_norm;
+
+            let text_width_pixels = font.measure_text_normalized(song_title) * text_scale;
+            
+            let text_x = dm_inner_left_x + (dm_inner_width - text_width_pixels) / 2.0;
+            
+            // Center baseline vertically
+            // (ascender + descender) / 2 is the midpoint of the typographic box relative to baseline
+            let mut text_baseline_y = (dm_inner_top_y + dm_inner_height / 2.0) - (font.metrics.ascender + font.metrics.descender) / 2.0 * text_scale;
+
+            const TEXT_VERTICAL_NUDGE_REF_PX: f32 = 13.0; // e.g., nudge down by 2 pixels at reference height
+            let current_text_vertical_nudge = TEXT_VERTICAL_NUDGE_REF_PX * height_scale;
+            text_baseline_y += current_text_vertical_nudge;
+
+            renderer.draw_text(
+                device, 
+                cmd_buf, 
+                font, 
+                song_title, 
+                text_x.max(dm_inner_left_x), // Clamp to prevent drawing outside if title too long
+                text_baseline_y, 
+                config::UI_BAR_TEXT_COLOR, 
+                text_scale, 
+                None
+            );
+        }
+    }
+
 
     // --- Draw Targets & Arrows ---
     let frame_index = ((game_state.current_beat * 2.0).floor().abs() as usize) % 4;
@@ -514,7 +598,6 @@ pub fn draw(
     let target_uv_offset = [0.0, 0.0]; 
     let target_uv_scale = [0.25, 1.0];
 
-    // Draw Targets
     for target in &game_state.targets {
         let rotation_angle = match target.direction {
             ArrowDirection::Left => Rad(PI / 2.0),
@@ -522,18 +605,10 @@ pub fn draw(
             ArrowDirection::Up => Rad(PI),
             ArrowDirection::Right => Rad(-PI / 2.0),
         };
-
-        // Determine pre-rotation scale for draw_quad
         let quad_size_for_draw_quad = match target.direction {
-            ArrowDirection::Up | ArrowDirection::Down => {
-                (desired_on_screen_width, desired_on_screen_height)
-            }
-            ArrowDirection::Left | ArrowDirection::Right => {
-                // Swap: local width becomes screen height, local height becomes screen width
-                (desired_on_screen_height, desired_on_screen_width) 
-            }
+            ArrowDirection::Up | ArrowDirection::Down => (desired_on_screen_width, desired_on_screen_height),
+            ArrowDirection::Left | ArrowDirection::Right => (desired_on_screen_height, desired_on_screen_width), 
         };
-
         renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay, 
             Vector3::new(target.x, target.y, 0.0),
             quad_size_for_draw_quad, 
@@ -543,18 +618,15 @@ pub fn draw(
         );
     }
 
-    // Draw Arrows 
     for (_direction, column_arrows) in &game_state.arrows {
         for arrow in column_arrows {
-            let culling_margin_w = desired_on_screen_width; // Use max potential screen extent for culling
+            let culling_margin_w = desired_on_screen_width; 
             let culling_margin_h = desired_on_screen_height;
-            if arrow.y < (0.0 - culling_margin_h) || arrow.y > (win_h + culling_margin_h) { // Culling based on Y and screen height
+            if arrow.y < (0.0 - culling_margin_h) || arrow.y > (win_h + culling_margin_h) { 
                 continue;
             }
-            
             let measure_idx_for_arrow = (arrow.target_beat / 4.0).floor() as usize;
             let mut arrow_tint = config::ARROW_TINT_OTHER;
-            // ... (tint logic remains the same) ...
             if measure_idx_for_arrow < game_state.processed_chart.measures.len() {
                 let measure_data = &game_state.processed_chart.measures[measure_idx_for_arrow];
                 let num_lines_in_measure = measure_data.len();
@@ -573,22 +645,14 @@ pub fn draw(
                     }
                 }
             }
-
             let rotation_angle = match arrow.direction {
                 ArrowDirection::Left => Rad(PI / 2.0), ArrowDirection::Down => Rad(0.0),
                 ArrowDirection::Up => Rad(PI), ArrowDirection::Right => Rad(-PI / 2.0),
             };
-
-            // Determine pre-rotation scale for draw_quad for this arrow
             let quad_size_for_draw_quad = match arrow.direction {
-                ArrowDirection::Up | ArrowDirection::Down => {
-                    (desired_on_screen_width, desired_on_screen_height)
-                }
-                ArrowDirection::Left | ArrowDirection::Right => {
-                    (desired_on_screen_height, desired_on_screen_width)
-                }
+                ArrowDirection::Up | ArrowDirection::Down => (desired_on_screen_width, desired_on_screen_height),
+                ArrowDirection::Left | ArrowDirection::Right => (desired_on_screen_height, desired_on_screen_width),
             };
-
             renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay,
                 Vector3::new(arrow.x, arrow.y, 0.0),
                 quad_size_for_draw_quad, 
@@ -610,17 +674,10 @@ pub fn draw(
                         ArrowDirection::Up => Rad(PI),
                         ArrowDirection::Right => Rad(-PI / 2.0),
                     };
-
-                    // Determine pre-rotation scale for draw_quad for this explosion
                     let quad_size_for_draw_quad = match target_info.direction {
-                        ArrowDirection::Up | ArrowDirection::Down => {
-                            (desired_explosion_on_screen_width, desired_explosion_on_screen_height)
-                        }
-                        ArrowDirection::Left | ArrowDirection::Right => {
-                            (desired_explosion_on_screen_height, desired_explosion_on_screen_width)
-                        }
+                        ArrowDirection::Up | ArrowDirection::Down => (desired_explosion_on_screen_width, desired_explosion_on_screen_height),
+                        ArrowDirection::Left | ArrowDirection::Right => (desired_explosion_on_screen_height, desired_explosion_on_screen_width),
                     };
-
                     renderer.draw_quad(
                         device,
                         cmd_buf,
@@ -628,9 +685,9 @@ pub fn draw(
                         Vector3::new(target_info.x, target_info.y, 0.0),
                         quad_size_for_draw_quad, 
                         explosion_rotation_angle,
-                        [1.0, 1.0, 1.0, 1.0], // Tint
-                        [0.0, 0.0], // UV offset
-                        [1.0, 1.0], // UV scale
+                        [1.0, 1.0, 1.0, 1.0], 
+                        [0.0, 0.0], 
+                        [1.0, 1.0], 
                     );
                 } else {
                     warn!(

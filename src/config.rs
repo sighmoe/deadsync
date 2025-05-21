@@ -56,6 +56,16 @@ pub const HEALTH_METER_BORDER_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // White
 pub const HEALTH_METER_FILL_COLOR: [f32; 4] = [193.0/255.0, 0.0/255.0, 111.0/255.0, 1.0]; // c1006f
 pub const HEALTH_METER_EMPTY_COLOR: [f32; 4] = UI_BOX_DARK_COLOR; // Use existing dark box color
 
+// Song Duration Meter Reference Constants (for 1280x720)
+pub const DURATION_METER_LEFT_MARGIN_REF: f32 = 327.0;
+pub const DURATION_METER_TOP_MARGIN_REF: f32 = HEALTH_METER_TOP_MARGIN_REF; // Same top margin as health bar
+pub const DURATION_METER_WIDTH_REF: f32 = 626.0;
+pub const DURATION_METER_HEIGHT_REF: f32 = HEALTH_METER_HEIGHT_REF; // Same height as health bar
+pub const DURATION_METER_BORDER_THICKNESS_REF: f32 = HEALTH_METER_BORDER_THICKNESS_REF; // Same border
+pub const DURATION_METER_BORDER_COLOR: [f32; 4] = HEALTH_METER_BORDER_COLOR; // Same border color
+pub const DURATION_METER_FILL_COLOR: [f32; 4] = [0.0/255.0, 126.0/255.0, 204.0/255.0, 1.0]; // A distinct blue for now: #007ECC
+pub const DURATION_METER_EMPTY_COLOR: [f32; 4] = HEALTH_METER_EMPTY_COLOR; // Same empty color
+
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5];
 pub const ARROW_TINT_QUARTER: [f32; 4] = [1.0, 0.6, 0.6, 1.0];
