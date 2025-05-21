@@ -27,9 +27,17 @@ pub enum TextureId {
     ExplosionW5, // Way Off / Boo
 }
 
-// FontId, SoundId (keep as is)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum FontId { Wendy, Miso, Cjk }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)] pub enum SoundId { MenuChange, MenuStart }
+// FontId
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FontId { Wendy, Miso, Cjk }
+
+// SoundId
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SoundId {
+    MenuChange,
+    MenuStart,
+    MenuExpandCollapse, // Added
+}
 
 
 pub struct AssetManager {
@@ -157,6 +165,7 @@ impl AssetManager {
         info!("Loading sounds...");
         audio_manager.load_sfx(SoundId::MenuChange, Path::new(config::SFX_CHANGE_PATH))?;
         audio_manager.load_sfx(SoundId::MenuStart, Path::new(config::SFX_START_PATH))?;
+        audio_manager.load_sfx(SoundId::MenuExpandCollapse, Path::new(config::SFX_EXPAND_PATH))?;
         info!("Sounds loaded.");
 
         info!("All assets loaded successfully.");

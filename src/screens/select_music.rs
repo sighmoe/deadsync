@@ -98,11 +98,11 @@ pub fn handle_input(
                                             return (Some(AppState::Gameplay), selection_changed_this_frame);
                                         }
                                         MusicWheelEntry::PackHeader { name: pack_name_str, .. } => { // Use .. to ignore other fields like banner_path here
-                                            audio_manager.play_sfx(SoundId::MenuChange);
+                                            audio_manager.play_sfx(SoundId::MenuExpandCollapse); // Play expand/collapse sound
                                             if state.expanded_pack_name.as_ref() == Some(&pack_name_str) {
-                                                state.expanded_pack_name = None;
+                                                state.expanded_pack_name = None; // Collapse
                                             } else {
-                                                state.expanded_pack_name = Some(pack_name_str.clone());
+                                                state.expanded_pack_name = Some(pack_name_str.clone()); // Expand
                                             }
                                             selection_changed_this_frame = true; // This will trigger a rebuild
                                             state.selection_animation_timer = 0.0;
