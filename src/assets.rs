@@ -35,8 +35,8 @@ pub enum TextureId {
 pub struct AssetManager {
     textures: HashMap<TextureId, TextureResource>,
     fonts: HashMap<FontId, Font>,
-    current_banner: Option<TextureResource>, 
-    current_banner_is_fallback: bool, 
+    current_banner: Option<TextureResource>,
+    current_banner_is_fallback: bool,
     current_banner_path_key: Option<PathBuf>, // To avoid reloading the same banner
 }
 
@@ -46,7 +46,7 @@ impl AssetManager {
             textures: HashMap::new(),
             fonts: HashMap::new(),
             current_banner: None,
-            current_banner_is_fallback: true, 
+            current_banner_is_fallback: true,
             current_banner_path_key: None,
         }
     }
@@ -80,10 +80,10 @@ impl AssetManager {
         if let Some(fallback_res) = self.textures.get(&TextureId::FallbackBanner) {
              renderer.update_texture_descriptor(
                  &base.device,
-                 DescriptorSetId::DynamicBanner, 
+                 DescriptorSetId::DynamicBanner,
                  fallback_res,
              );
-             self.current_banner_is_fallback = true; 
+             self.current_banner_is_fallback = true;
              info!("Initialized DynamicBanner descriptor set with Fallback Banner.");
         } else {
             error!("Fallback banner failed to load, DynamicBanner descriptor not initialized!");
@@ -189,7 +189,7 @@ impl AssetManager {
             trace!("Song banner for {:?} already loaded.", new_banner_path_key.as_ref().unwrap());
             return;
         }
-        
+
         self.destroy_current_dynamic_banner(&base.device); // Destroy old banner, reset state
 
         let mut loaded_successfully = false;
@@ -222,7 +222,7 @@ impl AssetManager {
                  renderer.update_texture_descriptor(
                      &base.device,
                      DescriptorSetId::DynamicBanner,
-                     fallback_res, 
+                     fallback_res,
                  );
                  self.current_banner_is_fallback = true; // Explicitly mark as fallback
                  self.current_banner_path_key = None; // No specific path for fallback
@@ -286,7 +286,7 @@ impl AssetManager {
             }
         }
     }
-    
+
     // Call this when leaving SelectMusic state to ensure fallback is active
     pub fn clear_current_banner(&mut self, device: &Device) {
         self.destroy_current_dynamic_banner(device);
@@ -303,6 +303,10 @@ impl AssetManager {
 
     pub fn get_font(&self, id: FontId) -> Option<&Font> {
         self.fonts.get(&id)
+    }
+
+    pub fn get_current_banner_path(&self) -> Option<PathBuf> {
+        self.current_banner_path_key.clone()
     }
 
     pub fn destroy(&mut self, device: &Device) {

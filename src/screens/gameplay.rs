@@ -25,7 +25,7 @@ pub struct BeatTimePoint { pub beat: f32, pub time_sec: f32, pub bpm: f32, }
 pub struct TimingData { pub points: Vec<BeatTimePoint>, pub stops_at_beat: Vec<(f32, f32)>, pub song_offset_sec: f32, }
 impl TimingData {
     pub fn get_time_for_beat(&self, target_beat: f32) -> f32 {
-        if self.points.is_empty() { return self.song_offset_sec + target_beat * 0.5; } 
+        if self.points.is_empty() { return self.song_offset_sec + target_beat * 0.5; }
         let mut current_time_sec = 0.0;
         let mut last_beat = 0.0;
         let mut last_bpm = self.points[0].bpm;
@@ -97,12 +97,12 @@ pub fn initialize_game_state(
 
     let width_scale = win_w / config::GAMEPLAY_REF_WIDTH;
     let height_scale = win_h / config::GAMEPLAY_REF_HEIGHT;
-    
-    let desired_on_screen_width_for_layout = config::TARGET_VISUAL_SIZE_REF * width_scale; 
+
+    let desired_on_screen_width_for_layout = config::TARGET_VISUAL_SIZE_REF * width_scale;
     let desired_on_screen_height_for_layout = config::TARGET_VISUAL_SIZE_REF * height_scale;
 
-    let arrow_lane_width = desired_on_screen_width_for_layout; 
-    let current_target_spacing = config::TARGET_SPACING_REF * width_scale; 
+    let arrow_lane_width = desired_on_screen_width_for_layout;
+    let current_target_spacing = config::TARGET_SPACING_REF * width_scale;
 
     let current_target_top_margin = config::TARGET_TOP_MARGIN_REF * height_scale;
     let current_first_target_left_margin = config::FIRST_TARGET_LEFT_MARGIN_REF * width_scale;
@@ -143,17 +143,17 @@ pub fn initialize_game_state(
         let mut current_time = song.offset;
         let mut last_b_beat = 0.0;
         let mut last_b_bpm = combined_bpms[0].1;
-        if combined_bpms[0].0 != 0.0 { 
+        if combined_bpms[0].0 != 0.0 {
             temp_timing_data.points.push(BeatTimePoint { beat: 0.0, time_sec: song.offset, bpm: last_b_bpm});
         }
         for (beat, bpm) in &combined_bpms {
-            if *beat < last_b_beat { continue; } 
+            if *beat < last_b_beat { continue; }
             if *beat > last_b_beat { current_time += (*beat - last_b_beat) * (60.0 / last_b_bpm); }
             temp_timing_data.points.push(BeatTimePoint { beat: *beat, time_sec: current_time, bpm: *bpm });
             last_b_beat = *beat; last_b_bpm = *bpm;
         }
     }
-    
+
     let mut combined_stops = song.stops_header.clone();
      if let Some(chart_stops_str) = &chart_info.stops_chart {
          if let Ok(chart_stops_vec) = crate::parsing::simfile::parse_stops(chart_stops_str) {
@@ -163,7 +163,7 @@ pub fn initialize_game_state(
     combined_stops.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     for (beat, duration_simfile_value) in &combined_stops {
         let bpm_at_stop = temp_timing_data.points.iter().rfind(|p| p.beat <= *beat).map_or(120.0, |p| p.bpm);
-        let duration_sec = duration_simfile_value * (60.0 / bpm_at_stop); 
+        let duration_sec = duration_simfile_value * (60.0 / bpm_at_stop);
         temp_timing_data.stops_at_beat.push((*beat, duration_sec));
     }
 
@@ -196,8 +196,8 @@ pub fn initialize_game_state(
         targets,
         arrows: arrows_map,
         pressed_keys: HashSet::new(),
-        current_beat: initial_actual_chart_beat - initial_display_beat_offset, 
-        current_chart_beat_actual: initial_actual_chart_beat, 
+        current_beat: initial_actual_chart_beat - initial_display_beat_offset,
+        current_chart_beat_actual: initial_actual_chart_beat,
         window_size: (win_w, win_h),
         active_explosions: HashMap::new(),
         audio_start_time: Some(audio_start_time),
@@ -207,7 +207,7 @@ pub fn initialize_game_state(
         processed_chart: Arc::new(processed_chart_data),
         current_measure_idx: 0,
         current_line_in_measure_idx: 0,
-        current_processed_beat: -1.0, 
+        current_processed_beat: -1.0,
         judgment_counts,
     }
 }
@@ -247,7 +247,7 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
     if let Some(start_time) = game_state.audio_start_time {
         let current_raw_time_sec = Instant::now().duration_since(start_time).as_secs_f32();
         game_state.current_chart_beat_actual = game_state.timing_data.get_beat_for_time(current_raw_time_sec);
-        
+
         let initial_bpm_at_zero = game_state.timing_data.points.iter()
             .find(|p| p.beat == 0.0)
             .map_or_else(
@@ -259,7 +259,7 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
         } else {
             0.0 // Avoid division by zero
         };
-        
+
         game_state.current_beat = game_state.current_chart_beat_actual - initial_display_beat_offset; // This is the display beat
         trace!("Current Raw Time: {:.3}s, Actual Chart Beat: {:.4}, Display Beat: {:.4}", current_raw_time_sec, game_state.current_chart_beat_actual, game_state.current_beat);
     } else {
@@ -313,25 +313,25 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
             state.current_line_in_measure_idx += 1; continue;
         }
         if target_beat_for_line > lookahead_chart_beat_limit { break; }
-        
+
         let time_of_line_sec_audio_relative = state.timing_data.get_time_for_beat(target_beat_for_line);
         let current_audio_time_sec_audio_relative = if let Some(start_time) = state.audio_start_time {
             Instant::now().duration_since(start_time).as_secs_f32()
-        } else { return; }; 
+        } else { return; };
 
         let time_to_target_on_screen_sec = time_of_line_sec_audio_relative - current_audio_time_sec_audio_relative;
 
 
-        if time_to_target_on_screen_sec < -0.05 { 
+        if time_to_target_on_screen_sec < -0.05 {
             trace!("Missed spawn window for line at chart_beat {:.2} (current audio time implies chart_beat {:.2})", target_beat_for_line, current_audio_time_chart_beat);
             state.current_processed_beat = target_beat_for_line;
             state.current_line_in_measure_idx += 1;
             continue;
         }
-        
+
         let target_y_pos = state.targets.first().map_or(0.0, |t| t.y);
         let current_arrow_speed = config::ARROW_SPEED * (state.window_size.1 / config::GAMEPLAY_REF_HEIGHT);
-        let distance_to_travel_pixels = current_arrow_speed * time_to_target_on_screen_sec.max(0.0); 
+        let distance_to_travel_pixels = current_arrow_speed * time_to_target_on_screen_sec.max(0.0);
         let spawn_y = target_y_pos + distance_to_travel_pixels;
 
         let note_line = &current_measure_data[state.current_line_in_measure_idx];
@@ -365,7 +365,7 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
     if let Some(dir) = direction {
         if let Some(column_arrows) = state.arrows.get_mut(&dir) {
-            let current_display_beat = state.current_beat; 
+            let current_display_beat = state.current_beat;
             let bpm_at_arrow_approx = state.timing_data.points.iter()
                 .rfind(|p| p.beat <= current_display_beat)
                 .map_or(120.0, |p| p.bpm);
@@ -373,7 +373,7 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
 
             let mut best_hit_idx: Option<usize> = None;
-            let mut min_abs_time_diff_ms = config::MAX_HIT_WINDOW_MS + 1.0; 
+            let mut min_abs_time_diff_ms = config::MAX_HIT_WINDOW_MS + 1.0;
 
             for (idx, arrow) in column_arrows.iter().enumerate() {
                 let beat_diff = current_display_beat - arrow.target_beat;
@@ -396,18 +396,18 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
                                else if min_abs_time_diff_ms <= config::W3_WINDOW_MS { Judgment::W3 }
                                else if min_abs_time_diff_ms <= config::W4_WINDOW_MS { Judgment::W4 }
                                else { Judgment::W5 };
-                
-                *state.judgment_counts.entry(judgment).or_insert(0) += 1; 
+
+                *state.judgment_counts.entry(judgment).or_insert(0) += 1;
 
                 info!( "HIT! {:?} {:?} ({:.1}ms) -> {:?} (Count: {})", dir, note_char_for_log, time_diff_for_log, judgment, state.judgment_counts[&judgment] );
 
-                let explosion_end_time = Instant::now() + config::EXPLOSION_DURATION; 
+                let explosion_end_time = Instant::now() + config::EXPLOSION_DURATION;
                 state.active_explosions.insert(dir, ActiveExplosion {
                     judgment,
                     direction: dir,
-                    end_time: explosion_end_time, 
+                    end_time: explosion_end_time,
                 });
-                
+
                 debug!(
                     "Added ActiveExplosion: dir={:?}, judgment={:?}, end_time will be in {:?}. Map size: {}",
                     dir, judgment, config::EXPLOSION_DURATION, state.active_explosions.len()
@@ -423,7 +423,7 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
 // --- Miss Checking Logic ---
 fn check_misses(state: &mut GameState) {
-    let current_display_beat = state.current_beat; 
+    let current_display_beat = state.current_beat;
     let mut missed_count_this_frame = 0;
     for (_dir, column_arrows) in state.arrows.iter_mut() {
         column_arrows.retain(|arrow| {
@@ -432,8 +432,8 @@ fn check_misses(state: &mut GameState) {
             let miss_window_beats_dynamic = (config::MISS_WINDOW_MS / 1000.0) / seconds_per_beat_at_target;
             let beat_diff = current_display_beat - arrow.target_beat;
             if beat_diff > miss_window_beats_dynamic {
-                *state.judgment_counts.entry(Judgment::Miss).or_insert(0) += 1; 
-                info!( "MISSED! {:?} {:?} (TgtBeat: {:.2}, DispBeat: {:.2}, DiffBeat: {:.2} > {:.2} ({:.1}ms)) (Miss Count: {})", 
+                *state.judgment_counts.entry(Judgment::Miss).or_insert(0) += 1;
+                info!( "MISSED! {:?} {:?} (TgtBeat: {:.2}, DispBeat: {:.2}, DiffBeat: {:.2} > {:.2} ({:.1}ms)) (Miss Count: {})",
                        arrow.direction, arrow.note_char, arrow.target_beat, current_display_beat, beat_diff, miss_window_beats_dynamic, config::MISS_WINDOW_MS, state.judgment_counts[&Judgment::Miss] );
                 missed_count_this_frame += 1;
                 false
@@ -454,26 +454,26 @@ fn draw_judgment_line(
     zero_scale: f32,
     label_scale: f32,
     label_text: &str,
-    current_count: u32, 
+    current_count: u32,
     dim_color: [f32; 4],
     bright_color: [f32; 4],
-    height_scale: f32, 
-    width_scale: f32, 
+    height_scale: f32,
+    width_scale: f32,
 ) {
     let wendy_font = assets.get_font(FontId::Wendy).unwrap();
     let miso_font = assets.get_font(FontId::Miso).unwrap();
 
     let mut current_digit_pen_x = initial_pen_x_for_digits;
     let wendy_zero_baseline_y = line_top_y + (wendy_font.metrics.ascender * zero_scale);
-    
+
     let scaled_label_nudge = config::JUDGMENT_LABEL_VERTICAL_NUDGE_REF * height_scale;
     let miso_label_baseline_y = line_top_y + (miso_font.metrics.ascender * label_scale) + scaled_label_nudge;
 
     let general_digit_spacing = config::JUDGMENT_ZERO_SPACING_REF * width_scale;
     let digit_one_pre_extra_space = config::JUDGMENT_DIGIT_ONE_PRE_SPACE_REF * width_scale;
     let digit_one_post_extra_space = config::JUDGMENT_DIGIT_ONE_POST_SPACE_REF * width_scale;
-    
-    let count_str = format!("{:04}", current_count.min(9999)); 
+
+    let count_str = format!("{:04}", current_count.min(9999));
     let count_chars: Vec<char> = count_str.chars().collect();
 
     let mut first_non_zero_found = false;
@@ -482,19 +482,19 @@ fn draw_judgment_line(
     for (idx, digit_char) in count_chars.iter().enumerate() {
         let digit_str = digit_char.to_string();
         let mut actual_pre_spacing = 0.0;
-                
+
         if *digit_char == '1' {
             actual_pre_spacing = digit_one_pre_extra_space;
         }
-        
+
         let digit_width = wendy_font.measure_text_normalized(&digit_str) * zero_scale;
-        
+
         let is_bright;
-        if *digit_char == '0' && !first_non_zero_found && idx < count_chars.len() -1 { 
+        if *digit_char == '0' && !first_non_zero_found && idx < count_chars.len() -1 {
              is_bright = false;
         } else {
             is_bright = true;
-            if *digit_char != '0' { 
+            if *digit_char != '0' {
                 first_non_zero_found = true;
             }
         }
@@ -505,9 +505,9 @@ fn draw_judgment_line(
             current_digit_pen_x + actual_pre_spacing, wendy_zero_baseline_y,
             color, zero_scale, None
         );
-        
+
         let mut actual_post_spacing = general_digit_spacing;
-        if *digit_char == '1' { 
+        if *digit_char == '1' {
              actual_post_spacing = digit_one_post_extra_space;
         }
 
@@ -518,9 +518,9 @@ fn draw_judgment_line(
 
     // The label starts after the total width taken by digits and their specific spacing,
     // plus the general spacing between the digit block and the label.
-    let label_start_x = initial_pen_x_for_digits + total_width_of_drawn_digits_and_their_spacing + 
+    let label_start_x = initial_pen_x_for_digits + total_width_of_drawn_digits_and_their_spacing +
                         (config::JUDGMENT_ZERO_TO_LABEL_SPACING_REF * width_scale);
-    
+
     renderer.draw_text(
         device, cmd_buf, miso_font, label_text,
         label_start_x, miso_label_baseline_y,
@@ -533,24 +533,46 @@ fn draw_judgment_line(
 pub fn draw(
     renderer: &Renderer,
     game_state: &GameState,
-    assets: &AssetManager, 
+    assets: &AssetManager,
     device: &ash::Device,
     cmd_buf: vk::CommandBuffer,
 ) {
     let (win_w, win_h) = renderer.window_size();
     let width_scale = win_w / config::GAMEPLAY_REF_WIDTH;
     let height_scale = win_h / config::GAMEPLAY_REF_HEIGHT;
-    
+
     let desired_on_screen_width = config::TARGET_VISUAL_SIZE_REF * width_scale;
     let desired_on_screen_height = config::TARGET_VISUAL_SIZE_REF * height_scale;
-    
-    let desired_explosion_on_screen_width = desired_on_screen_width * config::EXPLOSION_SIZE_MULTIPLIER; 
+
+    let desired_explosion_on_screen_width = desired_on_screen_width * config::EXPLOSION_SIZE_MULTIPLIER;
     let desired_explosion_on_screen_height = desired_on_screen_height * config::EXPLOSION_SIZE_MULTIPLIER;
+
+    // --- Draw Gameplay Song Banner ---
+    let banner_width = config::GAMEPLAY_BANNER_WIDTH_REF * width_scale;
+    let banner_height = config::GAMEPLAY_BANNER_HEIGHT_REF * height_scale;
+    let banner_right_margin = config::GAMEPLAY_BANNER_RIGHT_MARGIN_REF * width_scale;
+    let banner_top_margin = config::GAMEPLAY_BANNER_TOP_MARGIN_REF * height_scale;
+
+    let banner_pos_x = win_w - banner_right_margin - banner_width / 2.0;
+    let banner_pos_y = banner_top_margin + banner_height / 2.0;
+
+    renderer.draw_quad(
+        device,
+        cmd_buf,
+        DescriptorSetId::DynamicBanner, // Use the dynamic banner set
+        Vector3::new(banner_pos_x, banner_pos_y, 0.0),
+        (banner_width, banner_height),
+        Rad(0.0),
+        [1.0, 1.0, 1.0, 1.0], // Full tint
+        [0.0, 0.0],           // Default UV offset
+        [1.0, 1.0],           // Default UV scale
+    );
+
 
     // --- Draw Health Meter ---
     let health_meter_width = config::HEALTH_METER_WIDTH_REF * width_scale;
     let health_meter_height = config::HEALTH_METER_HEIGHT_REF * height_scale;
-    let health_meter_border_thickness = config::HEALTH_METER_BORDER_THICKNESS_REF * width_scale.min(height_scale); 
+    let health_meter_border_thickness = config::HEALTH_METER_BORDER_THICKNESS_REF * width_scale.min(height_scale);
 
     let health_meter_outer_left_x = config::HEALTH_METER_LEFT_MARGIN_REF * width_scale;
     let health_meter_outer_top_y = config::HEALTH_METER_TOP_MARGIN_REF * height_scale;
@@ -587,13 +609,13 @@ pub fn draw(
             [0.0, 0.0], [1.0, 1.0]
         );
 
-        let current_health_percentage = 0.5; 
+        let current_health_percentage = 0.5;
         let hm_fill_width = (hm_inner_width * current_health_percentage).max(0.0);
         if hm_fill_width > 0.0 {
             renderer.draw_quad(
                 device, cmd_buf, DescriptorSetId::SolidColor,
                 Vector3::new(
-                    hm_inner_left_x + hm_fill_width / 2.0, 
+                    hm_inner_left_x + hm_fill_width / 2.0,
                     hm_inner_top_y + hm_inner_height / 2.0,
                     0.0
                 ),
@@ -646,7 +668,7 @@ pub fn draw(
             config::DURATION_METER_EMPTY_COLOR,
             [0.0, 0.0], [1.0, 1.0]
         );
-        
+
         let total_duration_sec = game_state.song_info.charts[game_state.selected_chart_idx]
             .calculated_length_sec.unwrap_or(0.0);
 
@@ -655,19 +677,19 @@ pub fn draw(
         } else {
             0.0
         };
-        
-        let progress_percentage = if total_duration_sec > 0.01 { 
+
+        let progress_percentage = if total_duration_sec > 0.01 {
             (current_elapsed_song_time_sec / total_duration_sec).clamp(0.0, 1.0)
         } else {
             0.0
         };
-        
+
         let dm_fill_width = (dm_inner_width * progress_percentage).max(0.0);
         if dm_fill_width > 0.0 {
             renderer.draw_quad(
                 device, cmd_buf, DescriptorSetId::SolidColor,
                 Vector3::new(
-                    dm_inner_left_x + dm_fill_width / 2.0, 
+                    dm_inner_left_x + dm_fill_width / 2.0,
                     dm_inner_top_y + dm_inner_height / 2.0,
                     0.0
                 ),
@@ -680,30 +702,30 @@ pub fn draw(
 
         if let Some(font) = assets.get_font(FontId::Miso) {
             let song_title = &game_state.song_info.title;
-            
+
             let target_text_visual_height = dm_inner_height * 0.80;
             let font_typographic_height_norm = (font.metrics.ascender - font.metrics.descender).max(1e-5);
             let text_scale = target_text_visual_height / font_typographic_height_norm;
 
             let text_width_pixels = font.measure_text_normalized(song_title) * text_scale;
-            
+
             let text_x = dm_inner_left_x + (dm_inner_width - text_width_pixels) / 2.0;
-            
+
             let mut text_baseline_y = (dm_inner_top_y + dm_inner_height / 2.0) - (font.metrics.ascender + font.metrics.descender) / 2.0 * text_scale;
 
-            const TEXT_VERTICAL_NUDGE_REF_PX: f32 = 13.0; 
+            const TEXT_VERTICAL_NUDGE_REF_PX: f32 = 13.0;
             let current_text_vertical_nudge = TEXT_VERTICAL_NUDGE_REF_PX * height_scale;
             text_baseline_y += current_text_vertical_nudge;
 
             renderer.draw_text(
-                device, 
-                cmd_buf, 
-                font, 
-                song_title, 
-                text_x.max(dm_inner_left_x), 
-                text_baseline_y, 
-                config::UI_BAR_TEXT_COLOR, 
-                text_scale, 
+                device,
+                cmd_buf,
+                font,
+                song_title,
+                text_x.max(dm_inner_left_x),
+                text_baseline_y,
+                config::UI_BAR_TEXT_COLOR,
+                text_scale,
                 None
             );
         }
@@ -717,7 +739,7 @@ pub fn draw(
         let zero_target_visual_height = config::JUDGMENT_ZERO_VISUAL_HEIGHT_REF * height_scale;
         let wendy_font_typographic_height_norm = (wendy_font_ref.metrics.ascender - wendy_font_ref.metrics.descender).max(1e-5);
         let wendy_zero_scale = zero_target_visual_height / wendy_font_typographic_height_norm;
-        
+
         let label_target_visual_height = config::JUDGMENT_LABEL_VISUAL_HEIGHT_REF * height_scale;
         let miso_font_typographic_height_norm = (miso_font_ref.metrics.ascender - miso_font_ref.metrics.descender).max(1e-5);
         let miso_label_scale = label_target_visual_height / miso_font_typographic_height_norm;
@@ -730,8 +752,8 @@ pub fn draw(
             (Judgment::W5, "WAY OFF",   config::JUDGMENT_W5_DIM_COLOR, config::JUDGMENT_W5_BRIGHT_COLOR),
             (Judgment::Miss,"MISS",      config::JUDGMENT_MISS_DIM_COLOR, config::JUDGMENT_MISS_BRIGHT_COLOR),
         ];
-        
-        let line_visual_height_for_spacing = zero_target_visual_height.max(label_target_visual_height); 
+
+        let line_visual_height_for_spacing = zero_target_visual_height.max(label_target_visual_height);
         let vertical_spacing_between_lines = config::JUDGMENT_LINE_VERTICAL_SPACING_REF * height_scale;
 
 
@@ -753,10 +775,10 @@ pub fn draw(
     let frame_index = ((game_state.current_beat * 2.0).floor().abs() as usize) % 4;
     let uv_width = 1.0 / 4.0;
     let uv_x_start = frame_index as f32 * uv_width;
-    let base_uv_offset_arrows = [uv_x_start, 0.0]; 
-    let base_uv_scale_arrows = [uv_width, 1.0];   
-    
-    let target_uv_offset = [0.0, 0.0]; 
+    let base_uv_offset_arrows = [uv_x_start, 0.0];
+    let base_uv_scale_arrows = [uv_width, 1.0];
+
+    let target_uv_offset = [0.0, 0.0];
     let target_uv_scale = [0.25, 1.0];
 
     for target in &game_state.targets {
@@ -768,22 +790,22 @@ pub fn draw(
         };
         let quad_size_for_draw_quad = match target.direction {
             ArrowDirection::Up | ArrowDirection::Down => (desired_on_screen_width, desired_on_screen_height),
-            ArrowDirection::Left | ArrowDirection::Right => (desired_on_screen_height, desired_on_screen_width), 
+            ArrowDirection::Left | ArrowDirection::Right => (desired_on_screen_height, desired_on_screen_width),
         };
-        renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay, 
+        renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay,
             Vector3::new(target.x, target.y, 0.0),
-            quad_size_for_draw_quad, 
-            rotation_angle, config::TARGET_TINT, 
-            target_uv_offset, 
+            quad_size_for_draw_quad,
+            rotation_angle, config::TARGET_TINT,
+            target_uv_offset,
             target_uv_scale,
         );
     }
 
     for (_direction, column_arrows) in &game_state.arrows {
         for arrow in column_arrows {
-            let culling_margin_w = desired_on_screen_width; 
+            let culling_margin_w = desired_on_screen_width;
             let culling_margin_h = desired_on_screen_height;
-            if arrow.y < (0.0 - culling_margin_h) || arrow.y > (win_h + culling_margin_h) { 
+            if arrow.y < (0.0 - culling_margin_h) || arrow.y > (win_h + culling_margin_h) {
                 continue;
             }
             let measure_idx_for_arrow = (arrow.target_beat / 4.0).floor() as usize;
@@ -816,9 +838,9 @@ pub fn draw(
             };
             renderer.draw_quad( device, cmd_buf, DescriptorSetId::Gameplay,
                 Vector3::new(arrow.x, arrow.y, 0.0),
-                quad_size_for_draw_quad, 
+                quad_size_for_draw_quad,
                 rotation_angle, arrow_tint,
-                base_uv_offset_arrows, base_uv_scale_arrows, 
+                base_uv_offset_arrows, base_uv_scale_arrows,
             );
         }
     }
@@ -844,11 +866,11 @@ pub fn draw(
                         cmd_buf,
                         explosion_set_id,
                         Vector3::new(target_info.x, target_info.y, 0.0),
-                        quad_size_for_draw_quad, 
+                        quad_size_for_draw_quad,
                         explosion_rotation_angle,
-                        [1.0, 1.0, 1.0, 1.0], 
-                        [0.0, 0.0], 
-                        [1.0, 1.0], 
+                        [1.0, 1.0, 1.0, 1.0],
+                        [0.0, 0.0],
+                        [1.0, 1.0],
                     );
                 } else {
                     warn!(

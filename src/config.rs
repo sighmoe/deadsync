@@ -89,6 +89,12 @@ pub const JUDGMENT_W5_DIM_COLOR: [f32; 4] =    [89.0/255.0, 59.0/255.0, 41.0/255
 pub const JUDGMENT_MISS_BRIGHT_COLOR: [f32; 4] = [255.0/255.0, 48.0/255.0, 48.0/255.0, 1.0];  // #ff3030 (Red)
 pub const JUDGMENT_MISS_DIM_COLOR: [f32; 4] =    [89.0/255.0, 16.0/255.0, 16.0/255.0, 1.0];     // #591010
 
+// Gameplay Banner Reference Constants (for 1280x720)
+pub const GAMEPLAY_BANNER_RIGHT_MARGIN_REF: f32 = 90.0;
+pub const GAMEPLAY_BANNER_TOP_MARGIN_REF: f32 = 131.0;
+pub const GAMEPLAY_BANNER_WIDTH_REF: f32 = 250.0;
+pub const GAMEPLAY_BANNER_HEIGHT_REF: f32 = 98.0;
+
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5];
 pub const ARROW_TINT_QUARTER: [f32; 4] = [1.0, 0.6, 0.6, 1.0];

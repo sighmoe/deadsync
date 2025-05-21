@@ -486,7 +486,7 @@ impl App {
                             graph_image_data.width,
                             graph_image_data.height,
                             &graph_image_data.data,
-                            "NPS_Graph_Texture", 
+                            "NPS_Graph_Texture",
                         ) {
                             Ok(tex_res) => {
                                 self.renderer.update_texture_descriptor(
@@ -503,7 +503,7 @@ impl App {
                     Err(e) => error!("Failed to generate NPS graph image data: {}", e),
                 }
             }
-        } else if self.select_music_state.current_graph_texture.is_some() { 
+        } else if self.select_music_state.current_graph_texture.is_some() {
              if let Some(mut old_graph_tex) = self.select_music_state.current_graph_texture.take() {
                 info!("Clearing NPS graph texture as current selection does not require one.");
                 old_graph_tex.destroy(&self.vulkan_base.device);
@@ -541,7 +541,7 @@ impl App {
                                 self.rebuild_music_wheel_entries(); // This will re-focus/re-select
                                 // After rebuilding, the selection might change implicitly.
                                 // We need to ensure handle_music_selection_change is called.
-                                selection_changed_in_music_by_input = true; 
+                                selection_changed_in_music_by_input = true;
                             }
                         }
                     }
@@ -581,37 +581,58 @@ impl App {
             self.current_app_state, new_state
         );
 
-        if self.current_app_state == AppState::SelectMusic && new_state != AppState::SelectMusic {
-            self.audio_manager.stop_preview();
-            self.select_music_state.preview_audio_path = None;
-            self.select_music_state.preview_playback_started_at = None;
-            self.select_music_state.is_awaiting_preview_restart = false;
-            self.select_music_state.selection_landed_at = None;
-            self.select_music_state.is_preview_actions_scheduled = false;
-
-            if let Some(mut graph_tex) = self.select_music_state.current_graph_texture.take() {
-                info!("Destroying NPS graph texture on state transition from SelectMusic.");
-                graph_tex.destroy(&self.vulkan_base.device);
-            }
-            self.select_music_state.current_graph_song_chart_key = None;
-             // Reset DynamicBanner to FallbackBanner when leaving SelectMusic
-            if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
-            }
-            self.asset_manager.clear_current_banner(&self.vulkan_base.device);
-
-        }
-
-
+        // --- Cleanup from old state ---
         match self.current_app_state {
+            AppState::SelectMusic => {
+                self.audio_manager.stop_preview();
+                self.select_music_state.preview_audio_path = None;
+                self.select_music_state.preview_playback_started_at = None;
+                self.select_music_state.is_awaiting_preview_restart = false;
+                self.select_music_state.selection_landed_at = None;
+                self.select_music_state.is_preview_actions_scheduled = false;
+
+                if let Some(mut graph_tex) = self.select_music_state.current_graph_texture.take() {
+                    info!("Destroying NPS graph texture on state transition from SelectMusic.");
+                    graph_tex.destroy(&self.vulkan_base.device);
+                }
+                self.select_music_state.current_graph_song_chart_key = None;
+
+                // If NOT transitioning to Gameplay, reset banner
+                // Gameplay will use the banner already set by SelectMusic.
+                if new_state != AppState::Gameplay {
+                    info!("Transitioning from SelectMusic to non-Gameplay state ({:?}). Resetting DynamicBanner.", new_state);
+                    if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                        self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
+                    }
+                    self.asset_manager.clear_current_banner(&self.vulkan_base.device);
+                } else {
+                    info!("Transitioning from SelectMusic to Gameplay. DynamicBanner for song should persist.");
+                }
+            }
             AppState::Gameplay => {
                 self.audio_manager.stop_music();
                 self.game_state = None;
                 info!("Gameplay state cleared.");
+
+                // If transitioning away from Gameplay to a state that isn't SelectMusic,
+                // reset the dynamic banner. SelectMusic handles its own banner loading.
+                if new_state != AppState::SelectMusic {
+                    info!("Transitioning from Gameplay to non-SelectMusic state ({:?}). Resetting DynamicBanner.", new_state);
+                    if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                        self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
+                    }
+                    // It's important to clear the asset manager's current banner too,
+                    // so it can be reloaded correctly if needed.
+                    self.asset_manager.clear_current_banner(&self.vulkan_base.device);
+                } else {
+                     info!("Transitioning from Gameplay to SelectMusic. SelectMusic will handle banner refresh.");
+                }
             }
             _ => {}
         }
 
+
+        // --- Setup for new state ---
         match new_state {
             AppState::Menu => {
                 self.menu_state = MenuState::default();
@@ -622,7 +643,7 @@ impl App {
 
                 // After rebuilding and populating, trigger the initial selection handling
                 // which includes loading the banner for the initially selected item.
-                self.handle_music_selection_change(); 
+                self.handle_music_selection_change();
                 info!(
                     "Populated SelectMusic state with {} entries and handled initial selection.",
                     self.select_music_state.entries.len()
@@ -636,6 +657,22 @@ impl App {
                  let selected_entry_opt = self.select_music_state.entries.get(self.select_music_state.selected_index);
 
                 if let Some(MusicWheelEntry::Song(selected_song_arc)) = selected_entry_opt {
+
+                    // Ensure the banner for the selected song is active (it should be from SelectMusic)
+                    // This is more of a verification log, as the logic in SelectMusic transition out should keep it.
+                    if self.asset_manager.get_current_banner_path().as_ref() != selected_song_arc.banner_path.as_ref() {
+                        warn!("DynamicBanner might not be correctly set for Gameplay. Expected {:?}, AssetManager has {:?}. Re-loading.",
+                            selected_song_arc.banner_path, self.asset_manager.get_current_banner_path());
+                        // AssetManager will attempt to load this song's banner if its key differs.
+                        // Since SelectMusic should have already set it, this path is less likely,
+                        // but it's a fallback if state management elsewhere had an issue.
+                         self.asset_manager.load_song_banner(
+                            &self.vulkan_base,
+                            &self.renderer,
+                            selected_song_arc,
+                        );
+                    }
+
 
                     if selected_song_arc.audio_path.is_none() {
                         error!("Cannot start gameplay: Audio path missing for selected song '{}'. Returning to SelectMusic.", selected_song_arc.title);
@@ -697,6 +734,7 @@ impl App {
         ));
     }
 
+
     fn update(&mut self, dt: f32) {
         trace!("Update Start (dt: {:.4} s)", dt);
         let mut selection_changed_by_held_key_scroll = false;
@@ -715,7 +753,7 @@ impl App {
                         if elapsed_since_landed >= SELECTION_START_PLAY_DELAY {
                             info!("{}ms play delay elapsed. Attempting to start preview playback.", SELECTION_START_PLAY_DELAY.as_millis());
                             self.start_actual_preview_playback();
-                            self.select_music_state.is_preview_actions_scheduled = false; 
+                            self.select_music_state.is_preview_actions_scheduled = false;
                             self.select_music_state.selection_landed_at = None;
                         }
                     } else {
