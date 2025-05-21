@@ -63,7 +63,7 @@ pub const DURATION_METER_WIDTH_REF: f32 = 626.0;
 pub const DURATION_METER_HEIGHT_REF: f32 = HEALTH_METER_HEIGHT_REF; // Same height as health bar
 pub const DURATION_METER_BORDER_THICKNESS_REF: f32 = HEALTH_METER_BORDER_THICKNESS_REF; // Same border
 pub const DURATION_METER_BORDER_COLOR: [f32; 4] = HEALTH_METER_BORDER_COLOR; // Same border color
-pub const DURATION_METER_FILL_COLOR: [f32; 4] = [0.0/255.0, 126.0/255.0, 204.0/255.0, 1.0]; // A distinct blue for now: #007ECC
+pub const DURATION_METER_FILL_COLOR: [f32; 4] = HEALTH_METER_FILL_COLOR; // Same fill color
 pub const DURATION_METER_EMPTY_COLOR: [f32; 4] = HEALTH_METER_EMPTY_COLOR; // Same empty color
 
 // Visual Constants

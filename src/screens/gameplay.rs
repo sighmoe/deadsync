@@ -1,4 +1,3 @@
-// src/screens/gameplay.rs
 use crate::assets::{AssetManager, FontId, TextureId}; // Added FontId
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
@@ -179,13 +178,22 @@ pub fn initialize_game_state(
             || temp_timing_data.points.first().map_or(120.0, |p|p.bpm),
             |p| p.bpm
         );
-    let initial_display_beat_offset = (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / initial_bpm_at_zero);
+    let initial_display_beat_offset = if initial_bpm_at_zero > 0.0 {
+        (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / initial_bpm_at_zero)
+    } else {
+        0.0 // Avoid division by zero
+    };
+
+    // Calculate the actual chart beat at the moment audio starts (time = 0 relative to audio file)
+    let initial_actual_chart_beat = temp_timing_data.get_beat_for_time(0.0);
+
 
     GameState {
         targets,
         arrows: arrows_map,
         pressed_keys: HashSet::new(),
-        current_beat: -initial_display_beat_offset,
+        current_beat: initial_actual_chart_beat - initial_display_beat_offset, // Display beat
+        current_chart_beat_actual: initial_actual_chart_beat, // Actual musical beat
         window_size: (win_w, win_h),
         active_explosions: HashMap::new(),
         audio_start_time: Some(audio_start_time),
@@ -195,7 +203,7 @@ pub fn initialize_game_state(
         processed_chart: Arc::new(processed_chart_data),
         current_measure_idx: 0,
         current_line_in_measure_idx: 0,
-        current_processed_beat: -1.0,
+        current_processed_beat: -1.0, // Start before beat 0 to ensure first notes are processed
     }
 }
 
@@ -233,7 +241,7 @@ pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState) -> Option<
 pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
     if let Some(start_time) = game_state.audio_start_time {
         let current_raw_time_sec = Instant::now().duration_since(start_time).as_secs_f32();
-        let chart_beat = game_state.timing_data.get_beat_for_time(current_raw_time_sec);
+        game_state.current_chart_beat_actual = game_state.timing_data.get_beat_for_time(current_raw_time_sec);
         
         let initial_bpm_at_zero = game_state.timing_data.points.iter()
             .find(|p| p.beat == 0.0)
@@ -241,10 +249,14 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
                 || game_state.timing_data.points.first().map_or(120.0, |p|p.bpm),
                 |p| p.bpm
             );
-        let initial_display_beat_offset = (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / initial_bpm_at_zero);
+        let initial_display_beat_offset = if initial_bpm_at_zero > 0.0 {
+            (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / initial_bpm_at_zero)
+        } else {
+            0.0 // Avoid division by zero
+        };
         
-        game_state.current_beat = chart_beat - initial_display_beat_offset;
-        trace!("Current Raw Time: {:.3}s, Chart Beat: {:.4}, Display Beat: {:.4}", current_raw_time_sec, chart_beat, game_state.current_beat);
+        game_state.current_beat = game_state.current_chart_beat_actual - initial_display_beat_offset; // This is the display beat
+        trace!("Current Raw Time: {:.3}s, Actual Chart Beat: {:.4}, Display Beat: {:.4}", current_raw_time_sec, game_state.current_chart_beat_actual, game_state.current_beat);
     } else {
         warn!("Audio start time not set, cannot update beat accurately!");
     }
@@ -271,11 +283,9 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
 // --- Arrow Spawning Logic ---
 fn spawn_arrows_from_chart(state: &mut GameState) {
     if state.processed_chart.measures.is_empty() { return; }
-    let current_audio_time_sec = if let Some(start_time) = state.audio_start_time {
-        Instant::now().duration_since(start_time).as_secs_f32()
-    } else { return; };
-    let current_chart_beat_now = state.timing_data.get_beat_for_time(current_audio_time_sec);
-    let lookahead_chart_beat_limit = current_chart_beat_now + config::SPAWN_LOOKAHEAD_BEATS;
+    // Use current_chart_beat_actual for spawning logic as it's tied to audio time
+    let current_audio_time_chart_beat = state.current_chart_beat_actual;
+    let lookahead_chart_beat_limit = current_audio_time_chart_beat + config::SPAWN_LOOKAHEAD_BEATS;
 
     loop {
         if state.current_measure_idx >= state.processed_chart.measures.len() { break; }
@@ -300,11 +310,18 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
         }
         if target_beat_for_line > lookahead_chart_beat_limit { break; }
         
-        let time_of_line_sec = state.timing_data.get_time_for_beat(target_beat_for_line);
-        let time_to_target_on_screen_sec = time_of_line_sec - current_audio_time_sec;
+        // Time relative to audio file start for this line
+        let time_of_line_sec_audio_relative = state.timing_data.get_time_for_beat(target_beat_for_line);
+        // Current audio time relative to audio file start
+        let current_audio_time_sec_audio_relative = if let Some(start_time) = state.audio_start_time {
+            Instant::now().duration_since(start_time).as_secs_f32()
+        } else { return; }; // Should not happen if audio started
 
-        if time_to_target_on_screen_sec < 0.0 {
-            trace!("Missed spawn window for line at beat {:.2} (current audio time corresponds to beat {:.2})", target_beat_for_line, current_chart_beat_now);
+        let time_to_target_on_screen_sec = time_of_line_sec_audio_relative - current_audio_time_sec_audio_relative;
+
+
+        if time_to_target_on_screen_sec < -0.05 { // Allow a small negative tolerance for late spawns if necessary
+            trace!("Missed spawn window for line at chart_beat {:.2} (current audio time implies chart_beat {:.2})", target_beat_for_line, current_audio_time_chart_beat);
             state.current_processed_beat = target_beat_for_line;
             state.current_line_in_measure_idx += 1;
             continue;
@@ -312,7 +329,7 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
         
         let target_y_pos = state.targets.first().map_or(0.0, |t| t.y);
         let current_arrow_speed = config::ARROW_SPEED * (state.window_size.1 / config::GAMEPLAY_REF_HEIGHT);
-        let distance_to_travel_pixels = current_arrow_speed * time_to_target_on_screen_sec;
+        let distance_to_travel_pixels = current_arrow_speed * time_to_target_on_screen_sec.max(0.0); // Use max(0.0) to prevent negative distance
         let spawn_y = target_y_pos + distance_to_travel_pixels;
 
         let note_line = &current_measure_data[state.current_line_in_measure_idx];
@@ -346,11 +363,12 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
     if let Some(dir) = direction {
         if let Some(column_arrows) = state.arrows.get_mut(&dir) {
-            let current_display_beat = state.current_beat;
+            let current_display_beat = state.current_beat; // Use display beat for hit window checking
             let bpm_at_arrow_approx = state.timing_data.points.iter()
                 .rfind(|p| p.beat <= current_display_beat)
                 .map_or(120.0, |p| p.bpm);
-            let seconds_per_beat_approx = 60.0 / bpm_at_arrow_approx;
+            let seconds_per_beat_approx = if bpm_at_arrow_approx > 0.0 { 60.0 / bpm_at_arrow_approx } else { 0.5 };
+
 
             let mut best_hit_idx: Option<usize> = None;
             let mut min_abs_time_diff_ms = config::MAX_HIT_WINDOW_MS + 1.0; 
@@ -401,12 +419,12 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
 // --- Miss Checking Logic ---
 fn check_misses(state: &mut GameState) {
-    let current_display_beat = state.current_beat;
+    let current_display_beat = state.current_beat; // Use display beat for miss window
     let mut missed_count = 0;
     for (_dir, column_arrows) in state.arrows.iter_mut() {
         column_arrows.retain(|arrow| {
             let bpm_at_arrow_target = state.timing_data.points.iter().rfind(|p| p.beat <= arrow.target_beat).map_or(120.0, |p| p.bpm);
-            let seconds_per_beat_at_target = 60.0 / bpm_at_arrow_target;
+            let seconds_per_beat_at_target = if bpm_at_arrow_target > 0.0 { 60.0 / bpm_at_arrow_target } else { 0.5 };
             let miss_window_beats_dynamic = (config::MISS_WINDOW_MS / 1000.0) / seconds_per_beat_at_target;
             let beat_diff = current_display_beat - arrow.target_beat;
             if beat_diff > miss_window_beats_dynamic {
@@ -522,6 +540,7 @@ pub fn draw(
     let dm_inner_top_y = duration_meter_outer_top_y + duration_meter_border_thickness;
 
     if dm_inner_width > 0.0 && dm_inner_height > 0.0 {
+        // Draw Empty Part
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::SolidColor,
             Vector3::new(
@@ -535,8 +554,25 @@ pub fn draw(
             [0.0, 0.0], [1.0, 1.0]
         );
         
-        let current_song_progress_percentage = 0.5; 
-        let dm_fill_width = (dm_inner_width * current_song_progress_percentage).max(0.0);
+        // Calculate Progress for Fill
+        let total_duration_sec = game_state.song_info.charts[game_state.selected_chart_idx]
+            .calculated_length_sec.unwrap_or(0.0);
+
+        let current_elapsed_song_time_sec = if total_duration_sec > 0.0 && game_state.audio_start_time.is_some() {
+            // time since beat 0 = (time for current actual chart beat) - (time for beat 0)
+            // game_state.timing_data.song_offset_sec IS the time of beat 0 relative to audio file start
+            (game_state.timing_data.get_time_for_beat(game_state.current_chart_beat_actual) - game_state.timing_data.song_offset_sec).max(0.0)
+        } else {
+            0.0
+        };
+        
+        let progress_percentage = if total_duration_sec > 0.01 { // Avoid division by zero or tiny durations
+            (current_elapsed_song_time_sec / total_duration_sec).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        
+        let dm_fill_width = (dm_inner_width * progress_percentage).max(0.0);
         if dm_fill_width > 0.0 {
             renderer.draw_quad(
                 device, cmd_buf, DescriptorSetId::SolidColor,
@@ -556,7 +592,6 @@ pub fn draw(
         if let Some(font) = assets.get_font(FontId::Miso) {
             let song_title = &game_state.song_info.title;
             
-            // Target a visual height for the text within the bar, e.g., 60% of inner height
             let target_text_visual_height = dm_inner_height * 0.80;
             let font_typographic_height_norm = (font.metrics.ascender - font.metrics.descender).max(1e-5);
             let text_scale = target_text_visual_height / font_typographic_height_norm;
@@ -565,11 +600,9 @@ pub fn draw(
             
             let text_x = dm_inner_left_x + (dm_inner_width - text_width_pixels) / 2.0;
             
-            // Center baseline vertically
-            // (ascender + descender) / 2 is the midpoint of the typographic box relative to baseline
             let mut text_baseline_y = (dm_inner_top_y + dm_inner_height / 2.0) - (font.metrics.ascender + font.metrics.descender) / 2.0 * text_scale;
 
-            const TEXT_VERTICAL_NUDGE_REF_PX: f32 = 13.0; // e.g., nudge down by 2 pixels at reference height
+            const TEXT_VERTICAL_NUDGE_REF_PX: f32 = 13.0; 
             let current_text_vertical_nudge = TEXT_VERTICAL_NUDGE_REF_PX * height_scale;
             text_baseline_y += current_text_vertical_nudge;
 
@@ -578,7 +611,7 @@ pub fn draw(
                 cmd_buf, 
                 font, 
                 song_title, 
-                text_x.max(dm_inner_left_x), // Clamp to prevent drawing outside if title too long
+                text_x.max(dm_inner_left_x), 
                 text_baseline_y, 
                 config::UI_BAR_TEXT_COLOR, 
                 text_scale, 

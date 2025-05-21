@@ -114,7 +114,8 @@ pub struct GameState {
     pub targets: Vec<TargetInfo>,
     pub arrows: HashMap<ArrowDirection, Vec<Arrow>>,
     pub pressed_keys: HashSet<VirtualKeyCode>,
-    pub current_beat: f32,
+    pub current_beat: f32, // Display beat (accounts for sync offset)
+    pub current_chart_beat_actual: f32, // Actual musical beat based on audio time
     pub window_size: (f32, f32),
     pub active_explosions: HashMap<ArrowDirection, ActiveExplosion>,
     pub audio_start_time: Option<Instant>,
