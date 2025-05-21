@@ -72,6 +72,8 @@ pub const JUDGMENT_ZERO_SPACING_REF: f32 = 0.0; // Horizontal spacing between ze
 pub const JUDGMENT_ZERO_TO_LABEL_SPACING_REF: f32 = 10.0; // Spacing between last zero and judgment label
 pub const JUDGMENT_LINE_VERTICAL_SPACING_REF: f32 = -1.0; // Vertical spacing between judgment lines
 pub const JUDGMENT_LABEL_VERTICAL_NUDGE_REF: f32 = 18.0; // Downward nudge for Miso label text
+pub const JUDGMENT_DIGIT_ONE_PRE_SPACE_REF: f32 = 6.0;  // Extra space before a '1'
+pub const JUDGMENT_DIGIT_ONE_POST_SPACE_REF: f32 = 5.0; // Extra space after a '1'
 
 // ITG Judgment Colors (Bright = Label Color, Dim = Count Color for non-zero counts if different)
 pub const JUDGMENT_W1_BRIGHT_COLOR: [f32; 4] = [33.0/255.0, 204.0/255.0, 232.0/255.0, 1.0]; // #21cce8 (Blue)
@@ -86,7 +88,6 @@ pub const JUDGMENT_W5_BRIGHT_COLOR: [f32; 4] = [201.0/255.0, 133.0/255.0, 94.0/2
 pub const JUDGMENT_W5_DIM_COLOR: [f32; 4] =    [89.0/255.0, 59.0/255.0, 41.0/255.0, 1.0];    // #593b29
 pub const JUDGMENT_MISS_BRIGHT_COLOR: [f32; 4] = [255.0/255.0, 48.0/255.0, 48.0/255.0, 1.0];  // #ff3030 (Red)
 pub const JUDGMENT_MISS_DIM_COLOR: [f32; 4] =    [89.0/255.0, 16.0/255.0, 16.0/255.0, 1.0];     // #591010
-
 
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5];

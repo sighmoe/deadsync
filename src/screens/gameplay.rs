@@ -397,7 +397,7 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
                                else if min_abs_time_diff_ms <= config::W4_WINDOW_MS { Judgment::W4 }
                                else { Judgment::W5 };
                 
-                *state.judgment_counts.entry(judgment).or_insert(0) += 1; // Increment count
+                *state.judgment_counts.entry(judgment).or_insert(0) += 1; 
 
                 info!( "HIT! {:?} {:?} ({:.1}ms) -> {:?} (Count: {})", dir, note_char_for_log, time_diff_for_log, judgment, state.judgment_counts[&judgment] );
 
@@ -432,7 +432,7 @@ fn check_misses(state: &mut GameState) {
             let miss_window_beats_dynamic = (config::MISS_WINDOW_MS / 1000.0) / seconds_per_beat_at_target;
             let beat_diff = current_display_beat - arrow.target_beat;
             if beat_diff > miss_window_beats_dynamic {
-                *state.judgment_counts.entry(Judgment::Miss).or_insert(0) += 1; // Increment miss count
+                *state.judgment_counts.entry(Judgment::Miss).or_insert(0) += 1; 
                 info!( "MISSED! {:?} {:?} (TgtBeat: {:.2}, DispBeat: {:.2}, DiffBeat: {:.2} > {:.2} ({:.1}ms)) (Miss Count: {})", 
                        arrow.direction, arrow.note_char, arrow.target_beat, current_display_beat, beat_diff, miss_window_beats_dynamic, config::MISS_WINDOW_MS, state.judgment_counts[&Judgment::Miss] );
                 missed_count_this_frame += 1;
@@ -450,11 +450,11 @@ fn draw_judgment_line(
     cmd_buf: vk::CommandBuffer,
     assets: &AssetManager,
     line_top_y: f32,
-    start_x: f32,
+    initial_pen_x_for_digits: f32, // Renamed for clarity
     zero_scale: f32,
     label_scale: f32,
     label_text: &str,
-    current_count: u32, // Pass the actual count
+    current_count: u32, 
     dim_color: [f32; 4],
     bright_color: [f32; 4],
     height_scale: f32, 
@@ -463,50 +463,67 @@ fn draw_judgment_line(
     let wendy_font = assets.get_font(FontId::Wendy).unwrap();
     let miso_font = assets.get_font(FontId::Miso).unwrap();
 
-    let mut current_pen_x = start_x;
+    let mut current_digit_pen_x = initial_pen_x_for_digits;
     let wendy_zero_baseline_y = line_top_y + (wendy_font.metrics.ascender * zero_scale);
     
     let scaled_label_nudge = config::JUDGMENT_LABEL_VERTICAL_NUDGE_REF * height_scale;
     let miso_label_baseline_y = line_top_y + (miso_font.metrics.ascender * label_scale) + scaled_label_nudge;
 
-
-    let zero_spacing = config::JUDGMENT_ZERO_SPACING_REF * width_scale;
+    let general_digit_spacing = config::JUDGMENT_ZERO_SPACING_REF * width_scale;
+    let digit_one_pre_extra_space = config::JUDGMENT_DIGIT_ONE_PRE_SPACE_REF * width_scale;
+    let digit_one_post_extra_space = config::JUDGMENT_DIGIT_ONE_POST_SPACE_REF * width_scale;
     
-    // Format the count into a 4-digit string, padding with leading zeros
-    let count_str = format!("{:04}", current_count.min(9999)); // Cap at 9999
+    let count_str = format!("{:04}", current_count.min(9999)); 
     let count_chars: Vec<char> = count_str.chars().collect();
 
     let mut first_non_zero_found = false;
+    let mut total_width_of_drawn_digits_and_their_spacing = 0.0;
 
     for (idx, digit_char) in count_chars.iter().enumerate() {
         let digit_str = digit_char.to_string();
+        let mut actual_pre_spacing = 0.0;
+                
+        if *digit_char == '1' {
+            actual_pre_spacing = digit_one_pre_extra_space;
+        }
+        
         let digit_width = wendy_font.measure_text_normalized(&digit_str) * zero_scale;
         
-        // Determine color: dim if it's a leading zero before any non-zero digit.
-        // Bright if it's non-zero, or if a non-zero digit has already been encountered.
         let is_bright;
-        if *digit_char == '0' && !first_non_zero_found && idx < count_chars.len() -1 { // Don't make last '0' dim if count is 0
+        if *digit_char == '0' && !first_non_zero_found && idx < count_chars.len() -1 { 
              is_bright = false;
         } else {
             is_bright = true;
-            first_non_zero_found = true;
+            if *digit_char != '0' { 
+                first_non_zero_found = true;
+            }
         }
         let color = if is_bright { bright_color } else { dim_color };
 
         renderer.draw_text(
             device, cmd_buf, wendy_font, &digit_str,
-            current_pen_x, wendy_zero_baseline_y,
+            current_digit_pen_x + actual_pre_spacing, wendy_zero_baseline_y,
             color, zero_scale, None
         );
-        current_pen_x += digit_width + zero_spacing;
+        
+        let mut actual_post_spacing = general_digit_spacing;
+        if *digit_char == '1' { 
+             actual_post_spacing = digit_one_post_extra_space;
+        }
+
+        let advance_for_this_digit_segment = actual_pre_spacing + digit_width + actual_post_spacing;
+        current_digit_pen_x += advance_for_this_digit_segment;
+        total_width_of_drawn_digits_and_their_spacing += advance_for_this_digit_segment;
     }
 
-    current_pen_x -= zero_spacing; 
-    current_pen_x += config::JUDGMENT_ZERO_TO_LABEL_SPACING_REF * width_scale;
+    // The label starts after the total width taken by digits and their specific spacing,
+    // plus the general spacing between the digit block and the label.
+    let label_start_x = initial_pen_x_for_digits + total_width_of_drawn_digits_and_their_spacing + 
+                        (config::JUDGMENT_ZERO_TO_LABEL_SPACING_REF * width_scale);
     
     renderer.draw_text(
         device, cmd_buf, miso_font, label_text,
-        current_pen_x, miso_label_baseline_y,
+        label_start_x, miso_label_baseline_y,
         bright_color, label_scale, None
     );
 }
