@@ -24,9 +24,6 @@ pub const EXPLOSION_W4_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explo
 pub const EXPLOSION_W5_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w5.png";
 
 // Gameplay Constants
-// pub const TARGET_Y_POS: f32 = 150.0; // Replaced by dynamic calculation
-// pub const TARGET_SIZE: f32 = 120.0;  // Replaced by dynamic calculation
-// pub const ARROW_SIZE: f32 = 120.0;   // Replaced by dynamic calculation
 pub const ARROW_SPEED: f32 = 1300.0; // Speed of arrows scrolling up
 pub const AUDIO_SYNC_OFFSET_MS: i64 = 30;
 pub const SPAWN_LOOKAHEAD_BEATS: f32 = 10.0;
@@ -63,8 +60,33 @@ pub const DURATION_METER_WIDTH_REF: f32 = 626.0;
 pub const DURATION_METER_HEIGHT_REF: f32 = HEALTH_METER_HEIGHT_REF; // Same height as health bar
 pub const DURATION_METER_BORDER_THICKNESS_REF: f32 = HEALTH_METER_BORDER_THICKNESS_REF; // Same border
 pub const DURATION_METER_BORDER_COLOR: [f32; 4] = HEALTH_METER_BORDER_COLOR; // Same border color
-pub const DURATION_METER_FILL_COLOR: [f32; 4] = HEALTH_METER_FILL_COLOR; // Same fill color
+pub const DURATION_METER_FILL_COLOR: [f32; 4] = HEALTH_METER_FILL_COLOR; // Same fill
 pub const DURATION_METER_EMPTY_COLOR: [f32; 4] = HEALTH_METER_EMPTY_COLOR; // Same empty color
+
+// Judgment Count Display
+pub const JUDGMENT_TEXT_LINE_TOP_OFFSET_FROM_DURATION_METER_REF: f32 = 74.0;
+pub const JUDGMENT_ZERO_LEFT_START_OFFSET_REF: f32 = 655.0;
+pub const JUDGMENT_ZERO_VISUAL_HEIGHT_REF: f32 = 44.0;
+pub const JUDGMENT_LABEL_VISUAL_HEIGHT_REF: f32 = 18.0;
+pub const JUDGMENT_ZERO_SPACING_REF: f32 = 0.0; // Horizontal spacing between zeros
+pub const JUDGMENT_ZERO_TO_LABEL_SPACING_REF: f32 = 10.0; // Spacing between last zero and judgment label
+pub const JUDGMENT_LINE_VERTICAL_SPACING_REF: f32 = -1.0; // Vertical spacing between judgment lines
+pub const JUDGMENT_LABEL_VERTICAL_NUDGE_REF: f32 = 18.0; // Downward nudge for Miso label text
+
+// ITG Judgment Colors (Bright = Label Color, Dim = Count Color for non-zero counts if different)
+pub const JUDGMENT_W1_BRIGHT_COLOR: [f32; 4] = [33.0/255.0, 204.0/255.0, 232.0/255.0, 1.0]; // #21cce8 (Blue)
+pub const JUDGMENT_W1_DIM_COLOR: [f32; 4] =    [12.0/255.0, 78.0/255.0, 89.0/255.0, 1.0];   // #0c4e59
+pub const JUDGMENT_W2_BRIGHT_COLOR: [f32; 4] = [226.0/255.0, 156.0/255.0, 24.0/255.0, 1.0];  // #e29c18 (Gold)
+pub const JUDGMENT_W2_DIM_COLOR: [f32; 4] =    [89.0/255.0, 61.0/255.0, 9.0/255.0, 1.0];    // #593d09
+pub const JUDGMENT_W3_BRIGHT_COLOR: [f32; 4] = [102.0/255.0, 201.0/255.0, 85.0/255.0, 1.0];  // #66c955 (Green)
+pub const JUDGMENT_W3_DIM_COLOR: [f32; 4] =    [45.0/255.0, 89.0/255.0, 37.0/255.0, 1.0];    // #2d5925
+pub const JUDGMENT_W4_BRIGHT_COLOR: [f32; 4] = [180.0/255.0, 92.0/255.0, 255.0/255.0, 1.0]; // #b45cff (Purple)
+pub const JUDGMENT_W4_DIM_COLOR: [f32; 4] =    [63.0/255.0, 32.0/255.0, 89.0/255.0, 1.0];    // #3f2059
+pub const JUDGMENT_W5_BRIGHT_COLOR: [f32; 4] = [201.0/255.0, 133.0/255.0, 94.0/255.0, 1.0]; // #c9855e (Peach)
+pub const JUDGMENT_W5_DIM_COLOR: [f32; 4] =    [89.0/255.0, 59.0/255.0, 41.0/255.0, 1.0];    // #593b29
+pub const JUDGMENT_MISS_BRIGHT_COLOR: [f32; 4] = [255.0/255.0, 48.0/255.0, 48.0/255.0, 1.0];  // #ff3030 (Red)
+pub const JUDGMENT_MISS_DIM_COLOR: [f32; 4] =    [89.0/255.0, 16.0/255.0, 16.0/255.0, 1.0];     // #591010
+
 
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5];
@@ -147,12 +169,3 @@ pub const PACK_NAME_COLOR_PALETTE: [[f32; 4]; 12] = [
 
 pub const GRAPH_BOTTOM_COLOR: [f32; 4] = [0.0 / 255.0, 184.0 / 255.0, 204.0 / 255.0, 1.0]; // Cyan
 pub const GRAPH_TOP_COLOR: [f32; 4]    = [130.0 / 255.0, 0.0 / 255.0, 161.0 / 255.0, 1.0]; // Purple
-
-     /*   ITG = {
-            color("#21CCE8"),	-- blue
-            color("#e29c18"),	-- gold
-            color("#66c955"),	-- green
-            color("#b45cff"),	-- purple (greatly lightened)
-            color("#c9855e"),	-- peach?
-            color("#ff3030")	-- red (slightly lightened)
-        }, */

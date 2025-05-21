@@ -437,11 +437,62 @@ fn check_misses(state: &mut GameState) {
     if missed_count > 0 { trace!("Removed {} missed arrows.", missed_count); }
 }
 
+
+fn draw_judgment_line(
+    renderer: &Renderer,
+    device: &ash::Device,
+    cmd_buf: vk::CommandBuffer,
+    assets: &AssetManager,
+    line_top_y: f32,
+    start_x: f32,
+    zero_scale: f32,
+    label_scale: f32,
+    label_text: &str,
+    dim_color: [f32; 4],
+    bright_color: [f32; 4],
+    height_scale: f32, 
+    width_scale: f32, 
+) {
+    let wendy_font = assets.get_font(FontId::Wendy).unwrap();
+    let miso_font = assets.get_font(FontId::Miso).unwrap();
+
+    let mut current_pen_x = start_x;
+    let wendy_zero_baseline_y = line_top_y + (wendy_font.metrics.ascender * zero_scale);
+    
+    let scaled_label_nudge = config::JUDGMENT_LABEL_VERTICAL_NUDGE_REF * height_scale;
+    let miso_label_baseline_y = line_top_y + (miso_font.metrics.ascender * label_scale) + scaled_label_nudge;
+
+
+    let zero_spacing = config::JUDGMENT_ZERO_SPACING_REF * width_scale;
+    let zero_str = "0"; // Actual count will replace this later
+    let zero_width = wendy_font.measure_text_normalized(zero_str) * zero_scale;
+
+    for i in 0..4 {
+        let color = if i < 3 { dim_color } else { bright_color };
+        renderer.draw_text(
+            device, cmd_buf, wendy_font, zero_str,
+            current_pen_x, wendy_zero_baseline_y,
+            color, zero_scale, None
+        );
+        current_pen_x += zero_width + zero_spacing;
+    }
+
+    current_pen_x -= zero_spacing; 
+    current_pen_x += config::JUDGMENT_ZERO_TO_LABEL_SPACING_REF * width_scale;
+    
+    renderer.draw_text(
+        device, cmd_buf, miso_font, label_text,
+        current_pen_x, miso_label_baseline_y,
+        bright_color, label_scale, None
+    );
+}
+
+
 // --- Drawing Logic ---
 pub fn draw(
     renderer: &Renderer,
     game_state: &GameState,
-    assets: &AssetManager, // Changed to use assets
+    assets: &AssetManager, 
     device: &ash::Device,
     cmd_buf: vk::CommandBuffer,
 ) {
@@ -520,6 +571,8 @@ pub fn draw(
 
     let duration_meter_outer_left_x = config::DURATION_METER_LEFT_MARGIN_REF * width_scale;
     let duration_meter_outer_top_y = config::DURATION_METER_TOP_MARGIN_REF * height_scale;
+    let duration_meter_outer_bottom_y = duration_meter_outer_top_y + duration_meter_height;
+
 
     renderer.draw_quad(
         device, cmd_buf, DescriptorSetId::SolidColor,
@@ -559,14 +612,12 @@ pub fn draw(
             .calculated_length_sec.unwrap_or(0.0);
 
         let current_elapsed_song_time_sec = if total_duration_sec > 0.0 && game_state.audio_start_time.is_some() {
-            // time since beat 0 = (time for current actual chart beat) - (time for beat 0)
-            // game_state.timing_data.song_offset_sec IS the time of beat 0 relative to audio file start
             (game_state.timing_data.get_time_for_beat(game_state.current_chart_beat_actual) - game_state.timing_data.song_offset_sec).max(0.0)
         } else {
             0.0
         };
         
-        let progress_percentage = if total_duration_sec > 0.01 { // Avoid division by zero or tiny durations
+        let progress_percentage = if total_duration_sec > 0.01 { 
             (current_elapsed_song_time_sec / total_duration_sec).clamp(0.0, 1.0)
         } else {
             0.0
@@ -617,6 +668,44 @@ pub fn draw(
                 text_scale, 
                 None
             );
+        }
+    }
+
+    // --- Draw Judgment Counts ---
+    if let (Some(_wendy_font_ref_for_metrics), Some(_miso_font_ref_for_metrics)) = (assets.get_font(FontId::Wendy), assets.get_font(FontId::Miso)) {
+        let mut current_line_visual_top_y = duration_meter_outer_bottom_y + (config::JUDGMENT_TEXT_LINE_TOP_OFFSET_FROM_DURATION_METER_REF * height_scale);
+        let judgment_start_x = config::JUDGMENT_ZERO_LEFT_START_OFFSET_REF * width_scale;
+
+        let zero_target_visual_height = config::JUDGMENT_ZERO_VISUAL_HEIGHT_REF * height_scale;
+        let wendy_font_typographic_height_norm = (_wendy_font_ref_for_metrics.metrics.ascender - _wendy_font_ref_for_metrics.metrics.descender).max(1e-5);
+        let wendy_zero_scale = zero_target_visual_height / wendy_font_typographic_height_norm;
+        
+        let label_target_visual_height = config::JUDGMENT_LABEL_VISUAL_HEIGHT_REF * height_scale;
+        let miso_font_typographic_height_norm = (_miso_font_ref_for_metrics.metrics.ascender - _miso_font_ref_for_metrics.metrics.descender).max(1e-5);
+        let miso_label_scale = label_target_visual_height / miso_font_typographic_height_norm;
+
+        let judgment_lines_data = [
+            ("FANTASTIC", config::JUDGMENT_W1_DIM_COLOR, config::JUDGMENT_W1_BRIGHT_COLOR),
+            ("PERFECT",   config::JUDGMENT_W2_DIM_COLOR, config::JUDGMENT_W2_BRIGHT_COLOR),
+            ("GREAT",     config::JUDGMENT_W3_DIM_COLOR, config::JUDGMENT_W3_BRIGHT_COLOR),
+            ("DECENT",    config::JUDGMENT_W4_DIM_COLOR, config::JUDGMENT_W4_BRIGHT_COLOR),
+            ("WAY OFF",   config::JUDGMENT_W5_DIM_COLOR, config::JUDGMENT_W5_BRIGHT_COLOR),
+            ("MISS",      config::JUDGMENT_MISS_DIM_COLOR, config::JUDGMENT_MISS_BRIGHT_COLOR),
+        ];
+        
+        let line_visual_height_for_spacing = zero_target_visual_height.max(label_target_visual_height); 
+        let vertical_spacing_between_lines = config::JUDGMENT_LINE_VERTICAL_SPACING_REF * height_scale;
+
+
+        for (label, dim_color, bright_color) in judgment_lines_data.iter() {
+            draw_judgment_line(
+                renderer, device, cmd_buf, assets,
+                current_line_visual_top_y, judgment_start_x,
+                wendy_zero_scale, miso_label_scale,
+                label, *dim_color, *bright_color,
+                height_scale, width_scale
+            );
+            current_line_visual_top_y += line_visual_height_for_spacing + vertical_spacing_between_lines;
         }
     }
 
