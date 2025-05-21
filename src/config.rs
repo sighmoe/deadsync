@@ -140,6 +140,12 @@ pub const PINK_BOX_COLOR: [f32; 4] = [1.0, 71.0 / 255.0, 179.0 / 255.0, 1.0];
 pub const TOP_LEFT_BOX_COLOR: [f32; 4] = [230.0 / 255.0, 230.0 / 255.0, 250.0 / 255.0, 1.0];
 pub const UI_BOX_DARK_COLOR: [f32;4] = [30.0/255.0, 40.0/255.0, 47.0/255.0, 1.0];
 
+// Constants for the small boxes within the difficulty display area
+pub const DIFFICULTY_DISPLAY_INNER_BOX_COLOR: [f32; 4] = [15.0/255.0, 15.0/255.0, 15.0/255.0, 1.0]; // #0f0f0f
+pub const DIFFICULTY_DISPLAY_INNER_BOX_REF_SIZE: f32 = 42.0; // Size (width and height) at reference resolution
+pub const DIFFICULTY_DISPLAY_INNER_BOX_BORDER_AND_SPACING_REF: f32 = 3.0; // Border from outer box and spacing between inner boxes
+pub const DIFFICULTY_DISPLAY_INNER_BOX_COUNT: usize = 5;
+
 // Reference resolution for select_music.rs layout calculations
 pub const LAYOUT_BOXES_REF_RES_WIDTH: f32 = 1280.0;
 pub const LAYOUT_BOXES_REF_RES_HEIGHT: f32 = 720.0;

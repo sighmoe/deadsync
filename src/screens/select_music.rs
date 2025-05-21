@@ -1,3 +1,4 @@
+// src/screens/select_music.rs
 use crate::assets::{AssetManager, FontId, SoundId};
 use crate::audio::AudioManager;
 use crate::config;
@@ -279,7 +280,7 @@ pub fn draw(
     // Scaled padding for detail area
     let artist_header_left_padding_current = config::ARTIST_HEADER_LEFT_PADDING_REF * width_scale_factor;
     let artist_header_top_padding_current = config::ARTIST_HEADER_TOP_PADDING_REF * height_scale_factor;
-    let bpm_header_left_padding_current = config::BPM_HEADER_LEFT_PADDING_REF * width_scale_factor;
+    // let bpm_header_left_padding_current = config::BPM_HEADER_LEFT_PADDING_REF * width_scale_factor; // Not used directly, derived from artist_header_left_padding
     let header_to_value_horizontal_gap_current = config::HEADER_TO_VALUE_HORIZONTAL_GAP_REF * width_scale_factor;
     let bpm_to_length_horizontal_gap_current = config::BPM_TO_LENGTH_HORIZONTAL_GAP_REF * width_scale_factor;
     let artist_to_bpm_vertical_gap_current = config::ARTIST_TO_BPM_VERTICAL_GAP_REF * height_scale_factor;
@@ -404,6 +405,31 @@ pub fn draw(
         Rad(0.0), config::UI_BOX_DARK_COLOR,
         [0.0,0.0], [1.0,1.0]
     );
+
+    // --- Draw 5 Inner Boxes in Difficulty Box ---
+    let scaled_inner_box_dim_w = config::DIFFICULTY_DISPLAY_INNER_BOX_REF_SIZE * width_scale_factor;
+    let scaled_inner_box_dim_h = config::DIFFICULTY_DISPLAY_INNER_BOX_REF_SIZE * height_scale_factor;
+    let scaled_padding_border_x = config::DIFFICULTY_DISPLAY_INNER_BOX_BORDER_AND_SPACING_REF * width_scale_factor;
+    let scaled_padding_border_y = config::DIFFICULTY_DISPLAY_INNER_BOX_BORDER_AND_SPACING_REF * height_scale_factor; // Also used as spacing
+
+    let inner_boxes_start_x = small_upper_right_box_left_x + scaled_padding_border_x;
+    let inner_boxes_start_y = small_upper_right_box_top_y + scaled_padding_border_y;
+
+    for i in 0..config::DIFFICULTY_DISPLAY_INNER_BOX_COUNT {
+        let current_inner_box_top_y = inner_boxes_start_y + i as f32 * (scaled_inner_box_dim_h + scaled_padding_border_y);
+        let inner_box_center_x = inner_boxes_start_x + scaled_inner_box_dim_w / 2.0;
+        let inner_box_center_y = current_inner_box_top_y + scaled_inner_box_dim_h / 2.0;
+
+        renderer.draw_quad(
+            device, cmd_buf, DescriptorSetId::SolidColor,
+            Vector3::new(inner_box_center_x, inner_box_center_y, 0.0),
+            (scaled_inner_box_dim_w, scaled_inner_box_dim_h),
+            Rad(0.0), config::DIFFICULTY_DISPLAY_INNER_BOX_COLOR,
+            [0.0,0.0], [1.0,1.0]
+        );
+    }
+    // --- End Draw 5 Inner Boxes ---
+
 
     let bottom_left_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - left_box_current_height;
     let bottom_left_box_left_x = small_upper_right_box_left_x - horizontal_gap_left_to_right_current - left_boxes_current_width;
@@ -551,7 +577,7 @@ pub fn draw(
                 // --- Draw BPM ---
                 let bpm_header_str = "BPM";
                 let bpm_header_width = list_font.measure_text_normalized(bpm_header_str) * detail_header_effective_scale;
-                let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current;
+                let bpm_header_x = artist_bpm_box_left_x + artist_header_left_padding_current; // Use same left padding as artist
                 let bpm_header_baseline_y = artist_value_baseline_y + advance_for_next_line + artist_to_bpm_vertical_gap_current;
                 renderer.draw_text(
                     device, cmd_buf, list_font, bpm_header_str,
@@ -621,7 +647,7 @@ pub fn draw(
                 // --- Draw BPM Header (no value) ---
                 let bpm_header_str = "BPM";
                 let bpm_header_width = list_font.measure_text_normalized(bpm_header_str) * detail_header_effective_scale; // Still need for LENGTH positioning
-                let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current;
+                let bpm_header_x = artist_bpm_box_left_x + artist_header_left_padding_current; // Use same left padding as artist
                 let bpm_header_baseline_y = artist_header_baseline_y + advance_for_next_line + artist_to_bpm_vertical_gap_current; // Position relative to artist header's line
                  renderer.draw_text(
                     device, cmd_buf, list_font, bpm_header_str,
