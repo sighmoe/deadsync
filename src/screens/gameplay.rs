@@ -5,7 +5,7 @@ use crate::parsing::simfile::{ChartInfo, NoteChar, ProcessedChartData, SongInfo}
 use crate::state::{
     ActiveExplosion,
     AppState, Arrow, ArrowDirection, GameState, Judgment, TargetInfo,
-    VirtualKeyCode, ALL_ARROW_DIRECTIONS,
+    VirtualKeyCode, ALL_ARROW_DIRECTIONS, ALL_JUDGMENTS,
 };
 use ash::vk;
 use cgmath::{Rad, Vector3};
@@ -184,16 +184,20 @@ pub fn initialize_game_state(
         0.0 // Avoid division by zero
     };
 
-    // Calculate the actual chart beat at the moment audio starts (time = 0 relative to audio file)
     let initial_actual_chart_beat = temp_timing_data.get_beat_for_time(0.0);
+
+    let mut judgment_counts = HashMap::new();
+    for judgment_type in ALL_JUDGMENTS.iter() {
+        judgment_counts.insert(*judgment_type, 0);
+    }
 
 
     GameState {
         targets,
         arrows: arrows_map,
         pressed_keys: HashSet::new(),
-        current_beat: initial_actual_chart_beat - initial_display_beat_offset, // Display beat
-        current_chart_beat_actual: initial_actual_chart_beat, // Actual musical beat
+        current_beat: initial_actual_chart_beat - initial_display_beat_offset, 
+        current_chart_beat_actual: initial_actual_chart_beat, 
         window_size: (win_w, win_h),
         active_explosions: HashMap::new(),
         audio_start_time: Some(audio_start_time),
@@ -203,7 +207,8 @@ pub fn initialize_game_state(
         processed_chart: Arc::new(processed_chart_data),
         current_measure_idx: 0,
         current_line_in_measure_idx: 0,
-        current_processed_beat: -1.0, // Start before beat 0 to ensure first notes are processed
+        current_processed_beat: -1.0, 
+        judgment_counts,
     }
 }
 
@@ -283,7 +288,6 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
 // --- Arrow Spawning Logic ---
 fn spawn_arrows_from_chart(state: &mut GameState) {
     if state.processed_chart.measures.is_empty() { return; }
-    // Use current_chart_beat_actual for spawning logic as it's tied to audio time
     let current_audio_time_chart_beat = state.current_chart_beat_actual;
     let lookahead_chart_beat_limit = current_audio_time_chart_beat + config::SPAWN_LOOKAHEAD_BEATS;
 
@@ -310,17 +314,15 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
         }
         if target_beat_for_line > lookahead_chart_beat_limit { break; }
         
-        // Time relative to audio file start for this line
         let time_of_line_sec_audio_relative = state.timing_data.get_time_for_beat(target_beat_for_line);
-        // Current audio time relative to audio file start
         let current_audio_time_sec_audio_relative = if let Some(start_time) = state.audio_start_time {
             Instant::now().duration_since(start_time).as_secs_f32()
-        } else { return; }; // Should not happen if audio started
+        } else { return; }; 
 
         let time_to_target_on_screen_sec = time_of_line_sec_audio_relative - current_audio_time_sec_audio_relative;
 
 
-        if time_to_target_on_screen_sec < -0.05 { // Allow a small negative tolerance for late spawns if necessary
+        if time_to_target_on_screen_sec < -0.05 { 
             trace!("Missed spawn window for line at chart_beat {:.2} (current audio time implies chart_beat {:.2})", target_beat_for_line, current_audio_time_chart_beat);
             state.current_processed_beat = target_beat_for_line;
             state.current_line_in_measure_idx += 1;
@@ -329,7 +331,7 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
         
         let target_y_pos = state.targets.first().map_or(0.0, |t| t.y);
         let current_arrow_speed = config::ARROW_SPEED * (state.window_size.1 / config::GAMEPLAY_REF_HEIGHT);
-        let distance_to_travel_pixels = current_arrow_speed * time_to_target_on_screen_sec.max(0.0); // Use max(0.0) to prevent negative distance
+        let distance_to_travel_pixels = current_arrow_speed * time_to_target_on_screen_sec.max(0.0); 
         let spawn_y = target_y_pos + distance_to_travel_pixels;
 
         let note_line = &current_measure_data[state.current_line_in_measure_idx];
@@ -363,7 +365,7 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
     if let Some(dir) = direction {
         if let Some(column_arrows) = state.arrows.get_mut(&dir) {
-            let current_display_beat = state.current_beat; // Use display beat for hit window checking
+            let current_display_beat = state.current_beat; 
             let bpm_at_arrow_approx = state.timing_data.points.iter()
                 .rfind(|p| p.beat <= current_display_beat)
                 .map_or(120.0, |p| p.bpm);
@@ -394,8 +396,10 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
                                else if min_abs_time_diff_ms <= config::W3_WINDOW_MS { Judgment::W3 }
                                else if min_abs_time_diff_ms <= config::W4_WINDOW_MS { Judgment::W4 }
                                else { Judgment::W5 };
+                
+                *state.judgment_counts.entry(judgment).or_insert(0) += 1; // Increment count
 
-                info!( "HIT! {:?} {:?} ({:.1}ms) -> {:?}", dir, note_char_for_log, time_diff_for_log, judgment );
+                info!( "HIT! {:?} {:?} ({:.1}ms) -> {:?} (Count: {})", dir, note_char_for_log, time_diff_for_log, judgment, state.judgment_counts[&judgment] );
 
                 let explosion_end_time = Instant::now() + config::EXPLOSION_DURATION; 
                 state.active_explosions.insert(dir, ActiveExplosion {
@@ -419,8 +423,8 @@ fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
 // --- Miss Checking Logic ---
 fn check_misses(state: &mut GameState) {
-    let current_display_beat = state.current_beat; // Use display beat for miss window
-    let mut missed_count = 0;
+    let current_display_beat = state.current_beat; 
+    let mut missed_count_this_frame = 0;
     for (_dir, column_arrows) in state.arrows.iter_mut() {
         column_arrows.retain(|arrow| {
             let bpm_at_arrow_target = state.timing_data.points.iter().rfind(|p| p.beat <= arrow.target_beat).map_or(120.0, |p| p.bpm);
@@ -428,13 +432,15 @@ fn check_misses(state: &mut GameState) {
             let miss_window_beats_dynamic = (config::MISS_WINDOW_MS / 1000.0) / seconds_per_beat_at_target;
             let beat_diff = current_display_beat - arrow.target_beat;
             if beat_diff > miss_window_beats_dynamic {
-                info!( "MISSED! {:?} {:?} (TgtBeat: {:.2}, DispBeat: {:.2}, DiffBeat: {:.2} > {:.2} ({:.1}ms))", arrow.direction, arrow.note_char, arrow.target_beat, current_display_beat, beat_diff, miss_window_beats_dynamic, config::MISS_WINDOW_MS );
-                missed_count += 1;
+                *state.judgment_counts.entry(Judgment::Miss).or_insert(0) += 1; // Increment miss count
+                info!( "MISSED! {:?} {:?} (TgtBeat: {:.2}, DispBeat: {:.2}, DiffBeat: {:.2} > {:.2} ({:.1}ms)) (Miss Count: {})", 
+                       arrow.direction, arrow.note_char, arrow.target_beat, current_display_beat, beat_diff, miss_window_beats_dynamic, config::MISS_WINDOW_MS, state.judgment_counts[&Judgment::Miss] );
+                missed_count_this_frame += 1;
                 false
             } else { true }
         });
     }
-    if missed_count > 0 { trace!("Removed {} missed arrows.", missed_count); }
+    if missed_count_this_frame > 0 { trace!("Removed {} missed arrows.", missed_count_this_frame); }
 }
 
 
@@ -448,6 +454,7 @@ fn draw_judgment_line(
     zero_scale: f32,
     label_scale: f32,
     label_text: &str,
+    current_count: u32, // Pass the actual count
     dim_color: [f32; 4],
     bright_color: [f32; 4],
     height_scale: f32, 
@@ -464,17 +471,34 @@ fn draw_judgment_line(
 
 
     let zero_spacing = config::JUDGMENT_ZERO_SPACING_REF * width_scale;
-    let zero_str = "0"; // Actual count will replace this later
-    let zero_width = wendy_font.measure_text_normalized(zero_str) * zero_scale;
+    
+    // Format the count into a 4-digit string, padding with leading zeros
+    let count_str = format!("{:04}", current_count.min(9999)); // Cap at 9999
+    let count_chars: Vec<char> = count_str.chars().collect();
 
-    for i in 0..4 {
-        let color = if i < 3 { dim_color } else { bright_color };
+    let mut first_non_zero_found = false;
+
+    for (idx, digit_char) in count_chars.iter().enumerate() {
+        let digit_str = digit_char.to_string();
+        let digit_width = wendy_font.measure_text_normalized(&digit_str) * zero_scale;
+        
+        // Determine color: dim if it's a leading zero before any non-zero digit.
+        // Bright if it's non-zero, or if a non-zero digit has already been encountered.
+        let is_bright;
+        if *digit_char == '0' && !first_non_zero_found && idx < count_chars.len() -1 { // Don't make last '0' dim if count is 0
+             is_bright = false;
+        } else {
+            is_bright = true;
+            first_non_zero_found = true;
+        }
+        let color = if is_bright { bright_color } else { dim_color };
+
         renderer.draw_text(
-            device, cmd_buf, wendy_font, zero_str,
+            device, cmd_buf, wendy_font, &digit_str,
             current_pen_x, wendy_zero_baseline_y,
             color, zero_scale, None
         );
-        current_pen_x += zero_width + zero_spacing;
+        current_pen_x += digit_width + zero_spacing;
     }
 
     current_pen_x -= zero_spacing; 
@@ -593,7 +617,6 @@ pub fn draw(
     let dm_inner_top_y = duration_meter_outer_top_y + duration_meter_border_thickness;
 
     if dm_inner_width > 0.0 && dm_inner_height > 0.0 {
-        // Draw Empty Part
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::SolidColor,
             Vector3::new(
@@ -607,7 +630,6 @@ pub fn draw(
             [0.0, 0.0], [1.0, 1.0]
         );
         
-        // Calculate Progress for Fill
         let total_duration_sec = game_state.song_info.charts[game_state.selected_chart_idx]
             .calculated_length_sec.unwrap_or(0.0);
 
@@ -639,7 +661,6 @@ pub fn draw(
             );
         }
 
-        // Draw Song Title in Duration Meter
         if let Some(font) = assets.get_font(FontId::Miso) {
             let song_title = &game_state.song_info.title;
             
@@ -672,37 +693,38 @@ pub fn draw(
     }
 
     // --- Draw Judgment Counts ---
-    if let (Some(_wendy_font_ref_for_metrics), Some(_miso_font_ref_for_metrics)) = (assets.get_font(FontId::Wendy), assets.get_font(FontId::Miso)) {
+    if let (Some(wendy_font_ref), Some(miso_font_ref)) = (assets.get_font(FontId::Wendy), assets.get_font(FontId::Miso)) {
         let mut current_line_visual_top_y = duration_meter_outer_bottom_y + (config::JUDGMENT_TEXT_LINE_TOP_OFFSET_FROM_DURATION_METER_REF * height_scale);
         let judgment_start_x = config::JUDGMENT_ZERO_LEFT_START_OFFSET_REF * width_scale;
 
         let zero_target_visual_height = config::JUDGMENT_ZERO_VISUAL_HEIGHT_REF * height_scale;
-        let wendy_font_typographic_height_norm = (_wendy_font_ref_for_metrics.metrics.ascender - _wendy_font_ref_for_metrics.metrics.descender).max(1e-5);
+        let wendy_font_typographic_height_norm = (wendy_font_ref.metrics.ascender - wendy_font_ref.metrics.descender).max(1e-5);
         let wendy_zero_scale = zero_target_visual_height / wendy_font_typographic_height_norm;
         
         let label_target_visual_height = config::JUDGMENT_LABEL_VISUAL_HEIGHT_REF * height_scale;
-        let miso_font_typographic_height_norm = (_miso_font_ref_for_metrics.metrics.ascender - _miso_font_ref_for_metrics.metrics.descender).max(1e-5);
+        let miso_font_typographic_height_norm = (miso_font_ref.metrics.ascender - miso_font_ref.metrics.descender).max(1e-5);
         let miso_label_scale = label_target_visual_height / miso_font_typographic_height_norm;
 
         let judgment_lines_data = [
-            ("FANTASTIC", config::JUDGMENT_W1_DIM_COLOR, config::JUDGMENT_W1_BRIGHT_COLOR),
-            ("PERFECT",   config::JUDGMENT_W2_DIM_COLOR, config::JUDGMENT_W2_BRIGHT_COLOR),
-            ("GREAT",     config::JUDGMENT_W3_DIM_COLOR, config::JUDGMENT_W3_BRIGHT_COLOR),
-            ("DECENT",    config::JUDGMENT_W4_DIM_COLOR, config::JUDGMENT_W4_BRIGHT_COLOR),
-            ("WAY OFF",   config::JUDGMENT_W5_DIM_COLOR, config::JUDGMENT_W5_BRIGHT_COLOR),
-            ("MISS",      config::JUDGMENT_MISS_DIM_COLOR, config::JUDGMENT_MISS_BRIGHT_COLOR),
+            (Judgment::W1, "FANTASTIC", config::JUDGMENT_W1_DIM_COLOR, config::JUDGMENT_W1_BRIGHT_COLOR),
+            (Judgment::W2, "PERFECT",   config::JUDGMENT_W2_DIM_COLOR, config::JUDGMENT_W2_BRIGHT_COLOR),
+            (Judgment::W3, "GREAT",     config::JUDGMENT_W3_DIM_COLOR, config::JUDGMENT_W3_BRIGHT_COLOR),
+            (Judgment::W4, "DECENT",    config::JUDGMENT_W4_DIM_COLOR, config::JUDGMENT_W4_BRIGHT_COLOR),
+            (Judgment::W5, "WAY OFF",   config::JUDGMENT_W5_DIM_COLOR, config::JUDGMENT_W5_BRIGHT_COLOR),
+            (Judgment::Miss,"MISS",      config::JUDGMENT_MISS_DIM_COLOR, config::JUDGMENT_MISS_BRIGHT_COLOR),
         ];
         
         let line_visual_height_for_spacing = zero_target_visual_height.max(label_target_visual_height); 
         let vertical_spacing_between_lines = config::JUDGMENT_LINE_VERTICAL_SPACING_REF * height_scale;
 
 
-        for (label, dim_color, bright_color) in judgment_lines_data.iter() {
+        for (judgment_type, label, dim_color, bright_color) in judgment_lines_data.iter() {
+            let count = game_state.judgment_counts.get(judgment_type).copied().unwrap_or(0);
             draw_judgment_line(
                 renderer, device, cmd_buf, assets,
                 current_line_visual_top_y, judgment_start_x,
                 wendy_zero_scale, miso_label_scale,
-                label, *dim_color, *bright_color,
+                label, count, *dim_color, *bright_color,
                 height_scale, width_scale
             );
             current_line_visual_top_y += line_visual_height_for_spacing + vertical_spacing_between_lines;

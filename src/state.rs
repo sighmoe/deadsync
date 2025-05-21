@@ -126,6 +126,7 @@ pub struct GameState {
     pub current_measure_idx: usize,
     pub current_line_in_measure_idx: usize,
     pub current_processed_beat: f32,
+    pub judgment_counts: HashMap<Judgment, u32>, // NEW: Store judgment counts
 }
 
 // --- Gameplay Elements (remain the same) ---
@@ -136,6 +137,8 @@ pub const ALL_ARROW_DIRECTIONS: [ArrowDirection; 4] = [ ArrowDirection::Left, Ar
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Judgment { W1, W2, W3, W4, W5, Miss }
+pub const ALL_JUDGMENTS: [Judgment; 6] = [Judgment::W1, Judgment::W2, Judgment::W3, Judgment::W4, Judgment::W5, Judgment::Miss];
+
 
 #[derive(Debug, Clone)] pub struct TargetInfo { pub x: f32, pub y: f32, pub direction: ArrowDirection, }
 #[derive(Debug, Clone)]
