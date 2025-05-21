@@ -3,7 +3,7 @@ use crate::assets::{AssetManager, FontId, SoundId};
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
-use crate::parsing::simfile::SongInfo;
+use crate::parsing::simfile::SongInfo; // Ensure ChartInfo is accessible if needed, though we use SongInfo.charts
 use crate::state::{AppState, SelectMusicState, VirtualKeyCode, MusicWheelEntry, NavDirection};
 use ash::vk;
 use cgmath::{Rad, Vector3, InnerSpace};
@@ -199,6 +199,9 @@ pub fn draw(
 ) {
     let header_footer_font = assets.get_font(FontId::Wendy).expect("Wendy font missing");
     let list_font = assets.get_font(FontId::Miso).expect("Miso font missing");
+    let difficulty_font = assets.get_font(FontId::Wendy).expect("Wendy font for difficulty missing");
+
+
     let (window_width, window_height) = renderer.window_size();
     let center_x = window_width / 2.0;
 
@@ -212,7 +215,7 @@ pub fn draw(
     const PINK_BOX_REF_WIDTH: f32 = 625.0;
     const PINK_BOX_REF_HEIGHT: f32 = 90.0;
     const SMALL_UPPER_RIGHT_BOX_REF_WIDTH: f32 = 48.0;
-    const SMALL_UPPER_RIGHT_BOX_REF_HEIGHT: f32 = 228.0;
+    const SMALL_UPPER_RIGHT_BOX_REF_HEIGHT: f32 = 228.0; // (42*5 boxes + 3*4 spacing + 3*2 border) = 210 + 12 + 6 = 228
     const LEFT_BOXES_REF_WIDTH: f32 = 429.0;
     const LEFT_BOX_REF_HEIGHT: f32 = 96.0;
     const TOPMOST_LEFT_BOX_REF_WIDTH: f32 = 263.0;
@@ -406,7 +409,7 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    // --- Draw 5 Inner Boxes in Difficulty Box ---
+    // --- Draw 5 Inner Boxes and Difficulty Numbers in Difficulty Box ---
     let scaled_inner_box_dim_w = config::DIFFICULTY_DISPLAY_INNER_BOX_REF_SIZE * width_scale_factor;
     let scaled_inner_box_dim_h = config::DIFFICULTY_DISPLAY_INNER_BOX_REF_SIZE * height_scale_factor;
     let scaled_padding_border_x = config::DIFFICULTY_DISPLAY_INNER_BOX_BORDER_AND_SPACING_REF * width_scale_factor;
@@ -415,7 +418,15 @@ pub fn draw(
     let inner_boxes_start_x = small_upper_right_box_left_x + scaled_padding_border_x;
     let inner_boxes_start_y = small_upper_right_box_top_y + scaled_padding_border_y;
 
-    for i in 0..config::DIFFICULTY_DISPLAY_INNER_BOX_COUNT {
+    let difficulty_levels_ordered = [
+        ("Beginner", config::DIFFICULTY_TEXT_COLOR_BEGINNER),
+        ("Easy", config::DIFFICULTY_TEXT_COLOR_EASY), // "Basic" or "Light" might also be used in SM
+        ("Medium", config::DIFFICULTY_TEXT_COLOR_MEDIUM), // "Standard" or "Trick"
+        ("Hard", config::DIFFICULTY_TEXT_COLOR_HARD),   // "Heavy" or "S.S.R" or "Maniac"
+        ("Challenge", config::DIFFICULTY_TEXT_COLOR_CHALLENGE), // "Expert" or "Oni"
+    ];
+
+    for (i, (diff_name_to_match, diff_color)) in difficulty_levels_ordered.iter().enumerate() {
         let current_inner_box_top_y = inner_boxes_start_y + i as f32 * (scaled_inner_box_dim_h + scaled_padding_border_y);
         let inner_box_center_x = inner_boxes_start_x + scaled_inner_box_dim_w / 2.0;
         let inner_box_center_y = current_inner_box_top_y + scaled_inner_box_dim_h / 2.0;
@@ -427,8 +438,45 @@ pub fn draw(
             Rad(0.0), config::DIFFICULTY_DISPLAY_INNER_BOX_COLOR,
             [0.0,0.0], [1.0,1.0]
         );
+
+        if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
+            if let Some(chart_info) = selected_song_arc.charts.iter().find(|c| {
+                // Case-insensitive comparison for difficulty string
+                c.difficulty.eq_ignore_ascii_case(diff_name_to_match) && c.stepstype == "dance-single" // Assuming dance-single for now
+            }) {
+                if !chart_info.meter.is_empty() && chart_info.meter.chars().all(char::is_numeric) {
+                    let meter_str = &chart_info.meter;
+
+                    // Scale text to fit visually within the box height (e.g., 75% of box height)
+                    let target_text_visual_height = scaled_inner_box_dim_h * 0.75;
+                    let font_typographic_height_norm = (difficulty_font.metrics.ascender - difficulty_font.metrics.descender).max(1e-5);
+                    let text_scale = target_text_visual_height / font_typographic_height_norm;
+                    
+                    let text_width_pixels = difficulty_font.measure_text_normalized(meter_str) * text_scale;
+                    
+                    let text_draw_x = inner_boxes_start_x + (scaled_inner_box_dim_w - text_width_pixels) / 2.0;
+                    
+                    // Center baseline vertically
+                    let text_visual_center_y = current_inner_box_top_y + scaled_inner_box_dim_h / 2.0;
+                    let text_baseline_y = text_visual_center_y + (difficulty_font.metrics.ascender + difficulty_font.metrics.descender) / 2.0 * text_scale;
+
+
+                    renderer.draw_text(
+                        device,
+                        cmd_buf,
+                        difficulty_font,
+                        meter_str,
+                        text_draw_x,
+                        text_baseline_y,
+                        *diff_color,
+                        text_scale,
+                        None,
+                    );
+                }
+            }
+        }
     }
-    // --- End Draw 5 Inner Boxes ---
+    // --- End Draw 5 Inner Boxes and Difficulty Numbers ---
 
 
     let bottom_left_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - left_box_current_height;

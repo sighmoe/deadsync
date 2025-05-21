@@ -140,12 +140,6 @@ pub const PINK_BOX_COLOR: [f32; 4] = [1.0, 71.0 / 255.0, 179.0 / 255.0, 1.0];
 pub const TOP_LEFT_BOX_COLOR: [f32; 4] = [230.0 / 255.0, 230.0 / 255.0, 250.0 / 255.0, 1.0];
 pub const UI_BOX_DARK_COLOR: [f32;4] = [30.0/255.0, 40.0/255.0, 47.0/255.0, 1.0];
 
-// Constants for the small boxes within the difficulty display area
-pub const DIFFICULTY_DISPLAY_INNER_BOX_COLOR: [f32; 4] = [15.0/255.0, 15.0/255.0, 15.0/255.0, 1.0]; // #0f0f0f
-pub const DIFFICULTY_DISPLAY_INNER_BOX_REF_SIZE: f32 = 42.0; // Size (width and height) at reference resolution
-pub const DIFFICULTY_DISPLAY_INNER_BOX_BORDER_AND_SPACING_REF: f32 = 3.0; // Border from outer box and spacing between inner boxes
-pub const DIFFICULTY_DISPLAY_INNER_BOX_COUNT: usize = 5;
-
 // Reference resolution for select_music.rs layout calculations
 pub const LAYOUT_BOXES_REF_RES_WIDTH: f32 = 1280.0;
 pub const LAYOUT_BOXES_REF_RES_HEIGHT: f32 = 720.0;
@@ -164,6 +158,19 @@ pub const BPM_HEADER_LEFT_PADDING_REF: f32 = 36.0;
 pub const HEADER_TO_VALUE_HORIZONTAL_GAP_REF: f32 = 6.0;
 pub const ARTIST_TO_BPM_VERTICAL_GAP_REF: f32 = 5.0;
 pub const BPM_TO_LENGTH_HORIZONTAL_GAP_REF: f32 = 214.0;
+
+// Constants for the small boxes within the difficulty display area
+pub const DIFFICULTY_DISPLAY_INNER_BOX_COLOR: [f32; 4] = [15.0/255.0, 15.0/255.0, 15.0/255.0, 1.0]; // #0f0f0f
+pub const DIFFICULTY_DISPLAY_INNER_BOX_REF_SIZE: f32 = 42.0; // Size (width and height) at reference resolution
+pub const DIFFICULTY_DISPLAY_INNER_BOX_BORDER_AND_SPACING_REF: f32 = 3.0; // Border from outer box and spacing between inner boxes
+pub const DIFFICULTY_DISPLAY_INNER_BOX_COUNT: usize = 5;
+
+// Colors for difficulty numbers (meter)
+pub const DIFFICULTY_TEXT_COLOR_BEGINNER: [f32; 4] = [255.0/255.0, 190.0/255.0, 0.0/255.0, 1.0];     // #FFBE00
+pub const DIFFICULTY_TEXT_COLOR_EASY: [f32; 4] = [255.0/255.0, 125.0/255.0, 0.0/255.0, 1.0];         // #FF7D00
+pub const DIFFICULTY_TEXT_COLOR_MEDIUM: [f32; 4] = [255.0/255.0, 93.0/255.0, 71.0/255.0, 1.0];      // #FF5D47
+pub const DIFFICULTY_TEXT_COLOR_HARD: [f32; 4] = [255.0/255.0, 87.0/255.0, 126.0/255.0, 1.0];       // #FF577E
+pub const DIFFICULTY_TEXT_COLOR_CHALLENGE: [f32; 4] = [255.0/255.0, 71.0/255.0, 179.0/255.0, 1.0];  // #FF47B3 (Matches one of the pack palette colors too)
 
 // Simply Love / ITGMania Color Palette for Pack Name TEXTS
 pub const PACK_NAME_COLOR_PALETTE: [[f32; 4]; 12] = [
