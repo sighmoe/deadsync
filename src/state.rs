@@ -40,7 +40,7 @@ impl Default for MenuState {
 #[derive(Debug, Clone)] // MusicWheelEntry can be Clone
 pub enum MusicWheelEntry {
     Song(Arc<SongInfo>),
-    PackHeader { name: String, color: [f32; 4] },
+    PackHeader { name: String, color: [f32; 4], banner_path: Option<PathBuf> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)] // NavDirection can be Clone
@@ -126,7 +126,7 @@ pub struct GameState {
     pub current_measure_idx: usize,
     pub current_line_in_measure_idx: usize,
     pub current_processed_beat: f32,
-    pub judgment_counts: HashMap<Judgment, u32>, // NEW: Store judgment counts
+    pub judgment_counts: HashMap<Judgment, u32>, 
 }
 
 // --- Gameplay Elements (remain the same) ---

@@ -1,4 +1,3 @@
-// src/screens/select_music.rs
 use crate::assets::{AssetManager, FontId, SoundId};
 use crate::audio::AudioManager;
 use crate::config;
@@ -98,14 +97,14 @@ pub fn handle_input(
                                             audio_manager.play_sfx(SoundId::MenuStart);
                                             return (Some(AppState::Gameplay), selection_changed_this_frame);
                                         }
-                                        MusicWheelEntry::PackHeader { name: pack_name_str, .. } => {
+                                        MusicWheelEntry::PackHeader { name: pack_name_str, .. } => { // Use .. to ignore other fields like banner_path here
                                             audio_manager.play_sfx(SoundId::MenuChange);
                                             if state.expanded_pack_name.as_ref() == Some(&pack_name_str) {
                                                 state.expanded_pack_name = None;
                                             } else {
                                                 state.expanded_pack_name = Some(pack_name_str.clone());
                                             }
-                                            selection_changed_this_frame = true;
+                                            selection_changed_this_frame = true; // This will trigger a rebuild
                                             state.selection_animation_timer = 0.0;
                                         }
                                     }
@@ -320,7 +319,6 @@ pub fn draw(
         let is_selected_slot = i == CENTER_MUSIC_WHEEL_SLOT_INDEX;
 
         if num_entries > 0 {
-            // Calculate the actual index in the `state.entries` list for this wheel slot
             let list_index_isize = (state.selected_index as isize + i as isize - CENTER_MUSIC_WHEEL_SLOT_INDEX as isize + num_entries as isize) % num_entries as isize;
             let list_index = if list_index_isize < 0 { (list_index_isize + num_entries as isize) as usize } else { list_index_isize as usize };
 
@@ -332,25 +330,21 @@ pub fn draw(
                         current_text_color = config::SONG_TEXT_COLOR;
                         text_x_pos = music_box_left_x + song_text_left_padding_current;
                     }
-                    MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color_val } => {
+                    MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color_val, banner_path: _ } => { // Ignore banner_path for text display
                         display_text = pack_name.clone();
                         current_box_color = if is_selected_slot { lerp_color(config::PACK_HEADER_BOX_COLOR, config::SELECTED_PACK_HEADER_BOX_COLOR, anim_t) } else { config::PACK_HEADER_BOX_COLOR };
                         current_text_color = *pack_text_color_val;
-                        // Center pack header text
                         let text_width_pixels = list_font.measure_text_normalized(&display_text) * wheel_text_effective_scale;
                         text_x_pos = music_box_left_x + (music_wheel_box_current_width - text_width_pixels) / 2.0;
                     }
                 }
             } else {
-                // Should not happen if list_index logic is correct, but good fallback
                 current_box_color = config::MUSIC_WHEEL_BOX_COLOR;
             }
         } else {
-            // No entries, draw empty boxes
             current_box_color = config::MUSIC_WHEEL_BOX_COLOR;
         }
 
-        // Draw the box
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::SolidColor,
             Vector3::new(music_box_center_x, current_box_center_y, 0.0),
@@ -359,14 +353,12 @@ pub fn draw(
             [0.0,0.0], [1.0,1.0]
         );
 
-        // Draw text if any
         if !display_text.is_empty() {
             let current_box_center_y_for_text = current_box_top_y + music_wheel_box_current_height / 2.0;
-            // Calculate baseline for vertical centering of text within the box
             let scaled_ascender = list_font.metrics.ascender * wheel_text_effective_scale;
-            let scaled_descender = list_font.metrics.descender * wheel_text_effective_scale; // Typically negative
-            let mut text_baseline_y = current_box_center_y_for_text + (scaled_ascender + scaled_descender) / 2.0; // Center point for text
-            text_baseline_y += music_wheel_text_vertical_nudge_current; // Apply nudge
+            let scaled_descender = list_font.metrics.descender * wheel_text_effective_scale; 
+            let mut text_baseline_y = current_box_center_y_for_text + (scaled_ascender + scaled_descender) / 2.0; 
+            text_baseline_y += music_wheel_text_vertical_nudge_current; 
 
             renderer.draw_text(
                 device, cmd_buf, list_font, &display_text,
@@ -376,22 +368,20 @@ pub fn draw(
         }
     }
 
-    // --- Draw Header and Footer Bars ---
     renderer.draw_quad(
         device, cmd_buf, DescriptorSetId::SolidColor,
-        Vector3::new(center_x, bar_height / 2.0, 0.0), // Center of header bar
+        Vector3::new(center_x, bar_height / 2.0, 0.0), 
         (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR,
         [0.0,0.0], [1.0,1.0]
     );
     renderer.draw_quad(
         device, cmd_buf, DescriptorSetId::SolidColor,
-        Vector3::new(center_x, footer_y_top_edge + bar_height / 2.0, 0.0), // Center of footer bar
+        Vector3::new(center_x, footer_y_top_edge + bar_height / 2.0, 0.0), 
         (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR,
         [0.0,0.0], [1.0,1.0]
     );
 
-    // --- Draw Pink Box (bottom left) ---
-    let pink_box_left_x = 0.0; // Align to left edge
+    let pink_box_left_x = 0.0; 
     let pink_box_top_y = footer_y_top_edge - pink_box_current_height;
     let pink_box_center_x = pink_box_left_x + pink_box_current_width / 2.0;
     let pink_box_center_y = pink_box_top_y + pink_box_current_height / 2.0;
@@ -403,9 +393,8 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    // --- Draw Small Upper Right Box (relative to pink box) ---
     let small_upper_right_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - small_upper_right_box_current_height;
-    let small_upper_right_box_left_x = pink_box_left_x + pink_box_current_width - small_upper_right_box_current_width; // Aligned to the right edge of the pink box
+    let small_upper_right_box_left_x = pink_box_left_x + pink_box_current_width - small_upper_right_box_current_width; 
     let small_upper_right_box_center_x = small_upper_right_box_left_x + small_upper_right_box_current_width / 2.0;
     let small_upper_right_box_center_y = small_upper_right_box_top_y + small_upper_right_box_current_height / 2.0;
     renderer.draw_quad(
@@ -416,8 +405,7 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    // --- Draw Bottom Left Box (to the left of small_upper_right_box) ---
-    let bottom_left_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - left_box_current_height; // Align top edge with small_upper_right_box
+    let bottom_left_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - left_box_current_height; 
     let bottom_left_box_left_x = small_upper_right_box_left_x - horizontal_gap_left_to_right_current - left_boxes_current_width;
     let bottom_left_box_center_x = bottom_left_box_left_x + left_boxes_current_width / 2.0;
     let bottom_left_box_center_y = bottom_left_box_top_y + left_box_current_height / 2.0;
@@ -429,15 +417,13 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    // --- Top Left Box (Density Graph Area) ---
-    let graph_area_left_x = bottom_left_box_left_x; // Align with box below
+    let graph_area_left_x = bottom_left_box_left_x; 
     let graph_area_width = left_boxes_current_width;
-    let graph_area_height = left_box_current_height; // Use same height as other left boxes
+    let graph_area_height = left_box_current_height; 
     let graph_area_top_y = bottom_left_box_top_y - vertical_gap_between_left_boxes_current - graph_area_height;
     let graph_area_center_x = graph_area_left_x + graph_area_width / 2.0;
     let graph_area_center_y = graph_area_top_y + graph_area_height / 2.0;
 
-    // Draw background for the graph area (always, even if no graph texture)
     renderer.draw_quad(
         device, cmd_buf, DescriptorSetId::SolidColor,
         Vector3::new(graph_area_center_x, graph_area_center_y, 0.0),
@@ -445,21 +431,19 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    // If a graph texture exists (i.e., a song is selected and graph was generated), draw it on top of the background
     if state.current_graph_texture.is_some() {
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::NpsGraph,
             Vector3::new(graph_area_center_x, graph_area_center_y, 0.0),
-            (graph_area_width, graph_area_height), // Stretch texture to fit the box
-            Rad(0.0), [1.0, 1.0, 1.0, 1.0], // White tint for opaque texture
-            [0.0, 0.0], [1.0, 1.0] // Full UVs
+            (graph_area_width, graph_area_height), 
+            Rad(0.0), [1.0, 1.0, 1.0, 1.0], 
+            [0.0, 0.0], [1.0, 1.0] 
         );
     }
 
 
-    // --- Draw Topmost Left Box (above density graph) ---
     let topmost_left_box_top_y = graph_area_top_y - vertical_gap_topleft_to_topmost_current - topmost_left_box_current_height;
-    let topmost_left_box_left_x = graph_area_left_x; // Align with graph area
+    let topmost_left_box_left_x = graph_area_left_x; 
     let topmost_left_box_center_x = topmost_left_box_left_x + topmost_left_box_current_width / 2.0;
     let topmost_left_box_center_y = topmost_left_box_top_y + topmost_left_box_current_height / 2.0;
     renderer.draw_quad(
@@ -470,8 +454,7 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    // --- Draw Artist/BPM Box (above topmost left box) ---
-    let artist_bpm_box_left_x = topmost_left_box_left_x; // Align left edge
+    let artist_bpm_box_left_x = topmost_left_box_left_x; 
     let artist_bpm_box_actual_top_y = topmost_left_box_top_y - vertical_gap_topmost_to_artist_box_current - artist_bpm_box_current_height;
     let artist_bpm_box_center_x = artist_bpm_box_left_x + artist_bpm_box_current_width / 2.0;
     let artist_bpm_box_center_y = artist_bpm_box_actual_top_y + artist_bpm_box_current_height / 2.0;
@@ -483,32 +466,27 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    // --- Draw Fallback/Dynamic Banner ---
-    let fallback_banner_left_x = artist_bpm_box_left_x; // Align left edge
-    let fallback_banner_width_to_draw = fallback_banner_current_width; // Could be dynamic later
+    let fallback_banner_left_x = artist_bpm_box_left_x; 
+    let fallback_banner_width_to_draw = fallback_banner_current_width; 
     let fallback_banner_actual_top_y = artist_bpm_box_actual_top_y - vertical_gap_artist_to_banner_current - fallback_banner_current_height;
     let fallback_banner_center_x = fallback_banner_left_x + fallback_banner_width_to_draw / 2.0;
     let fallback_banner_center_y = fallback_banner_actual_top_y + fallback_banner_current_height / 2.0;
     renderer.draw_quad(
-        device, cmd_buf, DescriptorSetId::DynamicBanner, // Use DynamicBanner set ID
+        device, cmd_buf, DescriptorSetId::DynamicBanner, 
         Vector3::new(fallback_banner_center_x, fallback_banner_center_y, 0.0),
         (fallback_banner_width_to_draw, fallback_banner_current_height),
-        Rad(0.0), [1.0, 1.0, 1.0, 1.0], // Tint (usually white for textures)
-        [0.0,0.0], [1.0,1.0] // Full UVs
+        Rad(0.0), [1.0, 1.0, 1.0, 1.0], 
+        [0.0,0.0], [1.0,1.0] 
     );
 
-    // --- Draw Header and Footer Text ---
-    // Calculate effective scale for header/footer font to match target visual height
     let hf_target_visual_current_px_height = TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES * height_scale_factor;
     let hf_font_typographic_height_normalized = (header_footer_font.metrics.ascender - header_footer_font.metrics.descender).max(1e-5);
     let base_scale_for_typographic_height = hf_target_visual_current_px_height / hf_font_typographic_height_normalized;
-    // Apply empirical adjustment for visual height vs typographic height
     let height_adjustment_factor = if OBSERVED_PX_HEIGHT_AT_REF_FOR_30PX_TARGET_OLD_METHOD > 1e-5 {
         TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES / OBSERVED_PX_HEIGHT_AT_REF_FOR_30PX_TARGET_OLD_METHOD
     } else { 1.0 };
     let hf_effective_scale = base_scale_for_typographic_height * height_adjustment_factor;
 
-    // Position text vertically within bars
     let hf_scaled_ascender_metric = header_footer_font.metrics.ascender * hf_effective_scale;
     let hf_scaled_ascender_for_positioning = hf_scaled_ascender_metric * ASCENDER_POSITIONING_ADJUSTMENT_FACTOR;
     let hf_empty_vertical_space = (bar_height - hf_target_visual_current_px_height).max(0.0);
@@ -516,8 +494,8 @@ pub fn draw(
 
     let mut header_baseline_y = hf_padding_from_bar_top_to_text_visual_top + hf_scaled_ascender_for_positioning;
     let mut footer_baseline_y = footer_y_top_edge + hf_padding_from_bar_top_to_text_visual_top + hf_scaled_ascender_for_positioning;
-    header_baseline_y += bar_text_vertical_nudge_current; // Apply nudge
-    footer_baseline_y += bar_text_vertical_nudge_current; // Apply nudge
+    header_baseline_y += bar_text_vertical_nudge_current; 
+    footer_baseline_y += bar_text_vertical_nudge_current; 
 
     let header_text_left_padding_px = 14.0 * width_scale_factor;
     let header_text_str = "SELECT MUSIC";
@@ -539,13 +517,11 @@ pub fn draw(
         config::UI_BAR_TEXT_COLOR, hf_effective_scale, Some(HEADER_FOOTER_LETTER_SPACING_FACTOR)
     );
 
-    // --- Draw Song Details (Artist, BPM, Length) if a song is selected ---
     if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
         let detail_header_font_typographic_h_norm = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
         let detail_header_effective_scale = detail_header_text_target_current_px_height / detail_header_font_typographic_h_norm;
         let detail_value_effective_scale = detail_value_text_target_current_px_height / detail_header_font_typographic_h_norm;
 
-        // First row: Artist
         let first_row_visual_top_y_from_box_top = artist_header_top_padding_current;
 
         let artist_header_str = "ARTIST";
@@ -567,12 +543,11 @@ pub fn draw(
             config::SONG_TEXT_COLOR, detail_value_effective_scale, None
         );
 
-        // Second row: BPM and Length
-        let advance_for_next_line = detail_value_text_target_current_px_height; // Using value height for line spacing
+        let advance_for_next_line = detail_value_text_target_current_px_height; 
 
         let bpm_header_str = "BPM";
         let bpm_header_width = list_font.measure_text_normalized(bpm_header_str) * detail_header_effective_scale;
-        let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current; // Re-using for alignment
+        let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current; 
         let bpm_header_baseline_y = artist_value_baseline_y + advance_for_next_line + artist_to_bpm_vertical_gap_current;
         renderer.draw_text(
             device, cmd_buf, list_font, bpm_header_str,
@@ -585,7 +560,7 @@ pub fn draw(
                             } else if !selected_song_arc.bpms_header.is_empty() {
                                 let min_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::INFINITY, f32::min);
                                 let max_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::NEG_INFINITY, f32::max);
-                                if (min_bpm - max_bpm).abs() < 0.1 { // Consider them same if very close
+                                if (min_bpm - max_bpm).abs() < 0.1 { 
                                     format!("{:.0}", min_bpm)
                                 } else {
                                     format!("{:.0}-{:.0}", min_bpm, max_bpm)
@@ -594,7 +569,7 @@ pub fn draw(
                                 "???".to_string()
                             };
         let bpm_value_x = bpm_header_x + bpm_header_width + header_to_value_horizontal_gap_current;
-        let bpm_value_baseline_y = bpm_header_baseline_y; // Same baseline as its header
+        let bpm_value_baseline_y = bpm_header_baseline_y; 
         renderer.draw_text(
             device, cmd_buf, list_font, &bpm_value_str,
             bpm_value_x, bpm_value_baseline_y,
@@ -610,10 +585,10 @@ pub fn draw(
             );
 
         let length_header_width = list_font.measure_text_normalized(length_header_str) * detail_header_effective_scale;
-        let length_header_x = bpm_header_x + bpm_header_width + bpm_to_length_horizontal_gap_current; // Horizontal offset from BPM group
+        let length_header_x = bpm_header_x + bpm_header_width + bpm_to_length_horizontal_gap_current; 
         let length_value_x = length_header_x + length_header_width + header_to_value_horizontal_gap_current;
-        let length_header_baseline_y = bpm_header_baseline_y; // Same row as BPM
-        let length_value_baseline_y = bpm_value_baseline_y;   // Same row as BPM value
+        let length_header_baseline_y = bpm_header_baseline_y; 
+        let length_value_baseline_y = bpm_value_baseline_y;   
 
         renderer.draw_text(
             device, cmd_buf, list_font, length_header_str,

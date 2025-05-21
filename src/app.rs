@@ -12,7 +12,8 @@ use ash::vk;
 use log::{error, info, trace, warn};
 use std::collections::HashMap;
 use std::error::Error;
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::{
@@ -25,7 +26,6 @@ use winit::{
 
 const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0);
 const PREVIEW_RESTART_DELAY: f32 = 0.25; // Seconds
-const SELECTION_PRELOAD_AUDIO_DELAY: Duration = Duration::from_millis(250); // No longer used for preloading, but keep for now if other logic depends on it
 const SELECTION_START_PLAY_DELAY: Duration = Duration::from_millis(500);
 
 
@@ -257,6 +257,49 @@ impl App {
         }
     }
 
+    fn find_pack_banner(pack_folder_path: &Path) -> Option<PathBuf> {
+        if !pack_folder_path.is_dir() {
+            return None;
+        }
+        let banner_name_patterns = ["banner", "ban", "bn"]; // Order by preference if needed
+
+        let entries = match fs::read_dir(pack_folder_path) {
+            Ok(e) => e,
+            Err(_) => return None,
+        };
+
+        let mut found_banner: Option<PathBuf> = None;
+
+        for pattern_base in banner_name_patterns {
+            for entry_res in fs::read_dir(pack_folder_path).ok()? { // Re-read dir for each pattern or collect names first
+                if let Ok(entry) = entry_res {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(filename_osstr) = path.file_name() {
+                            if let Some(filename_str) = filename_osstr.to_str() {
+                                let filename_lower = filename_str.to_lowercase();
+                                // Check if filename_lower CONTAINS pattern_base and ends with .png
+                                if filename_lower.contains(pattern_base) && filename_lower.ends_with(".png") {
+                                     // Prioritize exact matches like "banner.png"
+                                    if filename_lower == format!("{}.png", pattern_base) {
+                                        return Some(path);
+                                    }
+                                    if found_banner.is_none() { // Take the first partial match
+                                        found_banner = Some(path.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if found_banner.is_some() && pattern_base == "banner" { // If "banner.png" or "Banner.png" etc. was found, it's good enough
+                return found_banner;
+            }
+        }
+        found_banner // Return whatever was found (could be from "bn.png" etc.)
+    }
+
 
     fn rebuild_music_wheel_entries(&mut self) {
         let mut new_entries = Vec::new();
@@ -284,7 +327,16 @@ impl App {
                 let color = self.pack_colors.get(&pack_name_for_song)
                                 .cloned()
                                 .unwrap_or(config::MENU_NORMAL_COLOR);
-                new_entries.push(MusicWheelEntry::PackHeader { name: pack_name_for_song.clone(), color });
+
+                // Find the pack's root folder to search for a banner
+                let pack_banner_path = song_info.folder_path.parent()
+                    .and_then(|pack_dir| App::find_pack_banner(pack_dir));
+
+                new_entries.push(MusicWheelEntry::PackHeader {
+                    name: pack_name_for_song.clone(),
+                    color,
+                    banner_path: pack_banner_path,
+                });
                 current_pack_name_in_library = pack_name_for_song.clone();
             }
 
@@ -314,15 +366,12 @@ impl App {
             self.select_music_state.selected_index = 0;
         }
 
-        // Reset preview state as the list structure changed significantly
         self.audio_manager.stop_preview();
         self.select_music_state.preview_audio_path = None;
         self.select_music_state.preview_playback_started_at = None;
         self.select_music_state.is_awaiting_preview_restart = false;
         self.select_music_state.selection_landed_at = None;
         self.select_music_state.is_preview_actions_scheduled = false;
-        // current_graph_texture and key will be handled by handle_music_selection_change if needed
-
 
         info!("Rebuilt music wheel. New #entries: {}, selected_index: {}", self.select_music_state.entries.len(), self.select_music_state.selected_index);
     }
@@ -360,7 +409,7 @@ impl App {
         if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
             match selected_entry {
                 MusicWheelEntry::Song(selected_song_arc) => {
-                    self.asset_manager.load_song_banner(
+                    self.asset_manager.load_song_banner( // This handles song-specific banners
                         &self.vulkan_base,
                         &self.renderer,
                         selected_song_arc,
@@ -376,7 +425,6 @@ impl App {
                         selected_song_arc.title, SELECTION_START_PLAY_DELAY.as_millis()
                     );
 
-                    // Prepare key for graph generation if applicable
                     if let Some(chart_info) = selected_song_arc.charts.iter().find(|c|
                         c.processed_data.as_ref().map_or(false, |pd| !pd.measure_nps_vec.is_empty() && pd.max_nps > 0.001)
                     ) {
@@ -386,20 +434,16 @@ impl App {
                         }
                     }
                 }
-                MusicWheelEntry::PackHeader { .. } => {
+                MusicWheelEntry::PackHeader { name: _, color: _, banner_path } => {
                     info!(
-                        "Selected a pack header ({}), loading fallback banner and clearing preview actions.",
+                        "Selected a pack header ({}), attempting to load pack banner.",
                         current_index
                     );
-                    if let Some(fallback_res) =
-                        self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner)
-                    {
-                        self.renderer.update_texture_descriptor(
-                            &self.vulkan_base.device,
-                            crate::graphics::renderer::DescriptorSetId::DynamicBanner,
-                            fallback_res,
-                        );
-                    }
+                    self.asset_manager.load_pack_banner( // New function call
+                        &self.vulkan_base,
+                        &self.renderer,
+                        banner_path.as_deref(), // Pass Option<&Path>
+                    );
                     self.select_music_state.preview_audio_path = None;
                     self.select_music_state.selection_landed_at = None;
                 }
@@ -423,8 +467,6 @@ impl App {
             self.select_music_state.selection_landed_at = None;
         }
 
-        // --- NPS Graph Texture Management ---
-        // Destroy old graph texture if the key has changed or if no graph is needed for the current selection
         if self.select_music_state.current_graph_song_chart_key != new_graph_key_for_current_selection {
             if let Some(mut old_graph_tex) = self.select_music_state.current_graph_texture.take() {
                 info!("Destroying old NPS graph texture (key change or no graph needed).");
@@ -433,7 +475,6 @@ impl App {
             self.select_music_state.current_graph_song_chart_key = new_graph_key_for_current_selection.clone();
         }
 
-        // Generate and load new graph texture if a new key is set and no texture currently exists for it
         if let (Some(key_str), Some(pd_arc)) = (new_graph_key_for_current_selection, chart_data_for_graph_generation) {
             if self.select_music_state.current_graph_texture.is_none() {
                 info!("Generating NPS graph for: {}", key_str);
@@ -445,7 +486,7 @@ impl App {
                             graph_image_data.width,
                             graph_image_data.height,
                             &graph_image_data.data,
-                            "NPS_Graph_Texture", // Give it a debug name
+                            "NPS_Graph_Texture", 
                         ) {
                             Ok(tex_res) => {
                                 self.renderer.update_texture_descriptor(
@@ -462,12 +503,11 @@ impl App {
                     Err(e) => error!("Failed to generate NPS graph image data: {}", e),
                 }
             }
-        } else if self.select_music_state.current_graph_texture.is_some() { // No graph needed, but one exists
+        } else if self.select_music_state.current_graph_texture.is_some() { 
              if let Some(mut old_graph_tex) = self.select_music_state.current_graph_texture.take() {
                 info!("Clearing NPS graph texture as current selection does not require one.");
                 old_graph_tex.destroy(&self.vulkan_base.device);
             }
-            // Set NpsGraph descriptor to a fallback (e.g., transparent or default texture)
              self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::NpsGraph, &self.renderer.solid_white_texture);
         }
     }
@@ -498,8 +538,10 @@ impl App {
                      if let Some(VirtualKeyCode::Enter) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
                         if let Some(entry) = self.select_music_state.entries.get(original_selected_index_before_input) {
                             if let MusicWheelEntry::PackHeader { .. } = entry {
-                                self.rebuild_music_wheel_entries();
-                                selection_changed_in_music_by_input = true;
+                                self.rebuild_music_wheel_entries(); // This will re-focus/re-select
+                                // After rebuilding, the selection might change implicitly.
+                                // We need to ensure handle_music_selection_change is called.
+                                selection_changed_in_music_by_input = true; 
                             }
                         }
                     }
@@ -552,6 +594,12 @@ impl App {
                 graph_tex.destroy(&self.vulkan_base.device);
             }
             self.select_music_state.current_graph_song_chart_key = None;
+             // Reset DynamicBanner to FallbackBanner when leaving SelectMusic
+            if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
+            }
+            self.asset_manager.clear_current_banner(&self.vulkan_base.device);
+
         }
 
 
@@ -570,13 +618,15 @@ impl App {
             }
             AppState::SelectMusic => {
                 self.select_music_state = SelectMusicState::default();
-                self.rebuild_music_wheel_entries();
+                self.rebuild_music_wheel_entries(); // This will populate entries
 
+                // After rebuilding and populating, trigger the initial selection handling
+                // which includes loading the banner for the initially selected item.
+                self.handle_music_selection_change(); 
                 info!(
-                    "Populated SelectMusic state with {} entries (initially collapsed).",
+                    "Populated SelectMusic state with {} entries and handled initial selection.",
                     self.select_music_state.entries.len()
                 );
-                self.handle_music_selection_change();
             }
             AppState::Options => {
                 self.options_state = OptionsState::default();
@@ -662,12 +712,10 @@ impl App {
                     if let Some(landed_at) = self.select_music_state.selection_landed_at {
                         let elapsed_since_landed = Instant::now().duration_since(landed_at);
 
-                        // The SELECTION_PRELOAD_AUDIO_DELAY is effectively bypassed now.
-                        // We directly wait for SELECTION_START_PLAY_DELAY.
                         if elapsed_since_landed >= SELECTION_START_PLAY_DELAY {
                             info!("{}ms play delay elapsed. Attempting to start preview playback.", SELECTION_START_PLAY_DELAY.as_millis());
                             self.start_actual_preview_playback();
-                            self.select_music_state.is_preview_actions_scheduled = false; // Mark actions as done
+                            self.select_music_state.is_preview_actions_scheduled = false; 
                             self.select_music_state.selection_landed_at = None;
                         }
                     } else {
@@ -845,7 +893,6 @@ impl Drop for App {
         self.audio_manager.stop_preview();
         info!("Audio stopped.");
 
-        // Destroy graph texture if it exists
         if let Some(mut graph_tex) = self.select_music_state.current_graph_texture.take() {
             info!("Destroying NPS graph texture during App drop.");
             graph_tex.destroy(&self.vulkan_base.device);
