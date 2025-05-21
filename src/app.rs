@@ -302,6 +302,27 @@ impl App {
 
 
     fn rebuild_music_wheel_entries(&mut self) {
+        // Calculate total durations for each pack first
+        let mut pack_total_durations: HashMap<String, f32> = HashMap::new();
+        for song_info in &self.song_library {
+            let pack_name = song_info
+                .folder_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("Unknown Pack")
+                .to_string();
+
+            // Use the duration of the first chart that has one for summing pack duration
+            let song_duration_for_pack_sum = song_info
+                .charts
+                .iter()
+                .find_map(|c| c.calculated_length_sec)
+                .unwrap_or(0.0);
+
+            *pack_total_durations.entry(pack_name).or_insert(0.0) += song_duration_for_pack_sum;
+        }
+
         let mut new_entries = Vec::new();
         let mut current_pack_name_in_library = String::new();
 
@@ -328,14 +349,16 @@ impl App {
                                 .cloned()
                                 .unwrap_or(config::MENU_NORMAL_COLOR);
 
-                // Find the pack's root folder to search for a banner
                 let pack_banner_path = song_info.folder_path.parent()
                     .and_then(|pack_dir| App::find_pack_banner(pack_dir));
+
+                let total_duration = pack_total_durations.get(&pack_name_for_song).copied();
 
                 new_entries.push(MusicWheelEntry::PackHeader {
                     name: pack_name_for_song.clone(),
                     color,
                     banner_path: pack_banner_path,
+                    total_duration_sec: total_duration, // Populate new field
                 });
                 current_pack_name_in_library = pack_name_for_song.clone();
             }
@@ -434,7 +457,7 @@ impl App {
                         }
                     }
                 }
-                MusicWheelEntry::PackHeader { name: _, color: _, banner_path } => {
+                MusicWheelEntry::PackHeader { name: _, color: _, banner_path, .. } => { // Use .. to ignore new total_duration_sec field
                     info!(
                         "Selected a pack header ({}), attempting to load pack banner.",
                         current_index

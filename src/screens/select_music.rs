@@ -330,7 +330,7 @@ pub fn draw(
                         current_text_color = config::SONG_TEXT_COLOR;
                         text_x_pos = music_box_left_x + song_text_left_padding_current;
                     }
-                    MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color_val, banner_path: _ } => { // Ignore banner_path for text display
+                    MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color_val, banner_path: _, total_duration_sec: _ } => {
                         display_text = pack_name.clone();
                         current_box_color = if is_selected_slot { lerp_color(config::PACK_HEADER_BOX_COLOR, config::SELECTED_PACK_HEADER_BOX_COLOR, anim_t) } else { config::PACK_HEADER_BOX_COLOR };
                         current_text_color = *pack_text_color_val;
@@ -356,9 +356,9 @@ pub fn draw(
         if !display_text.is_empty() {
             let current_box_center_y_for_text = current_box_top_y + music_wheel_box_current_height / 2.0;
             let scaled_ascender = list_font.metrics.ascender * wheel_text_effective_scale;
-            let scaled_descender = list_font.metrics.descender * wheel_text_effective_scale; 
-            let mut text_baseline_y = current_box_center_y_for_text + (scaled_ascender + scaled_descender) / 2.0; 
-            text_baseline_y += music_wheel_text_vertical_nudge_current; 
+            let scaled_descender = list_font.metrics.descender * wheel_text_effective_scale;
+            let mut text_baseline_y = current_box_center_y_for_text + (scaled_ascender + scaled_descender) / 2.0;
+            text_baseline_y += music_wheel_text_vertical_nudge_current;
 
             renderer.draw_text(
                 device, cmd_buf, list_font, &display_text,
@@ -370,18 +370,18 @@ pub fn draw(
 
     renderer.draw_quad(
         device, cmd_buf, DescriptorSetId::SolidColor,
-        Vector3::new(center_x, bar_height / 2.0, 0.0), 
+        Vector3::new(center_x, bar_height / 2.0, 0.0),
         (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR,
         [0.0,0.0], [1.0,1.0]
     );
     renderer.draw_quad(
         device, cmd_buf, DescriptorSetId::SolidColor,
-        Vector3::new(center_x, footer_y_top_edge + bar_height / 2.0, 0.0), 
+        Vector3::new(center_x, footer_y_top_edge + bar_height / 2.0, 0.0),
         (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR,
         [0.0,0.0], [1.0,1.0]
     );
 
-    let pink_box_left_x = 0.0; 
+    let pink_box_left_x = 0.0;
     let pink_box_top_y = footer_y_top_edge - pink_box_current_height;
     let pink_box_center_x = pink_box_left_x + pink_box_current_width / 2.0;
     let pink_box_center_y = pink_box_top_y + pink_box_current_height / 2.0;
@@ -394,7 +394,7 @@ pub fn draw(
     );
 
     let small_upper_right_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - small_upper_right_box_current_height;
-    let small_upper_right_box_left_x = pink_box_left_x + pink_box_current_width - small_upper_right_box_current_width; 
+    let small_upper_right_box_left_x = pink_box_left_x + pink_box_current_width - small_upper_right_box_current_width;
     let small_upper_right_box_center_x = small_upper_right_box_left_x + small_upper_right_box_current_width / 2.0;
     let small_upper_right_box_center_y = small_upper_right_box_top_y + small_upper_right_box_current_height / 2.0;
     renderer.draw_quad(
@@ -405,7 +405,7 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    let bottom_left_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - left_box_current_height; 
+    let bottom_left_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - left_box_current_height;
     let bottom_left_box_left_x = small_upper_right_box_left_x - horizontal_gap_left_to_right_current - left_boxes_current_width;
     let bottom_left_box_center_x = bottom_left_box_left_x + left_boxes_current_width / 2.0;
     let bottom_left_box_center_y = bottom_left_box_top_y + left_box_current_height / 2.0;
@@ -417,9 +417,9 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    let graph_area_left_x = bottom_left_box_left_x; 
+    let graph_area_left_x = bottom_left_box_left_x;
     let graph_area_width = left_boxes_current_width;
-    let graph_area_height = left_box_current_height; 
+    let graph_area_height = left_box_current_height;
     let graph_area_top_y = bottom_left_box_top_y - vertical_gap_between_left_boxes_current - graph_area_height;
     let graph_area_center_x = graph_area_left_x + graph_area_width / 2.0;
     let graph_area_center_y = graph_area_top_y + graph_area_height / 2.0;
@@ -435,15 +435,15 @@ pub fn draw(
         renderer.draw_quad(
             device, cmd_buf, DescriptorSetId::NpsGraph,
             Vector3::new(graph_area_center_x, graph_area_center_y, 0.0),
-            (graph_area_width, graph_area_height), 
-            Rad(0.0), [1.0, 1.0, 1.0, 1.0], 
-            [0.0, 0.0], [1.0, 1.0] 
+            (graph_area_width, graph_area_height),
+            Rad(0.0), [1.0, 1.0, 1.0, 1.0],
+            [0.0, 0.0], [1.0, 1.0]
         );
     }
 
 
     let topmost_left_box_top_y = graph_area_top_y - vertical_gap_topleft_to_topmost_current - topmost_left_box_current_height;
-    let topmost_left_box_left_x = graph_area_left_x; 
+    let topmost_left_box_left_x = graph_area_left_x;
     let topmost_left_box_center_x = topmost_left_box_left_x + topmost_left_box_current_width / 2.0;
     let topmost_left_box_center_y = topmost_left_box_top_y + topmost_left_box_current_height / 2.0;
     renderer.draw_quad(
@@ -454,7 +454,7 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    let artist_bpm_box_left_x = topmost_left_box_left_x; 
+    let artist_bpm_box_left_x = topmost_left_box_left_x;
     let artist_bpm_box_actual_top_y = topmost_left_box_top_y - vertical_gap_topmost_to_artist_box_current - artist_bpm_box_current_height;
     let artist_bpm_box_center_x = artist_bpm_box_left_x + artist_bpm_box_current_width / 2.0;
     let artist_bpm_box_center_y = artist_bpm_box_actual_top_y + artist_bpm_box_current_height / 2.0;
@@ -466,17 +466,17 @@ pub fn draw(
         [0.0,0.0], [1.0,1.0]
     );
 
-    let fallback_banner_left_x = artist_bpm_box_left_x; 
-    let fallback_banner_width_to_draw = fallback_banner_current_width; 
+    let fallback_banner_left_x = artist_bpm_box_left_x;
+    let fallback_banner_width_to_draw = fallback_banner_current_width;
     let fallback_banner_actual_top_y = artist_bpm_box_actual_top_y - vertical_gap_artist_to_banner_current - fallback_banner_current_height;
     let fallback_banner_center_x = fallback_banner_left_x + fallback_banner_width_to_draw / 2.0;
     let fallback_banner_center_y = fallback_banner_actual_top_y + fallback_banner_current_height / 2.0;
     renderer.draw_quad(
-        device, cmd_buf, DescriptorSetId::DynamicBanner, 
+        device, cmd_buf, DescriptorSetId::DynamicBanner,
         Vector3::new(fallback_banner_center_x, fallback_banner_center_y, 0.0),
         (fallback_banner_width_to_draw, fallback_banner_current_height),
-        Rad(0.0), [1.0, 1.0, 1.0, 1.0], 
-        [0.0,0.0], [1.0,1.0] 
+        Rad(0.0), [1.0, 1.0, 1.0, 1.0],
+        [0.0,0.0], [1.0,1.0]
     );
 
     let hf_target_visual_current_px_height = TARGET_BAR_TEXT_VISUAL_PX_HEIGHT_AT_REF_RES * height_scale_factor;
@@ -494,8 +494,8 @@ pub fn draw(
 
     let mut header_baseline_y = hf_padding_from_bar_top_to_text_visual_top + hf_scaled_ascender_for_positioning;
     let mut footer_baseline_y = footer_y_top_edge + hf_padding_from_bar_top_to_text_visual_top + hf_scaled_ascender_for_positioning;
-    header_baseline_y += bar_text_vertical_nudge_current; 
-    footer_baseline_y += bar_text_vertical_nudge_current; 
+    header_baseline_y += bar_text_vertical_nudge_current;
+    footer_baseline_y += bar_text_vertical_nudge_current;
 
     let header_text_left_padding_px = 14.0 * width_scale_factor;
     let header_text_str = "SELECT MUSIC";
@@ -517,88 +517,143 @@ pub fn draw(
         config::UI_BAR_TEXT_COLOR, hf_effective_scale, Some(HEADER_FOOTER_LETTER_SPACING_FACTOR)
     );
 
-    if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
-        let detail_header_font_typographic_h_norm = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
-        let detail_header_effective_scale = detail_header_text_target_current_px_height / detail_header_font_typographic_h_norm;
-        let detail_value_effective_scale = detail_value_text_target_current_px_height / detail_header_font_typographic_h_norm;
+    // Helper variables for text positioning, calculated once
+    let detail_header_font_typographic_h_norm = (list_font.metrics.ascender - list_font.metrics.descender).max(1e-5);
+    let detail_header_effective_scale = detail_header_text_target_current_px_height / detail_header_font_typographic_h_norm;
+    let detail_value_effective_scale = detail_value_text_target_current_px_height / detail_header_font_typographic_h_norm;
+    let first_row_visual_top_y_from_box_top = artist_header_top_padding_current;
+    let advance_for_next_line = detail_value_text_target_current_px_height;
 
-        let first_row_visual_top_y_from_box_top = artist_header_top_padding_current;
 
-        let artist_header_str = "ARTIST";
-        let artist_header_width = list_font.measure_text_normalized(artist_header_str) * detail_header_effective_scale;
-        let artist_header_x = artist_bpm_box_left_x + artist_header_left_padding_current;
-        let artist_header_baseline_y = artist_bpm_box_actual_top_y + first_row_visual_top_y_from_box_top + (list_font.metrics.ascender * detail_header_effective_scale) + music_wheel_text_vertical_nudge_current;
-        renderer.draw_text(
-            device, cmd_buf, list_font, artist_header_str,
-            artist_header_x, artist_header_baseline_y,
-            config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None
-        );
+    if let Some(selected_entry) = state.entries.get(state.selected_index) {
+        match selected_entry {
+            MusicWheelEntry::Song(selected_song_arc) => {
+                // --- Draw Artist ---
+                let artist_header_str = "ARTIST";
+                let artist_header_width = list_font.measure_text_normalized(artist_header_str) * detail_header_effective_scale;
+                let artist_header_x = artist_bpm_box_left_x + artist_header_left_padding_current;
+                let artist_header_baseline_y = artist_bpm_box_actual_top_y + first_row_visual_top_y_from_box_top + (list_font.metrics.ascender * detail_header_effective_scale) + music_wheel_text_vertical_nudge_current;
+                renderer.draw_text(
+                    device, cmd_buf, list_font, artist_header_str,
+                    artist_header_x, artist_header_baseline_y,
+                    config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None
+                );
 
-        let artist_value_str = &selected_song_arc.artist;
-        let artist_value_x = artist_header_x + artist_header_width + header_to_value_horizontal_gap_current;
-        let artist_value_baseline_y = artist_bpm_box_actual_top_y + first_row_visual_top_y_from_box_top + (list_font.metrics.ascender * detail_value_effective_scale) + music_wheel_text_vertical_nudge_current;
-        renderer.draw_text(
-            device, cmd_buf, list_font, artist_value_str,
-            artist_value_x, artist_value_baseline_y,
-            config::SONG_TEXT_COLOR, detail_value_effective_scale, None
-        );
+                let artist_value_str = &selected_song_arc.artist;
+                let artist_value_x = artist_header_x + artist_header_width + header_to_value_horizontal_gap_current;
+                let artist_value_baseline_y = artist_bpm_box_actual_top_y + first_row_visual_top_y_from_box_top + (list_font.metrics.ascender * detail_value_effective_scale) + music_wheel_text_vertical_nudge_current;
+                renderer.draw_text(
+                    device, cmd_buf, list_font, artist_value_str,
+                    artist_value_x, artist_value_baseline_y,
+                    config::SONG_TEXT_COLOR, detail_value_effective_scale, None
+                );
 
-        let advance_for_next_line = detail_value_text_target_current_px_height; 
+                // --- Draw BPM ---
+                let bpm_header_str = "BPM";
+                let bpm_header_width = list_font.measure_text_normalized(bpm_header_str) * detail_header_effective_scale;
+                let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current;
+                let bpm_header_baseline_y = artist_value_baseline_y + advance_for_next_line + artist_to_bpm_vertical_gap_current;
+                renderer.draw_text(
+                    device, cmd_buf, list_font, bpm_header_str,
+                    bpm_header_x, bpm_header_baseline_y,
+                    config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None
+                );
 
-        let bpm_header_str = "BPM";
-        let bpm_header_width = list_font.measure_text_normalized(bpm_header_str) * detail_header_effective_scale;
-        let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current; 
-        let bpm_header_baseline_y = artist_value_baseline_y + advance_for_next_line + artist_to_bpm_vertical_gap_current;
-        renderer.draw_text(
-            device, cmd_buf, list_font, bpm_header_str,
-            bpm_header_x, bpm_header_baseline_y,
-            config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None
-        );
+                let bpm_value_str = if selected_song_arc.bpms_header.len() == 1 {
+                                        format!("{:.0}", selected_song_arc.bpms_header[0].1)
+                                    } else if !selected_song_arc.bpms_header.is_empty() {
+                                        let min_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::INFINITY, f32::min);
+                                        let max_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::NEG_INFINITY, f32::max);
+                                        if (min_bpm - max_bpm).abs() < 0.1 {
+                                            format!("{:.0}", min_bpm)
+                                        } else {
+                                            format!("{:.0} - {:.0}", min_bpm, max_bpm)
+                                        }
+                                    } else {
+                                        "???".to_string()
+                                    };
+                let bpm_value_x = bpm_header_x + bpm_header_width + header_to_value_horizontal_gap_current;
+                let bpm_value_baseline_y = bpm_header_baseline_y;
+                renderer.draw_text(
+                    device, cmd_buf, list_font, &bpm_value_str,
+                    bpm_value_x, bpm_value_baseline_y,
+                    config::SONG_TEXT_COLOR, detail_value_effective_scale, None
+                );
 
-        let bpm_value_str = if selected_song_arc.bpms_header.len() == 1 {
-                                format!("{:.0}", selected_song_arc.bpms_header[0].1)
-                            } else if !selected_song_arc.bpms_header.is_empty() {
-                                let min_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::INFINITY, f32::min);
-                                let max_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::NEG_INFINITY, f32::max);
-                                if (min_bpm - max_bpm).abs() < 0.1 { 
-                                    format!("{:.0}", min_bpm)
-                                } else {
-                                    format!("{:.0}-{:.0}", min_bpm, max_bpm)
-                                }
-                            } else {
-                                "???".to_string()
-                            };
-        let bpm_value_x = bpm_header_x + bpm_header_width + header_to_value_horizontal_gap_current;
-        let bpm_value_baseline_y = bpm_header_baseline_y; 
-        renderer.draw_text(
-            device, cmd_buf, list_font, &bpm_value_str,
-            bpm_value_x, bpm_value_baseline_y,
-            config::SONG_TEXT_COLOR, detail_value_effective_scale, None
-        );
+                // --- Draw Length (for Song) ---
+                let length_header_str = "LENGTH";
+                let length_value_str = selected_song_arc.charts.iter()
+                    .find_map(|c| c.calculated_length_sec)
+                    .map_or_else(
+                        || "??:??".to_string(),
+                        |secs| format_duration_flexible(secs)
+                    );
 
-        let length_header_str = "LENGTH";
-        let length_value_str = selected_song_arc.charts.iter()
-            .find_map(|c| c.calculated_length_sec)
-            .map_or_else(
-                || "??:??".to_string(),
-                |secs| format_duration_flexible(secs)
-            );
+                let length_header_width = list_font.measure_text_normalized(length_header_str) * detail_header_effective_scale;
+                let length_header_x = bpm_header_x + bpm_header_width + bpm_to_length_horizontal_gap_current;
+                let length_value_x = length_header_x + length_header_width + header_to_value_horizontal_gap_current;
+                let length_header_baseline_y = bpm_header_baseline_y;
+                let length_value_baseline_y = bpm_value_baseline_y;
 
-        let length_header_width = list_font.measure_text_normalized(length_header_str) * detail_header_effective_scale;
-        let length_header_x = bpm_header_x + bpm_header_width + bpm_to_length_horizontal_gap_current; 
-        let length_value_x = length_header_x + length_header_width + header_to_value_horizontal_gap_current;
-        let length_header_baseline_y = bpm_header_baseline_y; 
-        let length_value_baseline_y = bpm_value_baseline_y;   
+                renderer.draw_text(
+                    device, cmd_buf, list_font, length_header_str,
+                    length_header_x, length_header_baseline_y,
+                    config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None
+                );
+                renderer.draw_text(
+                    device, cmd_buf, list_font, &length_value_str,
+                    length_value_x, length_value_baseline_y,
+                    config::SONG_TEXT_COLOR, detail_value_effective_scale, None
+                );
+            }
+            MusicWheelEntry::PackHeader { name: _, color: _, banner_path: _, total_duration_sec } => {
+                // --- Draw Artist Header (no value) ---
+                let artist_header_str = "ARTIST";
+                // let artist_header_width = list_font.measure_text_normalized(artist_header_str) * detail_header_effective_scale; // Not needed if no value
+                let artist_header_x = artist_bpm_box_left_x + artist_header_left_padding_current;
+                let artist_header_baseline_y = artist_bpm_box_actual_top_y + first_row_visual_top_y_from_box_top + (list_font.metrics.ascender * detail_header_effective_scale) + music_wheel_text_vertical_nudge_current;
+                 renderer.draw_text(
+                    device, cmd_buf, list_font, artist_header_str,
+                    artist_header_x, artist_header_baseline_y,
+                    config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None
+                );
 
-        renderer.draw_text(
-            device, cmd_buf, list_font, length_header_str,
-            length_header_x, length_header_baseline_y,
-            config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None
-        );
-        renderer.draw_text(
-            device, cmd_buf, list_font, &length_value_str,
-            length_value_x, length_value_baseline_y,
-            config::SONG_TEXT_COLOR, detail_value_effective_scale, None
-        );
+                // --- Draw BPM Header (no value) ---
+                let bpm_header_str = "BPM";
+                let bpm_header_width = list_font.measure_text_normalized(bpm_header_str) * detail_header_effective_scale; // Still need for LENGTH positioning
+                let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current;
+                let bpm_header_baseline_y = artist_header_baseline_y + advance_for_next_line + artist_to_bpm_vertical_gap_current; // Position relative to artist header's line
+                 renderer.draw_text(
+                    device, cmd_buf, list_font, bpm_header_str,
+                    bpm_header_x, bpm_header_baseline_y,
+                    config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None
+                );
+
+                // --- Draw Length (for Pack) ---
+                let length_header_str = "LENGTH";
+                let length_value_str = total_duration_sec
+                    .map_or_else(
+                        || "??:??".to_string(),
+                        |secs| format_duration_flexible(secs)
+                    );
+
+                let length_header_width = list_font.measure_text_normalized(length_header_str) * detail_header_effective_scale;
+                let length_header_x = bpm_header_x + bpm_header_width + bpm_to_length_horizontal_gap_current; // Position relative to BPM header
+                let length_value_x = length_header_x + length_header_width + header_to_value_horizontal_gap_current;
+                let length_header_baseline_y = bpm_header_baseline_y; // Same line as BPM header
+                let length_value_baseline_y = bpm_header_baseline_y; // Same line as BPM header
+
+                renderer.draw_text(
+                    device, cmd_buf, list_font, length_header_str,
+                    length_header_x, length_header_baseline_y,
+                    config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None
+                );
+                renderer.draw_text(
+                    device, cmd_buf, list_font, &length_value_str,
+                    length_value_x, length_value_baseline_y,
+                    config::SONG_TEXT_COLOR, detail_value_effective_scale, None
+                );
+            }
+        }
     }
 }
