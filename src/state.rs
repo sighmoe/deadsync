@@ -60,6 +60,7 @@ pub struct SelectMusicState {
     pub selected_index: usize, // Song wheel index
     pub selected_difficulty_index: usize, // 0 for Beginner, up to 4 for Challenge
     pub expanded_pack_name: Option<String>,
+    pub meter_arrow_animation_timer: f32,
     pub selection_animation_timer: f32,
     pub nav_key_held_direction: Option<NavDirection>, // For song wheel (left/right are mapped to this)
     pub nav_key_held_since: Option<Instant>,
@@ -89,6 +90,7 @@ impl Default for SelectMusicState {
             selected_index: 0,
             selected_difficulty_index: 2, // Default to Medium (index 2 of 0-4)
             expanded_pack_name: None,
+            meter_arrow_animation_timer: 0.0,
             selection_animation_timer: 0.0,
             nav_key_held_direction: None,
             nav_key_held_since: None,

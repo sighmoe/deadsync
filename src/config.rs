@@ -167,13 +167,17 @@ pub const DIFFICULTY_DISPLAY_INNER_BOX_REF_SIZE: f32 = 42.0; // Size (width and 
 pub const DIFFICULTY_DISPLAY_INNER_BOX_BORDER_AND_SPACING_REF: f32 = 3.0; // Border from outer box and spacing between inner boxes
 pub const DIFFICULTY_DISPLAY_INNER_BOX_COUNT: usize = 5;
 
-
 // Colors for difficulty numbers (meter)
 pub const DIFFICULTY_TEXT_COLOR_BEGINNER: [f32; 4] = [255.0/255.0, 190.0/255.0, 0.0/255.0, 1.0];     // #FFBE00
 pub const DIFFICULTY_TEXT_COLOR_EASY: [f32; 4] = [255.0/255.0, 125.0/255.0, 0.0/255.0, 1.0];         // #FF7D00
 pub const DIFFICULTY_TEXT_COLOR_MEDIUM: [f32; 4] = [255.0/255.0, 93.0/255.0, 71.0/255.0, 1.0];      // #FF5D47
 pub const DIFFICULTY_TEXT_COLOR_HARD: [f32; 4] = [255.0/255.0, 87.0/255.0, 126.0/255.0, 1.0];       // #FF577E
 pub const DIFFICULTY_TEXT_COLOR_CHALLENGE: [f32; 4] = [255.0/255.0, 71.0/255.0, 179.0/255.0, 1.0];  // #FF47B3 (Matches one of the pack palette colors too)
+
+// Select Music Screen Meter Arrow Animation
+pub const METER_ARROW_ANIM_DURATION_SEC: f32 = 0.4; // Duration for one full oscillation cycle (left-right-left)
+pub const METER_ARROW_ANIM_HORIZONTAL_TRAVEL_REF: f32 = 2.0; // Max horizontal displacement from center in ref pixels
+pub const METER_ARROW_SIZE_SCALE_FACTOR: f32 = 0.75; // Scale arrow's calculated size (e.g., 0.85 for 85%)
 
 // Simply Love / ITGMania Color Palette for Pack Name TEXTS
 pub const PACK_NAME_COLOR_PALETTE: [[f32; 4]; 12] = [

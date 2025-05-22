@@ -202,6 +202,12 @@ pub fn update(state: &mut SelectMusicState, dt: f32, audio_manager: &AudioManage
     if state.selection_animation_timer > ANIMATION_CYCLE_DURATION {
         state.selection_animation_timer -= ANIMATION_CYCLE_DURATION;
     }
+    
+    // Animation timer for meter arrow
+    state.meter_arrow_animation_timer += dt;
+    if state.meter_arrow_animation_timer > config::METER_ARROW_ANIM_DURATION_SEC {
+        state.meter_arrow_animation_timer -= config::METER_ARROW_ANIM_DURATION_SEC;
+    }
 
     let initial_hold_delay = Duration::from_millis(config::MUSIC_WHEEL_NAV_INITIAL_HOLD_DELAY_MS);
     let repeat_scroll_interval = Duration::from_millis(config::MUSIC_WHEEL_NAV_REPEAT_SCROLL_INTERVAL_MS);
@@ -288,7 +294,7 @@ pub fn draw(
     const VERTICAL_GAP_TOPLEFT_TO_TOPMOST_REF: f32 = 1.0;
     const VERTICAL_GAP_ARTIST_TO_BANNER_REF: f32 = 2.0;
     const MUSIC_WHEEL_VERTICAL_GAP_REF: f32 = 2.0;
-    const METER_ARROW_PADDING_LEFT_REF: f32 = 5.0; // Padding from meter arrow to difficulty boxes
+    const METER_ARROW_PADDING_LEFT_REF: f32 = 0.0; // Padding from meter arrow to difficulty boxes
 
     let width_scale_factor = window_width / config::LAYOUT_BOXES_REF_RES_WIDTH;
     let height_scale_factor = window_height / config::LAYOUT_BOXES_REF_RES_HEIGHT;
@@ -479,13 +485,27 @@ pub fn draw(
     if meter_arrow_target_y > 0.0 { // Basic check to ensure Y is somewhat valid
         if let Some(meter_arrow_texture) = meter_arrow_texture_opt {
             let arrow_texture_aspect = meter_arrow_texture.width as f32 / meter_arrow_texture.height.max(1) as f32;
-            let arrow_draw_height = scaled_inner_box_dim_h * 0.7; // Slightly smaller than box
-            let arrow_draw_width = arrow_draw_height * arrow_texture_aspect;
+            
+            // Base size calculation (slightly smaller than box)
+            let base_arrow_draw_height = scaled_inner_box_dim_h * 0.7; 
+            // Apply new size scale factor
+            let arrow_draw_height = base_arrow_draw_height * config::METER_ARROW_SIZE_SCALE_FACTOR;
+            let arrow_draw_width = arrow_draw_height * arrow_texture_aspect; // Maintain aspect ratio
+            
             // Position arrow to the LEFT of the difficulty boxes
-            let arrow_x_pos = small_upper_right_box_left_x - scaled_meter_arrow_padding_left - arrow_draw_width / 2.0;
+            let base_arrow_center_x = small_upper_right_box_left_x - scaled_meter_arrow_padding_left - arrow_draw_width / 2.0;
+
+            // Calculate horizontal oscillation for animation
+            let anim_cycle_progress = state.meter_arrow_animation_timer / config::METER_ARROW_ANIM_DURATION_SEC;
+            let horizontal_offset_rad = anim_cycle_progress * PI * 2.0; // Full sine wave cycle
+            let horizontal_offset_factor = horizontal_offset_rad.sin(); // Ranges from -1.0 to 1.0
+            let scaled_max_horizontal_travel = config::METER_ARROW_ANIM_HORIZONTAL_TRAVEL_REF * width_scale_factor;
+            let current_horizontal_offset = horizontal_offset_factor * scaled_max_horizontal_travel;
+            let animated_arrow_center_x = base_arrow_center_x + current_horizontal_offset;
+
             renderer.draw_quad(
                 device, cmd_buf, DescriptorSetId::MeterArrow,
-                Vector3::new(arrow_x_pos, meter_arrow_target_y, 0.0), // Use the calculated target Y
+                Vector3::new(animated_arrow_center_x, meter_arrow_target_y, 0.0),
                 (arrow_draw_width, arrow_draw_height),
                 Rad(0.0), // Assuming arrow texture points right by default, adjust if it points left
                 [1.0, 1.0, 1.0, 1.0],
