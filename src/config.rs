@@ -19,6 +19,8 @@ pub const ARROW_TEXTURE_PATH: &str = "assets/noteskins/cel/down_arrow_cel.png";
 pub const SFX_CHANGE_PATH: &str = "assets/sounds/change.ogg";
 pub const SFX_START_PATH: &str = "assets/sounds/start.ogg";
 pub const SFX_EXPAND_PATH: &str = "assets/sounds/expand.ogg";
+pub const SFX_DIFFICULTY_EASIER_PATH: &str = "assets/sounds/easier.ogg";
+pub const SFX_DIFFICULTY_HARDER_PATH: &str = "assets/sounds/harder.ogg";
 
 pub const EXPLOSION_W1_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w1.png";
 pub const EXPLOSION_W2_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w2.png";

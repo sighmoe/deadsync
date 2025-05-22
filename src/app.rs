@@ -1,3 +1,4 @@
+// src/app.rs
 use crate::assets::AssetManager;
 use crate::audio::AudioManager;
 use crate::config;
@@ -412,14 +413,17 @@ impl App {
 
 
     fn handle_music_selection_change(&mut self) {
-        self.audio_manager.stop_preview();
-        self.select_music_state.preview_playback_started_at = None;
-        self.select_music_state.is_awaiting_preview_restart = false;
-        self.select_music_state.is_preview_actions_scheduled = false;
-
+        // Store previous preview parameters to see if the actual audio sample needs to change
+        let prev_preview_audio_path = self.select_music_state.preview_audio_path.clone();
+        let prev_preview_sample_start = self.select_music_state.preview_sample_start_sec;
+        let prev_preview_sample_length = self.select_music_state.preview_sample_length_sec;
+        // Only clear playback/scheduling state if the audio source WILL change.
+        // This will be re-evaluated after determining new preview params.
+        // self.select_music_state.preview_playback_started_at = None; // Moved down
+    
         let mut new_graph_key_for_current_selection: Option<String> = None;
         let mut chart_data_for_graph_generation: Option<Arc<crate::parsing::simfile::ProcessedChartData>> = None;
-
+    
         let current_index = self.select_music_state.selected_index;
         if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
             match selected_entry {
@@ -429,37 +433,30 @@ impl App {
                         &self.renderer,
                         selected_song_arc,
                     );
-                    self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone();
-                    self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start;
-                    self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length;
-
-                    self.select_music_state.selection_landed_at = Some(Instant::now());
-                    self.select_music_state.is_preview_actions_scheduled = true;
-                    info!(
-                        "Selection changed to song: '{}'. Preview actions (play@{}ms) scheduled.",
-                        selected_song_arc.title, SELECTION_START_PLAY_DELAY.as_millis()
-                    );
-
+                    // Update state with new song's preview info. These will be compared later.
+                    self.select_music_state.preview_audio_path = selected_song_arc.audio_path.clone(); // Target for new preview
+                    self.select_music_state.preview_sample_start_sec = selected_song_arc.sample_start; // Target for new preview
+                    self.select_music_state.preview_sample_length_sec = selected_song_arc.sample_length; // Target for new preview
+    
                     // Auto-select/validate difficulty for the new song for NPS graph AND gameplay selection
                     let mut difficulty_index_to_use = self.select_music_state.selected_difficulty_index;
                     if !is_difficulty_playable(selected_song_arc, difficulty_index_to_use) {
-                        let mut found_playable = false;
+                        // let mut found_playable = false; // No longer needed as we will find one or keep current
                         for i in 0..DIFFICULTY_NAMES.len() {
                             if is_difficulty_playable(selected_song_arc, i) {
                                 info!("Auto-adjusting difficulty for '{}' from index {} to {} ('{}')", selected_song_arc.title, difficulty_index_to_use, i, DIFFICULTY_NAMES[i]);
                                 difficulty_index_to_use = i;
-                                found_playable = true;
+                                // found_playable = true; // No longer needed
                                 break; // Found the easiest playable
                             }
                         }
-                        if !found_playable {
-                            // This case should be rare. If no "dance-single" chart is playable at all.
-                            warn!("Song '{}' has no playable 'dance-single' charts. Difficulty selection remains as is.", selected_song_arc.title);
-                        }
+                        // if !found_playable { // No longer needed as we default to current if none found
+                        //     warn!("Song '{}' has no playable 'dance-single' charts. Difficulty selection remains as is.", selected_song_arc.title);
+                        // }
                     }
                     // Update the actual state's selected difficulty index
                     self.select_music_state.selected_difficulty_index = difficulty_index_to_use;
-
+    
                     // Use the (potentially updated) difficulty_index for NPS graph
                     let target_difficulty_name = DIFFICULTY_NAMES[difficulty_index_to_use]; // Use the validated/auto-selected index
                     // Use selected_difficulty_index to pick a chart for NPS graph
@@ -495,11 +492,13 @@ impl App {
                         &self.renderer,
                         banner_path.as_deref(),
                     );
+                    // Clear preview info as it's a pack header
                     self.select_music_state.preview_audio_path = None;
-                    self.select_music_state.selection_landed_at = None;
+                    self.select_music_state.preview_sample_start_sec = None;
+                    self.select_music_state.preview_sample_length_sec = None;
                 }
             }
-        } else {
+        } else { // Index out of bounds
             warn!(
                 "Selection changed in Music Select, but index {} is out of bounds ({} entries). Loading fallback and clearing preview actions.",
                 current_index,
@@ -514,10 +513,63 @@ impl App {
                     fallback_res,
                 );
             }
+            // Clear preview info
             self.select_music_state.preview_audio_path = None;
-            self.select_music_state.selection_landed_at = None;
+            self.select_music_state.preview_sample_start_sec = None;
+            self.select_music_state.preview_sample_length_sec = None;
         }
-
+    
+        // --- Conditional Preview Stop/Restart ---
+        let current_preview_audio_path = self.select_music_state.preview_audio_path.clone();
+        let current_preview_sample_start = self.select_music_state.preview_sample_start_sec;
+        let current_preview_sample_length = self.select_music_state.preview_sample_length_sec;
+    
+        let preview_parameters_changed = 
+            prev_preview_audio_path != current_preview_audio_path ||
+            prev_preview_sample_start != current_preview_sample_start ||
+            prev_preview_sample_length != current_preview_sample_length ||
+            (prev_preview_audio_path.is_some() && current_preview_audio_path.is_none()) || // Switched from song to pack
+            (prev_preview_audio_path.is_none() && current_preview_audio_path.is_some()); // Switched from pack to song
+    
+        if preview_parameters_changed {
+            info!("Preview parameters changed. Stopping current preview and rescheduling.");
+            self.audio_manager.stop_preview();
+            self.select_music_state.preview_playback_started_at = None;
+            self.select_music_state.is_awaiting_preview_restart = false;
+            
+            if self.select_music_state.preview_audio_path.is_some() { // If new selection HAS a preview
+                self.select_music_state.selection_landed_at = Some(Instant::now());
+                self.select_music_state.is_preview_actions_scheduled = true;
+                info!(
+                    "New preview actions (play@{}ms) scheduled for {:?}.",
+                    SELECTION_START_PLAY_DELAY.as_millis(),
+                    self.select_music_state.preview_audio_path.as_ref().and_then(|p| p.file_name())
+                );
+            } else { // New selection has NO preview (e.g., pack header)
+                self.select_music_state.selection_landed_at = None;
+                self.select_music_state.is_preview_actions_scheduled = false;
+            }
+        } else {
+            info!("Preview parameters unchanged. Preview will continue or maintain its schedule. Only SFX played for difficulty change.");
+            // If parameters are the same, and it was scheduled, ensure it stays scheduled if selection just landed.
+            // If it was playing, it will continue its natural loop.
+            // This ensures that if only difficulty changes, the preview isn't reset unless its core audio source changes.
+            if self.select_music_state.preview_audio_path.is_some() && self.select_music_state.selection_landed_at.is_none() && self.select_music_state.preview_playback_started_at.is_none() {
+                // This case might occur if difficulty changed, params are same, but previous action cleared selection_landed_at.
+                // Re-assert scheduling if no playback has started and it's not awaiting restart.
+                if !self.select_music_state.is_awaiting_preview_restart && !self.select_music_state.is_preview_actions_scheduled {
+                    self.select_music_state.selection_landed_at = Some(Instant::now());
+                    self.select_music_state.is_preview_actions_scheduled = true;
+                     info!(
+                        "Re-asserting preview actions (play@{}ms) for {:?} as parameters were same but no playback/restart active.",
+                        SELECTION_START_PLAY_DELAY.as_millis(),
+                        self.select_music_state.preview_audio_path.as_ref().and_then(|p| p.file_name())
+                    );
+                }
+            }
+        }
+    
+        // --- NPS Graph Update ---
         if self.select_music_state.current_graph_song_chart_key != new_graph_key_for_current_selection {
             if let Some(mut old_graph_tex) = self.select_music_state.current_graph_texture.take() {
                 info!("Destroying old NPS graph texture (key change or no graph needed).");
@@ -525,9 +577,9 @@ impl App {
             }
             self.select_music_state.current_graph_song_chart_key = new_graph_key_for_current_selection.clone();
         }
-
+    
         if let (Some(key_str), Some(pd_arc)) = (new_graph_key_for_current_selection, chart_data_for_graph_generation) {
-            if self.select_music_state.current_graph_texture.is_none() {
+            if self.select_music_state.current_graph_texture.is_none() { // Only generate if not already there for this key
                 info!("Generating NPS graph for: {}", key_str);
                 let nps_vec_f64: Vec<f64> = pd_arc.measure_nps_vec.iter().map(|&f| f as f64).collect();
                 match crate::parsing::graph::generate_density_graph_rgba(&nps_vec_f64, pd_arc.max_nps as f64) {
@@ -554,7 +606,7 @@ impl App {
                     Err(e) => error!("Failed to generate NPS graph image data: {}", e),
                 }
             }
-        } else if self.select_music_state.current_graph_texture.is_some() {
+        } else if self.select_music_state.current_graph_texture.is_some() { // No graph needed, but one exists
              if let Some(mut old_graph_tex) = self.select_music_state.current_graph_texture.take() {
                 info!("Clearing NPS graph texture as current selection does not require one.");
                 old_graph_tex.destroy(&self.vulkan_base.device);
@@ -576,7 +628,6 @@ impl App {
             }
             AppState::SelectMusic => {
                 let original_selected_index_before_input = self.select_music_state.selected_index;
-                // let original_difficulty_index_before_input = self.select_music_state.selected_difficulty_index; // Not strictly needed if handle_input is robust
  
                 let (next_state, sel_changed_by_nav_or_toggle) = select_music::handle_input(
                     &key_event,
@@ -584,8 +635,6 @@ impl App {
                     &self.audio_manager,
                 );
                 requested_state = next_state;
-                // sel_changed_by_nav_or_toggle is true if song index OR pack expansion changed.
-                // It will also be true if difficulty changed via double-tap.
                 selection_changed_in_music_by_input = sel_changed_by_nav_or_toggle;
 
 
@@ -603,7 +652,7 @@ impl App {
             AppState::Options => {
                 requested_state = options::handle_input(&key_event, &mut self.options_state);
             }
-            AppState::Gameplay => { // Gameplay input uses raw key_event
+            AppState::Gameplay => { 
                 if let Some(ref mut gs) = self.game_state {
                     requested_state = gameplay::handle_input(&key_event, gs);
                 } else {
@@ -642,7 +691,7 @@ impl App {
                 self.select_music_state.is_awaiting_preview_restart = false;
                 self.select_music_state.selection_landed_at = None;
                 self.select_music_state.is_preview_actions_scheduled = false;
-                self.select_music_state.last_difficulty_nav_key = None; // Reset double-tap state on leaving screen
+                self.select_music_state.last_difficulty_nav_key = None; 
                 self.select_music_state.last_difficulty_nav_time = None;
 
 
@@ -688,7 +737,7 @@ impl App {
             AppState::SelectMusic => {
                 self.select_music_state = SelectMusicState::default();
                 self.rebuild_music_wheel_entries();
-                self.handle_music_selection_change(); // This will now correctly set the difficulty index
+                self.handle_music_selection_change(); 
                 info!(
                     "Populated SelectMusic state with {} entries and handled initial selection.",
                     self.select_music_state.entries.len()

@@ -38,6 +38,8 @@ pub enum SoundId {
     MenuChange,
     MenuStart,
     MenuExpandCollapse,
+    DifficultyEasier, // Added
+    DifficultyHarder, // Added
 }
 
 
@@ -88,12 +90,6 @@ impl AssetManager {
 
         // Load MeterArrow texture
         let meter_arrow_texture = load_texture(base, Path::new(config::METER_ARROW_TEXTURE_PATH))?;
-        // Assuming MeterArrow will use its own descriptor set, or be part of a UI atlas.
-        // For now, let's create a new DescriptorSetId for it if not already handled.
-        // If you have a general UI atlas or a 'MiscUI' descriptor set, use that.
-        // Otherwise, you'll need to add DescriptorSetId::MeterArrow in renderer.rs
-        // and update the renderer to handle it.
-        // For simplicity if it's a standalone texture:
         renderer.update_texture_descriptor(&base.device, DescriptorSetId::MeterArrow, &meter_arrow_texture);
         self.textures.insert(TextureId::MeterArrow, meter_arrow_texture);
         info!("Meter Arrow texture loaded and descriptor set updated.");
@@ -111,7 +107,6 @@ impl AssetManager {
             error!("Fallback banner failed to load, DynamicBanner descriptor not initialized!");
         }
 
-        // ... (explosion textures, fonts, sounds loading) ...
         info!("Loading gameplay explosion textures...");
         let explosion_w1_tex = load_texture(base, Path::new(config::EXPLOSION_W1_TEXTURE_PATH))?;
         renderer.update_texture_descriptor(&base.device, DescriptorSetId::ExplosionW1, &explosion_w1_tex);
@@ -181,6 +176,8 @@ impl AssetManager {
         audio_manager.load_sfx(SoundId::MenuChange, Path::new(config::SFX_CHANGE_PATH))?;
         audio_manager.load_sfx(SoundId::MenuStart, Path::new(config::SFX_START_PATH))?;
         audio_manager.load_sfx(SoundId::MenuExpandCollapse, Path::new(config::SFX_EXPAND_PATH))?;
+        audio_manager.load_sfx(SoundId::DifficultyEasier, Path::new(config::SFX_DIFFICULTY_EASIER_PATH))?;
+        audio_manager.load_sfx(SoundId::DifficultyHarder, Path::new(config::SFX_DIFFICULTY_HARDER_PATH))?;
         info!("Sounds loaded.");
 
 
@@ -188,7 +185,6 @@ impl AssetManager {
         Ok(())
     }
 
-    // ... (rest of AssetManager impl) ...
     fn destroy_current_dynamic_banner(&mut self, device: &Device) {
         if !self.current_banner_is_fallback {
             if let Some(mut old_banner) = self.current_banner.take() {
@@ -197,7 +193,7 @@ impl AssetManager {
             }
         }
         self.current_banner = None;
-        self.current_banner_is_fallback = true; // Assume fallback until a new one is loaded
+        self.current_banner_is_fallback = true; 
         self.current_banner_path_key = None;
     }
 
@@ -211,15 +207,14 @@ impl AssetManager {
         let new_banner_path_key = song_info.banner_path.clone();
 
         if self.current_banner_path_key == new_banner_path_key && new_banner_path_key.is_some() {
-            // Banner is already loaded, no need to reload
             trace!("Song banner for {:?} already loaded.", new_banner_path_key.as_ref().unwrap());
             return;
         }
 
-        self.destroy_current_dynamic_banner(&base.device); // Destroy old banner, reset state
+        self.destroy_current_dynamic_banner(&base.device); 
 
         let mut loaded_successfully = false;
-        if let Some(banner_path) = &song_info.banner_path { // This is the song_info.banner_path
+        if let Some(banner_path) = &song_info.banner_path { 
             info!("Attempting to load song banner: {:?} for song: {}", banner_path, song_info.title);
             match load_texture(base, banner_path) {
                 Ok(new_banner_texture) => {
@@ -250,8 +245,8 @@ impl AssetManager {
                      DescriptorSetId::DynamicBanner,
                      fallback_res,
                  );
-                 self.current_banner_is_fallback = true; // Explicitly mark as fallback
-                 self.current_banner_path_key = None; // No specific path for fallback
+                 self.current_banner_is_fallback = true; 
+                 self.current_banner_path_key = None; 
             } else {
                 error!("Fallback banner resource not found! DynamicBanner set might be invalid.");
             }
@@ -271,7 +266,7 @@ impl AssetManager {
             return;
         }
 
-        self.destroy_current_dynamic_banner(&base.device); // Destroy old banner, reset state
+        self.destroy_current_dynamic_banner(&base.device); 
 
         let mut loaded_successfully = false;
         if let Some(pack_banner_path) = pack_banner_path_opt {

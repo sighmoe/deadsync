@@ -1,4 +1,3 @@
-// src/screens/select_music.rs
 use crate::assets::{AssetManager, FontId, SoundId, TextureId};
 use crate::audio::AudioManager;
 use crate::config;
@@ -121,8 +120,8 @@ pub fn handle_input(
                                    state.last_difficulty_nav_time.map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW)
                                 { // Double-tap UP
                                     if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
+                                        let original_diff_idx = state.selected_difficulty_index; // Store before potential change
                                         let mut new_diff_idx = state.selected_difficulty_index;
-                                        let original_diff_idx = new_diff_idx;
                                         loop {
                                             if new_diff_idx == 0 { break; } 
                                             new_diff_idx -= 1;
@@ -132,7 +131,7 @@ pub fn handle_input(
                                             }
                                         }
                                         if state.selected_difficulty_index != original_diff_idx {
-                                            audio_manager.play_sfx(SoundId::MenuChange);
+                                            audio_manager.play_sfx(SoundId::DifficultyEasier); 
                                             difficulty_selection_changed = true; 
                                         }
                                     }
@@ -151,8 +150,8 @@ pub fn handle_input(
                                    state.last_difficulty_nav_time.map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW)
                                 { // Double-tap DOWN
                                     if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
+                                        let original_diff_idx = state.selected_difficulty_index; // Store before potential change
                                         let mut new_diff_idx = state.selected_difficulty_index;
-                                        let original_diff_idx = new_diff_idx;
                                         loop {
                                             if new_diff_idx >= DIFFICULTY_NAMES.len() - 1 { break; } 
                                             new_diff_idx += 1;
@@ -162,7 +161,7 @@ pub fn handle_input(
                                             }
                                         }
                                          if state.selected_difficulty_index != original_diff_idx {
-                                            audio_manager.play_sfx(SoundId::MenuChange);
+                                            audio_manager.play_sfx(SoundId::DifficultyHarder);
                                             difficulty_selection_changed = true;
                                         }
                                     }
@@ -369,6 +368,7 @@ pub fn draw(
     let detail_value_text_target_current_px_height = config::DETAIL_VALUE_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * height_scale_factor;
     let artist_header_left_padding_current = config::ARTIST_HEADER_LEFT_PADDING_REF * width_scale_factor;
     let artist_header_top_padding_current = config::ARTIST_HEADER_TOP_PADDING_REF * height_scale_factor;
+    let bpm_header_left_padding_current = config::BPM_HEADER_LEFT_PADDING_REF * width_scale_factor;
     let header_to_value_horizontal_gap_current = config::HEADER_TO_VALUE_HORIZONTAL_GAP_REF * width_scale_factor;
     let bpm_to_length_horizontal_gap_current = config::BPM_TO_LENGTH_HORIZONTAL_GAP_REF * width_scale_factor;
     let artist_to_bpm_vertical_gap_current = config::ARTIST_TO_BPM_VERTICAL_GAP_REF * height_scale_factor;
@@ -610,7 +610,7 @@ pub fn draw(
                 renderer.draw_text(device, cmd_buf, list_font, artist_value_str, artist_value_x, artist_value_baseline_y, config::SONG_TEXT_COLOR, detail_value_effective_scale, None);
                 let bpm_header_str = "BPM";
                 let bpm_header_width = list_font.measure_text_normalized(bpm_header_str) * detail_header_effective_scale;
-                let bpm_header_x = artist_bpm_box_left_x + artist_header_left_padding_current;
+                let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current;
                 let bpm_header_baseline_y = artist_value_baseline_y + advance_for_next_line + artist_to_bpm_vertical_gap_current;
                 renderer.draw_text(device, cmd_buf, list_font, bpm_header_str, bpm_header_x, bpm_header_baseline_y, config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None);
                 let bpm_value_str = if selected_song_arc.bpms_header.len() == 1 { format!("{:.0}", selected_song_arc.bpms_header[0].1) } else if !selected_song_arc.bpms_header.is_empty() { let min_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::INFINITY, f32::min); let max_bpm = selected_song_arc.bpms_header.iter().map(|&(_, bpm)| bpm).fold(f32::NEG_INFINITY, f32::max); if (min_bpm - max_bpm).abs() < 0.1 { format!("{:.0}", min_bpm) } else { format!("{:.0} - {:.0}", min_bpm, max_bpm) } } else { "???".to_string() };
@@ -634,7 +634,7 @@ pub fn draw(
                 renderer.draw_text(device, cmd_buf, list_font, artist_header_str, artist_header_x, artist_header_baseline_y, config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None);
                 let bpm_header_str = "BPM";
                 let bpm_header_width = list_font.measure_text_normalized(bpm_header_str) * detail_header_effective_scale;
-                let bpm_header_x = artist_bpm_box_left_x + artist_header_left_padding_current;
+                let bpm_header_x = artist_bpm_box_left_x + bpm_header_left_padding_current;
                 let bpm_header_baseline_y = artist_header_baseline_y + advance_for_next_line + artist_to_bpm_vertical_gap_current;
                 renderer.draw_text(device, cmd_buf, list_font, bpm_header_str, bpm_header_x, bpm_header_baseline_y, config::DETAIL_HEADER_TEXT_COLOR, detail_header_effective_scale, None);
                 let length_header_str = "LENGTH";
