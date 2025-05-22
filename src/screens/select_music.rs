@@ -452,13 +452,15 @@ pub fn draw(
                 if is_difficulty_playable(selected_song_arc, i) { // Only draw meter if this slot is playable
                     if !chart_info.meter.is_empty() && chart_info.meter.chars().all(char::is_numeric) {
                         let meter_str = &chart_info.meter;
-                        let target_text_visual_height = scaled_inner_box_dim_h * 0.75;
+                        let target_text_visual_height = config::DIFFICULTY_METER_TEXT_VISUAL_HEIGHT_REF * height_scale_factor;
                         let font_typographic_height_norm = (difficulty_font.metrics.ascender - difficulty_font.metrics.descender).max(1e-5);
                         let text_scale = target_text_visual_height / font_typographic_height_norm;
                         let text_width_pixels = difficulty_font.measure_text_normalized(meter_str) * text_scale;
                         let text_draw_x = inner_boxes_start_x + (scaled_inner_box_dim_w - text_width_pixels) / 2.0;
                         let text_visual_center_y = current_inner_box_top_y + scaled_inner_box_dim_h / 2.0;
-                        let text_baseline_y = text_visual_center_y + (difficulty_font.metrics.ascender + difficulty_font.metrics.descender) / 2.0 * text_scale;
+                        let scaled_vertical_nudge = config::DIFFICULTY_METER_TEXT_VERTICAL_NUDGE_REF * height_scale_factor;
+                        let text_baseline_y = text_visual_center_y + (difficulty_font.metrics.ascender + difficulty_font.metrics.descender) / 2.0 * text_scale + scaled_vertical_nudge;
+                        
                         renderer.draw_text(device, cmd_buf, difficulty_font, meter_str, text_draw_x, text_baseline_y, *diff_color, text_scale, None);
                     }
                 }

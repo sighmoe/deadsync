@@ -173,6 +173,8 @@ pub const DIFFICULTY_TEXT_COLOR_EASY: [f32; 4] = [255.0/255.0, 125.0/255.0, 0.0/
 pub const DIFFICULTY_TEXT_COLOR_MEDIUM: [f32; 4] = [255.0/255.0, 93.0/255.0, 71.0/255.0, 1.0];      // #FF5D47
 pub const DIFFICULTY_TEXT_COLOR_HARD: [f32; 4] = [255.0/255.0, 87.0/255.0, 126.0/255.0, 1.0];       // #FF577E
 pub const DIFFICULTY_TEXT_COLOR_CHALLENGE: [f32; 4] = [255.0/255.0, 71.0/255.0, 179.0/255.0, 1.0];  // #FF47B3 (Matches one of the pack palette colors too)
+pub const DIFFICULTY_METER_TEXT_VISUAL_HEIGHT_REF: f32 = 39.0; // Target visual height for difficulty numbers at ref res
+pub const DIFFICULTY_METER_TEXT_VERTICAL_NUDGE_REF: f32 = -3.0; // Vertical nudge for difficulty numbers (negative is up)
 
 // Select Music Screen Meter Arrow Animation
 pub const METER_ARROW_ANIM_DURATION_SEC: f32 = 0.4; // Duration for one full oscillation cycle (left-right-left)
