@@ -1,4 +1,3 @@
-// deadsync/src/parsing/simfile.rs
 use super::stats::{
     minimize_chart_and_count, ArrowStats, BreakdownMode,
     compute_stream_counts, generate_breakdown, StreamCounts,
@@ -43,10 +42,11 @@ pub struct ProcessedChartData {
 #[derive(Debug, Clone)]
 pub struct ChartInfo { 
     pub stepstype: String, 
-    pub description: String, 
+    pub description: String, // Original description from file
     pub difficulty: String, 
     pub meter: String, 
-    pub credit: String, 
+    pub credit: String, // Original credit from file (mainly for SSC)
+    pub stepartist_display_name: String, // Combined and cleaned name for UI
     pub notes_data_raw: String, 
     pub bpms_chart: Option<String>, 
     pub stops_chart: Option<String>, 
@@ -85,9 +85,6 @@ pub enum ParseError {
     NoCharts 
 }
 
-// Using parse_bpms and parse_stops from this module for f32.
-// rssp's bpm.rs uses f64, so direct use for parsing might need f64 types earlier.
-// For now, keeping these local as they are used to populate f32 fields.
 pub fn parse_bpms(bpm_string: &str) -> Result<Vec<(f32, f32)>, ParseError> {
     let mut bpms = Vec::new();
     if bpm_string.trim().is_empty() { return Ok(bpms); }
@@ -229,17 +226,36 @@ pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> {
         }
 
         let stepstype = String::from_utf8_lossy(metadata_fields_byte_slices[0]).trim().to_string();
-        let description = String::from_utf8_lossy(metadata_fields_byte_slices[1]).trim().to_string();
+        let description_raw = String::from_utf8_lossy(metadata_fields_byte_slices[1]).trim().to_string();
         let difficulty = String::from_utf8_lossy(metadata_fields_byte_slices[2]).trim().to_string();
         let meter = String::from_utf8_lossy(metadata_fields_byte_slices[3]).trim().to_string();
         let credit_or_radar_bytes = metadata_fields_byte_slices[4];
         
-        let credit = if extension_str == "ssc" {
+        let credit_raw = if extension_str == "ssc" {
             String::from_utf8_lossy(credit_or_radar_bytes).trim().to_string()
         } else {
-            String::new() 
+            String::new() // .sm files use radar values here, credit is not standardly in this field for .sm
+                          // If credit is desired for .sm, it would typically be in the description.
         };
         
+        // Combine credit and description for stepartist display name
+        // Prioritize credit if it exists and is different from description.
+        // Otherwise, use description. If both are empty, it will be empty.
+        let stepartist_display_name = {
+            let c = credit_raw.trim();
+            let d = description_raw.trim();
+            if !c.is_empty() {
+                if !d.is_empty() && c.to_lowercase() != d.to_lowercase() {
+                    format!("{} {}", c, d) // Combine if different and both non-empty
+                } else {
+                    c.to_string() // Use credit if description is same or empty
+                }
+            } else {
+                d.to_string() // Use description if credit is empty
+            }
+        };
+
+
         let notes_data_raw = String::from_utf8_lossy(actual_notes_data_bytes).to_string();
         
         let chart_bpms = ssc_chart_bpms_bytes_opt.map(|b_vec| String::from_utf8_lossy(&b_vec).trim().to_string());
@@ -254,12 +270,17 @@ pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> {
 
         if stepstype.is_empty() || difficulty.is_empty() || meter.is_empty() {
              warn!("Skipping chart in {:?} (type: '{}', desc: '{}', diff: '{}', meter: '{}') due to missing essential metadata fields post-split.",
-                simfile_path, stepstype, description, difficulty, meter);
+                simfile_path, stepstype, description_raw, difficulty, meter);
             continue;
         }
         
         charts.push(ChartInfo {
-            stepstype, description, difficulty, meter, credit,
+            stepstype, 
+            description: description_raw, 
+            difficulty, 
+            meter, 
+            credit: credit_raw, 
+            stepartist_display_name,
             notes_data_raw,
             bpms_chart: chart_bpms,
             stops_chart: chart_stops, 
@@ -345,7 +366,6 @@ pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> {
                 breakdown_detailed, breakdown_simplified,
             });
         
-            // Duration calculation uses f32 bpm map
             if let Some(pd) = &chart_mut.processed_data {
                  let current_chart_bpms = if let Some(cb_str) = &chart_mut.bpms_chart {
                     parse_bpms(cb_str).unwrap_or_else(|_| song_info.bpms_header.clone())
@@ -364,13 +384,14 @@ pub fn parse_simfile(simfile_path: &Path) -> Result<SongInfo, ParseError> {
     
     song_info.charts.retain(|c| c.processed_data.as_ref().map_or(false, |pd| !pd.measures.is_empty() || pd.stats.total_arrows > 0));
     if song_info.charts.is_empty() && !song_info.simfile_path.to_string_lossy().contains("EditCourses") {
+        // If, after retaining, there are no charts, then return an error
+        // unless it's an EditCourses file which might legitimately have no charts of its own.
         return Err(ParseError::NoCharts);
     }
 
     Ok(song_info)
 }
 
-// Moved from local scope to module scope
 pub fn get_bpm_at_beat(bpm_map: &[(f32, f32)], beat: f32) -> f32 {
     let mut current_bpm = if !bpm_map.is_empty() { bpm_map[0].1 } else { 120.0 }; 
     for &(b_beat, b_bpm) in bpm_map {
@@ -393,7 +414,7 @@ pub fn calculate_chart_duration_seconds(
     let mut total_length_seconds = 0.0;
     for (i, _measure_lines) in processed_data.measures.iter().enumerate() {
         let measure_start_beat = i as f32 * 4.0; 
-        let current_bpm = get_bpm_at_beat(bpm_map, measure_start_beat); // Now correctly calls the module-level one
+        let current_bpm = get_bpm_at_beat(bpm_map, measure_start_beat); 
         if current_bpm <= 0.0 { 
             warn!("Invalid BPM ({}) found at measure {}, beat {}. Skipping measure for duration calculation.", current_bpm, i, measure_start_beat);
             continue; 
@@ -405,7 +426,7 @@ pub fn calculate_chart_duration_seconds(
 }
 
 
-pub fn parse_song_folder(folder_path: &Path) -> Result<SongInfo, ParseError> { /* ... same ... */ 
+pub fn parse_song_folder(folder_path: &Path) -> Result<SongInfo, ParseError> { 
     debug!("Scanning song folder: {:?}", folder_path);
     let mut ssc_path: Option<PathBuf> = None;
     let mut sm_path: Option<PathBuf> = None;
@@ -434,7 +455,7 @@ pub fn parse_song_folder(folder_path: &Path) -> Result<SongInfo, ParseError> { /
     else if let Some(path) = sm_path { parse_simfile(&path) } 
     else { Err(ParseError::NotFound(folder_path.join("*.ssc/*.sm"))) }
 }
-pub fn scan_pack(pack_path: &Path) -> Vec<Result<SongInfo, ParseError>> { /* ... same ... */ 
+pub fn scan_pack(pack_path: &Path) -> Vec<Result<SongInfo, ParseError>> { 
     info!("Scanning pack: {:?}", pack_path);
     let mut songs = Vec::new();
     if !pack_path.is_dir() { error!("Pack path is not a directory: {:?}", pack_path); return songs; }
@@ -451,7 +472,7 @@ pub fn scan_pack(pack_path: &Path) -> Vec<Result<SongInfo, ParseError>> { /* ...
     }
     songs
 }
-pub fn scan_packs(packs_root_dir: &Path) -> Vec<SongInfo> { /* ... same ... */
+pub fn scan_packs(packs_root_dir: &Path) -> Vec<SongInfo> { 
     info!("Scanning for packs in: {:?}", packs_root_dir);
     let mut all_songs = Vec::new();
      if !packs_root_dir.is_dir() { error!("Packs root directory not found or is not a directory: {:?}", packs_root_dir); return all_songs; }

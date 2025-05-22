@@ -302,14 +302,14 @@ pub fn draw(
     const ASCENDER_POSITIONING_ADJUSTMENT_FACTOR: f32 = 0.65;
     const HEADER_FOOTER_LETTER_SPACING_FACTOR: f32 = 0.90;
 
-    const PINK_BOX_REF_WIDTH: f32 = 625.0;
+    const PINK_BOX_REF_WIDTH: f32 = 625.0; 
     const PINK_BOX_REF_HEIGHT: f32 = 90.0;
     const SMALL_UPPER_RIGHT_BOX_REF_WIDTH: f32 = 48.0;
     const SMALL_UPPER_RIGHT_BOX_REF_HEIGHT: f32 = 228.0;
     const LEFT_BOXES_REF_WIDTH: f32 = 429.0;
-    const LEFT_BOX_REF_HEIGHT: f32 = 96.0;
-    const TOPMOST_LEFT_BOX_REF_WIDTH: f32 = 263.0;
-    const TOPMOST_LEFT_BOX_REF_HEIGHT: f32 = 26.0;
+    const LEFT_BOX_REF_HEIGHT: f32 = 96.0; 
+    const STEPARTIST_INFO_BOX_REF_WIDTH: f32 = 263.0; 
+    const STEPARTIST_INFO_BOX_REF_HEIGHT: f32 = 26.0;
     const ARTIST_BPM_BOX_REF_WIDTH: f32 = 480.0;
     const ARTIST_BPM_BOX_REF_HEIGHT: f32 = 75.0;
     const FALLBACK_BANNER_REF_WIDTH: f32 = 480.0;
@@ -321,12 +321,21 @@ pub fn draw(
     const CENTER_MUSIC_WHEEL_SLOT_INDEX: usize = 7;
 
     const VERTICAL_GAP_PINK_TO_UPPER_REF: f32 = 7.0;
-    const HORIZONTAL_GAP_LEFT_TO_RIGHT_REF: f32 = 3.0; // Gap between left-side boxes and the small_upper_right_box
+    const HORIZONTAL_GAP_LEFT_TO_RIGHT_REF: f32 = 3.0; 
     const VERTICAL_GAP_BETWEEN_LEFT_BOXES_REF: f32 = 36.0;
-    const VERTICAL_GAP_TOPLEFT_TO_TOPMOST_REF: f32 = 1.0;
+    const VERTICAL_GAP_GRAPH_TO_STEPARTIST_BOX_REF: f32 = 1.0;
     const VERTICAL_GAP_ARTIST_TO_BANNER_REF: f32 = 2.0;
     const MUSIC_WHEEL_VERTICAL_GAP_REF: f32 = 2.0;
-    const METER_ARROW_PADDING_LEFT_REF: f32 = 0.0; // Padding from meter arrow to difficulty boxes
+    const METER_ARROW_PADDING_LEFT_REF: f32 = 0.0; 
+
+    // Constants for Stepartist Info Box Text (Using your provided values)
+    const STEPARTIST_INFO_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 22.0;
+    const STEPARTIST_BOX_HEADER_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; 
+    const STEPARTIST_BOX_VALUE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];  
+    const STEPARTIST_BOX_TEXT_LEFT_PADDING_REF: f32 = 7.0;
+    const STEPARTIST_BOX_HEADER_TO_VALUE_GAP_REF: f32 = 21.0;
+    const STEPARTIST_BOX_TEXT_VERTICAL_NUDGE_REF: f32 = 2.0; // Positive is down, negative is up
+
 
     let width_scale_factor = window_width / config::LAYOUT_BOXES_REF_RES_WIDTH;
     let height_scale_factor = window_height / config::LAYOUT_BOXES_REF_RES_HEIGHT;
@@ -346,21 +355,21 @@ pub fn draw(
     let small_upper_right_box_current_width = SMALL_UPPER_RIGHT_BOX_REF_WIDTH * width_scale_factor;
     let small_upper_right_box_current_height = SMALL_UPPER_RIGHT_BOX_REF_HEIGHT * height_scale_factor;
     let left_boxes_current_width = LEFT_BOXES_REF_WIDTH * width_scale_factor;
-    let left_box_current_height = LEFT_BOX_REF_HEIGHT * height_scale_factor;
-    let topmost_left_box_current_width = TOPMOST_LEFT_BOX_REF_WIDTH * width_scale_factor;
-    let topmost_left_box_current_height = TOPMOST_LEFT_BOX_REF_HEIGHT * height_scale_factor;
+    let left_box_current_height = LEFT_BOX_REF_HEIGHT * height_scale_factor; 
+    let stepartist_info_box_current_width = STEPARTIST_INFO_BOX_REF_WIDTH * width_scale_factor;
+    let stepartist_info_box_current_height = STEPARTIST_INFO_BOX_REF_HEIGHT * height_scale_factor;
     let artist_bpm_box_current_width = ARTIST_BPM_BOX_REF_WIDTH * width_scale_factor;
     let artist_bpm_box_current_height = ARTIST_BPM_BOX_REF_HEIGHT * height_scale_factor;
     let fallback_banner_current_width = FALLBACK_BANNER_REF_WIDTH * width_scale_factor;
     let fallback_banner_current_height = FALLBACK_BANNER_REF_HEIGHT * height_scale_factor;
 
     let vertical_gap_pink_to_upper_current = VERTICAL_GAP_PINK_TO_UPPER_REF * height_scale_factor;
-    let _horizontal_gap_left_to_right_current = HORIZONTAL_GAP_LEFT_TO_RIGHT_REF * width_scale_factor; // Keep if used elsewhere
+    let _horizontal_gap_left_to_right_current = HORIZONTAL_GAP_LEFT_TO_RIGHT_REF * width_scale_factor;
     let vertical_gap_between_left_boxes_current = VERTICAL_GAP_BETWEEN_LEFT_BOXES_REF * height_scale_factor;
-    let vertical_gap_topleft_to_topmost_current = VERTICAL_GAP_TOPLEFT_TO_TOPMOST_REF * height_scale_factor;
+    let vertical_gap_graph_to_stepartist_box_current = VERTICAL_GAP_GRAPH_TO_STEPARTIST_BOX_REF * height_scale_factor;
     let vertical_gap_artist_to_banner_current = VERTICAL_GAP_ARTIST_TO_BANNER_REF * height_scale_factor;
     let song_text_left_padding_current = config::MUSIC_WHEEL_SONG_TEXT_LEFT_PADDING_REF * width_scale_factor;
-    let vertical_gap_topmost_to_artist_box_current = config::VERTICAL_GAP_TOPMOST_TO_ARTIST_BOX_REF * height_scale_factor;
+    let vertical_gap_stepartist_to_artist_box_current = config::VERTICAL_GAP_TOPMOST_TO_ARTIST_BOX_REF * height_scale_factor; 
     let scaled_meter_arrow_padding_left = METER_ARROW_PADDING_LEFT_REF * width_scale_factor;
 
 
@@ -436,14 +445,14 @@ pub fn draw(
     renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
     renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(center_x, footer_y_top_edge + bar_height / 2.0, 0.0), (window_width, bar_height), Rad(0.0), config::UI_BAR_COLOR, [0.0,0.0], [1.0,1.0]);
 
-    let pink_box_left_x = 0.0;
-    let pink_box_top_y = footer_y_top_edge - pink_box_current_height;
-    let pink_box_center_x = pink_box_left_x + pink_box_current_width / 2.0;
-    let pink_box_center_y = pink_box_top_y + pink_box_current_height / 2.0;
-    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(pink_box_center_x, pink_box_center_y, 0.0), (pink_box_current_width, pink_box_current_height), Rad(0.0), config::PINK_BOX_COLOR, [0.0,0.0], [1.0,1.0]);
+    let large_pink_box_left_x = 0.0;
+    let large_pink_box_top_y = footer_y_top_edge - pink_box_current_height;
+    let large_pink_box_center_x = large_pink_box_left_x + pink_box_current_width / 2.0;
+    let large_pink_box_center_y = large_pink_box_top_y + pink_box_current_height / 2.0;
+    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(large_pink_box_center_x, large_pink_box_center_y, 0.0), (pink_box_current_width, pink_box_current_height), Rad(0.0), config::PINK_BOX_COLOR, [0.0,0.0], [1.0,1.0]);
 
-    let small_upper_right_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - small_upper_right_box_current_height;
-    let small_upper_right_box_left_x = pink_box_left_x + pink_box_current_width - small_upper_right_box_current_width;
+    let small_upper_right_box_top_y = large_pink_box_top_y - vertical_gap_pink_to_upper_current - small_upper_right_box_current_height;
+    let small_upper_right_box_left_x = large_pink_box_left_x + pink_box_current_width - small_upper_right_box_current_width;
     let small_upper_right_box_center_x = small_upper_right_box_left_x + small_upper_right_box_current_width / 2.0;
     let small_upper_right_box_center_y = small_upper_right_box_top_y + small_upper_right_box_current_height / 2.0;
     renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(small_upper_right_box_center_x, small_upper_right_box_center_y, 0.0), (small_upper_right_box_current_width, small_upper_right_box_current_height), Rad(0.0), config::UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0]);
@@ -465,15 +474,10 @@ pub fn draw(
         if let MusicWheelEntry::Song(song_arc) = entry { Some(song_arc.clone()) } else { None }
     });
 
-    // Calculate the Y position for the arrow based on state.selected_difficulty_index,
-    // regardless of whether a song is selected or if the difficulty is playable.
-    // The arrow will simply point.
     let meter_arrow_target_y = inner_boxes_start_y + 
                                state.selected_difficulty_index as f32 * (scaled_inner_box_dim_h + scaled_padding_border_y) + 
                                scaled_inner_box_dim_h / 2.0;
 
-
-    // Loop to draw difficulty meters
     for (i, diff_color) in difficulty_levels_ordered_colors.iter().enumerate() {
         let current_inner_box_top_y = inner_boxes_start_y + i as f32 * (scaled_inner_box_dim_h + scaled_padding_border_y);
         let inner_box_center_x = inner_boxes_start_x + scaled_inner_box_dim_w / 2.0;
@@ -482,7 +486,7 @@ pub fn draw(
         renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(inner_box_center_x, inner_box_center_y, 0.0), (scaled_inner_box_dim_w, scaled_inner_box_dim_h), Rad(0.0), config::DIFFICULTY_DISPLAY_INNER_BOX_COLOR, [0.0,0.0], [1.0,1.0]);
         if let Some(selected_song_arc) = &selected_song_arc_opt {
             if let Some(chart_info) = selected_song_arc.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(DIFFICULTY_NAMES[i]) && c.stepstype == "dance-single") {
-                if is_difficulty_playable(selected_song_arc, i) { // Only draw meter if this slot is playable
+                if is_difficulty_playable(selected_song_arc, i) { 
                     if !chart_info.meter.is_empty() && chart_info.meter.chars().all(char::is_numeric) {
                         let meter_str = &chart_info.meter;
                         let target_text_visual_height = config::DIFFICULTY_METER_TEXT_VISUAL_HEIGHT_REF * height_scale_factor;
@@ -501,8 +505,8 @@ pub fn draw(
         }
     }
     
-    let bottom_left_box_top_y = pink_box_top_y - vertical_gap_pink_to_upper_current - left_box_current_height;
-    let bottom_left_box_left_x = small_upper_right_box_left_x - HORIZONTAL_GAP_LEFT_TO_RIGHT_REF * width_scale_factor - left_boxes_current_width; // Corrected gap usage
+    let bottom_left_box_top_y = large_pink_box_top_y - vertical_gap_pink_to_upper_current - left_box_current_height; 
+    let bottom_left_box_left_x = small_upper_right_box_left_x - HORIZONTAL_GAP_LEFT_TO_RIGHT_REF * width_scale_factor - left_boxes_current_width; 
     let bottom_left_box_center_x = bottom_left_box_left_x + left_boxes_current_width / 2.0;
     let bottom_left_box_center_y = bottom_left_box_top_y + left_box_current_height / 2.0;
     renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(bottom_left_box_center_x, bottom_left_box_center_y, 0.0), (left_boxes_current_width, left_box_current_height), Rad(0.0), config::UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0]);
@@ -516,47 +520,112 @@ pub fn draw(
     renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(graph_area_center_x, graph_area_center_y, 0.0), (graph_area_width, graph_area_height), Rad(0.0), config::UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0]);
     if state.current_graph_texture.is_some() { renderer.draw_quad(device, cmd_buf, DescriptorSetId::NpsGraph, Vector3::new(graph_area_center_x, graph_area_center_y, 0.0), (graph_area_width, graph_area_height), Rad(0.0), [1.0, 1.0, 1.0, 1.0], [0.0, 0.0], [1.0, 1.0]); }
 
-    // Draw the arrow unconditionally at the calculated Y position.
-    if meter_arrow_target_y > 0.0 { // Basic check to ensure Y is somewhat valid
+    if meter_arrow_target_y > 0.0 { 
         if let Some(meter_arrow_texture) = meter_arrow_texture_opt {
             let arrow_texture_aspect = meter_arrow_texture.width as f32 / meter_arrow_texture.height.max(1) as f32;
-            
-            // Base size calculation (slightly smaller than box)
             let base_arrow_draw_height = scaled_inner_box_dim_h * 0.7; 
-            // Apply new size scale factor
             let arrow_draw_height = base_arrow_draw_height * config::METER_ARROW_SIZE_SCALE_FACTOR;
-            let arrow_draw_width = arrow_draw_height * arrow_texture_aspect; // Maintain aspect ratio
-            
-            // Position arrow to the LEFT of the difficulty boxes
+            let arrow_draw_width = arrow_draw_height * arrow_texture_aspect; 
             let base_arrow_center_x = small_upper_right_box_left_x - scaled_meter_arrow_padding_left - arrow_draw_width / 2.0;
-
-            // Calculate horizontal oscillation for animation
             let anim_cycle_progress = state.meter_arrow_animation_timer / config::METER_ARROW_ANIM_DURATION_SEC;
-            let horizontal_offset_rad = anim_cycle_progress * PI * 2.0; // Full sine wave cycle
-            let horizontal_offset_factor = horizontal_offset_rad.sin(); // Ranges from -1.0 to 1.0
+            let horizontal_offset_rad = anim_cycle_progress * PI * 2.0; 
+            let horizontal_offset_factor = horizontal_offset_rad.sin(); 
             let scaled_max_horizontal_travel = config::METER_ARROW_ANIM_HORIZONTAL_TRAVEL_REF * width_scale_factor;
             let current_horizontal_offset = horizontal_offset_factor * scaled_max_horizontal_travel;
             let animated_arrow_center_x = base_arrow_center_x + current_horizontal_offset;
-
             renderer.draw_quad(
                 device, cmd_buf, DescriptorSetId::MeterArrow,
                 Vector3::new(animated_arrow_center_x, meter_arrow_target_y, 0.0),
                 (arrow_draw_width, arrow_draw_height),
-                Rad(0.0), // Assuming arrow texture points right by default, adjust if it points left
+                Rad(0.0), 
                 [1.0, 1.0, 1.0, 1.0],
                 [0.0, 0.0], [1.0, 1.0]
             );
         }
     }
 
-    let topmost_left_box_top_y = graph_area_top_y - vertical_gap_topleft_to_topmost_current - topmost_left_box_current_height;
-    let topmost_left_box_left_x = graph_area_left_x;
-    let topmost_left_box_center_x = topmost_left_box_left_x + topmost_left_box_current_width / 2.0;
-    let topmost_left_box_center_y = topmost_left_box_top_y + topmost_left_box_current_height / 2.0;
-    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(topmost_left_box_center_x, topmost_left_box_center_y, 0.0), (topmost_left_box_current_width, topmost_left_box_current_height), Rad(0.0), config::PINK_BOX_COLOR, [0.0,0.0], [1.0,1.0]);
+    // Stepartist Info Box (the small pink one) drawing logic
+    let stepartist_info_box_top_y = graph_area_top_y - vertical_gap_graph_to_stepartist_box_current - stepartist_info_box_current_height;
+    let stepartist_info_box_left_x = graph_area_left_x; 
+    let stepartist_info_box_center_x = stepartist_info_box_left_x + stepartist_info_box_current_width / 2.0;
+    let stepartist_info_box_center_y = stepartist_info_box_top_y + stepartist_info_box_current_height / 2.0;
+    renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(stepartist_info_box_center_x, stepartist_info_box_center_y, 0.0), (stepartist_info_box_current_width, stepartist_info_box_current_height), Rad(0.0), config::PINK_BOX_COLOR, [0.0,0.0], [1.0,1.0]);
 
-    let artist_bpm_box_left_x = topmost_left_box_left_x;
-    let artist_bpm_box_actual_top_y = topmost_left_box_top_y - vertical_gap_topmost_to_artist_box_current - artist_bpm_box_current_height;
+    // Text inside Stepartist Info Box
+    let miso_font = assets.get_font(FontId::Miso).expect("Miso font missing for stepartist info box text");
+    let stepartist_box_text_target_visual_height = STEPARTIST_INFO_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * height_scale_factor; 
+    let stepartist_font_typographic_h_norm = (miso_font.metrics.ascender - miso_font.metrics.descender).max(1e-5);
+    let stepartist_text_effective_scale = stepartist_box_text_target_visual_height / stepartist_font_typographic_h_norm;
+    
+    let scaled_miso_asc_stepartist = miso_font.metrics.ascender * stepartist_text_effective_scale;
+    let current_stepartist_text_vertical_nudge = STEPARTIST_BOX_TEXT_VERTICAL_NUDGE_REF * height_scale_factor;
+    let stepartist_visual_text_height = scaled_miso_asc_stepartist - (miso_font.metrics.descender * stepartist_text_effective_scale);
+    let stepartist_text_padding_top_visual = (stepartist_info_box_current_height - stepartist_visual_text_height) / 2.0;
+    let mut stepartist_baseline_y = stepartist_info_box_top_y + stepartist_text_padding_top_visual + scaled_miso_asc_stepartist;
+    stepartist_baseline_y += current_stepartist_text_vertical_nudge;
+
+
+    let stepartist_text_padding_left_current = STEPARTIST_BOX_TEXT_LEFT_PADDING_REF * width_scale_factor;
+    let header_steps_str = "STEPS";
+    let mut current_pen_x = stepartist_info_box_left_x + stepartist_text_padding_left_current;
+
+    renderer.draw_text(
+        device, cmd_buf, miso_font,
+        header_steps_str,
+        current_pen_x,
+        stepartist_baseline_y,
+        STEPARTIST_BOX_HEADER_COLOR, 
+        stepartist_text_effective_scale,
+        None
+    );
+    current_pen_x += miso_font.measure_text_normalized(header_steps_str) * stepartist_text_effective_scale;
+    current_pen_x += STEPARTIST_BOX_HEADER_TO_VALUE_GAP_REF * width_scale_factor;
+
+    if let Some(selected_entry) = state.entries.get(state.selected_index) {
+        if let MusicWheelEntry::Song(selected_song_arc) = selected_entry {
+            let mut stepartist_display_name_for_ui = String::new();
+            
+            // Get stepartist_display_name from the currently selected chart for the song
+            if state.selected_difficulty_index < DIFFICULTY_NAMES.len() {
+                let target_difficulty_name = DIFFICULTY_NAMES[state.selected_difficulty_index];
+                 // Find the chart matching current difficulty and type
+                if let Some(chart) = selected_song_arc.charts.iter().find(|c| 
+                    c.difficulty.eq_ignore_ascii_case(target_difficulty_name) &&
+                    c.stepstype == "dance-single" // Assuming dance-single
+                ) {
+                    if !chart.stepartist_display_name.trim().is_empty() {
+                        stepartist_display_name_for_ui = chart.stepartist_display_name.trim().to_string();
+                    }
+                }
+                // Fallback if specific difficulty chart not found or its display name is empty
+                // to the first available dance-single chart with a non-empty stepartist_display_name
+                if stepartist_display_name_for_ui.is_empty() {
+                    if let Some(chart) = selected_song_arc.charts.iter().find(|c|
+                        c.stepstype == "dance-single" && !c.stepartist_display_name.trim().is_empty()
+                    ) {
+                         stepartist_display_name_for_ui = chart.stepartist_display_name.trim().to_string();
+                    }
+                }
+            }
+
+
+            if !stepartist_display_name_for_ui.is_empty() {
+                 renderer.draw_text(
+                    device, cmd_buf, miso_font,
+                    &stepartist_display_name_for_ui,
+                    current_pen_x,
+                    stepartist_baseline_y,
+                    STEPARTIST_BOX_VALUE_COLOR, 
+                    stepartist_text_effective_scale,
+                    None
+                );
+            }
+        }
+    }
+    // End of stepartist_info_box text rendering
+
+    let artist_bpm_box_left_x = stepartist_info_box_left_x; 
+    let artist_bpm_box_actual_top_y = stepartist_info_box_top_y - vertical_gap_stepartist_to_artist_box_current - artist_bpm_box_current_height; 
     let artist_bpm_box_center_x = artist_bpm_box_left_x + artist_bpm_box_current_width / 2.0;
     let artist_bpm_box_center_y = artist_bpm_box_actual_top_y + artist_bpm_box_current_height / 2.0;
     renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(artist_bpm_box_center_x, artist_bpm_box_center_y, 0.0), (artist_bpm_box_current_width, artist_bpm_box_current_height), Rad(0.0), config::UI_BOX_DARK_COLOR, [0.0,0.0], [1.0,1.0]);
