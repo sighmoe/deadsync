@@ -1,11 +1,13 @@
+// src/app.rs
 use crate::assets::AssetManager;
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::Renderer;
 use crate::graphics::vulkan_base::VulkanBase;
 use crate::parsing::simfile::{scan_packs, SongInfo};
-use crate::screens::{gameplay, menu, options, select_music};
+use crate::screens::{gameplay, menu, options, select_music::{self, is_difficulty_playable}}; // Import for gameplay transition AND helper
 use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState, MusicWheelEntry, VirtualKeyCode, NavDirection};
+use crate::screens::select_music::DIFFICULTY_NAMES; // Import for gameplay transition
 use crate::utils::fps::FPSCounter;
 
 use ash::vk;
@@ -261,30 +263,23 @@ impl App {
         if !pack_folder_path.is_dir() {
             return None;
         }
-        let banner_name_patterns = ["banner", "ban", "bn"]; // Order by preference if needed
-
-        let entries = match fs::read_dir(pack_folder_path) {
-            Ok(e) => e,
-            Err(_) => return None,
-        };
+        let banner_name_patterns = ["banner", "ban", "bn"]; 
 
         let mut found_banner: Option<PathBuf> = None;
 
         for pattern_base in banner_name_patterns {
-            for entry_res in fs::read_dir(pack_folder_path).ok()? { // Re-read dir for each pattern or collect names first
+            for entry_res in fs::read_dir(pack_folder_path).ok()? { 
                 if let Ok(entry) = entry_res {
                     let path = entry.path();
                     if path.is_file() {
                         if let Some(filename_osstr) = path.file_name() {
                             if let Some(filename_str) = filename_osstr.to_str() {
                                 let filename_lower = filename_str.to_lowercase();
-                                // Check if filename_lower CONTAINS pattern_base and ends with .png
                                 if filename_lower.contains(pattern_base) && filename_lower.ends_with(".png") {
-                                     // Prioritize exact matches like "banner.png"
                                     if filename_lower == format!("{}.png", pattern_base) {
                                         return Some(path);
                                     }
-                                    if found_banner.is_none() { // Take the first partial match
+                                    if found_banner.is_none() { 
                                         found_banner = Some(path.clone());
                                     }
                                 }
@@ -293,16 +288,15 @@ impl App {
                     }
                 }
             }
-            if found_banner.is_some() && pattern_base == "banner" { // If "banner.png" or "Banner.png" etc. was found, it's good enough
+            if found_banner.is_some() && pattern_base == "banner" { 
                 return found_banner;
             }
         }
-        found_banner // Return whatever was found (could be from "bn.png" etc.)
+        found_banner
     }
 
 
     fn rebuild_music_wheel_entries(&mut self) {
-        // Calculate total durations for each pack first
         let mut pack_total_durations: HashMap<String, f32> = HashMap::new();
         for song_info in &self.song_library {
             let pack_name = song_info
@@ -313,7 +307,6 @@ impl App {
                 .unwrap_or("Unknown Pack")
                 .to_string();
 
-            // Use the duration of the first chart that has one for summing pack duration
             let song_duration_for_pack_sum = song_info
                 .charts
                 .iter()
@@ -358,7 +351,7 @@ impl App {
                     name: pack_name_for_song.clone(),
                     color,
                     banner_path: pack_banner_path,
-                    total_duration_sec: total_duration, // Populate new field
+                    total_duration_sec: total_duration,
                 });
                 current_pack_name_in_library = pack_name_for_song.clone();
             }
@@ -432,7 +425,7 @@ impl App {
         if let Some(selected_entry) = self.select_music_state.entries.get(current_index) {
             match selected_entry {
                 MusicWheelEntry::Song(selected_song_arc) => {
-                    self.asset_manager.load_song_banner( // This handles song-specific banners
+                    self.asset_manager.load_song_banner(
                         &self.vulkan_base,
                         &self.renderer,
                         selected_song_arc,
@@ -448,24 +441,60 @@ impl App {
                         selected_song_arc.title, SELECTION_START_PLAY_DELAY.as_millis()
                     );
 
+                    // Auto-select/validate difficulty for the new song for NPS graph AND gameplay selection
+                    let mut difficulty_index_to_use = self.select_music_state.selected_difficulty_index;
+                    if !is_difficulty_playable(selected_song_arc, difficulty_index_to_use) {
+                        let mut found_playable = false;
+                        for i in 0..DIFFICULTY_NAMES.len() {
+                            if is_difficulty_playable(selected_song_arc, i) {
+                                info!("Auto-adjusting difficulty for '{}' from index {} to {} ('{}')", selected_song_arc.title, difficulty_index_to_use, i, DIFFICULTY_NAMES[i]);
+                                difficulty_index_to_use = i;
+                                found_playable = true;
+                                break; // Found the easiest playable
+                            }
+                        }
+                        if !found_playable {
+                            // This case should be rare. If no "dance-single" chart is playable at all.
+                            warn!("Song '{}' has no playable 'dance-single' charts. Difficulty selection remains as is.", selected_song_arc.title);
+                        }
+                    }
+                    // Update the actual state's selected difficulty index
+                    self.select_music_state.selected_difficulty_index = difficulty_index_to_use;
+
+                    // Use the (potentially updated) difficulty_index for NPS graph
+                    let target_difficulty_name = DIFFICULTY_NAMES[difficulty_index_to_use]; // Use the validated/auto-selected index
+                    // Use selected_difficulty_index to pick a chart for NPS graph
                     if let Some(chart_info) = selected_song_arc.charts.iter().find(|c|
+                        c.difficulty.eq_ignore_ascii_case(target_difficulty_name) && // Match difficulty name
+                        c.stepstype == "dance-single" && // Assuming dance-single for now
                         c.processed_data.as_ref().map_or(false, |pd| !pd.measure_nps_vec.is_empty() && pd.max_nps > 0.001)
                     ) {
                         if let Some(pd) = &chart_info.processed_data {
                              new_graph_key_for_current_selection = Some(format!("{}//{}", selected_song_arc.title, chart_info.difficulty));
                              chart_data_for_graph_generation = Some(Arc::new(pd.clone()));
                         }
+                    } else {
+                        // Fallback: try any chart if specific difficulty not found or not processable
+                        if let Some(chart_info_fallback) = selected_song_arc.charts.iter().find(|c|
+                            c.processed_data.as_ref().map_or(false, |pd| !pd.measure_nps_vec.is_empty() && pd.max_nps > 0.001)
+                        ) {
+                            if let Some(pd_fallback) = &chart_info_fallback.processed_data {
+                                new_graph_key_for_current_selection = Some(format!("{}//{} (fallback)", selected_song_arc.title, chart_info_fallback.difficulty));
+                                chart_data_for_graph_generation = Some(Arc::new(pd_fallback.clone()));
+                                warn!("NPS Graph: Chart for difficulty '{}' not found or unprocessable for '{}'. Using fallback: '{}'", target_difficulty_name, selected_song_arc.title, chart_info_fallback.difficulty);
+                            }
+                        }
                     }
                 }
-                MusicWheelEntry::PackHeader { name: _, color: _, banner_path, .. } => { // Use .. to ignore new total_duration_sec field
+                MusicWheelEntry::PackHeader { name: _, color: _, banner_path, .. } => {
                     info!(
                         "Selected a pack header ({}), attempting to load pack banner.",
                         current_index
                     );
-                    self.asset_manager.load_pack_banner( // New function call
+                    self.asset_manager.load_pack_banner(
                         &self.vulkan_base,
                         &self.renderer,
-                        banner_path.as_deref(), // Pass Option<&Path>
+                        banner_path.as_deref(),
                     );
                     self.select_music_state.preview_audio_path = None;
                     self.select_music_state.selection_landed_at = None;
@@ -548,6 +577,7 @@ impl App {
             }
             AppState::SelectMusic => {
                 let original_selected_index_before_input = self.select_music_state.selected_index;
+                let original_difficulty_index_before_input = self.select_music_state.selected_difficulty_index;
 
                 let (next_state, sel_changed_by_nav_or_toggle) = select_music::handle_input(
                     &key_event,
@@ -555,17 +585,26 @@ impl App {
                     &self.audio_manager,
                 );
                 requested_state = next_state;
+                // sel_changed_by_nav_or_toggle is true if song index OR pack expansion changed.
+                // We need to check difficulty index separately or rely on handle_music_selection_change to always be smart.
                 selection_changed_in_music_by_input = sel_changed_by_nav_or_toggle;
+
+                if self.select_music_state.selected_difficulty_index != original_difficulty_index_before_input {
+                    // Difficulty changed, this might require NPS graph update
+                    selection_changed_in_music_by_input = true;
+                }
+
 
                 if key_event.state == ElementState::Pressed && !key_event.repeat {
                      if let Some(VirtualKeyCode::Enter) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
                         if let Some(entry) = self.select_music_state.entries.get(original_selected_index_before_input) {
                             if let MusicWheelEntry::PackHeader { .. } = entry {
-                                self.rebuild_music_wheel_entries(); // This will re-focus/re-select
-                                // After rebuilding, the selection might change implicitly.
-                                // We need to ensure handle_music_selection_change is called.
+                                self.rebuild_music_wheel_entries();
                                 selection_changed_in_music_by_input = true;
                             }
+                            // If it's a song, the enter key press itself would trigger a state change to Gameplay,
+                            // so handle_music_selection_change() might not be needed for *that specific* Enter press for song,
+                            // but we call it if any other relevant input caused a change.
                         }
                     }
                 }
@@ -604,7 +643,6 @@ impl App {
             self.current_app_state, new_state
         );
 
-        // --- Cleanup from old state ---
         match self.current_app_state {
             AppState::SelectMusic => {
                 self.audio_manager.stop_preview();
@@ -620,8 +658,6 @@ impl App {
                 }
                 self.select_music_state.current_graph_song_chart_key = None;
 
-                // If NOT transitioning to Gameplay, reset banner
-                // Gameplay will use the banner already set by SelectMusic.
                 if new_state != AppState::Gameplay {
                     info!("Transitioning from SelectMusic to non-Gameplay state ({:?}). Resetting DynamicBanner.", new_state);
                     if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
@@ -637,15 +673,11 @@ impl App {
                 self.game_state = None;
                 info!("Gameplay state cleared.");
 
-                // If transitioning away from Gameplay to a state that isn't SelectMusic,
-                // reset the dynamic banner. SelectMusic handles its own banner loading.
                 if new_state != AppState::SelectMusic {
                     info!("Transitioning from Gameplay to non-SelectMusic state ({:?}). Resetting DynamicBanner.", new_state);
                     if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                         self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
                     }
-                    // It's important to clear the asset manager's current banner too,
-                    // so it can be reloaded correctly if needed.
                     self.asset_manager.clear_current_banner(&self.vulkan_base.device);
                 } else {
                      info!("Transitioning from Gameplay to SelectMusic. SelectMusic will handle banner refresh.");
@@ -655,18 +687,14 @@ impl App {
         }
 
 
-        // --- Setup for new state ---
         match new_state {
             AppState::Menu => {
                 self.menu_state = MenuState::default();
             }
             AppState::SelectMusic => {
                 self.select_music_state = SelectMusicState::default();
-                self.rebuild_music_wheel_entries(); // This will populate entries
-
-                // After rebuilding and populating, trigger the initial selection handling
-                // which includes loading the banner for the initially selected item.
-                self.handle_music_selection_change();
+                self.rebuild_music_wheel_entries();
+                self.handle_music_selection_change(); // This will now correctly set the difficulty index
                 info!(
                     "Populated SelectMusic state with {} entries and handled initial selection.",
                     self.select_music_state.entries.len()
@@ -680,15 +708,39 @@ impl App {
                  let selected_entry_opt = self.select_music_state.entries.get(self.select_music_state.selected_index);
 
                 if let Some(MusicWheelEntry::Song(selected_song_arc)) = selected_entry_opt {
+                    let target_difficulty_name = DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
+                    info!("Attempting to start gameplay for song '{}' with difficulty: {}", selected_song_arc.title, target_difficulty_name);
 
-                    // Ensure the banner for the selected song is active (it should be from SelectMusic)
-                    // This is more of a verification log, as the logic in SelectMusic transition out should keep it.
+                    let chart_to_play_idx_option = selected_song_arc.charts.iter().position(|c|
+                        c.difficulty.eq_ignore_ascii_case(target_difficulty_name) &&
+                        c.stepstype == "dance-single" && 
+                        c.processed_data.is_some() &&
+                        c.processed_data.as_ref().map_or(false, |pd| !pd.measures.is_empty())
+                    );
+
+                    let final_selected_chart_idx = match chart_to_play_idx_option {
+                        Some(idx) => idx,
+                        None => {
+                            warn!(
+                                "No chart found for '{}' with difficulty '{}' and stepstype 'dance-single'. Trying first available processable 'dance-single' chart.",
+                                selected_song_arc.title, target_difficulty_name
+                            );
+                            selected_song_arc.charts.iter().position(|c|
+                                c.stepstype == "dance-single" &&
+                                c.processed_data.is_some() &&
+                                c.processed_data.as_ref().map_or(false, |pd| !pd.measures.is_empty())
+                            ).unwrap_or_else(|| {
+                                warn!("No processable 'dance-single' charts found for song '{}', defaulting to chart index 0. Gameplay might be empty or wrong type.", selected_song_arc.title);
+                                0 
+                            })
+                        }
+                    };
+                     info!("Final selected chart index for gameplay: {}", final_selected_chart_idx);
+
+
                     if self.asset_manager.get_current_banner_path().as_ref() != selected_song_arc.banner_path.as_ref() {
                         warn!("DynamicBanner might not be correctly set for Gameplay. Expected {:?}, AssetManager has {:?}. Re-loading.",
                             selected_song_arc.banner_path, self.asset_manager.get_current_banner_path());
-                        // AssetManager will attempt to load this song's banner if its key differs.
-                        // Since SelectMusic should have already set it, this path is less likely,
-                        // but it's a fallback if state management elsewhere had an issue.
                          self.asset_manager.load_song_banner(
                             &self.vulkan_base,
                             &self.renderer,
@@ -716,21 +768,12 @@ impl App {
                     match self.audio_manager.play_music(audio_path, 1.0) {
                         Ok(_) => {
                             let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
-
-                            let selected_chart_idx = song_info_for_gameplay.charts.iter().position(|c|
-                                c.processed_data.is_some() &&
-                                !c.processed_data.as_ref().unwrap().measures.is_empty()
-                            ).unwrap_or_else(|| {
-                                warn!("No processable charts found for song '{}', defaulting to chart index 0. Gameplay might be empty.", song_info_for_gameplay.title);
-                                0
-                            });
-
                             self.game_state = Some(gameplay::initialize_game_state(
                                 window_size_f32.0,
                                 window_size_f32.1,
                                 start_time,
                                 song_info_for_gameplay,
-                                selected_chart_idx,
+                                final_selected_chart_idx,
                             ));
                             info!("Gameplay state initialized and music started.");
                         }

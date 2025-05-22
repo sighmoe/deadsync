@@ -1,7 +1,7 @@
 use crate::graphics::font::{Font};
 use crate::graphics::texture::{self, TextureResource};
 use crate::graphics::vulkan_base::{BufferResource, UniformBufferObject, Vertex, VulkanBase};
-use crate::state::{PushConstantData, Judgment}; // Added Judgment
+use crate::state::{PushConstantData, Judgment};
 use ash::util::read_spv;
 use ash::{vk, Device};
 use cgmath::{ortho, Matrix4, Rad, Vector3};
@@ -16,20 +16,21 @@ use std::{ffi::CString, mem};
 pub enum DescriptorSetId {
     FontWendy,
     FontMiso,
-    FontCjk, // Retained for now, even if CJK font isn't loaded in this example
+    FontCjk,
     Logo,
     Dancer,
-    Gameplay, // For arrows
+    Gameplay,
     SolidColor,
     FallbackBanner,
     DynamicBanner,
+    MeterArrow, // Added
     // Explosion Textures
     ExplosionW1,
     ExplosionW2,
     ExplosionW3,
     ExplosionW4,
     ExplosionW5,
-    NpsGraph, // New DescriptorSetId for the NPS graph texture
+    NpsGraph,
 }
 
 impl DescriptorSetId {
@@ -40,7 +41,7 @@ impl DescriptorSetId {
             Judgment::W3 => Some(Self::ExplosionW3),
             Judgment::W4 => Some(Self::ExplosionW4),
             Judgment::W5 => Some(Self::ExplosionW5),
-            Judgment::Miss => None, // No explosion for a miss
+            Judgment::Miss => None,
         }
     }
 }
@@ -56,14 +57,13 @@ pub struct Renderer {
     quad_index_count: u32,
     projection_ubo: BufferResource,
     current_window_size: (f32, f32),
-    pub solid_white_texture: TextureResource, // Made public for fallback graph
+    pub solid_white_texture: TextureResource,
 }
 
 impl Renderer {
     pub fn new(base: &VulkanBase, initial_window_size: (f32, f32)) -> Result<Self, Box<dyn Error>> {
         info!("Initializing Renderer...");
 
-        // ... (quad vertex/index buffer, UBO, solid white texture creation remains same) ...
         let quad_vertices: [Vertex; 4] = [
             Vertex { pos: [-0.5, -0.5], tex_coord: [0.0, 0.0], },
             Vertex { pos: [0.5, -0.5], tex_coord: [1.0, 0.0], },
@@ -101,8 +101,7 @@ impl Renderer {
                 .create_descriptor_set_layout(&dsl_create_info, None)?
         };
 
-        // Increased MAX_SETS for new explosion textures and NPS graph
-        const MAX_SETS: u32 = 15; // 9 original + 5 explosions + 1 NpsGraph
+        const MAX_SETS: u32 = 16; // Increased for MeterArrow
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
@@ -137,13 +136,13 @@ impl Renderer {
         descriptor_sets.insert(DescriptorSetId::FontCjk, allocated_sets[6]);
         descriptor_sets.insert(DescriptorSetId::FallbackBanner, allocated_sets[7]);
         descriptor_sets.insert(DescriptorSetId::DynamicBanner, allocated_sets[8]);
-        // New explosion descriptor sets
         descriptor_sets.insert(DescriptorSetId::ExplosionW1, allocated_sets[9]);
         descriptor_sets.insert(DescriptorSetId::ExplosionW2, allocated_sets[10]);
         descriptor_sets.insert(DescriptorSetId::ExplosionW3, allocated_sets[11]);
         descriptor_sets.insert(DescriptorSetId::ExplosionW4, allocated_sets[12]);
         descriptor_sets.insert(DescriptorSetId::ExplosionW5, allocated_sets[13]);
-        descriptor_sets.insert(DescriptorSetId::NpsGraph, allocated_sets[14]);   // Add the new one
+        descriptor_sets.insert(DescriptorSetId::NpsGraph, allocated_sets[14]);
+        descriptor_sets.insert(DescriptorSetId::MeterArrow, allocated_sets[15]);
 
 
         let push_constant_ranges = [vk::PushConstantRange {
@@ -160,7 +159,6 @@ impl Renderer {
         };
         info!("Main Pipeline Layout created.");
 
-        // ... (shader module loading and pipeline creation remains the same) ...
         let vert_shader_module = {
             let mut file = std::io::Cursor::new(&include_bytes!("../../shaders/msdf_vert.spv")[..]);
             let code = read_spv(&mut file)?;
@@ -196,7 +194,7 @@ impl Renderer {
             .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
             .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
             .color_blend_op(vk::BlendOp::ADD)
-            .src_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA) // Use SRC_ALPHA for pre-multiplied alpha, or ONE for non-premultiplied
+            .src_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA)
             .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
             .alpha_blend_op(vk::BlendOp::ADD);
         let color_blend_state = vk::PipelineColorBlendStateCreateInfo::default().attachments(std::slice::from_ref(&color_blend_attachment));
@@ -252,13 +250,10 @@ impl Renderer {
             DescriptorSetId::SolidColor,
             &renderer.solid_white_texture,
         );
-        // Initialize NpsGraph descriptor set with solid white (transparent alpha might be better) texture
-        // Or create a 1x1 fully transparent texture for this.
-        // For now, solid white is okay, it just won't show anything if graph isn't loaded.
         renderer.update_texture_descriptor(
             &base.device,
             DescriptorSetId::NpsGraph,
-            &renderer.solid_white_texture, // Fallback: use solid white or a dedicated transparent texture
+            &renderer.solid_white_texture,
         );
 
         info!("Renderer initialization complete.");
@@ -305,7 +300,7 @@ impl Renderer {
     pub fn draw_quad( &self, device: &Device, cmd_buf: vk::CommandBuffer, set_id: DescriptorSetId, position: Vector3<f32>, size: (f32, f32), rotation_rad: Rad<f32>, tint: [f32; 4], uv_offset: [f32; 2], uv_scale: [f32; 2], ) {
         trace!( "Drawing quad: pos={:?}, size={:?}, set={:?}", position, size, set_id );
         let model_matrix = Matrix4::from_translation(position) * Matrix4::from_angle_z(rotation_rad) * Matrix4::from_nonuniform_scale(size.0, size.1, 1.0);
-        let push_data = PushConstantData { model: model_matrix, color: tint, uv_offset, uv_scale, px_range: 0.0, }; // px_range 0.0 for non-MSDF
+        let push_data = PushConstantData { model: model_matrix, color: tint, uv_offset, uv_scale, px_range: 0.0, };
         unsafe {
             let descriptor_set = self .descriptor_sets .get(&set_id) .unwrap_or_else(|| panic!("Invalid DescriptorSetId: {:?}", set_id));
             device.cmd_bind_descriptor_sets( cmd_buf, vk::PipelineBindPoint::GRAPHICS, self.main_pipeline_layout, 0, &[*descriptor_set], &[], );

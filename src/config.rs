@@ -14,10 +14,12 @@ pub const CJK_MSDF_JSON_PATH: &str = "assets/fonts/notosans_cjk_msdf.json";
 pub const CJK_MSDF_TEXTURE_PATH: &str = "assets/fonts/notosans_cjk_msdf.png";
 pub const LOGO_TEXTURE_PATH: &str = "assets/graphics/logo.png";
 pub const DANCE_TEXTURE_PATH: &str = "assets/graphics/dance.png";
+pub const METER_ARROW_TEXTURE_PATH: &str = "assets/graphics/meter_arrow.png";
 pub const ARROW_TEXTURE_PATH: &str = "assets/noteskins/cel/down_arrow_cel.png";
 pub const SFX_CHANGE_PATH: &str = "assets/sounds/change.ogg";
 pub const SFX_START_PATH: &str = "assets/sounds/start.ogg";
 pub const SFX_EXPAND_PATH: &str = "assets/sounds/expand.ogg";
+
 pub const EXPLOSION_W1_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w1.png";
 pub const EXPLOSION_W2_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w2.png";
 pub const EXPLOSION_W3_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w3.png";
@@ -164,6 +166,7 @@ pub const DIFFICULTY_DISPLAY_INNER_BOX_COLOR: [f32; 4] = [15.0/255.0, 15.0/255.0
 pub const DIFFICULTY_DISPLAY_INNER_BOX_REF_SIZE: f32 = 42.0; // Size (width and height) at reference resolution
 pub const DIFFICULTY_DISPLAY_INNER_BOX_BORDER_AND_SPACING_REF: f32 = 3.0; // Border from outer box and spacing between inner boxes
 pub const DIFFICULTY_DISPLAY_INNER_BOX_COUNT: usize = 5;
+
 
 // Colors for difficulty numbers (meter)
 pub const DIFFICULTY_TEXT_COLOR_BEGINNER: [f32; 4] = [255.0/255.0, 190.0/255.0, 0.0/255.0, 1.0];     // #FFBE00

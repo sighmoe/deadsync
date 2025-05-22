@@ -1,6 +1,6 @@
 use crate::parsing::simfile::{SongInfo, ProcessedChartData, NoteChar};
 use crate::screens::gameplay::{TimingData};
-use crate::graphics::texture::TextureResource; // Added for graph texture
+use crate::graphics::texture::TextureResource;
 use cgmath::Matrix4;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -21,7 +21,7 @@ pub enum AppState {
 // --- Screen Specific States ---
 
 // MenuState
-#[derive(Debug, Clone)] // MenuState can remain Clone if needed
+#[derive(Debug, Clone)]
 pub struct MenuState {
     pub options: Vec<String>,
     pub selected_index: usize,
@@ -37,35 +37,36 @@ impl Default for MenuState {
 }
 
 
-#[derive(Debug, Clone)] // MusicWheelEntry can be Clone
+#[derive(Debug, Clone)]
 pub enum MusicWheelEntry {
     Song(Arc<SongInfo>),
     PackHeader {
         name: String,
         color: [f32; 4],
         banner_path: Option<PathBuf>,
-        total_duration_sec: Option<f32>, // Added field for total pack duration
+        total_duration_sec: Option<f32>,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)] // NavDirection can be Clone
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavDirection {
     Up,
     Down,
 }
 
-#[derive(Debug)] // SelectMusicState is NOT Clone because of TextureResource
+#[derive(Debug)]
 pub struct SelectMusicState {
-    pub entries: Vec<MusicWheelEntry>, // Vec<T> is Clone if T is Clone
-    pub selected_index: usize,
-    pub expanded_pack_name: Option<String>, // Option<String> is Clone
+    pub entries: Vec<MusicWheelEntry>,
+    pub selected_index: usize, // Song wheel index
+    pub selected_difficulty_index: usize, // 0 for Beginner, up to 4 for Challenge
+    pub expanded_pack_name: Option<String>,
     pub selection_animation_timer: f32,
-    pub nav_key_held_direction: Option<NavDirection>, // Option<T> is Clone if T is Clone
-    pub nav_key_held_since: Option<Instant>,       // Option<Instant> is Clone
-    pub nav_key_last_scrolled_at: Option<Instant>,   // Option<Instant> is Clone
+    pub nav_key_held_direction: Option<NavDirection>, // For song wheel (left/right are mapped to this)
+    pub nav_key_held_since: Option<Instant>,
+    pub nav_key_last_scrolled_at: Option<Instant>,
 
     // Music preview fields
-    pub preview_audio_path: Option<PathBuf>,    // Option<PathBuf> is Clone
+    pub preview_audio_path: Option<PathBuf>,
     pub preview_sample_start_sec: Option<f32>,
     pub preview_sample_length_sec: Option<f32>,
     pub preview_playback_started_at: Option<Instant>,
@@ -77,7 +78,7 @@ pub struct SelectMusicState {
     pub is_preview_actions_scheduled: bool,
 
     // NPS Graph texture
-    pub current_graph_texture: Option<TextureResource>, // This is why SelectMusicState can't derive Clone
+    pub current_graph_texture: Option<TextureResource>,
     pub current_graph_song_chart_key: Option<String>,
 }
 
@@ -86,6 +87,7 @@ impl Default for SelectMusicState {
         SelectMusicState {
             entries: Vec::new(),
             selected_index: 0,
+            selected_difficulty_index: 2, // Default to Medium (index 2 of 0-4)
             expanded_pack_name: None,
             selection_animation_timer: 0.0,
             nav_key_held_direction: None,
@@ -108,24 +110,24 @@ impl Default for SelectMusicState {
 }
 
 // OptionsState
-#[derive(Debug, Clone, Default)] // Can be Clone if it only contains cloneable data
+#[derive(Debug, Clone, Default)]
 pub struct OptionsState {
     pub placeholder: bool,
 }
 
 // GameState
-#[derive(Debug)] // GameState also contains Arcs and non-Clone resources effectively
+#[derive(Debug)]
 pub struct GameState {
     pub targets: Vec<TargetInfo>,
     pub arrows: HashMap<ArrowDirection, Vec<Arrow>>,
     pub pressed_keys: HashSet<VirtualKeyCode>,
-    pub current_beat: f32, // Display beat (accounts for sync offset)
-    pub current_chart_beat_actual: f32, // Actual musical beat based on audio time
+    pub current_beat: f32,
+    pub current_chart_beat_actual: f32,
     pub window_size: (f32, f32),
     pub active_explosions: HashMap<ArrowDirection, ActiveExplosion>,
     pub audio_start_time: Option<Instant>,
     pub song_info: Arc<SongInfo>,
-    pub selected_chart_idx: usize,
+    pub selected_chart_idx: usize, // This is the final index passed to gameplay logic
     pub timing_data: Arc<TimingData>,
     pub processed_chart: Arc<ProcessedChartData>,
     pub current_measure_idx: usize,
@@ -134,7 +136,7 @@ pub struct GameState {
     pub judgment_counts: HashMap<Judgment, u32>,
 }
 
-// --- Gameplay Elements (remain the same) ---
+// --- Gameplay Elements ---
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum ArrowDirection { Left, Down, Up, Right, }
@@ -163,7 +165,7 @@ pub struct ActiveExplosion {
 }
 
 
-// --- Input (remains the same) ---
+// --- Input ---
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)] #[repr(u32)] pub enum VirtualKeyCode { Left, Down, Up, Right, Enter, Escape, }
 pub fn key_to_virtual_keycode(key: Key) -> Option<VirtualKeyCode> {
     match key {
@@ -177,7 +179,7 @@ pub fn key_to_virtual_keycode(key: Key) -> Option<VirtualKeyCode> {
     }
  }
 
-// --- Graphics Related (remains the same) ---
+// --- Graphics Related ---
 #[repr(C)] #[derive(Debug, Clone, Copy)] pub struct PushConstantData {
     pub model: Matrix4<f32>,
     pub color: [f32; 4],

@@ -1,7 +1,7 @@
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::font::{load_font, Font, LoadedFontData};
-use crate::graphics::renderer::{DescriptorSetId, Renderer};
+use crate::graphics::renderer::{DescriptorSetId, Renderer}; // Keep this
 use crate::graphics::texture::{load_texture, TextureResource};
 use crate::graphics::vulkan_base::VulkanBase;
 use crate::parsing::simfile::SongInfo;
@@ -19,6 +19,7 @@ pub enum TextureId {
     Dancer,
     Arrows,
     FallbackBanner,
+    MeterArrow, // Added
     // Gameplay Explosion Textures
     ExplosionW1, // Marvelous
     ExplosionW2, // Excellent
@@ -36,7 +37,7 @@ pub enum FontId { Wendy, Miso, Cjk }
 pub enum SoundId {
     MenuChange,
     MenuStart,
-    MenuExpandCollapse, // Added
+    MenuExpandCollapse,
 }
 
 
@@ -45,7 +46,7 @@ pub struct AssetManager {
     fonts: HashMap<FontId, Font>,
     current_banner: Option<TextureResource>,
     current_banner_is_fallback: bool,
-    current_banner_path_key: Option<PathBuf>, // To avoid reloading the same banner
+    current_banner_path_key: Option<PathBuf>,
 }
 
 impl AssetManager {
@@ -85,6 +86,19 @@ impl AssetManager {
         self.textures.insert(TextureId::FallbackBanner, fallback_banner_texture);
         info!("Fallback banner texture loaded and its static descriptor set updated.");
 
+        // Load MeterArrow texture
+        let meter_arrow_texture = load_texture(base, Path::new(config::METER_ARROW_TEXTURE_PATH))?;
+        // Assuming MeterArrow will use its own descriptor set, or be part of a UI atlas.
+        // For now, let's create a new DescriptorSetId for it if not already handled.
+        // If you have a general UI atlas or a 'MiscUI' descriptor set, use that.
+        // Otherwise, you'll need to add DescriptorSetId::MeterArrow in renderer.rs
+        // and update the renderer to handle it.
+        // For simplicity if it's a standalone texture:
+        renderer.update_texture_descriptor(&base.device, DescriptorSetId::MeterArrow, &meter_arrow_texture);
+        self.textures.insert(TextureId::MeterArrow, meter_arrow_texture);
+        info!("Meter Arrow texture loaded and descriptor set updated.");
+
+
         if let Some(fallback_res) = self.textures.get(&TextureId::FallbackBanner) {
              renderer.update_texture_descriptor(
                  &base.device,
@@ -97,6 +111,7 @@ impl AssetManager {
             error!("Fallback banner failed to load, DynamicBanner descriptor not initialized!");
         }
 
+        // ... (explosion textures, fonts, sounds loading) ...
         info!("Loading gameplay explosion textures...");
         let explosion_w1_tex = load_texture(base, Path::new(config::EXPLOSION_W1_TEXTURE_PATH))?;
         renderer.update_texture_descriptor(&base.device, DescriptorSetId::ExplosionW1, &explosion_w1_tex);
@@ -168,10 +183,12 @@ impl AssetManager {
         audio_manager.load_sfx(SoundId::MenuExpandCollapse, Path::new(config::SFX_EXPAND_PATH))?;
         info!("Sounds loaded.");
 
+
         info!("All assets loaded successfully.");
         Ok(())
     }
 
+    // ... (rest of AssetManager impl) ...
     fn destroy_current_dynamic_banner(&mut self, device: &Device) {
         if !self.current_banner_is_fallback {
             if let Some(mut old_banner) = self.current_banner.take() {
@@ -296,12 +313,8 @@ impl AssetManager {
         }
     }
 
-    // Call this when leaving SelectMusic state to ensure fallback is active
     pub fn clear_current_banner(&mut self, device: &Device) {
         self.destroy_current_dynamic_banner(device);
-        // The destroy_current_dynamic_banner already sets current_banner_is_fallback to true
-        // and current_banner_path_key to None.
-        // The DynamicBanner descriptor itself will be reset to fallback by transition_state in app.rs
         info!("Cleared current dynamic banner, DynamicBanner will be reset to fallback by App state transition.");
     }
 
@@ -326,7 +339,7 @@ impl AssetManager {
         self.textures.clear();
         info!("Static textures (including explosions and fallback banner) destroyed.");
 
-        self.destroy_current_dynamic_banner(device); // Ensures any loaded dynamic banner is destroyed
+        self.destroy_current_dynamic_banner(device);
         info!("Dynamic banner resources checked/destroyed.");
 
         for (_, font) in self.fonts.iter_mut() {
