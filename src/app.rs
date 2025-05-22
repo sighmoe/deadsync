@@ -1,4 +1,3 @@
-// src/app.rs
 use crate::assets::AssetManager;
 use crate::audio::AudioManager;
 use crate::config;
@@ -577,8 +576,8 @@ impl App {
             }
             AppState::SelectMusic => {
                 let original_selected_index_before_input = self.select_music_state.selected_index;
-                let original_difficulty_index_before_input = self.select_music_state.selected_difficulty_index;
-
+                // let original_difficulty_index_before_input = self.select_music_state.selected_difficulty_index; // Not strictly needed if handle_input is robust
+ 
                 let (next_state, sel_changed_by_nav_or_toggle) = select_music::handle_input(
                     &key_event,
                     &mut self.select_music_state,
@@ -586,13 +585,8 @@ impl App {
                 );
                 requested_state = next_state;
                 // sel_changed_by_nav_or_toggle is true if song index OR pack expansion changed.
-                // We need to check difficulty index separately or rely on handle_music_selection_change to always be smart.
+                // It will also be true if difficulty changed via double-tap.
                 selection_changed_in_music_by_input = sel_changed_by_nav_or_toggle;
-
-                if self.select_music_state.selected_difficulty_index != original_difficulty_index_before_input {
-                    // Difficulty changed, this might require NPS graph update
-                    selection_changed_in_music_by_input = true;
-                }
 
 
                 if key_event.state == ElementState::Pressed && !key_event.repeat {
@@ -601,10 +595,7 @@ impl App {
                             if let MusicWheelEntry::PackHeader { .. } = entry {
                                 self.rebuild_music_wheel_entries();
                                 selection_changed_in_music_by_input = true;
-                            }
-                            // If it's a song, the enter key press itself would trigger a state change to Gameplay,
-                            // so handle_music_selection_change() might not be needed for *that specific* Enter press for song,
-                            // but we call it if any other relevant input caused a change.
+                            }                           
                         }
                     }
                 }
@@ -612,7 +603,7 @@ impl App {
             AppState::Options => {
                 requested_state = options::handle_input(&key_event, &mut self.options_state);
             }
-            AppState::Gameplay => {
+            AppState::Gameplay => { // Gameplay input uses raw key_event
                 if let Some(ref mut gs) = self.game_state {
                     requested_state = gameplay::handle_input(&key_event, gs);
                 } else {
@@ -651,6 +642,9 @@ impl App {
                 self.select_music_state.is_awaiting_preview_restart = false;
                 self.select_music_state.selection_landed_at = None;
                 self.select_music_state.is_preview_actions_scheduled = false;
+                self.select_music_state.last_difficulty_nav_key = None; // Reset double-tap state on leaving screen
+                self.select_music_state.last_difficulty_nav_time = None;
+
 
                 if let Some(mut graph_tex) = self.select_music_state.current_graph_texture.take() {
                     info!("Destroying NPS graph texture on state transition from SelectMusic.");

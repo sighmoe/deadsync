@@ -81,6 +81,9 @@ pub struct SelectMusicState {
     // NPS Graph texture
     pub current_graph_texture: Option<TextureResource>,
     pub current_graph_song_chart_key: Option<String>,
+
+    pub last_difficulty_nav_key: Option<VirtualKeyCode>, // For double-tap difficulty change
+    pub last_difficulty_nav_time: Option<Instant>,     // For double-tap difficulty change
 }
 
 impl Default for SelectMusicState {
@@ -107,6 +110,8 @@ impl Default for SelectMusicState {
             is_preview_actions_scheduled: false,
             current_graph_texture: None,
             current_graph_song_chart_key: None,
+            last_difficulty_nav_key: None,
+            last_difficulty_nav_time: None,
         }
     }
 }

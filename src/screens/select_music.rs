@@ -56,13 +56,16 @@ fn format_duration_flexible(total_seconds_f: f32) -> String {
     }
 }
 
+const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300); // For difficulty change
+
 
 pub fn handle_input(
     key_event: &KeyEvent,
     state: &mut SelectMusicState,
     audio_manager: &AudioManager,
 ) -> (Option<AppState>, bool) {
-    let mut selection_changed_this_frame = false;
+    let mut song_or_pack_selection_changed = false; // Tracks song index or pack expansion changes
+    let mut difficulty_selection_changed = false; // Tracks if difficulty index actually changed
 
     if let Some(virtual_keycode) =
         crate::state::key_to_virtual_keycode(key_event.logical_key.clone())
@@ -85,10 +88,12 @@ pub fn handle_input(
                                 };
                                 if state.selected_index != old_index {
                                     audio_manager.play_sfx(SoundId::MenuChange);
-                                    selection_changed_this_frame = true;
+                                    song_or_pack_selection_changed = true;
                                     state.selection_animation_timer = 0.0;
+                                    state.last_difficulty_nav_key = None; // Reset on song change
+                                    state.last_difficulty_nav_time = None;
                                 }
-                                state.nav_key_held_direction = Some(NavDirection::Up);
+                                state.nav_key_held_direction = Some(NavDirection::Up); // Up/Left scroll wheel up
                                 state.nav_key_held_since = Some(Instant::now());
                                 state.nav_key_last_scrolled_at = Some(Instant::now());
                             }
@@ -99,51 +104,73 @@ pub fn handle_input(
                                 state.selected_index = (state.selected_index + 1) % num_entries;
                                 if state.selected_index != old_index {
                                     audio_manager.play_sfx(SoundId::MenuChange);
-                                    selection_changed_this_frame = true;
+                                    song_or_pack_selection_changed = true;
                                     state.selection_animation_timer = 0.0;
+                                    state.last_difficulty_nav_key = None; // Reset on song change
+                                    state.last_difficulty_nav_time = None;
                                 }
-                                state.nav_key_held_direction = Some(NavDirection::Down);
+                                state.nav_key_held_direction = Some(NavDirection::Down); // Down/Right scroll wheel down
                                 state.nav_key_held_since = Some(Instant::now());
                                 state.nav_key_last_scrolled_at = Some(Instant::now());
                             }
                         }
                         VirtualKeyCode::Up => {
                             if is_song_selected {
-                                if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
-                                    let mut new_diff_idx = state.selected_difficulty_index;
-                                    let original_diff_idx = new_diff_idx;
-                                    loop {
-                                        if new_diff_idx == 0 { break; } // Stop at the top (Beginner)
-                                        new_diff_idx -= 1;
-                                        if is_difficulty_playable(selected_song_arc, new_diff_idx) {
-                                            state.selected_difficulty_index = new_diff_idx;
-                                            break;
+                                let now = Instant::now();
+                                if state.last_difficulty_nav_key == Some(VirtualKeyCode::Up) &&
+                                   state.last_difficulty_nav_time.map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW)
+                                { // Double-tap UP
+                                    if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
+                                        let mut new_diff_idx = state.selected_difficulty_index;
+                                        let original_diff_idx = new_diff_idx;
+                                        loop {
+                                            if new_diff_idx == 0 { break; } 
+                                            new_diff_idx -= 1;
+                                            if is_difficulty_playable(selected_song_arc, new_diff_idx) {
+                                                state.selected_difficulty_index = new_diff_idx;
+                                                break; 
+                                            }
+                                        }
+                                        if state.selected_difficulty_index != original_diff_idx {
+                                            audio_manager.play_sfx(SoundId::MenuChange);
+                                            difficulty_selection_changed = true; 
                                         }
                                     }
-                                    if state.selected_difficulty_index != original_diff_idx {
-                                        audio_manager.play_sfx(SoundId::MenuChange);
-                                        selection_changed_this_frame = true; 
-                                    }
+                                    state.last_difficulty_nav_key = None; 
+                                    state.last_difficulty_nav_time = None;
+                                } else { // First tap or too slow
+                                    state.last_difficulty_nav_key = Some(VirtualKeyCode::Up);
+                                    state.last_difficulty_nav_time = Some(now);
                                 }
                             }
                         }
                         VirtualKeyCode::Down => {
                              if is_song_selected {
-                                if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
-                                    let mut new_diff_idx = state.selected_difficulty_index;
-                                    let original_diff_idx = new_diff_idx;
-                                    loop {
-                                        if new_diff_idx >= DIFFICULTY_NAMES.len() - 1 { break; } // Stop at the bottom (Challenge)
-                                        new_diff_idx += 1;
-                                        if is_difficulty_playable(selected_song_arc, new_diff_idx) {
-                                            state.selected_difficulty_index = new_diff_idx;
-                                            break;
+                                let now = Instant::now();
+                                if state.last_difficulty_nav_key == Some(VirtualKeyCode::Down) &&
+                                   state.last_difficulty_nav_time.map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW)
+                                { // Double-tap DOWN
+                                    if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
+                                        let mut new_diff_idx = state.selected_difficulty_index;
+                                        let original_diff_idx = new_diff_idx;
+                                        loop {
+                                            if new_diff_idx >= DIFFICULTY_NAMES.len() - 1 { break; } 
+                                            new_diff_idx += 1;
+                                            if is_difficulty_playable(selected_song_arc, new_diff_idx) {
+                                                state.selected_difficulty_index = new_diff_idx;
+                                                break;
+                                            }
+                                        }
+                                         if state.selected_difficulty_index != original_diff_idx {
+                                            audio_manager.play_sfx(SoundId::MenuChange);
+                                            difficulty_selection_changed = true;
                                         }
                                     }
-                                     if state.selected_difficulty_index != original_diff_idx {
-                                        audio_manager.play_sfx(SoundId::MenuChange);
-                                        selection_changed_this_frame = true;
-                                    }
+                                    state.last_difficulty_nav_key = None;
+                                    state.last_difficulty_nav_time = None;
+                                } else { // First tap or too slow
+                                    state.last_difficulty_nav_key = Some(VirtualKeyCode::Down);
+                                    state.last_difficulty_nav_time = Some(now);
                                 }
                             }
                         }
@@ -154,8 +181,9 @@ pub fn handle_input(
                                         MusicWheelEntry::Song(selected_song_arc) => {
                                             let target_difficulty_name = DIFFICULTY_NAMES[state.selected_difficulty_index];
                                             if selected_song_arc.charts.iter().any(|c| c.difficulty.eq_ignore_ascii_case(target_difficulty_name) && c.stepstype == "dance-single" && c.processed_data.is_some() && !c.processed_data.as_ref().unwrap().measures.is_empty()) {
-                                                audio_manager.play_sfx(SoundId::MenuStart);
-                                                return (Some(AppState::Gameplay), selection_changed_this_frame);
+                                                audio_manager.play_sfx(SoundId::MenuStart);                                               
+                                                state.last_difficulty_nav_key = None; state.last_difficulty_nav_time = None;
+                                                return (Some(AppState::Gameplay), song_or_pack_selection_changed || difficulty_selection_changed);
                                             } else {
                                                 warn!("No playable chart found for '{}' at difficulty '{}'. Cannot start.", selected_song_arc.title, target_difficulty_name);
                                             }
@@ -167,15 +195,18 @@ pub fn handle_input(
                                             } else {
                                                 state.expanded_pack_name = Some(pack_name_str.clone());
                                             }
-                                            selection_changed_this_frame = true;
+                                            song_or_pack_selection_changed = true;
                                             state.selection_animation_timer = 0.0;
+                                            state.last_difficulty_nav_key = None; // Reset on pack toggle
+                                            state.last_difficulty_nav_time = None;
                                         }
                                     }
                                 }
                             }
                         }
                         VirtualKeyCode::Escape => {
-                            return (Some(AppState::Menu), selection_changed_this_frame);
+                            state.last_difficulty_nav_key = None; state.last_difficulty_nav_time = None;
+                            return (Some(AppState::Menu), song_or_pack_selection_changed || difficulty_selection_changed);
                         }
                     }
                 }
@@ -192,7 +223,7 @@ pub fn handle_input(
             }
         }
     }
-    (None, selection_changed_this_frame)
+    (None, song_or_pack_selection_changed || difficulty_selection_changed)
 }
 
 pub fn update(state: &mut SelectMusicState, dt: f32, audio_manager: &AudioManager) -> bool {
@@ -237,8 +268,10 @@ pub fn update(state: &mut SelectMusicState, dt: f32, audio_manager: &AudioManage
                     }
                     if state.selected_index != old_index {
                          audio_manager.play_sfx(SoundId::MenuChange);
-                         selection_changed_by_update = true;
+                         selection_changed_by_update = true; // Song index changed
                          state.selection_animation_timer = 0.0;
+                         state.last_difficulty_nav_key = None; // Reset on song change by hold-scroll
+                         state.last_difficulty_nav_time = None;
                     }
                     state.nav_key_last_scrolled_at = Some(now);
                 }
