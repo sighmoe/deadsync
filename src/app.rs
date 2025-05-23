@@ -318,14 +318,19 @@ impl App {
         // Calculate song counts per pack
         let mut pack_song_counts: HashMap<String, usize> = HashMap::new();
         for song_info in &self.song_library {
-            let pack_name = song_info
-                .folder_path
-                .parent()
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .unwrap_or("Unknown Pack")
-                .to_string();
-            *pack_song_counts.entry(pack_name).or_insert(0) += 1;
+            // A song contributes to the pack count if it has at least one "dance-single" chart.
+            let has_dance_single_chart = song_info.charts.iter().any(|c| c.stepstype == "dance-single");
+
+            if has_dance_single_chart {
+                let pack_name = song_info
+                    .folder_path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Unknown Pack")
+                    .to_string();
+                *pack_song_counts.entry(pack_name).or_insert(0) += 1;
+            }
         }
 
         let mut new_entries = Vec::new();
