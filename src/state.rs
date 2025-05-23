@@ -135,7 +135,7 @@ pub struct GameState {
     pub current_chart_beat_actual: f32,
     pub window_size: (f32, f32),
     pub active_explosions: HashMap<ArrowDirection, ActiveExplosion>,
-    pub audio_start_time: Option<Instant>,
+    pub audio_start_time: Option<Instant>, // When audio t=0 occurs (after lead-in)
     pub song_info: Arc<SongInfo>,
     pub selected_chart_idx: usize, // This is the final index passed to gameplay logic
     pub timing_data: Arc<TimingData>,
@@ -144,6 +144,8 @@ pub struct GameState {
     pub current_line_in_measure_idx: usize,
     pub current_processed_beat: f32,
     pub judgment_counts: HashMap<Judgment, u32>,
+    pub lead_in_timer: f32,      // Counts down the lead-in duration
+    pub music_started: bool,       // Flag to indicate if music has been triggered
 }
 
 // --- Gameplay Elements ---

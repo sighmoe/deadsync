@@ -89,7 +89,7 @@ impl TimingData {
 pub fn initialize_game_state(
     win_w: f32,
     win_h: f32,
-    audio_start_time: Instant,
+    audio_start_time: Instant, // This is when audio t=0 occurs (AFTER lead-in)
     song: Arc<SongInfo>,
     selected_chart_idx: usize,
 ) -> GameState {
@@ -121,11 +121,13 @@ pub fn initialize_game_state(
         .collect();
 
     let mut arrows_map = HashMap::new();
-    for dir in ALL_ARROW_DIRECTIONS.iter() {
-        arrows_map.insert(*dir, Vec::new());
-    }
+    for dir in ALL_ARROW_DIRECTIONS.iter() { arrows_map.insert(*dir, Vec::new()); }
 
-    let mut temp_timing_data = TimingData { song_offset_sec: song.offset, ..Default::default() };
+    // Standard interpretation: positive file offset means beat 0 of the chart occurs LATER than the music's t=0.
+    // So, TimingData.song_offset_sec should store this value directly.
+    let effective_file_offset = -song.offset;
+
+    let mut temp_timing_data = TimingData { song_offset_sec: effective_file_offset, ..Default::default() };
     let chart_info = &song.charts[selected_chart_idx];
     let mut combined_bpms = song.bpms_header.clone();
     if let Some(chart_bpms_str) = &chart_info.bpms_chart {
@@ -138,17 +140,21 @@ pub fn initialize_game_state(
 
     if combined_bpms.is_empty() {
         warn!("No BPMs found for song {} chart {}, defaulting to 120 BPM at beat 0", song.title, selected_chart_idx);
-        temp_timing_data.points.push(BeatTimePoint { beat: 0.0, time_sec: song.offset, bpm: 120.0 });
+        // Beat 0 occurs at effective_file_offset seconds into the audio track.
+        temp_timing_data.points.push(BeatTimePoint { beat: 0.0, time_sec: effective_file_offset, bpm: 120.0 });
     } else {
-        let mut current_time = song.offset;
+        // current_time tracks the time *into the audio file* for each BPM point's beat.
+        // It starts at the effective_file_offset, as that's the time of beat 0 (if no prior BPM changes).
+        let mut current_time = effective_file_offset;
         let mut last_b_beat = 0.0;
         let mut last_b_bpm = combined_bpms[0].1;
-        if combined_bpms[0].0 != 0.0 {
-            temp_timing_data.points.push(BeatTimePoint { beat: 0.0, time_sec: song.offset, bpm: last_b_bpm});
+        if combined_bpms[0].0 != 0.0 { // If the first BPM change isn't at beat 0
+            // Add a point for beat 0; its time is the effective_file_offset.
+            temp_timing_data.points.push(BeatTimePoint { beat: 0.0, time_sec: effective_file_offset, bpm: last_b_bpm});
         }
         for (beat, bpm) in &combined_bpms {
             if *beat < last_b_beat { continue; }
-            if *beat > last_b_beat { current_time += (*beat - last_b_beat) * (60.0 / last_b_bpm); }
+            if *beat > last_b_beat { current_time += (*beat - last_b_beat) * (60.0 / last_b_bpm); } // Accumulate time from last BPM point
             temp_timing_data.points.push(BeatTimePoint { beat: *beat, time_sec: current_time, bpm: *bpm });
             last_b_beat = *beat; last_b_bpm = *bpm;
         }
@@ -172,19 +178,26 @@ pub fn initialize_game_state(
         ProcessedChartData::default()
     });
 
-    let initial_bpm_at_zero = temp_timing_data.points.iter()
-        .find(|p| p.beat == 0.0)
-        .map_or_else(
-            || temp_timing_data.points.first().map_or(120.0, |p|p.bpm),
-            |p| p.bpm
-        );
-    let initial_display_beat_offset = if initial_bpm_at_zero > 0.0 {
-        (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / initial_bpm_at_zero)
+    // At the moment gameplay screen appears, the time relative to audio_start_time (which is in the future)
+    // is -GAME_LEAD_IN_DURATION_SECONDS.
+    // Note: audio_start_time itself ALREADY ACCOUNTS for GAME_LEAD_IN_DURATION_SECONDS.
+    // So, when gameplay *starts visually*, current_raw_time_sec relative to audio_start_time (game_state.audio_start_time)
+    // will effectively be -config::GAME_LEAD_IN_DURATION_SECONDS.
+    // We need to find what chart beat corresponds to this "pre-audio-start" time.
+    let time_at_visual_start_relative_to_audio_zero = -config::GAME_LEAD_IN_DURATION_SECONDS;
+    let initial_actual_chart_beat = temp_timing_data.get_beat_for_time(time_at_visual_start_relative_to_audio_zero);
+
+    // The display beat offset is based on the BPM around the *actual chart beat* we're calculating for.
+    // For the initial display beat, this is the BPM at `initial_actual_chart_beat`.
+    let bpm_at_initial_actual_chart_beat = temp_timing_data.points.iter()
+        .rfind(|p| p.beat <= initial_actual_chart_beat) // Find BPM at or before this beat
+        .map_or(120.0, |p| p.bpm); // Default to 120 if no points or all are later
+
+    let display_beat_offset_due_to_audio_sync = if bpm_at_initial_actual_chart_beat > 0.0 {
+        (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / bpm_at_initial_actual_chart_beat)
     } else {
         0.0 // Avoid division by zero
     };
-
-    let initial_actual_chart_beat = temp_timing_data.get_beat_for_time(0.0);
 
     let mut judgment_counts = HashMap::new();
     for judgment_type in ALL_JUDGMENTS.iter() {
@@ -196,7 +209,8 @@ pub fn initialize_game_state(
         targets,
         arrows: arrows_map,
         pressed_keys: HashSet::new(),
-        current_beat: initial_actual_chart_beat - initial_display_beat_offset,
+        // current_beat is the beat used for display purposes (arrow positions, hit checking against display)
+        current_beat: initial_actual_chart_beat - display_beat_offset_due_to_audio_sync,
         current_chart_beat_actual: initial_actual_chart_beat,
         window_size: (win_w, win_h),
         active_explosions: HashMap::new(),
@@ -207,8 +221,10 @@ pub fn initialize_game_state(
         processed_chart: Arc::new(processed_chart_data),
         current_measure_idx: 0,
         current_line_in_measure_idx: 0,
-        current_processed_beat: -1.0,
+        current_processed_beat: -1.0, // Start before any valid chart beat
         judgment_counts,
+        lead_in_timer: config::GAME_LEAD_IN_DURATION_SECONDS,
+        music_started: false,
     }
 }
 
@@ -244,24 +260,35 @@ pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState) -> Option<
 
 // --- Update Logic ---
 pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
-    if let Some(start_time) = game_state.audio_start_time {
-        let current_raw_time_sec = Instant::now().duration_since(start_time).as_secs_f32();
-        game_state.current_chart_beat_actual = game_state.timing_data.get_beat_for_time(current_raw_time_sec);
+    if !game_state.music_started && game_state.lead_in_timer > 0.0 {
+        game_state.lead_in_timer -= dt;
+        // Music will be started by App when lead_in_timer <= 0.0
+    }
 
-        let initial_bpm_at_zero = game_state.timing_data.points.iter()
-            .find(|p| p.beat == 0.0)
-            .map_or_else(
-                || game_state.timing_data.points.first().map_or(120.0, |p|p.bpm),
-                |p| p.bpm
-            );
-        let initial_display_beat_offset = if initial_bpm_at_zero > 0.0 {
-            (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / initial_bpm_at_zero)
+    if let Some(start_time) = game_state.audio_start_time {
+        // `start_time` is when audio t=0 occurs.
+        // `current_time_relative_to_audio_zero` can be negative during lead-in.
+        let current_time_relative_to_audio_zero = if Instant::now() >= start_time {
+            Instant::now().duration_since(start_time).as_secs_f32()
+        } else {
+            -(start_time.duration_since(Instant::now()).as_secs_f32())
+        };
+
+        game_state.current_chart_beat_actual = game_state.timing_data.get_beat_for_time(current_time_relative_to_audio_zero);
+
+        // Calculate display beat offset based on current actual chart beat's BPM
+        let bpm_at_current_actual_chart_beat = game_state.timing_data.points.iter()
+            .rfind(|p| p.beat <= game_state.current_chart_beat_actual)
+            .map_or(120.0, |p| p.bpm);
+
+        let display_beat_offset_due_to_audio_sync = if bpm_at_current_actual_chart_beat > 0.0 {
+            (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / bpm_at_current_actual_chart_beat)
         } else {
             0.0 // Avoid division by zero
         };
 
-        game_state.current_beat = game_state.current_chart_beat_actual - initial_display_beat_offset; // This is the display beat
-        trace!("Current Raw Time: {:.3}s, Actual Chart Beat: {:.4}, Display Beat: {:.4}", current_raw_time_sec, game_state.current_chart_beat_actual, game_state.current_beat);
+        game_state.current_beat = game_state.current_chart_beat_actual - display_beat_offset_due_to_audio_sync;
+        trace!("Time Rel. Audio 0: {:.3}s, LeadInTimer: {:.2}, Actual Chart Beat: {:.4}, Display Beat: {:.4}", current_time_relative_to_audio_zero, game_state.lead_in_timer, game_state.current_chart_beat_actual, game_state.current_beat);
     } else {
         warn!("Audio start time not set, cannot update beat accurately!");
     }
@@ -315,14 +342,20 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
         if target_beat_for_line > lookahead_chart_beat_limit { break; }
 
         let time_of_line_sec_audio_relative = state.timing_data.get_time_for_beat(target_beat_for_line);
+        
+        // Calculate current audio time relative to audio t=0
         let current_audio_time_sec_audio_relative = if let Some(start_time) = state.audio_start_time {
-            Instant::now().duration_since(start_time).as_secs_f32()
+             if Instant::now() >= start_time {
+                Instant::now().duration_since(start_time).as_secs_f32()
+            } else {
+                -(start_time.duration_since(Instant::now()).as_secs_f32())
+            }
         } else { return; };
 
         let time_to_target_on_screen_sec = time_of_line_sec_audio_relative - current_audio_time_sec_audio_relative;
 
 
-        if time_to_target_on_screen_sec < -0.05 {
+        if time_to_target_on_screen_sec < -0.05 { // Arrow is already past the target significantly
             trace!("Missed spawn window for line at chart_beat {:.2} (current audio time implies chart_beat {:.2})", target_beat_for_line, current_audio_time_chart_beat);
             state.current_processed_beat = target_beat_for_line;
             state.current_line_in_measure_idx += 1;
@@ -347,7 +380,13 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
                 }
             }
         }
-        if spawned_on_this_line { debug!("Spawned notes for line at measure {}, line_idx {}, chart_beat {:.3}", state.current_measure_idx, state.current_line_in_measure_idx, target_beat_for_line); }
+        if spawned_on_this_line {
+            // Get the time of the line again for logging, using the same method as for spawning.
+            // This `time_of_line_sec_audio_relative` is the time from the audio file's t=0.
+            let time_for_log = state.timing_data.get_time_for_beat(target_beat_for_line);
+            debug!("Spawned notes for line at measure {}, line_idx {}, chart_beat {:.3}, audio_time {:.3}s",
+                   state.current_measure_idx, state.current_line_in_measure_idx, target_beat_for_line, time_for_log);
+        }
         state.current_processed_beat = target_beat_for_line;
         state.current_line_in_measure_idx += 1;
     }

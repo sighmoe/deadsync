@@ -730,7 +730,7 @@ impl App {
                 }
             }
             AppState::Gameplay => {
-                self.audio_manager.stop_music();
+                self.audio_manager.stop_music(); // Stop music when leaving gameplay
                 self.game_state = None;
                 info!("Gameplay state cleared.");
 
@@ -816,34 +816,32 @@ impl App {
                         return;
                     }
                     let song_info_for_gameplay = selected_song_arc.clone();
-                    let audio_path = song_info_for_gameplay.audio_path.as_ref().unwrap();
+                    // Audio path is known to be Some at this point.
+                    // Music will be started by App::update when lead_in_timer in GameState expires.
 
-                    info!("Starting gameplay with song: {}", song_info_for_gameplay.title);
-                    info!("Audio path: {:?}", audio_path);
-
+                    info!("Preparing gameplay for song: {}", song_info_for_gameplay.title);
+                    
                     let window_size_f32 = (
                         self.vulkan_base.surface_resolution.width as f32,
                         self.vulkan_base.surface_resolution.height as f32,
                     );
+                    
+                    // visual_and_logic_start_instant is when the gameplay screen appears and logic begins.
+                    let visual_and_logic_start_instant = Instant::now();
+                    
+                    // audio_play_begins_at_instant is when the audio file's t=0 is aligned.
+                    // This incorporates the lead-in time.
+                    let audio_target_start_instant = visual_and_logic_start_instant + Duration::from_secs_f32(config::GAME_LEAD_IN_DURATION_SECONDS);
 
-                    match self.audio_manager.play_music(audio_path, 1.0) {
-                        Ok(_) => {
-                            let start_time = Instant::now() + Duration::from_millis(config::AUDIO_SYNC_OFFSET_MS as u64);
-                            self.game_state = Some(gameplay::initialize_game_state(
-                                window_size_f32.0,
-                                window_size_f32.1,
-                                start_time,
-                                song_info_for_gameplay,
-                                final_selected_chart_idx,
-                            ));
-                            info!("Gameplay state initialized and music started.");
-                        }
-                        Err(e) => {
-                            error!("Failed to start gameplay music: {}. Returning to SelectMusic.", e);
-                            self.next_app_state = Some(AppState::SelectMusic);
-                            return;
-                        }
-                    }
+                    self.game_state = Some(gameplay::initialize_game_state(
+                        window_size_f32.0,
+                        window_size_f32.1,
+                        audio_target_start_instant, // This is when audio t=0 occurs
+                        song_info_for_gameplay,
+                        final_selected_chart_idx,
+                    ));
+                    info!("Gameplay state initialized. Music will start after lead-in.");
+
                 } else {
                     error!("Cannot start gameplay: Selected item is not a song or selection is invalid. Returning to SelectMusic.");
                     self.next_app_state = Some(AppState::SelectMusic);
@@ -909,7 +907,27 @@ impl App {
             AppState::Options => options::update(&mut self.options_state, dt),
             AppState::Gameplay => {
                 if let Some(ref mut gs) = self.game_state {
-                    gameplay::update(gs, dt, &mut self.rng);
+                    gameplay::update(gs, dt, &mut self.rng); // Update game state, which includes lead_in_timer
+
+                    // Check if it's time to start the music
+                    if !gs.music_started && gs.lead_in_timer <= 0.0 {
+                        if let Some(audio_path) = &gs.song_info.audio_path {
+                            info!("Lead-in complete. Starting music playback for: {:?}", audio_path.file_name().unwrap_or_default());
+                            match self.audio_manager.play_music(audio_path, 1.0) {
+                                Ok(_) => {
+                                    gs.music_started = true;
+                                }
+                                Err(e) => {
+                                    error!("Failed to start gameplay music after lead-in: {}. Returning to SelectMusic.", e);
+                                    self.next_app_state = Some(AppState::SelectMusic);
+                                    // No return here, let state transition handle it
+                                }
+                            }
+                        } else {
+                            error!("Cannot start music: Audio path missing for song '{}' even after lead-in. Returning to SelectMusic.", gs.song_info.title);
+                            self.next_app_state = Some(AppState::SelectMusic);
+                        }
+                    }
                 }
             }
             AppState::Exiting => {}
