@@ -45,6 +45,7 @@ pub enum MusicWheelEntry {
         color: [f32; 4],
         banner_path: Option<PathBuf>,
         total_duration_sec: Option<f32>,
+        song_count: usize,
     },
 }
 

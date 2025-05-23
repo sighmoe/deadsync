@@ -325,6 +325,7 @@ pub fn draw(
     let header_footer_font = assets.get_font(FontId::Wendy).expect("Wendy font missing");
     let list_font = assets.get_font(FontId::Miso).expect("Miso font missing");
     let difficulty_font = assets.get_font(FontId::Wendy).expect("Wendy font for difficulty missing");
+    let miso_font_for_counts = assets.get_font(FontId::Miso).expect("Miso font missing for counts");
     let meter_arrow_texture_opt = assets.get_texture(TextureId::MeterArrow);
 
 
@@ -443,9 +444,12 @@ pub fn draw(
         let num_entries = state.entries.len();
         let is_selected_slot = i == CENTER_MUSIC_WHEEL_SLOT_INDEX;
 
+        let mut current_entry_song_count: Option<usize> = None; // Store song count for this entry
+
         if num_entries > 0 {
             let list_index_isize = (state.selected_index as isize + i as isize - CENTER_MUSIC_WHEEL_SLOT_INDEX as isize + num_entries as isize) % num_entries as isize;
             let list_index = if list_index_isize < 0 { (list_index_isize + num_entries as isize) as usize } else { list_index_isize as usize };
+            
             if let Some(entry) = state.entries.get(list_index) {
                 match entry {
                     MusicWheelEntry::Song(song_info_arc) => {
@@ -454,12 +458,13 @@ pub fn draw(
                         current_text_color = config::SONG_TEXT_COLOR;
                         text_x_pos = music_box_left_x + song_text_left_padding_current;
                     }
-                    MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color_val, .. } => {
+                    MusicWheelEntry::PackHeader { name: pack_name, color: pack_text_color_val, song_count, .. } => {
                         display_text = pack_name.clone();
                         current_box_color = if is_selected_slot { lerp_color(config::PACK_HEADER_BOX_COLOR, config::SELECTED_PACK_HEADER_BOX_COLOR, anim_t) } else { config::PACK_HEADER_BOX_COLOR };
                         current_text_color = *pack_text_color_val;
                         let text_width_pixels = list_font.measure_text_normalized(&display_text) * wheel_text_effective_scale;
-                        text_x_pos = music_box_left_x + (music_wheel_box_current_width - text_width_pixels) / 2.0;
+                        text_x_pos = music_box_left_x + (music_wheel_box_current_width - text_width_pixels) / 2.0; // Centered
+                        current_entry_song_count = Some(*song_count);
                     }
                 }
             } else { current_box_color = config::MUSIC_WHEEL_BOX_COLOR; }
@@ -473,6 +478,32 @@ pub fn draw(
             let mut text_baseline_y = current_box_center_y_for_text + (scaled_ascender + scaled_descender) / 2.0;
             text_baseline_y += music_wheel_text_vertical_nudge_current;
             renderer.draw_text(device, cmd_buf, list_font, &display_text, text_x_pos, text_baseline_y, current_text_color, wheel_text_effective_scale, None);
+
+            // Draw song count for PackHeader
+            if let Some(song_count_val) = current_entry_song_count { // Use the stored count
+                if song_count_val > 0 { // Only draw if there's a count
+                    let count_str = format!("{}", song_count_val);
+
+                    let target_count_text_visual_height_px = 21.0 * height_scale_factor;
+                    let count_font_typographic_height_norm = (miso_font_for_counts.metrics.ascender - miso_font_for_counts.metrics.descender).max(1e-5);
+                    let count_text_scale = target_count_text_visual_height_px / count_font_typographic_height_norm;
+
+                    let count_text_width_pixels = miso_font_for_counts.measure_text_normalized(&count_str) * count_text_scale;
+                    let padding_right_px = 15.0 * width_scale_factor;
+                    let count_text_x_pos = music_box_right_x - padding_right_px - count_text_width_pixels;
+
+                    let count_scaled_ascender = miso_font_for_counts.metrics.ascender * count_text_scale;
+                    let count_scaled_descender = miso_font_for_counts.metrics.descender * count_text_scale;
+                    let mut count_text_baseline_y = current_box_center_y_for_text + (count_scaled_ascender + count_scaled_descender) / 2.0;
+                    count_text_baseline_y += music_wheel_text_vertical_nudge_current;
+
+                    renderer.draw_text(
+                        device, cmd_buf, miso_font_for_counts, &count_str,
+                        count_text_x_pos, count_text_baseline_y,
+                        [1.0, 1.0, 1.0, 1.0], // White color
+                        count_text_scale, None);
+                }
+            }
         }
     }
 
