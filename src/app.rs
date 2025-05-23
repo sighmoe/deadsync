@@ -1,4 +1,3 @@
-// src/app.rs
 use crate::assets::AssetManager;
 use crate::audio::AudioManager;
 use crate::config;
@@ -627,7 +626,8 @@ impl App {
                     menu::handle_input(&key_event, &mut self.menu_state, &self.audio_manager);
             }
             AppState::SelectMusic => {
-                let original_selected_index_before_input = self.select_music_state.selected_index;
+                let _original_selected_index_before_input = self.select_music_state.selected_index;
+                let original_expanded_pack_name = self.select_music_state.expanded_pack_name.clone(); // Capture before
  
                 let (next_state, sel_changed_by_nav_or_toggle) = select_music::handle_input(
                     &key_event,
@@ -636,17 +636,15 @@ impl App {
                 );
                 requested_state = next_state;
                 selection_changed_in_music_by_input = sel_changed_by_nav_or_toggle;
-
-
-                if key_event.state == ElementState::Pressed && !key_event.repeat {
-                     if let Some(VirtualKeyCode::Enter) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
-                        if let Some(entry) = self.select_music_state.entries.get(original_selected_index_before_input) {
-                            if let MusicWheelEntry::PackHeader { .. } = entry {
-                                self.rebuild_music_wheel_entries();
-                                selection_changed_in_music_by_input = true;
-                            }                           
-                        }
-                    }
+                
+                // If pack expansion state changed due to any input handled by select_music::handle_input
+                // (e.g. Enter on pack, or new Up+Down combo to collapse)
+                if self.select_music_state.expanded_pack_name != original_expanded_pack_name {
+                    self.rebuild_music_wheel_entries();
+                    // selection_changed_in_music_by_input is likely already true if sel_changed_by_nav_or_toggle was true,
+                    // which it would be if expanded_pack_name changed.
+                    // Ensure it's true so handle_music_selection_change runs after rebuild.
+                    selection_changed_in_music_by_input = true; 
                 }
             }
             AppState::Options => {

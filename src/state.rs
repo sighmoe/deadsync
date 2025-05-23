@@ -84,6 +84,7 @@ pub struct SelectMusicState {
 
     pub last_difficulty_nav_key: Option<VirtualKeyCode>, // For double-tap difficulty change
     pub last_difficulty_nav_time: Option<Instant>,     // For double-tap difficulty change
+    pub active_chord_keys: HashSet<VirtualKeyCode>, // For Up+Down combo etc.
 }
 
 impl Default for SelectMusicState {
@@ -112,6 +113,7 @@ impl Default for SelectMusicState {
             current_graph_song_chart_key: None,
             last_difficulty_nav_key: None,
             last_difficulty_nav_time: None,
+            active_chord_keys: HashSet::new(),
         }
     }
 }

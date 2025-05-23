@@ -75,7 +75,35 @@ pub fn handle_input(
 
         match key_event.state {
             ElementState::Pressed => {
-                if !key_event.repeat {
+                // Handle active_chord_keys update for Up/Down presses regardless of repeat status,
+                // as we care about the *current* pressed state for the combo.
+                if virtual_keycode == VirtualKeyCode::Up || virtual_keycode == VirtualKeyCode::Down {
+                    state.active_chord_keys.insert(virtual_keycode);
+                }
+
+                if !key_event.repeat { // Process actions only on initial press for non-combo keys
+                    let mut combo_action_taken = false;
+
+                    // Check for Up+Down combo to collapse pack
+                    if state.active_chord_keys.contains(&VirtualKeyCode::Up) &&
+                       state.active_chord_keys.contains(&VirtualKeyCode::Down) {
+                        if state.expanded_pack_name.is_some() {
+                            info!("Up+Down combo: Collapsing pack.");
+                            state.expanded_pack_name = None;
+                            audio_manager.play_sfx(SoundId::MenuExpandCollapse);
+                            song_or_pack_selection_changed = true;
+                            state.selection_animation_timer = 0.0;
+                            state.last_difficulty_nav_key = None; // Prevent misfires
+                            state.last_difficulty_nav_time = None;
+                            combo_action_taken = true;
+                        }
+                    }
+
+                    // Process other key actions if combo wasn't just handled by this specific key press
+                    // contributing to the combo.
+                    if combo_action_taken && (virtual_keycode == VirtualKeyCode::Up || virtual_keycode == VirtualKeyCode::Down) {
+                        // Combo action was just performed using this key, skip other Up/Down actions for this event.
+                    } else {
                     match virtual_keycode {
                         VirtualKeyCode::Left => {
                             if num_entries > 0 {
@@ -207,10 +235,16 @@ pub fn handle_input(
                             state.last_difficulty_nav_key = None; state.last_difficulty_nav_time = None;
                             return (Some(AppState::Menu), song_or_pack_selection_changed || difficulty_selection_changed);
                         }
+                        _ => {} // Other keys not handled here.
                     }
+                  }
                 }
             }
             ElementState::Released => {
+                if virtual_keycode == VirtualKeyCode::Up || virtual_keycode == VirtualKeyCode::Down {
+                    state.active_chord_keys.remove(&virtual_keycode);
+                }
+
                  match virtual_keycode {
                     VirtualKeyCode::Left | VirtualKeyCode::Right => {
                         state.nav_key_held_direction = None;
