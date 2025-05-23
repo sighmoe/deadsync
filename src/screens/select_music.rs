@@ -2,17 +2,22 @@ use crate::assets::{AssetManager, FontId, SoundId, TextureId};
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
-use crate::parsing::simfile::{ChartInfo, SongInfo}; // Added ChartInfo for direct use
+use crate::graphics::vulkan_base::VulkanBase; // Added
+use crate::parsing::simfile::{ChartInfo, SongInfo};
 use crate::state::{AppState, SelectMusicState, VirtualKeyCode, MusicWheelEntry, NavDirection};
 use ash::vk;
 use cgmath::{Rad, Vector3, InnerSpace};
-use log::{debug, info, warn}; // Added info
+use log::{debug, info, warn, error}; // Added info, error
 use std::f32::consts::PI;
 use std::sync::Arc;
 use std::time::{Instant, Duration};
 use winit::event::{ElementState, KeyEvent};
+use std::collections::HashMap; // Added for pack_colors
+use std::path::{Path, PathBuf}; // Added for find_pack_banner_for_wheel
+use std::fs; // Added for find_pack_banner_for_wheel
 
 pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
+pub(crate) const SELECTION_START_PLAY_DELAY: Duration = Duration::from_millis(500); // Moved from app.rs
 
 // Helper function to check if a specific difficulty index has a playable chart for the given song
 pub(crate) fn is_difficulty_playable(song: &Arc<SongInfo>, difficulty_index: usize) -> bool {
@@ -22,8 +27,8 @@ pub(crate) fn is_difficulty_playable(song: &Arc<SongInfo>, difficulty_index: usi
     let target_difficulty_name = DIFFICULTY_NAMES[difficulty_index];
     song.charts.iter().any(|c|
         c.difficulty.eq_ignore_ascii_case(target_difficulty_name) &&
-        c.stepstype == "dance-single" && // Ensure it's a playable type
-        c.processed_data.as_ref().map_or(false, |pd| !pd.measures.is_empty()) // Ensure chart has data
+        c.stepstype == "dance-single" && 
+        c.processed_data.as_ref().map_or(false, |pd| !pd.measures.is_empty())
     )
 }
 
@@ -55,7 +60,382 @@ fn format_duration_flexible(total_seconds_f: f32) -> String {
     }
 }
 
-const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300); // For difficulty change
+const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
+
+
+// Moved from App
+fn find_pack_banner_for_wheel(pack_folder_path: &Path) -> Option<PathBuf> {
+    if !pack_folder_path.is_dir() {
+        return None;
+    }
+    let banner_name_patterns = ["banner", "ban", "bn"]; 
+
+    let mut found_banner: Option<PathBuf> = None;
+
+    for pattern_base in banner_name_patterns {
+        // Ensure read_dir result is handled properly
+        let entries = match fs::read_dir(pack_folder_path) {
+            Ok(e) => e,
+            Err(_) => return found_banner, // Or None if error implies no banner
+        };
+
+        for entry_res in entries { 
+            if let Ok(entry) = entry_res {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(filename_osstr) = path.file_name() {
+                        if let Some(filename_str) = filename_osstr.to_str() {
+                            let filename_lower = filename_str.to_lowercase();
+                            if filename_lower.contains(pattern_base) && filename_lower.ends_with(".png") {
+                                if filename_lower == format!("{}.png", pattern_base) {
+                                    return Some(path);
+                                }
+                                if found_banner.is_none() { 
+                                    found_banner = Some(path.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if found_banner.is_some() && pattern_base == "banner" { 
+            return found_banner;
+        }
+    }
+    found_banner
+}
+
+// Moved from App and adapted
+pub(crate) fn rebuild_music_wheel_entries_logic(
+    state: &mut SelectMusicState,
+    song_library: &[SongInfo],
+    pack_colors: &HashMap<String, [f32; 4]>,
+) {
+    let mut pack_total_durations: HashMap<String, f32> = HashMap::new();
+    for song_info in song_library {
+        let pack_name = song_info
+            .folder_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("Unknown Pack")
+            .to_string();
+
+        let song_duration_for_pack_sum = song_info
+            .charts
+            .iter()
+            .find_map(|c| c.calculated_length_sec)
+            .unwrap_or(0.0);
+
+        *pack_total_durations.entry(pack_name).or_insert(0.0) += song_duration_for_pack_sum;
+    }
+
+    let mut pack_song_counts: HashMap<String, usize> = HashMap::new();
+    for song_info in song_library {
+        let has_dance_single_chart = song_info.charts.iter().any(|c| c.stepstype == "dance-single");
+
+        if has_dance_single_chart {
+            let pack_name = song_info
+                .folder_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("Unknown Pack")
+                .to_string();
+            *pack_song_counts.entry(pack_name).or_insert(0) += 1;
+        }
+    }
+
+    let mut new_entries = Vec::new();
+    let mut current_pack_name_in_library = String::new();
+
+    let pack_to_focus_on: Option<String> = state.expanded_pack_name.clone()
+        .or_else(|| {
+            state.entries.get(state.selected_index)
+                .and_then(|entry| match entry {
+                    MusicWheelEntry::PackHeader { name, .. } => Some(name.clone()),
+                    _ => None,
+                })
+        });
+
+    for song_info in song_library {
+        let pack_name_for_song = song_info
+            .folder_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|name| name.to_str())
+            .unwrap_or("Unknown Pack")
+            .to_string();
+
+        if pack_name_for_song != current_pack_name_in_library {
+            let color = pack_colors.get(&pack_name_for_song)
+                            .cloned()
+                            .unwrap_or(config::MENU_NORMAL_COLOR);
+
+            let pack_banner_path = song_info.folder_path.parent()
+                .and_then(|pack_dir| find_pack_banner_for_wheel(pack_dir)); // Use local helper
+
+            let total_duration = pack_total_durations.get(&pack_name_for_song).copied();
+            let song_count = pack_song_counts.get(&pack_name_for_song).copied().unwrap_or(0);
+
+            new_entries.push(MusicWheelEntry::PackHeader {
+                name: pack_name_for_song.clone(),
+                color,
+                banner_path: pack_banner_path,
+                total_duration_sec: total_duration,
+                song_count,
+            });
+            current_pack_name_in_library = pack_name_for_song.clone();
+        }
+
+        if let Some(expanded_name) = &state.expanded_pack_name {
+            if *expanded_name == pack_name_for_song {
+                new_entries.push(MusicWheelEntry::Song(Arc::new(song_info.clone())));
+            }
+        }
+    }
+    state.entries = new_entries;
+
+    let mut new_selected_idx = 0;
+    if let Some(focus_pack_name_str) = pack_to_focus_on {
+        if let Some(idx) = state.entries.iter().position(|entry| {
+            match entry {
+                MusicWheelEntry::PackHeader { name, .. } => name == &focus_pack_name_str,
+                _ => false,
+            }
+        }) {
+            new_selected_idx = idx;
+        }
+    }
+
+    if !state.entries.is_empty() {
+        state.selected_index = new_selected_idx.min(state.entries.len() - 1);
+    } else {
+        state.selected_index = 0;
+    }
+
+    // Reset preview state - caller (App) will handle audio_manager.stop_preview()
+    // if this is part of a larger state transition. For direct rebuilds, this is fine.
+    state.preview_audio_path = None;
+    state.preview_playback_started_at = None;
+    state.is_awaiting_preview_restart = false;
+    state.selection_landed_at = None;
+    state.is_preview_actions_scheduled = false;
+}
+
+// Moved from App and adapted
+pub(crate) fn start_preview_playback_logic(
+    state: &mut SelectMusicState,
+    audio_manager: &mut AudioManager,
+) {
+    state.preview_playback_started_at = None; // Ensure it's reset before attempting to set
+
+    if let Some(audio_path) = &state.preview_audio_path {
+        if let Some(start_sec) = state.preview_sample_start_sec {
+            let duration_sec = state.preview_sample_length_sec;
+             match audio_manager.play_preview(audio_path, 0.7, start_sec, duration_sec) {
+                Ok(_) => {
+                    state.preview_playback_started_at = Some(Instant::now());
+                    info!("Preview playback started for {:?} at {:.2}s", audio_path.file_name().unwrap_or_default(), start_sec);
+                }
+                Err(e) => error!("Failed to start preview playback: {}", e),
+            }
+        } else {
+            warn!("No sample start time for song, cannot play preview.");
+        }
+    }
+}
+
+// Moved from App and adapted
+pub(crate) fn handle_selection_change_logic(
+    state: &mut SelectMusicState,
+    asset_manager: &mut AssetManager,
+    audio_manager: &mut AudioManager,
+    renderer: &Renderer,
+    vulkan_base: &VulkanBase,
+) {
+    let prev_preview_audio_path = state.preview_audio_path.clone();
+    let prev_preview_sample_start = state.preview_sample_start_sec;
+    let prev_preview_sample_length = state.preview_sample_length_sec;
+
+    let mut new_graph_key_for_current_selection: Option<String> = None;
+    let mut chart_data_for_graph_generation: Option<Arc<crate::parsing::simfile::ProcessedChartData>> = None;
+
+    let current_index = state.selected_index;
+    if let Some(selected_entry) = state.entries.get(current_index) {
+        match selected_entry {
+            MusicWheelEntry::Song(selected_song_arc) => {
+                asset_manager.load_song_banner(
+                    vulkan_base, // Pass VulkanBase
+                    renderer,
+                    selected_song_arc,
+                );
+                state.preview_audio_path = selected_song_arc.audio_path.clone();
+                state.preview_sample_start_sec = selected_song_arc.sample_start;
+                state.preview_sample_length_sec = selected_song_arc.sample_length;
+
+                let mut difficulty_index_to_use = state.selected_difficulty_index;
+                if !is_difficulty_playable(selected_song_arc, difficulty_index_to_use) {
+                    for i in 0..DIFFICULTY_NAMES.len() {
+                        if is_difficulty_playable(selected_song_arc, i) {
+                            info!("Auto-adjusting difficulty for '{}' from index {} to {} ('{}')", selected_song_arc.title, difficulty_index_to_use, i, DIFFICULTY_NAMES[i]);
+                            difficulty_index_to_use = i;
+                            break;
+                        }
+                    }
+                }
+                state.selected_difficulty_index = difficulty_index_to_use;
+
+                let target_difficulty_name = DIFFICULTY_NAMES[difficulty_index_to_use];
+                if let Some(chart_info) = selected_song_arc.charts.iter().find(|c|
+                    c.difficulty.eq_ignore_ascii_case(target_difficulty_name) &&
+                    c.stepstype == "dance-single" &&
+                    c.processed_data.as_ref().map_or(false, |pd| !pd.measure_nps_vec.is_empty() && pd.max_nps > 0.001)
+                ) {
+                    if let Some(pd) = &chart_info.processed_data {
+                         new_graph_key_for_current_selection = Some(format!("{}//{}", selected_song_arc.title, chart_info.difficulty));
+                         chart_data_for_graph_generation = Some(Arc::new(pd.clone()));
+                    }
+                } else {
+                    if let Some(chart_info_fallback) = selected_song_arc.charts.iter().find(|c|
+                        c.processed_data.as_ref().map_or(false, |pd| !pd.measure_nps_vec.is_empty() && pd.max_nps > 0.001)
+                    ) {
+                        if let Some(pd_fallback) = &chart_info_fallback.processed_data {
+                            new_graph_key_for_current_selection = Some(format!("{}//{} (fallback)", selected_song_arc.title, chart_info_fallback.difficulty));
+                            chart_data_for_graph_generation = Some(Arc::new(pd_fallback.clone()));
+                            warn!("NPS Graph: Chart for difficulty '{}' not found or unprocessable for '{}'. Using fallback: '{}'", target_difficulty_name, selected_song_arc.title, chart_info_fallback.difficulty);
+                        }
+                    }
+                }
+            }
+            MusicWheelEntry::PackHeader { name: _, color: _, banner_path, .. } => {
+                info!(
+                    "Selected a pack header ({}), attempting to load pack banner.",
+                    current_index
+                );
+                asset_manager.load_pack_banner(
+                    vulkan_base, // Pass VulkanBase
+                    renderer,
+                    banner_path.as_deref(),
+                );
+                state.preview_audio_path = None;
+                state.preview_sample_start_sec = None;
+                state.preview_sample_length_sec = None;
+            }
+        }
+    } else {
+        warn!(
+            "Selection changed in Music Select, but index {} is out of bounds ({} entries). Loading fallback and clearing preview actions.",
+            current_index,
+            state.entries.len()
+        );
+        if let Some(fallback_res) =
+            asset_manager.get_texture(crate::assets::TextureId::FallbackBanner)
+        {
+            renderer.update_texture_descriptor(
+                &vulkan_base.device,
+                crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                fallback_res,
+            );
+        }
+        state.preview_audio_path = None;
+        state.preview_sample_start_sec = None;
+        state.preview_sample_length_sec = None;
+    }
+
+    let current_preview_audio_path = state.preview_audio_path.clone();
+    let current_preview_sample_start = state.preview_sample_start_sec;
+    let current_preview_sample_length = state.preview_sample_length_sec;
+
+    let preview_parameters_changed = 
+        prev_preview_audio_path != current_preview_audio_path ||
+        prev_preview_sample_start != current_preview_sample_start ||
+        prev_preview_sample_length != current_preview_sample_length ||
+        (prev_preview_audio_path.is_some() && current_preview_audio_path.is_none()) ||
+        (prev_preview_audio_path.is_none() && current_preview_audio_path.is_some());
+
+    if preview_parameters_changed {
+        info!("Preview parameters changed. Stopping current preview and rescheduling.");
+        audio_manager.stop_preview();
+        state.preview_playback_started_at = None;
+        state.is_awaiting_preview_restart = false;
+        
+        if state.preview_audio_path.is_some() {
+            state.selection_landed_at = Some(Instant::now());
+            state.is_preview_actions_scheduled = true;
+            info!(
+                "New preview actions (play@{}ms) scheduled for {:?}.",
+                SELECTION_START_PLAY_DELAY.as_millis(),
+                state.preview_audio_path.as_ref().and_then(|p| p.file_name())
+            );
+        } else {
+            state.selection_landed_at = None;
+            state.is_preview_actions_scheduled = false;
+        }
+    } else {
+        info!("Preview parameters unchanged. Preview will continue or maintain its schedule. Only SFX played for difficulty change.");
+        if state.preview_audio_path.is_some() && state.selection_landed_at.is_none() && state.preview_playback_started_at.is_none() {
+            if !state.is_awaiting_preview_restart && !state.is_preview_actions_scheduled {
+                state.selection_landed_at = Some(Instant::now());
+                state.is_preview_actions_scheduled = true;
+                 info!(
+                    "Re-asserting preview actions (play@{}ms) for {:?} as parameters were same but no playback/restart active.",
+                    SELECTION_START_PLAY_DELAY.as_millis(),
+                    state.preview_audio_path.as_ref().and_then(|p| p.file_name())
+                );
+            }
+        }
+    }
+
+    if state.current_graph_song_chart_key != new_graph_key_for_current_selection {
+        if let Some(mut old_graph_tex) = state.current_graph_texture.take() {
+            info!("Destroying old NPS graph texture (key change or no graph needed).");
+            old_graph_tex.destroy(&vulkan_base.device);
+        }
+        state.current_graph_song_chart_key = new_graph_key_for_current_selection.clone();
+    }
+
+    if let (Some(key_str), Some(pd_arc)) = (new_graph_key_for_current_selection, chart_data_for_graph_generation) {
+        if state.current_graph_texture.is_none() {
+            info!("Generating NPS graph for: {}", key_str);
+            let nps_vec_f64: Vec<f64> = pd_arc.measure_nps_vec.iter().map(|&f| f as f64).collect();
+            match crate::parsing::graph::generate_density_graph_rgba(&nps_vec_f64, pd_arc.max_nps as f64) {
+                Ok(graph_image_data) => {
+                    match crate::graphics::texture::create_texture_from_rgba_data(
+                        vulkan_base, // Pass VulkanBase
+                        graph_image_data.width,
+                        graph_image_data.height,
+                        &graph_image_data.data,
+                        "NPS_Graph_Texture",
+                    ) {
+                        Ok(tex_res) => {
+                            renderer.update_texture_descriptor(
+                                &vulkan_base.device,
+                                crate::graphics::renderer::DescriptorSetId::NpsGraph,
+                                &tex_res,
+                            );
+                            state.current_graph_texture = Some(tex_res);
+                            info!("NPS graph texture created and descriptor updated.");
+                        }
+                        Err(e) => error!("Failed to create NPS graph texture from data: {}", e),
+                    }
+                }
+                Err(e) => error!("Failed to generate NPS graph image data: {}", e),
+            }
+        }
+    } else if state.current_graph_texture.is_some() {
+         if let Some(mut old_graph_tex) = state.current_graph_texture.take() {
+            info!("Clearing NPS graph texture as current selection does not require one.");
+            old_graph_tex.destroy(&vulkan_base.device);
+        }
+         renderer.update_texture_descriptor(
+             &vulkan_base.device,
+             crate::graphics::renderer::DescriptorSetId::NpsGraph,
+             &renderer.solid_white_texture
+        );
+    }
+}
 
 
 pub fn handle_input(
@@ -63,8 +443,8 @@ pub fn handle_input(
     state: &mut SelectMusicState,
     audio_manager: &AudioManager,
 ) -> (Option<AppState>, bool) {
-    let mut song_or_pack_selection_changed = false; // Tracks song index or pack expansion changes
-    let mut difficulty_selection_changed = false; // Tracks if difficulty index actually changed
+    let mut song_or_pack_selection_changed = false; 
+    let mut difficulty_selection_changed = false; 
 
     if let Some(virtual_keycode) =
         crate::state::key_to_virtual_keycode(key_event.logical_key.clone())
@@ -75,16 +455,13 @@ pub fn handle_input(
 
         match key_event.state {
             ElementState::Pressed => {
-                // Handle active_chord_keys update for Up/Down presses regardless of repeat status,
-                // as we care about the *current* pressed state for the combo.
                 if virtual_keycode == VirtualKeyCode::Up || virtual_keycode == VirtualKeyCode::Down {
                     state.active_chord_keys.insert(virtual_keycode);
                 }
 
-                if !key_event.repeat { // Process actions only on initial press for non-combo keys
+                if !key_event.repeat { 
                     let mut combo_action_taken = false;
 
-                    // Check for Up+Down combo to collapse pack
                     if state.active_chord_keys.contains(&VirtualKeyCode::Up) &&
                        state.active_chord_keys.contains(&VirtualKeyCode::Down) {
                         if state.expanded_pack_name.is_some() {
@@ -93,16 +470,14 @@ pub fn handle_input(
                             audio_manager.play_sfx(SoundId::MenuExpandCollapse);
                             song_or_pack_selection_changed = true;
                             state.selection_animation_timer = 0.0;
-                            state.last_difficulty_nav_key = None; // Prevent misfires
+                            state.last_difficulty_nav_key = None; 
                             state.last_difficulty_nav_time = None;
                             combo_action_taken = true;
                         }
                     }
 
-                    // Process other key actions if combo wasn't just handled by this specific key press
-                    // contributing to the combo.
                     if combo_action_taken && (virtual_keycode == VirtualKeyCode::Up || virtual_keycode == VirtualKeyCode::Down) {
-                        // Combo action was just performed using this key, skip other Up/Down actions for this event.
+                        // Skip other actions for this key press
                     } else {
                     match virtual_keycode {
                         VirtualKeyCode::Left => {
@@ -117,10 +492,10 @@ pub fn handle_input(
                                     audio_manager.play_sfx(SoundId::MenuChange);
                                     song_or_pack_selection_changed = true;
                                     state.selection_animation_timer = 0.0;
-                                    state.last_difficulty_nav_key = None; // Reset on song change
+                                    state.last_difficulty_nav_key = None; 
                                     state.last_difficulty_nav_time = None;
                                 }
-                                state.nav_key_held_direction = Some(NavDirection::Up); // Up/Left scroll wheel up
+                                state.nav_key_held_direction = Some(NavDirection::Up); 
                                 state.nav_key_held_since = Some(Instant::now());
                                 state.nav_key_last_scrolled_at = Some(Instant::now());
                             }
@@ -133,10 +508,10 @@ pub fn handle_input(
                                     audio_manager.play_sfx(SoundId::MenuChange);
                                     song_or_pack_selection_changed = true;
                                     state.selection_animation_timer = 0.0;
-                                    state.last_difficulty_nav_key = None; // Reset on song change
+                                    state.last_difficulty_nav_key = None; 
                                     state.last_difficulty_nav_time = None;
                                 }
-                                state.nav_key_held_direction = Some(NavDirection::Down); // Down/Right scroll wheel down
+                                state.nav_key_held_direction = Some(NavDirection::Down);
                                 state.nav_key_held_since = Some(Instant::now());
                                 state.nav_key_last_scrolled_at = Some(Instant::now());
                             }
@@ -146,9 +521,9 @@ pub fn handle_input(
                                 let now = Instant::now();
                                 if state.last_difficulty_nav_key == Some(VirtualKeyCode::Up) &&
                                    state.last_difficulty_nav_time.map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW)
-                                { // Double-tap UP
+                                { 
                                     if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
-                                        let original_diff_idx = state.selected_difficulty_index; // Store before potential change
+                                        let original_diff_idx = state.selected_difficulty_index;
                                         let mut new_diff_idx = state.selected_difficulty_index;
                                         loop {
                                             if new_diff_idx == 0 { break; } 
@@ -165,7 +540,7 @@ pub fn handle_input(
                                     }
                                     state.last_difficulty_nav_key = None; 
                                     state.last_difficulty_nav_time = None;
-                                } else { // First tap or too slow
+                                } else { 
                                     state.last_difficulty_nav_key = Some(VirtualKeyCode::Up);
                                     state.last_difficulty_nav_time = Some(now);
                                 }
@@ -176,9 +551,9 @@ pub fn handle_input(
                                 let now = Instant::now();
                                 if state.last_difficulty_nav_key == Some(VirtualKeyCode::Down) &&
                                    state.last_difficulty_nav_time.map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW)
-                                { // Double-tap DOWN
+                                { 
                                     if let Some(MusicWheelEntry::Song(selected_song_arc)) = state.entries.get(state.selected_index) {
-                                        let original_diff_idx = state.selected_difficulty_index; // Store before potential change
+                                        let original_diff_idx = state.selected_difficulty_index; 
                                         let mut new_diff_idx = state.selected_difficulty_index;
                                         loop {
                                             if new_diff_idx >= DIFFICULTY_NAMES.len() - 1 { break; } 
@@ -195,7 +570,7 @@ pub fn handle_input(
                                     }
                                     state.last_difficulty_nav_key = None;
                                     state.last_difficulty_nav_time = None;
-                                } else { // First tap or too slow
+                                } else { 
                                     state.last_difficulty_nav_key = Some(VirtualKeyCode::Down);
                                     state.last_difficulty_nav_time = Some(now);
                                 }
@@ -224,7 +599,7 @@ pub fn handle_input(
                                             }
                                             song_or_pack_selection_changed = true;
                                             state.selection_animation_timer = 0.0;
-                                            state.last_difficulty_nav_key = None; // Reset on pack toggle
+                                            state.last_difficulty_nav_key = None; 
                                             state.last_difficulty_nav_time = None;
                                         }
                                     }
@@ -235,7 +610,7 @@ pub fn handle_input(
                             state.last_difficulty_nav_key = None; state.last_difficulty_nav_time = None;
                             return (Some(AppState::Menu), song_or_pack_selection_changed || difficulty_selection_changed);
                         }
-                        _ => {} // Other keys not handled here.
+                        _ => {} 
                     }
                   }
                 }
@@ -267,7 +642,6 @@ pub fn update(state: &mut SelectMusicState, dt: f32, audio_manager: &AudioManage
         state.selection_animation_timer -= ANIMATION_CYCLE_DURATION;
     }
     
-    // Animation timer for meter arrow
     state.meter_arrow_animation_timer += dt;
     if state.meter_arrow_animation_timer > config::METER_ARROW_ANIM_DURATION_SEC {
         state.meter_arrow_animation_timer -= config::METER_ARROW_ANIM_DURATION_SEC;
@@ -301,9 +675,9 @@ pub fn update(state: &mut SelectMusicState, dt: f32, audio_manager: &AudioManage
                     }
                     if state.selected_index != old_index {
                          audio_manager.play_sfx(SoundId::MenuChange);
-                         selection_changed_by_update = true; // Song index changed
+                         selection_changed_by_update = true; 
                          state.selection_animation_timer = 0.0;
-                         state.last_difficulty_nav_key = None; // Reset on song change by hold-scroll
+                         state.last_difficulty_nav_key = None; 
                          state.last_difficulty_nav_time = None;
                     }
                     state.nav_key_last_scrolled_at = Some(now);
@@ -363,13 +737,12 @@ pub fn draw(
     const MUSIC_WHEEL_VERTICAL_GAP_REF: f32 = 2.0;
     const METER_ARROW_PADDING_LEFT_REF: f32 = 0.0; 
 
-    // Constants for Stepartist Info Box Text (Using your provided values)
     const STEPARTIST_INFO_TEXT_TARGET_PX_HEIGHT_AT_REF_RES: f32 = 22.0;
     const STEPARTIST_BOX_HEADER_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0]; 
     const STEPARTIST_BOX_VALUE_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 1.0];  
     const STEPARTIST_BOX_TEXT_LEFT_PADDING_REF: f32 = 7.0;
     const STEPARTIST_BOX_HEADER_TO_VALUE_GAP_REF: f32 = 21.0;
-    const STEPARTIST_BOX_TEXT_VERTICAL_NUDGE_REF: f32 = 2.0; // Positive is down, negative is up
+    const STEPARTIST_BOX_TEXT_VERTICAL_NUDGE_REF: f32 = 2.0; 
 
 
     let width_scale_factor = window_width / config::LAYOUT_BOXES_REF_RES_WIDTH;
@@ -444,7 +817,7 @@ pub fn draw(
         let num_entries = state.entries.len();
         let is_selected_slot = i == CENTER_MUSIC_WHEEL_SLOT_INDEX;
 
-        let mut current_entry_song_count: Option<usize> = None; // Store song count for this entry
+        let mut current_entry_song_count: Option<usize> = None; 
 
         if num_entries > 0 {
             let list_index_isize = (state.selected_index as isize + i as isize - CENTER_MUSIC_WHEEL_SLOT_INDEX as isize + num_entries as isize) % num_entries as isize;
@@ -463,7 +836,7 @@ pub fn draw(
                         current_box_color = if is_selected_slot { lerp_color(config::PACK_HEADER_BOX_COLOR, config::SELECTED_PACK_HEADER_BOX_COLOR, anim_t) } else { config::PACK_HEADER_BOX_COLOR };
                         current_text_color = *pack_text_color_val;
                         let text_width_pixels = list_font.measure_text_normalized(&display_text) * wheel_text_effective_scale;
-                        text_x_pos = music_box_left_x + (music_wheel_box_current_width - text_width_pixels) / 2.0; // Centered
+                        text_x_pos = music_box_left_x + (music_wheel_box_current_width - text_width_pixels) / 2.0; 
                         current_entry_song_count = Some(*song_count);
                     }
                 }
@@ -479,9 +852,8 @@ pub fn draw(
             text_baseline_y += music_wheel_text_vertical_nudge_current;
             renderer.draw_text(device, cmd_buf, list_font, &display_text, text_x_pos, text_baseline_y, current_text_color, wheel_text_effective_scale, None);
 
-            // Draw song count for PackHeader
-            if let Some(song_count_val) = current_entry_song_count { // Use the stored count
-                if song_count_val > 0 { // Only draw if there's a count
+            if let Some(song_count_val) = current_entry_song_count { 
+                if song_count_val > 0 { 
                     let count_str = format!("{}", song_count_val);
 
                     let target_count_text_visual_height_px = 21.0 * height_scale_factor;
@@ -500,7 +872,7 @@ pub fn draw(
                     renderer.draw_text(
                         device, cmd_buf, miso_font_for_counts, &count_str,
                         count_text_x_pos, count_text_baseline_y,
-                        [1.0, 1.0, 1.0, 1.0], // White color
+                        [1.0, 1.0, 1.0, 1.0], 
                         count_text_scale, None);
                 }
             }
@@ -609,14 +981,12 @@ pub fn draw(
         }
     }
 
-    // Stepartist Info Box (the small pink one) drawing logic
     let stepartist_info_box_top_y = graph_area_top_y - vertical_gap_graph_to_stepartist_box_current - stepartist_info_box_current_height;
     let stepartist_info_box_left_x = graph_area_left_x; 
     let stepartist_info_box_center_x = stepartist_info_box_left_x + stepartist_info_box_current_width / 2.0;
     let stepartist_info_box_center_y = stepartist_info_box_top_y + stepartist_info_box_current_height / 2.0;
     renderer.draw_quad(device, cmd_buf, DescriptorSetId::SolidColor, Vector3::new(stepartist_info_box_center_x, stepartist_info_box_center_y, 0.0), (stepartist_info_box_current_width, stepartist_info_box_current_height), Rad(0.0), config::PINK_BOX_COLOR, [0.0,0.0], [1.0,1.0]);
 
-    // Text inside Stepartist Info Box
     let miso_font = assets.get_font(FontId::Miso).expect("Miso font missing for stepartist info box text");
     let stepartist_box_text_target_visual_height = STEPARTIST_INFO_TEXT_TARGET_PX_HEIGHT_AT_REF_RES * height_scale_factor; 
     let stepartist_font_typographic_h_norm = (miso_font.metrics.ascender - miso_font.metrics.descender).max(1e-5);
@@ -650,20 +1020,16 @@ pub fn draw(
         if let MusicWheelEntry::Song(selected_song_arc) = selected_entry {
             let mut stepartist_display_name_for_ui = String::new();
             
-            // Get stepartist_display_name from the currently selected chart for the song
             if state.selected_difficulty_index < DIFFICULTY_NAMES.len() {
                 let target_difficulty_name = DIFFICULTY_NAMES[state.selected_difficulty_index];
-                 // Find the chart matching current difficulty and type
                 if let Some(chart) = selected_song_arc.charts.iter().find(|c| 
                     c.difficulty.eq_ignore_ascii_case(target_difficulty_name) &&
-                    c.stepstype == "dance-single" // Assuming dance-single
+                    c.stepstype == "dance-single" 
                 ) {
                     if !chart.stepartist_display_name.trim().is_empty() {
                         stepartist_display_name_for_ui = chart.stepartist_display_name.trim().to_string();
                     }
                 }
-                // Fallback if specific difficulty chart not found or its display name is empty
-                // to the first available dance-single chart with a non-empty stepartist_display_name
                 if stepartist_display_name_for_ui.is_empty() {
                     if let Some(chart) = selected_song_arc.charts.iter().find(|c|
                         c.stepstype == "dance-single" && !c.stepartist_display_name.trim().is_empty()
@@ -687,7 +1053,6 @@ pub fn draw(
             }
         }
     }
-    // End of stepartist_info_box text rendering
 
     let artist_bpm_box_left_x = stepartist_info_box_left_x; 
     let artist_bpm_box_actual_top_y = stepartist_info_box_top_y - vertical_gap_stepartist_to_artist_box_current - artist_bpm_box_current_height; 
