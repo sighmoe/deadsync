@@ -165,8 +165,8 @@ pub struct Arrow {
     pub x: f32,
     pub y: f32,
     pub direction: ArrowDirection,
-    pub note_char: NoteChar,
-    pub target_beat: f32,
+    pub note_char: NoteChar,    // Type of note (tap, hold start, etc.)
+    pub target_beat: f32,       // The beat at which this arrow should be hit (this will be the DISPLAY beat)
 }
 
 #[derive(Debug, Clone, Copy)]

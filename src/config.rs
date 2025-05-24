@@ -103,13 +103,16 @@ pub const GAMEPLAY_BANNER_HEIGHT_REF: f32 = 98.0;
 
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5];
-pub const ARROW_TINT_QUARTER: [f32; 4] = [1.0, 0.6, 0.6, 1.0];
-pub const ARROW_TINT_EIGHTH: [f32; 4] = [0.6, 0.6, 1.0, 1.0];
-pub const ARROW_TINT_SIXTEENTH: [f32; 4] = [0.6, 1.0, 0.6, 1.0];
-pub const ARROW_TINT_TWELFTH: [f32; 4] = [0.8, 0.5, 1.0, 1.0];
-pub const ARROW_TINT_TWENTYFOURTH: [f32; 4] = [0.7, 0.4, 0.9, 1.0];
-pub const ARROW_TINT_OTHER: [f32; 4] = [0.9, 0.9, 0.9, 1.0];
 pub const EXPLOSION_DURATION: Duration = Duration::from_millis(80);
+
+// New Arrow Quantization Colors (RGBA directly as [f32; 4])
+pub const ARROW_TINT_4TH: [f32; 4] = [1.0, 0.6, 0.6, 1.0];            // #FF9999   
+pub const ARROW_TINT_8TH: [f32; 4] = [0.6, 0.6, 1.0, 1.0];            // #9999FF
+pub const ARROW_TINT_16TH: [f32; 4] = [0.6, 1.0, 0.6, 1.0];           // #99FF99
+pub const ARROW_TINT_12TH_24TH_48TH: [f32; 4] = [0.8, 0.6, 1.0, 1.0]; // #CC99FF
+pub const ARROW_TINT_32ND: [f32; 4] = [0.8, 1.0, 0.6, 1.0];           // #FFBF99 
+pub const ARROW_TINT_64TH: [f32; 4] = [1.0, 0.75, 0.6, 1.0];          // #99FFCC
+pub const ARROW_TINT_OTHER: [f32; 4] = [0.85, 0.85, 0.85, 1.0];       // #D9D9D9
 
 // Menu Constants
 pub const LOGO_HEIGHT_RATIO_TO_WINDOW_HEIGHT: f32 = 0.55;
