@@ -21,92 +21,92 @@ use rand::Rng;
 #[derive(Debug, Clone, Default)]
 pub struct BeatTimePoint {
     pub beat: f32,
-    pub time_sec: f32,
+    pub time_sec: f32, 
     pub bpm: f32,
 }
 #[derive(Debug, Clone, Default)]
 pub struct TimingData {
-    pub points: Vec<BeatTimePoint>,
-    pub stops_at_beat: Vec<(f32, f32)>, // (beat, duration_in_seconds)
-    pub song_offset_sec: f32,
+    pub points: Vec<BeatTimePoint>, 
+    pub stops_at_beat: Vec<(f32, f32)>, 
+    pub song_offset_sec: f32, 
 }
 
 impl TimingData {
     pub fn get_time_for_beat(&self, target_beat: f32) -> f32 {
         if self.points.is_empty() {
-            return self.song_offset_sec + target_beat * (60.0 / 120.0); // Default to 120 BPM
+            warn!("TimingData::get_time_for_beat called with empty points, defaulting to 120 BPM.");
+            return self.song_offset_sec + target_beat * (60.0 / 120.0);
         }
 
-        let mut current_time_sec = 0.0;
-        let mut last_beat = 0.0;
+        let mut current_calculated_duration = 0.0; 
+        let mut last_processed_beat = 0.0;
         
-        // Determine the BPM at beat 0 if no explicit point exists
-        let mut last_bpm = self.points.first()
-            .map_or(120.0, |p| if p.beat == 0.0 { p.bpm } else {
-                // If first BPM change is after beat 0, assume the song starts with that BPM
-                // or a default if the list is empty (handled above).
-                self.points.first().map_or(120.0, |fp| fp.bpm)
-            });
-
-        // If the first BPM change isn't at beat 0, add time for the segment from beat 0
-        // to the first BPM change using the determined initial BPM.
-        // This logic is implicitly handled by the loop if points are correctly ordered and start from beat 0.
-        // It's crucial that self.points contains a point at beat 0.0 if the first #BPM tag is not at 0.0.
-        // Let's assume `initialize_game_state` ensures this.
+        let mut current_segment_bpm = self.points[0].bpm; 
 
         for point in &self.points {
-            if point.beat <= last_beat { // Handle multiple events at the same beat (take last BPM)
-                last_bpm = point.bpm;
+            if point.beat <= last_processed_beat && point.beat != 0.0 { 
+                current_segment_bpm = point.bpm; 
                 continue;
             }
-            if target_beat >= point.beat { // If target_beat is past or at this BPM change
-                if last_bpm > 0.0 {
-                    current_time_sec += (point.beat - last_beat) * (60.0 / last_bpm);
+
+            if target_beat < point.beat {
+                if current_segment_bpm > 0.0 {
+                    current_calculated_duration += (target_beat - last_processed_beat) * (60.0 / current_segment_bpm);
+                } else if target_beat > last_processed_beat { 
+                    current_calculated_duration = f32::INFINITY; 
                 }
-                last_beat = point.beat;
-                last_bpm = point.bpm;
-            } else { // Target is within the segment from last_beat to point.beat
-                if last_bpm > 0.0 {
-                    current_time_sec += (target_beat - last_beat) * (60.0 / last_bpm);
-                }
-                last_beat = target_beat; // We've reached the target beat
-                break;
+                last_processed_beat = target_beat; 
+                break; 
+            }
+
+            if current_segment_bpm > 0.0 {
+                current_calculated_duration += (point.beat - last_processed_beat) * (60.0 / current_segment_bpm);
+            } else if point.beat > last_processed_beat {
+                 current_calculated_duration = f32::INFINITY;
+            }
+            last_processed_beat = point.beat;
+            current_segment_bpm = point.bpm; 
+        }
+
+        if target_beat > last_processed_beat { 
+             if current_calculated_duration.is_finite() && current_segment_bpm > 0.0 {
+                current_calculated_duration += (target_beat - last_processed_beat) * (60.0 / current_segment_bpm);
+            } else if current_segment_bpm <= 0.0 && target_beat > last_processed_beat {
+                current_calculated_duration = f32::INFINITY;
             }
         }
-        // If target_beat is after all BPM points in the list
-        if target_beat > last_beat && last_bpm > 0.0 {
-            current_time_sec += (target_beat - last_beat) * (60.0 / last_bpm);
-        }
+        
+        let mut time_with_bpms = self.song_offset_sec + current_calculated_duration;
 
-        let mut time_with_bpms = self.song_offset_sec + current_time_sec;
-
-        // Add stop durations that occurred *before* the target_beat
         for (stop_beat, stop_duration_sec) in &self.stops_at_beat {
             if *stop_beat < target_beat {
-                time_with_bpms += stop_duration_sec;
+                if time_with_bpms.is_finite() { 
+                    time_with_bpms += stop_duration_sec;
+                }
             }
         }
         time_with_bpms
     }
 
-    pub fn get_beat_for_time(&self, target_time_sec: f32) -> f32 {
+    pub fn get_beat_for_time(&self, target_time_sec_relative_to_audio_zero: f32) -> f32 {
         if self.points.is_empty() {
-             return (target_time_sec - self.song_offset_sec).max(0.0) / (60.0 / 120.0); // Default 120 BPM
+            warn!("TimingData::get_beat_for_time called with empty points, defaulting to 120 BPM.");
+            let duration_from_offset = target_time_sec_relative_to_audio_zero - self.song_offset_sec;
+            return duration_from_offset / (60.0 / 120.0);
         }
 
-        let mut accumulated_stop_duration_at_event = 0.0;
-        let mut beat_at_last_event = 0.0;
-        let mut time_at_last_event_excluding_stops = self.song_offset_sec; // Time of beat 0 (effective start)
-        
-        let mut events: Vec<(f32, Option<f32>, Option<f32>)> = Vec::new(); // (beat, Option<new_bpm>, Option<stop_duration_sec>)
+        let mut current_beat = 0.0;
+        let mut current_time_in_audio_clock = self.song_offset_sec; 
+        let mut current_bpm = self.points[0].bpm; 
+
+        let mut events: Vec<(f32, Option<f32>, Option<f32>)> = Vec::new();
         for p in &self.points { events.push((p.beat, Some(p.bpm), None)); }
         for s in &self.stops_at_beat { events.push((s.0, None, Some(s.1))); }
         
-        // Sort events by beat, then by type (BPM changes processed before stops at same beat)
         events.sort_by(|a,b| {
             a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| {
-                match (a.1.is_some(), b.1.is_some()) { // BPM first
+                match (a.1.is_some(), b.1.is_some()) { 
                     (true, false) => std::cmp::Ordering::Less,
                     (false, true) => std::cmp::Ordering::Greater,
                     _ => std::cmp::Ordering::Equal,
@@ -116,9 +116,12 @@ impl TimingData {
         
         let mut unique_events: Vec<(f32, Option<f32>, Option<f32>)> = Vec::new();
         if !events.is_empty() {
+            if events[0].0 > 0.0 { // Accessing the first element of the tuple correctly
+                 unique_events.push((0.0, Some(self.points[0].bpm), None));
+            }
             unique_events.push(events[0]);
             for i in 1..events.len() {
-                if (events[i].0 - events[i-1].0).abs() > 0.0001 { 
+                if (events[i].0 - unique_events.last().unwrap().0).abs() > 0.0001 { 
                     unique_events.push(events[i]);
                 } else { 
                     let last = unique_events.last_mut().unwrap();
@@ -126,52 +129,58 @@ impl TimingData {
                     if events[i].2.is_some() && last.2.is_none() { last.2 = events[i].2; } 
                 }
             }
+        } else { 
+            unique_events.push((0.0, Some(self.points[0].bpm), None));
         }
 
-        let mut current_bpm = self.points.first().map_or(120.0, |p| p.bpm); 
-
         for (event_beat, new_bpm_opt, stop_duration_sec_opt) in &unique_events {
-            let time_segment_duration = if current_bpm > 0.0 {
-                (*event_beat - beat_at_last_event) * (60.0 / current_bpm)
+            let beats_in_segment = *event_beat - current_beat; // Dereference event_beat
+            let time_for_segment_beats_only = if current_bpm > 0.0 {
+                beats_in_segment * (60.0 / current_bpm)
             } else {
-                if *event_beat > beat_at_last_event { f32::INFINITY } else { 0.0 }
+                if beats_in_segment > 0.0 { f32::INFINITY } else { 0.0 }
             };
 
-            let time_at_event_beat_excluding_stops_current_segment = time_at_last_event_excluding_stops + time_segment_duration;
-            let time_at_event_beat_including_prior_stops = time_at_event_beat_excluding_stops_current_segment + accumulated_stop_duration_at_event;
+            let time_at_event_beat_in_audio_clock = current_time_in_audio_clock + time_for_segment_beats_only;
 
-            if time_at_event_beat_including_prior_stops >= target_time_sec {
-                let time_into_segment_effective = target_time_sec - (time_at_last_event_excluding_stops + accumulated_stop_duration_at_event);
-                return beat_at_last_event + if current_bpm > 0.0 {
-                    (time_into_segment_effective / (60.0 / current_bpm)).max(0.0)
+            if time_at_event_beat_in_audio_clock >= target_time_sec_relative_to_audio_zero {
+                let time_diff_in_segment = target_time_sec_relative_to_audio_zero - current_time_in_audio_clock;
+                return current_beat + if current_bpm > 0.0 {
+                    time_diff_in_segment / (60.0 / current_bpm)
                 } else {
                     0.0 
                 };
             }
+
+            current_time_in_audio_clock = time_at_event_beat_in_audio_clock;
+            current_beat = *event_beat; // Dereference event_beat
+
+            if let Some(new_bpm) = new_bpm_opt { current_bpm = *new_bpm; } // Dereference new_bpm
             
-            time_at_last_event_excluding_stops = time_at_event_beat_excluding_stops_current_segment;
-            beat_at_last_event = *event_beat;
-            if let Some(new_bpm) = new_bpm_opt { current_bpm = *new_bpm; }
-            if let Some(stop_dur) = stop_duration_sec_opt { accumulated_stop_duration_at_event += stop_dur; }
+            if let Some(stop_dur) = stop_duration_sec_opt { 
+                if current_time_in_audio_clock + stop_dur >= target_time_sec_relative_to_audio_zero {
+                    return current_beat; 
+                }
+                current_time_in_audio_clock += stop_dur; 
+            }
         }
 
-        let time_after_last_event_effective = target_time_sec - (time_at_last_event_excluding_stops + accumulated_stop_duration_at_event);
-        beat_at_last_event + if current_bpm > 0.0 {
-            (time_after_last_event_effective / (60.0 / current_bpm)).max(0.0)
+        let time_diff_after_last_event = target_time_sec_relative_to_audio_zero - current_time_in_audio_clock;
+        current_beat + if current_bpm > 0.0 {
+            time_diff_after_last_event / (60.0 / current_bpm)
         } else {
             0.0
         }
     }
 }
 
-// Gameplay constants for rendering window
-const MAX_DRAW_BEATS_FORWARD: f32 = 12.0; // How many actual chart beats ahead to consider
-const MAX_DRAW_BEATS_BACK: f32 = 3.0;   // How many actual chart beats behind to consider
+const MAX_DRAW_BEATS_FORWARD: f32 = 12.0; 
+const MAX_DRAW_BEATS_BACK: f32 = 3.0;   
 
 pub fn initialize_game_state(
     win_w: f32,
     win_h: f32,
-    audio_start_time: Instant,
+    audio_start_time: Instant, 
     song: Arc<SongInfo>,
     selected_chart_idx: usize,
 ) -> GameState {
@@ -205,15 +214,15 @@ pub fn initialize_game_state(
     let mut arrows_map = HashMap::new();
     for dir in ALL_ARROW_DIRECTIONS.iter() { arrows_map.insert(*dir, Vec::new()); }
     
-    let effective_file_offset = -song.offset; // Simfile offset: positive means music starts later / chart starts earlier
+    let effective_file_offset = -song.offset; 
 
     let mut temp_timing_data = TimingData { song_offset_sec: effective_file_offset, ..Default::default() };
     let chart_info = &song.charts[selected_chart_idx];
     let mut combined_bpms = song.bpms_header.clone();
     if let Some(chart_bpms_str) = &chart_info.bpms_chart {
         if let Ok(chart_bpms_vec) = crate::parsing::simfile::parse_bpms(chart_bpms_str) {
-            if !chart_bpms_vec.is_empty() { // Only use chart BPMs if they exist
-                combined_bpms = chart_bpms_vec; // Chart BPMs override song BPMs
+            if !chart_bpms_vec.is_empty() { 
+                combined_bpms = chart_bpms_vec; 
             }
         }
     }
@@ -221,40 +230,36 @@ pub fn initialize_game_state(
     combined_bpms.dedup_by_key(|k| k.0);
 
     if combined_bpms.is_empty() || combined_bpms[0].0 != 0.0 {
-        // Ensure there's a BPM at beat 0. If the first defined BPM is later,
-        // use its value for beat 0. If no BPMs, default to 120.
         let initial_bpm = combined_bpms.first().map_or(120.0, |p| p.1);
         if combined_bpms.first().map_or(true, |p| p.0 != 0.0) {
              combined_bpms.insert(0, (0.0, initial_bpm));
         }
     }
     
-    // Populate TimingData.points (time_sec is relative to song_offset_sec)
-    let mut current_calc_time_from_offset = 0.0; // Time elapsed since effective_file_offset due to BPMs
+    let mut current_calc_time_from_offset = 0.0; 
     let mut last_calc_beat = 0.0;
-    let mut last_calc_bpm = combined_bpms[0].1; // BPM at last_calc_beat
+    let mut last_calc_bpm = combined_bpms[0].1; // Correctly access bpm from tuple
 
-    for (beat, bpm_val) in &combined_bpms {
-        if *beat < last_calc_beat { continue; } // Should be sorted
-        if *beat > last_calc_beat { // If there's a gap, calculate time for that segment
+    for (beat, bpm_val) in &combined_bpms { 
+        if *beat < last_calc_beat { continue; } 
+        if *beat > last_calc_beat { 
             if last_calc_bpm > 0.0 {
                 current_calc_time_from_offset += (*beat - last_calc_beat) * (60.0 / last_calc_bpm);
             }
         }
         temp_timing_data.points.push(BeatTimePoint {
             beat: *beat,
-            time_sec: effective_file_offset + current_calc_time_from_offset, // Absolute time in audio file
+            time_sec: effective_file_offset + current_calc_time_from_offset, 
             bpm: *bpm_val,
         });
         last_calc_beat = *beat;
         last_calc_bpm = *bpm_val;
     }
 
-
     let mut combined_stops = song.stops_header.clone();
      if let Some(chart_stops_str) = &chart_info.stops_chart {
          if let Ok(chart_stops_vec) = crate::parsing::simfile::parse_stops(chart_stops_str) {
-             if !chart_stops_vec.is_empty() { // Chart stops override song stops
+             if !chart_stops_vec.is_empty() { 
                 combined_stops = chart_stops_vec;
              }
          }
@@ -263,22 +268,8 @@ pub fn initialize_game_state(
     combined_stops.dedup_by_key(|k| k.0); 
 
     for (beat, duration_simfile_value) in &combined_stops {
-        let bpm_at_stop_start = temp_timing_data.points.iter()
-            .rfind(|p| p.beat <= *beat) 
-            .map_or_else(
-                || temp_timing_data.points.first().map_or(120.0, |p| p.bpm), 
-                |p| p.bpm
-            );
-
-        if bpm_at_stop_start <= 0.0 {
-            warn!("Stop at beat {} has invalid BPM ({}), duration might be incorrect.", beat, bpm_at_stop_start);
-            temp_timing_data.stops_at_beat.push((*beat, *duration_simfile_value));
-        } else {
-            let duration_sec = duration_simfile_value * (60.0 / bpm_at_stop_start);
-            temp_timing_data.stops_at_beat.push((*beat, duration_sec));
-        }
+        temp_timing_data.stops_at_beat.push((*beat, *duration_simfile_value));
     }
-
 
     let processed_chart_data = chart_info.processed_data.as_ref().cloned().unwrap_or_else(|| {
         warn!("Chart {} for song {} has no processed data! Gameplay might be empty.", selected_chart_idx, song.title);
@@ -286,10 +277,12 @@ pub fn initialize_game_state(
     });
 
     let time_at_visual_start_relative_to_audio_zero = -config::GAME_LEAD_IN_DURATION_SECONDS;
-    let initial_actual_chart_beat = temp_timing_data.get_beat_for_time(time_at_visual_start_relative_to_audio_zero);
+    
+    let mut initial_actual_chart_beat_at_receptors_on_visual_start = 
+        temp_timing_data.get_beat_for_time(time_at_visual_start_relative_to_audio_zero);
 
     let bpm_at_initial_actual_chart_beat = temp_timing_data.points.iter()
-        .rfind(|p| p.beat <= initial_actual_chart_beat)
+        .rfind(|p| p.beat <= initial_actual_chart_beat_at_receptors_on_visual_start)
         .map_or(120.0, |p| p.bpm);
 
     let display_beat_offset_due_to_audio_sync = if bpm_at_initial_actual_chart_beat > 0.0 {
@@ -298,6 +291,34 @@ pub fn initialize_game_state(
         0.0
     };
     
+    let mut initial_display_beat_at_receptors_on_visual_start = 
+        initial_actual_chart_beat_at_receptors_on_visual_start - display_beat_offset_due_to_audio_sync;
+
+    let effective_scroll_time_for_beat0_before_audio = config::GAME_LEAD_IN_DURATION_SECONDS + song.offset;
+    const MIN_GUARANTEED_SCROLL_TIME_FOR_CHART_START_NOTES: f32 = config::GAME_LEAD_IN_DURATION_SECONDS;
+
+    if effective_scroll_time_for_beat0_before_audio < MIN_GUARANTEED_SCROLL_TIME_FOR_CHART_START_NOTES {
+        let time_deficit = MIN_GUARANTEED_SCROLL_TIME_FOR_CHART_START_NOTES - effective_scroll_time_for_beat0_before_audio;
+        
+        let bpm_at_chart_beat_0 = temp_timing_data.points.iter()
+            .rfind(|p| p.beat <= 0.0) 
+            .map_or_else(
+                || temp_timing_data.points.first().map_or(120.0, |p_first| p_first.bpm), 
+                |p_at_zero| p_at_zero.bpm
+            );
+
+        if bpm_at_chart_beat_0 > 0.0 {
+            let beat_adjustment_for_deficit = time_deficit / (60.0 / bpm_at_chart_beat_0);
+            
+            info!(
+                "Adjusting initial beats for scroll lead-in. Deficit: {:.2}s, Beat Adj: {:.2}. Song Offset: {:.2}s",
+                time_deficit, beat_adjustment_for_deficit, song.offset
+            );
+            initial_actual_chart_beat_at_receptors_on_visual_start -= beat_adjustment_for_deficit;
+            initial_display_beat_at_receptors_on_visual_start -= beat_adjustment_for_deficit; 
+        }
+    }
+
     let mut judgment_counts = HashMap::new();
     for judgment_type in ALL_JUDGMENTS.iter() {
         judgment_counts.insert(*judgment_type, 0);
@@ -307,8 +328,8 @@ pub fn initialize_game_state(
         targets,
         arrows: arrows_map,
         pressed_keys: HashSet::new(),
-        current_beat: initial_actual_chart_beat - display_beat_offset_due_to_audio_sync,
-        current_chart_beat_actual: initial_actual_chart_beat,
+        current_beat: initial_display_beat_at_receptors_on_visual_start, 
+        current_chart_beat_actual: initial_actual_chart_beat_at_receptors_on_visual_start,
         window_size: (win_w, win_h),
         active_explosions: HashMap::new(),
         audio_start_time: Some(audio_start_time),
@@ -316,9 +337,9 @@ pub fn initialize_game_state(
         selected_chart_idx,
         timing_data: Arc::new(temp_timing_data),
         processed_chart: Arc::new(processed_chart_data),
-        current_measure_idx: 0,
+        current_measure_idx: 0, 
         current_line_in_measure_idx: 0,
-        current_processed_beat: -1.0, 
+        current_processed_beat: initial_actual_chart_beat_at_receptors_on_visual_start - MAX_DRAW_BEATS_BACK - 1.0, 
         judgment_counts,
         lead_in_timer: config::GAME_LEAD_IN_DURATION_SECONDS,
         music_started: false,
@@ -360,11 +381,11 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
         game_state.lead_in_timer -= dt;
     }
 
-    if let Some(start_time) = game_state.audio_start_time {
-        let current_time_relative_to_audio_zero = if Instant::now() >= start_time {
-            Instant::now().duration_since(start_time).as_secs_f32()
+    if let Some(expected_audio_zero_instant) = game_state.audio_start_time {
+        let current_time_relative_to_audio_zero = if Instant::now() >= expected_audio_zero_instant {
+            Instant::now().duration_since(expected_audio_zero_instant).as_secs_f32()
         } else {
-            -(start_time.duration_since(Instant::now()).as_secs_f32())
+            -(expected_audio_zero_instant.duration_since(Instant::now()).as_secs_f32())
         };
 
         game_state.current_chart_beat_actual = game_state.timing_data.get_beat_for_time(current_time_relative_to_audio_zero);
@@ -417,42 +438,48 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
         0.0
     };
 
-    let mut measure_loop_start_idx = state.current_measure_idx;
-    let estimated_measure_for_first_render_beat = (first_actual_chart_beat_to_render / 4.0).floor() as usize;
-    if estimated_measure_for_first_render_beat > state.current_measure_idx {
-         measure_loop_start_idx = estimated_measure_for_first_render_beat.saturating_sub(1).min(state.processed_chart.measures.len().saturating_sub(1));
+    let mut measure_scan_start_idx = state.current_measure_idx;
+    let estimated_measure_for_first_render_beat = (first_actual_chart_beat_to_render / 4.0).floor() as isize;
+    
+    if estimated_measure_for_first_render_beat > state.current_measure_idx as isize {
+        measure_scan_start_idx = (estimated_measure_for_first_render_beat.saturating_sub(1) as usize)
+                                 .min(state.processed_chart.measures.len().saturating_sub(1));
+    } else if estimated_measure_for_first_render_beat < 0 {
+        measure_scan_start_idx = 0; 
     }
 
-    'measure_loop: for measure_idx in measure_loop_start_idx..state.processed_chart.measures.len() {
+
+    'measure_loop: for measure_idx in measure_scan_start_idx..state.processed_chart.measures.len() {
         let current_measure_data = &state.processed_chart.measures[measure_idx];
         if current_measure_data.is_empty() {
             if measure_idx == state.current_measure_idx {
-                state.current_measure_idx += 1;
+                state.current_measure_idx = measure_idx + 1;
                 state.current_line_in_measure_idx = 0;
             }
             continue;
         }
 
         let measure_base_actual_chart_beat = measure_idx as f32 * 4.0;
-        let mut line_loop_start_idx = 0;
+        
+        let mut line_scan_start_idx = 0;
         if measure_idx == state.current_measure_idx {
-            line_loop_start_idx = state.current_line_in_measure_idx;
+            line_scan_start_idx = state.current_line_in_measure_idx;
         } else if measure_base_actual_chart_beat + 4.0 < first_actual_chart_beat_to_render {
             let measure_end_beat = measure_base_actual_chart_beat + 4.0;
             if measure_end_beat > state.current_processed_beat {
                  state.current_processed_beat = measure_end_beat;
             }
-            continue;
+            continue; 
         }
 
-        for line_idx in line_loop_start_idx..current_measure_data.len() {
+        for line_idx in line_scan_start_idx..current_measure_data.len() {
             let num_lines_in_measure = current_measure_data.len() as f32;
             let beat_offset_in_measure_for_line = (line_idx as f32 / num_lines_in_measure) * 4.0;
             let target_actual_chart_beat_for_line = measure_base_actual_chart_beat + beat_offset_in_measure_for_line;
 
             if target_actual_chart_beat_for_line <= state.current_processed_beat {
                 if measure_idx == state.current_measure_idx && line_idx == state.current_line_in_measure_idx {
-                     state.current_line_in_measure_idx +=1;
+                     state.current_line_in_measure_idx = line_idx + 1;
                 }
                 continue;
             }
@@ -461,7 +488,7 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
                  if measure_idx == state.current_measure_idx {
                      state.current_line_in_measure_idx = line_idx;
                  }
-                 if measure_idx >= ((state.current_chart_beat_actual + MAX_DRAW_BEATS_FORWARD) / 4.0).floor() as usize {
+                 if measure_idx as f32 * 4.0 > last_actual_chart_beat_to_render {
                      break 'measure_loop; 
                  }
                  break; 
@@ -474,6 +501,7 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
                 let current_display_time_sec = state.timing_data.get_time_for_beat(state.current_beat);
                 let arrow_target_display_time_sec = state.timing_data.get_time_for_beat(arrow_display_target_beat);
                 let time_difference_to_display_target_sec = arrow_target_display_time_sec - current_display_time_sec;
+                
                 let target_receptor_y = state.targets.first().map_or(0.0, |t| t.y);
                 let px_per_sec_scroll_speed = config::ARROW_SPEED * (state.window_size.1 / config::GAMEPLAY_REF_HEIGHT);
                 let initial_y = target_receptor_y + time_difference_to_display_target_sec * px_per_sec_scroll_speed;
@@ -494,7 +522,7 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
                         if let Some(column_arrows) = state.arrows.get_mut(&direction) {
                             column_arrows.push(Arrow {
                                 x: target_x_pos,
-                                y: initial_y,
+                                y: initial_y, 
                                 direction,
                                 note_char: arrow_type_for_render,
                                 target_beat: arrow_display_target_beat, 
@@ -510,7 +538,7 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
         }
 
         if measure_idx == state.current_measure_idx && state.current_line_in_measure_idx >= current_measure_data.len() {
-            state.current_measure_idx += 1;
+            state.current_measure_idx = measure_idx + 1;
             state.current_line_in_measure_idx = 0;
         }
     }
@@ -552,11 +580,7 @@ pub fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
             if let Some(idx_to_remove) = best_hit_idx { 
                 let hit_arrow = column_arrows[idx_to_remove].clone(); 
-                 let bpm_at_arrow_target = state.timing_data.points.iter()
-                    .rfind(|p| p.beat <= hit_arrow.target_beat)
-                    .map_or(120.0, |p| p.bpm);
-                let seconds_per_beat_at_target = if bpm_at_arrow_target > 0.0 { 60.0 / bpm_at_arrow_target } else { 0.5 };
-                let time_diff_for_log = (current_display_beat - hit_arrow.target_beat) * seconds_per_beat_at_target * 1000.0;
+                let time_diff_for_log = min_abs_time_diff_ms * if (current_display_beat - hit_arrow.target_beat) < 0.0 {-1.0} else {1.0};
                 let note_char_for_log = hit_arrow.note_char;
 
                 let judgment = if min_abs_time_diff_ms <= config::W1_WINDOW_MS { Judgment::W1 }
@@ -567,7 +591,7 @@ pub fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
 
                 *state.judgment_counts.entry(judgment).or_insert(0) += 1;
 
-                info!( "HIT! {:?} {:?} (Beat: {:.3}, {:.1}ms) -> {:?} (Count: {})", dir, note_char_for_log, hit_arrow.target_beat, time_diff_for_log, judgment, state.judgment_counts[&judgment] );
+                info!( "HIT! {:?} {:?} (TargetDispBeat: {:.3}, TimeDiff: {:.1}ms) -> {:?} (Count: {})", dir, note_char_for_log, hit_arrow.target_beat, time_diff_for_log, judgment, state.judgment_counts[&judgment] );
                 
                 let explosion_end_time = Instant::now() + config::EXPLOSION_DURATION;
                 state.active_explosions.insert(dir, ActiveExplosion {
@@ -577,7 +601,7 @@ pub fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
                 });
                 column_arrows.remove(idx_to_remove);
             } else {
-                 debug!( "Input {:?} registered, but no arrow within {:.1}ms hit window (Display Beat: {:.2}).", keycode, config::MAX_HIT_WINDOW_MS, current_display_beat );
+                 debug!( "Input {:?} registered, but no arrow within {:.1}ms hit window (CurrDispBeat: {:.2}).", keycode, config::MAX_HIT_WINDOW_MS, current_display_beat );
             }
         }
     }
@@ -599,8 +623,8 @@ fn check_misses(state: &mut GameState) {
             
             if beat_diff > miss_window_beats_dynamic { 
                 *state.judgment_counts.entry(Judgment::Miss).or_insert(0) += 1;
-                info!( "MISSED! {:?} {:?} (Beat: {:.3}) (TgtDispBeat: {:.2}, CurrDispBeat: {:.2}, DiffBeat: {:.2} > {:.2} ({:.1}ms)) (Miss Count: {})",
-                       arrow.direction, arrow.note_char, arrow.target_beat, arrow.target_beat, current_display_beat, beat_diff, miss_window_beats_dynamic, config::MISS_WINDOW_MS, state.judgment_counts[&Judgment::Miss] );
+                info!( "MISSED! {:?} {:?} (TargetDispBeat: {:.3}) (CurrDispBeat: {:.2}, DiffBeat: {:.2} > DynamicMissWindowBeats: {:.2} ({:.1}ms)) (Miss Count: {})",
+                       arrow.direction, arrow.note_char, arrow.target_beat, current_display_beat, beat_diff, miss_window_beats_dynamic, config::MISS_WINDOW_MS, state.judgment_counts[&Judgment::Miss] );
                 missed_count_this_frame += 1;
                 false 
             } else { 
@@ -786,7 +810,6 @@ pub fn draw(
     }
 
 
-    // --- Draw Targets & Arrows ---
     let frame_index_receptor = ((game_state.current_beat * 2.0).floor().abs() as usize) % 4;
     let uv_width_receptor = 1.0 / 4.0;
     let uv_x_start_receptor = frame_index_receptor as f32 * uv_width_receptor;
@@ -829,54 +852,47 @@ pub fn draw(
             let arrow_uv_offset = [uv_x_start_arrow, 0.0];
             let arrow_uv_scale = [uv_width_arrow, 1.0];
             
-            // --- Arrow Tinting Logic ---
-            const BEAT_EPSILON_DRAW: f32 = 0.002; // Epsilon for float comparisons of beat fractions
+            const BEAT_EPSILON_DRAW: f32 = 0.002; 
             let beat_fraction = arrow.target_beat.fract();
             let normalized_fraction = {
                 let mut nf = beat_fraction;
-                if nf < -BEAT_EPSILON_DRAW { nf += 1.0; } // Handle negative fractions by wrapping around
-                // Snap to 0.0 if very close to 0.0 or 1.0
+                if nf < -BEAT_EPSILON_DRAW { nf += 1.0; } 
                 if nf.abs() < BEAT_EPSILON_DRAW || (nf - 1.0).abs() < BEAT_EPSILON_DRAW { 0.0 } else { nf }
             };
 
-            let arrow_tint = if (normalized_fraction - 0.0).abs() < BEAT_EPSILON_DRAW { // 4th (X.000)
+            let arrow_tint = if (normalized_fraction - 0.0).abs() < BEAT_EPSILON_DRAW { 
                 config::ARROW_TINT_4TH
-            } else if (normalized_fraction - 0.5).abs() < BEAT_EPSILON_DRAW { // 8th (X.500)
+            } else if (normalized_fraction - 0.5).abs() < BEAT_EPSILON_DRAW { 
                 config::ARROW_TINT_8TH
-            } else if (normalized_fraction - 0.25).abs() < BEAT_EPSILON_DRAW || // 16th (X.250)
-                      (normalized_fraction - 0.75).abs() < BEAT_EPSILON_DRAW { // 16th (X.750)
+            } else if (normalized_fraction - 0.25).abs() < BEAT_EPSILON_DRAW || 
+                      (normalized_fraction - 0.75).abs() < BEAT_EPSILON_DRAW { 
                 config::ARROW_TINT_16TH
-            } else if (normalized_fraction - 1.0/3.0).abs() < BEAT_EPSILON_DRAW || // 12th (X.333)
-                      (normalized_fraction - 2.0/3.0).abs() < BEAT_EPSILON_DRAW { // 12th (X.666)
-                config::ARROW_TINT_12TH_24TH_48TH // Also for 24th and 48th triplets offshoots
-            } else if (normalized_fraction - 1.0/8.0).abs() < BEAT_EPSILON_DRAW ||  // 32nd (X.125)
-                      (normalized_fraction - 3.0/8.0).abs() < BEAT_EPSILON_DRAW ||  // 32nd (X.375)
-                      (normalized_fraction - 5.0/8.0).abs() < BEAT_EPSILON_DRAW ||  // 32nd (X.625)
-                      (normalized_fraction - 7.0/8.0).abs() < BEAT_EPSILON_DRAW {  // 32nd (X.875)
+            } else if (normalized_fraction - 1.0/3.0).abs() < BEAT_EPSILON_DRAW || 
+                      (normalized_fraction - 2.0/3.0).abs() < BEAT_EPSILON_DRAW { 
+                config::ARROW_TINT_12TH_24TH_48TH 
+            } else if (normalized_fraction - 1.0/8.0).abs() < BEAT_EPSILON_DRAW ||  
+                      (normalized_fraction - 3.0/8.0).abs() < BEAT_EPSILON_DRAW ||  
+                      (normalized_fraction - 5.0/8.0).abs() < BEAT_EPSILON_DRAW ||  
+                      (normalized_fraction - 7.0/8.0).abs() < BEAT_EPSILON_DRAW {  
                 config::ARROW_TINT_32ND
-            } else if (normalized_fraction - 1.0/6.0).abs() < BEAT_EPSILON_DRAW ||  // 24th (X.166)
-                      (normalized_fraction - 5.0/6.0).abs() < BEAT_EPSILON_DRAW {  // 24th (X.833)
-                config::ARROW_TINT_12TH_24TH_48TH // Group with 12ths
-            } else if (normalized_fraction - 1.0/12.0).abs() < BEAT_EPSILON_DRAW || // 48th (X.083)
-                      (normalized_fraction - 5.0/12.0).abs() < BEAT_EPSILON_DRAW || // 48th (X.416)
-                      (normalized_fraction - 7.0/12.0).abs() < BEAT_EPSILON_DRAW || // 48th (X.583)
-                      (normalized_fraction - 11.0/12.0).abs() < BEAT_EPSILON_DRAW { // 48th (X.916)
-                config::ARROW_TINT_12TH_24TH_48TH // Group with 12ths
-            } else if { // 64ths: k/16 where k is odd
+            } else if (normalized_fraction - 1.0/6.0).abs() < BEAT_EPSILON_DRAW ||  
+                      (normalized_fraction - 5.0/6.0).abs() < BEAT_EPSILON_DRAW {  
+                config::ARROW_TINT_12TH_24TH_48TH 
+            } else if (normalized_fraction - 1.0/12.0).abs() < BEAT_EPSILON_DRAW || 
+                      (normalized_fraction - 5.0/12.0).abs() < BEAT_EPSILON_DRAW || 
+                      (normalized_fraction - 7.0/12.0).abs() < BEAT_EPSILON_DRAW || 
+                      (normalized_fraction - 11.0/12.0).abs() < BEAT_EPSILON_DRAW { 
+                config::ARROW_TINT_12TH_24TH_48TH 
+            } else if { 
                 let val_times_16_approx = normalized_fraction * 16.0;
                 let val_times_16_rounded = val_times_16_approx.round();
-                // Check if it's close to a 16th fraction
                 (val_times_16_approx - val_times_16_rounded).abs() < BEAT_EPSILON_DRAW * 16.0 &&
-                // And if that 16th fraction has an odd numerator (e.g. 1/16, 3/16, 5/16...)
                 (val_times_16_rounded as i32 % 2 != 0)
             } {
                 config::ARROW_TINT_64TH
-            } else { // Fallback for other fractions (e.g., 96ths, 192nds or complex non-standard)
+            } else { 
                 config::ARROW_TINT_OTHER
             };
-
-            // Log for debugging quantization and tint
-            // debug!("Arrow Beat (Disp): {:.3}, Frac: {:.3}, Tint: {:?}", arrow.target_beat, normalized_fraction, arrow_tint);
 
             let rotation_angle = match arrow.direction {
                 ArrowDirection::Left => Rad(PI / 2.0), ArrowDirection::Down => Rad(0.0),
@@ -897,7 +913,6 @@ pub fn draw(
         }
     }
 
-    // --- Draw Active Explosions ---
     let now = Instant::now();
     for (direction, explosion) in &game_state.active_explosions {
         if now < explosion.end_time {
