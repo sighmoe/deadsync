@@ -343,19 +343,60 @@ pub fn initialize_game_state(
         judgment_counts,
         lead_in_timer: config::GAME_LEAD_IN_DURATION_SECONDS,
         music_started: false,
+        is_esc_held: false,
+        esc_held_since: None,
+        is_enter_held: false,
+        enter_held_since: None,
     }
 }
 
-pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState) -> Option<AppState> {
+pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState) {
     if key_event.state == ElementState::Pressed && !key_event.repeat {
         if let Some(VirtualKeyCode::Escape) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
             info!("Escape pressed in gameplay, returning to Select Music.");
-            return Some(AppState::SelectMusic);
+            // Transition is handled by hold logic in update
+            // return Some(AppState::SelectMusic); // This line is removed
         }
     }
 
     if let Some(virtual_keycode) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
         match virtual_keycode {
+            VirtualKeyCode::Escape => {
+                match key_event.state {
+                    ElementState::Pressed => {
+                        if !game_state.is_esc_held && !key_event.repeat {
+                            game_state.is_esc_held = true;
+                            game_state.esc_held_since = Some(Instant::now());
+                            debug!("Gameplay: Escape key pressed, timer started.");
+                        }
+                    }
+                    ElementState::Released => {
+                        if game_state.is_esc_held {
+                            game_state.is_esc_held = false;
+                            game_state.esc_held_since = None;
+                            debug!("Gameplay: Escape key released, timer reset.");
+                        }
+                    }
+                }
+            }
+            VirtualKeyCode::Enter => {
+                 match key_event.state {
+                    ElementState::Pressed => {
+                        if !game_state.is_enter_held && !key_event.repeat {
+                            game_state.is_enter_held = true;
+                            game_state.enter_held_since = Some(Instant::now());
+                            debug!("Gameplay: Enter key pressed, timer started.");
+                        }
+                    }
+                    ElementState::Released => {
+                        if game_state.is_enter_held {
+                            game_state.is_enter_held = false;
+                            game_state.enter_held_since = None;
+                            debug!("Gameplay: Enter key released, timer reset.");
+                        }
+                    }
+                }
+            }
             VirtualKeyCode::Left | VirtualKeyCode::Down | VirtualKeyCode::Up | VirtualKeyCode::Right => match key_event.state {
                 ElementState::Pressed => {
                     if game_state.pressed_keys.insert(virtual_keycode) && !key_event.repeat {
@@ -372,11 +413,35 @@ pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState) -> Option<
             _ => {}
         }
     }
-    None
+    // No direct state transition for Esc/Enter from here
 }
 
 
-pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
+pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) -> Option<AppState> {
+    let mut next_state: Option<AppState> = None;
+
+    if game_state.is_esc_held {
+        if let Some(held_since) = game_state.esc_held_since {
+            if Instant::now().duration_since(held_since) >= config::HOLD_TO_ACTION_DURATION {
+                info!("Gameplay: Escape held for {:?}. Transitioning to SelectMusic.", config::HOLD_TO_ACTION_DURATION);
+                next_state = Some(AppState::SelectMusic);
+                game_state.is_esc_held = false; 
+                game_state.esc_held_since = None;
+            }
+        }
+    }
+
+    if game_state.is_enter_held {
+         if let Some(held_since) = game_state.enter_held_since {
+            if Instant::now().duration_since(held_since) >= config::HOLD_TO_ACTION_DURATION {
+                info!("Gameplay: Enter held for {:?}. Transitioning to ScoreScreen.", config::HOLD_TO_ACTION_DURATION);
+                next_state = Some(AppState::ScoreScreen);
+                game_state.is_enter_held = false; 
+                game_state.enter_held_since = None;
+            }
+        }
+    }
+
     if !game_state.music_started && game_state.lead_in_timer > 0.0 {
         game_state.lead_in_timer -= dt;
     }
@@ -421,6 +486,8 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) {
 
     let now = Instant::now();
     game_state.active_explosions.retain(|_dir, explosion| now < explosion.end_time);
+
+    next_state
 }
 
 fn spawn_arrows_from_chart(state: &mut GameState) {
@@ -948,4 +1015,51 @@ pub fn draw(
             }
         }
     }
+
+    let center_x = win_w / 2.0; // For centering text
+
+    if game_state.is_esc_held && game_state.esc_held_since.is_some() {
+        if let Some(font) = assets.get_font(FontId::Miso) {
+            let text = "Continue holding ESC to give up.";
+            let target_visual_height = config::HOLD_TEXT_VISUAL_HEIGHT_REF * height_scale;
+            let font_typographic_height_norm = (font.metrics.ascender - font.metrics.descender).max(1e-5);
+            let text_scale = target_visual_height / font_typographic_height_norm;
+
+            let text_width_pixels = font.measure_text_normalized(text) * text_scale;
+            let text_x = center_x - text_width_pixels / 2.0;
+
+            let text_bottom_edge_y = win_h - (config::HOLD_TEXT_BOTTOM_MARGIN_REF * height_scale);
+            let baseline_y = text_bottom_edge_y - (font.metrics.descender * text_scale); // Baseline relative to bottom edge
+
+            renderer.draw_text(
+                device, cmd_buf, font, text,
+                text_x, baseline_y,
+                [1.0, 1.0, 1.0, 1.0], // White text
+                text_scale, None,
+            );
+        }
+    }
+
+    if game_state.is_enter_held && game_state.enter_held_since.is_some() {
+        if let Some(font) = assets.get_font(FontId::Miso) {
+            let text = "Continue holding Enter to give up.";
+            let target_visual_height = config::HOLD_TEXT_VISUAL_HEIGHT_REF * height_scale;
+            let font_typographic_height_norm = (font.metrics.ascender - font.metrics.descender).max(1e-5);
+            let text_scale = target_visual_height / font_typographic_height_norm;
+
+            let text_width_pixels = font.measure_text_normalized(text) * text_scale;
+            let text_x = center_x - text_width_pixels / 2.0;
+
+            let text_bottom_edge_y = win_h - (config::HOLD_TEXT_BOTTOM_MARGIN_REF * height_scale);
+            let baseline_y = text_bottom_edge_y - (font.metrics.descender * text_scale); // Baseline relative to bottom edge
+
+            renderer.draw_text(
+                device, cmd_buf, font, text,
+                text_x, baseline_y,
+                [1.0, 1.0, 1.0, 1.0], // White text
+                text_scale, None,
+            );
+        }
+    }
+
 }

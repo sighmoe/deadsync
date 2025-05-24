@@ -321,6 +321,9 @@ impl AssetManager {
     pub fn get_font(&self, id: FontId) -> Option<&Font> {
         self.fonts.get(&id)
     }
+    // pub fn get_font_mut(&mut self, id: FontId) -> Option<&mut Font> {
+    //     self.fonts.get_mut(&id)
+    // }
 
     pub fn get_current_banner_path(&self) -> Option<PathBuf> {
         self.current_banner_path_key.clone()

@@ -126,6 +126,11 @@ pub const UI_BAR_TEXT_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
 pub const UI_REFERENCE_HEIGHT: f32 = 768.0; // General UI reference height, gameplay might use its own
 pub const UI_BAR_REFERENCE_HEIGHT: f32 = 51.0;
 
+// Hold to action (Gameplay quit/score)
+pub const HOLD_TO_ACTION_DURATION: Duration = Duration::from_secs(2);
+pub const HOLD_TEXT_VISUAL_HEIGHT_REF: f32 = 21.0;
+pub const HOLD_TEXT_BOTTOM_MARGIN_REF: f32 = 171.0;
+
 // MSDF Shader Parameters
 pub const MSDF_PX_RANGE: f32 = 4.0;
 

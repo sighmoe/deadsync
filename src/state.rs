@@ -15,6 +15,7 @@ pub enum AppState {
     SelectMusic,
     Options,
     Gameplay,
+    ScoreScreen,
     Exiting,
 }
 
@@ -125,6 +126,12 @@ pub struct OptionsState {
     pub placeholder: bool,
 }
 
+// ScoreScreenState
+#[derive(Debug, Clone, Default)]
+pub struct ScoreScreenState {
+    pub placeholder: bool, // For now
+}
+
 // GameState
 #[derive(Debug)]
 pub struct GameState {
@@ -146,6 +153,10 @@ pub struct GameState {
     pub judgment_counts: HashMap<Judgment, u32>,
     pub lead_in_timer: f32,      // Counts down the lead-in duration
     pub music_started: bool,       // Flag to indicate if music has been triggered
+    pub is_esc_held: bool,
+    pub esc_held_since: Option<Instant>,
+    pub is_enter_held: bool,
+    pub enter_held_since: Option<Instant>,
 }
 
 // --- Gameplay Elements ---

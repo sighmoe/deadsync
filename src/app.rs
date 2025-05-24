@@ -3,9 +3,9 @@ use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::Renderer;
 use crate::graphics::vulkan_base::VulkanBase;
-use crate::parsing::simfile::{scan_packs, SongInfo};
-use crate::screens::{gameplay, menu, options, select_music}; // Import for gameplay transition AND helper
-use crate::state::{AppState, GameState, MenuState, OptionsState, SelectMusicState, MusicWheelEntry, VirtualKeyCode, NavDirection};
+use crate::parsing::simfile::{scan_packs, SongInfo}; // Import for gameplay transition AND helper
+use crate::screens::{gameplay, menu, options, score, select_music};
+use crate::state::{AppState, GameState, MenuState, OptionsState, ScoreScreenState, SelectMusicState, MusicWheelEntry, VirtualKeyCode, NavDirection};
 // use crate::screens::select_music::DIFFICULTY_NAMES; // No longer needed directly here for gameplay transition
 use crate::utils::fps::FPSCounter;
 
@@ -40,6 +40,7 @@ pub struct App {
     select_music_state: SelectMusicState,
     options_state: OptionsState,
     game_state: Option<GameState>,
+    score_state: ScoreScreenState,
     fps_counter: FPSCounter,
     last_frame_time: Instant,
     rng: rand::rngs::ThreadRng,
@@ -115,6 +116,7 @@ impl App {
             select_music_state: SelectMusicState::default(),
             options_state: OptionsState::default(),
             game_state: None,
+            score_state: ScoreScreenState::default(),
             fps_counter: FPSCounter::new(),
             last_frame_time: Instant::now(),
             rng: rand::rng(),
@@ -314,7 +316,7 @@ impl App {
             }
             AppState::Gameplay => { 
                 if let Some(ref mut gs) = self.game_state {
-                    requested_state = gameplay::handle_input(&key_event, gs);
+                    gameplay::handle_input(&key_event, gs); // Modifies gs, transition handled in update
                 } else {
                     warn!("Received input in Gameplay state, but game_state is None.");
                     requested_state = None;
@@ -322,6 +324,9 @@ impl App {
             }
             AppState::Exiting => {
                  requested_state = None;
+            }
+            AppState::ScoreScreen => {
+                requested_state = score::handle_input(&key_event, &mut self.score_state);
             }
         }
 
@@ -376,7 +381,7 @@ impl App {
                 self.game_state = None;
                 info!("Gameplay state cleared.");
 
-                if new_state != AppState::SelectMusic {
+                if new_state != AppState::SelectMusic && new_state != AppState::ScoreScreen {
                     info!("Transitioning from Gameplay to non-SelectMusic state ({:?}). Resetting DynamicBanner.", new_state);
                     if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
                         self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
@@ -384,6 +389,18 @@ impl App {
                     self.asset_manager.clear_current_banner(&self.vulkan_base.device);
                 } else {
                      info!("Transitioning from Gameplay to SelectMusic. SelectMusic will handle banner refresh.");
+                }
+            }
+            AppState::ScoreScreen => {
+                // Cleanup for ScoreScreen if any specific resources were used.
+                // Currently ScoreScreenState is simple.
+                // If transitioning away from ScoreScreen, reset banner if not going to Gameplay
+                if new_state != AppState::Gameplay { 
+                    info!("Transitioning from ScoreScreen to non-Gameplay state ({:?}). Resetting DynamicBanner.", new_state);
+                    if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
+                        self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
+                    }
+                    self.asset_manager.clear_current_banner(&self.vulkan_base.device);
                 }
             }
             _ => {}
@@ -484,6 +501,10 @@ impl App {
                     return;
                 }
             }
+            AppState::ScoreScreen => {
+                self.score_state = ScoreScreenState::default();
+                info!("Initialized ScoreScreen state.");
+            }
             AppState::Exiting => {}
         }
 
@@ -543,7 +564,10 @@ impl App {
             AppState::Options => options::update(&mut self.options_state, dt),
             AppState::Gameplay => {
                 if let Some(ref mut gs) = self.game_state {
-                    gameplay::update(gs, dt, &mut self.rng); 
+                    if let Some(next_app_state_from_gameplay) = gameplay::update(gs, dt, &mut self.rng) {
+                        self.next_app_state = Some(next_app_state_from_gameplay);
+                    }
+                     
 
                     if !gs.music_started && gs.lead_in_timer <= 0.0 {
                         if let Some(audio_path) = &gs.song_info.audio_path {
@@ -564,6 +588,9 @@ impl App {
                     }
                 }
             }
+            AppState::ScoreScreen => {
+                score::update(&mut self.score_state, dt);
+            }
             AppState::Exiting => {}
         }
 
@@ -582,6 +609,7 @@ impl App {
                 AppState::Menu => format!("Menu | FPS: {}", fps),
                 AppState::SelectMusic => format!("Select Music | FPS: {}", fps),
                 AppState::Options => format!("Options | FPS: {}", fps),
+                AppState::ScoreScreen => format!("Score Screen | FPS: {}", fps),
                 AppState::Exiting => "Exiting...".to_string(),
             };
             self.vulkan_base.window.set_title(&format!(
@@ -678,6 +706,15 @@ impl App {
                     } else {
                         warn!("Attempted to draw Gameplay state, but game_state is None.");
                     }
+                }
+                AppState::ScoreScreen => {
+                    score::draw(
+                        &self.renderer,
+                        &self.score_state,
+                        &self.asset_manager,
+                        device,
+                        cmd_buf,
+                    );
                 }
                 AppState::Exiting => {
                     trace!("Render: In Exiting state, drawing nothing specific.");
