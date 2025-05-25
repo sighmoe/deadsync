@@ -31,7 +31,7 @@ pub const EXPLOSION_W5_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explo
 // Gameplay Constants
 pub const ARROW_SPEED: f32 = 1300.0; // Speed of arrows scrolling up
 pub const GAME_LEAD_IN_DURATION_SECONDS: f32 = 3.0;
-pub const AUDIO_SYNC_OFFSET_MS: i64 = 0;
+pub const GLOBAL_OFFSET_SEC: f32 = -0.009;
 pub const SPAWN_LOOKAHEAD_BEATS: f32 = 10.0;
 pub const W1_WINDOW_MS: f32 = 21.5;
 pub const W2_WINDOW_MS: f32 = 43.0;

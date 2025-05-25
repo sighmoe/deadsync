@@ -214,7 +214,8 @@ pub fn initialize_game_state(
     let mut arrows_map = HashMap::new();
     for dir in ALL_ARROW_DIRECTIONS.iter() { arrows_map.insert(*dir, Vec::new()); }
     
-    let effective_file_offset = -song.offset; 
+    // Apply global offset to the song's intrinsic offset
+    let effective_file_offset = -song.offset + -config::GLOBAL_OFFSET_SEC; 
 
     let mut temp_timing_data = TimingData { song_offset_sec: effective_file_offset, ..Default::default() };
     let chart_info = &song.charts[selected_chart_idx];
@@ -279,20 +280,10 @@ pub fn initialize_game_state(
     let time_at_visual_start_relative_to_audio_zero = -config::GAME_LEAD_IN_DURATION_SECONDS;
     
     let mut initial_actual_chart_beat_at_receptors_on_visual_start = 
-        temp_timing_data.get_beat_for_time(time_at_visual_start_relative_to_audio_zero);
-
-    let bpm_at_initial_actual_chart_beat = temp_timing_data.points.iter()
-        .rfind(|p| p.beat <= initial_actual_chart_beat_at_receptors_on_visual_start)
-        .map_or(120.0, |p| p.bpm);
-
-    let display_beat_offset_due_to_audio_sync = if bpm_at_initial_actual_chart_beat > 0.0 {
-        (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / bpm_at_initial_actual_chart_beat)
-    } else {
-        0.0
-    };
+        temp_timing_data.get_beat_for_time(time_at_visual_start_relative_to_audio_zero);    
     
-    let mut initial_display_beat_at_receptors_on_visual_start = 
-        initial_actual_chart_beat_at_receptors_on_visual_start - display_beat_offset_due_to_audio_sync;
+    // Display beat is now the same as actual chart beat (after global offset is applied to TimingData)
+    let mut initial_display_beat_at_receptors_on_visual_start = initial_actual_chart_beat_at_receptors_on_visual_start;
 
     let effective_scroll_time_for_beat0_before_audio = config::GAME_LEAD_IN_DURATION_SECONDS + song.offset;
     const MIN_GUARANTEED_SCROLL_TIME_FOR_CHART_START_NOTES: f32 = config::GAME_LEAD_IN_DURATION_SECONDS;
@@ -453,18 +444,9 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) -> Optio
             -(expected_audio_zero_instant.duration_since(Instant::now()).as_secs_f32())
         };
 
-        game_state.current_chart_beat_actual = game_state.timing_data.get_beat_for_time(current_time_relative_to_audio_zero);
-
-        let bpm_at_current_actual_chart_beat = game_state.timing_data.points.iter()
-            .rfind(|p| p.beat <= game_state.current_chart_beat_actual)
-            .map_or(120.0, |p| p.bpm);
-
-        let display_beat_offset_due_to_audio_sync = if bpm_at_current_actual_chart_beat > 0.0 {
-            (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / bpm_at_current_actual_chart_beat)
-        } else {
-            0.0
-        };
-        game_state.current_beat = game_state.current_chart_beat_actual - display_beat_offset_due_to_audio_sync;
+        // current_beat (display beat) is now the same as current_chart_beat_actual
+        game_state.current_chart_beat_actual = game_state.timing_data.get_beat_for_time(current_time_relative_to_audio_zero);        
+        game_state.current_beat = game_state.current_chart_beat_actual;
     }
 
     spawn_arrows_from_chart(game_state);
@@ -495,16 +477,7 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
 
     let first_actual_chart_beat_to_render = state.current_chart_beat_actual - MAX_DRAW_BEATS_BACK;
     let last_actual_chart_beat_to_render = state.current_chart_beat_actual + MAX_DRAW_BEATS_FORWARD;
-    
-    let bpm_at_current_actual_chart_beat = state.timing_data.points.iter()
-        .rfind(|p| p.beat <= state.current_chart_beat_actual)
-        .map_or(120.0, |p| p.bpm);
-    let display_beat_offset_due_to_audio_sync = if bpm_at_current_actual_chart_beat > 0.0 {
-        (config::AUDIO_SYNC_OFFSET_MS as f32 / 1000.0) / (60.0 / bpm_at_current_actual_chart_beat)
-    } else {
-        0.0
-    };
-
+        
     let mut measure_scan_start_idx = state.current_measure_idx;
     let estimated_measure_for_first_render_beat = (first_actual_chart_beat_to_render / 4.0).floor() as isize;
     
@@ -563,8 +536,8 @@ fn spawn_arrows_from_chart(state: &mut GameState) {
             
             if target_actual_chart_beat_for_line >= first_actual_chart_beat_to_render {
                 let note_line_data = &current_measure_data[line_idx];
-                let arrow_display_target_beat = target_actual_chart_beat_for_line - display_beat_offset_due_to_audio_sync;
-
+                // Arrow's display target beat is now the same as its actual chart beat
+                let arrow_display_target_beat = target_actual_chart_beat_for_line;
                 let current_display_time_sec = state.timing_data.get_time_for_beat(state.current_beat);
                 let arrow_target_display_time_sec = state.timing_data.get_time_for_beat(arrow_display_target_beat);
                 let time_difference_to_display_target_sec = arrow_target_display_time_sec - current_display_time_sec;
