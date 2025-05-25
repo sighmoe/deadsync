@@ -1,3 +1,4 @@
+// src/app.rs
 use crate::assets::AssetManager;
 use crate::audio::AudioManager;
 use crate::config;
@@ -18,9 +19,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::{
     dpi::PhysicalSize,
-    event::{ElementState, Event, KeyEvent, WindowEvent},
+    event::{ElementState, Event, KeyEvent, WindowEvent, Modifiers}, // Added Modifiers
     event_loop::{ControlFlow, EventLoop},
     platform::run_on_demand::EventLoopExtRunOnDemand,
+    keyboard::ModifiersState, // Added ModifiersState
     window::WindowBuilder,
 };
 
@@ -48,6 +50,7 @@ pub struct App {
     pending_resize: Option<(PhysicalSize<u32>, Instant)>,
     swapchain_is_known_bad: bool,
     pack_colors: HashMap<String, [f32; 4]>,
+    current_modifiers: ModifiersState, // Added
 }
 
 impl App {
@@ -124,6 +127,7 @@ impl App {
             pending_resize: None,
             swapchain_is_known_bad: false,
             pack_colors,
+            current_modifiers: ModifiersState::empty(), // Initialize
         })
     }
 
@@ -136,6 +140,9 @@ impl App {
 
             match event {
                 Event::WindowEvent { event: window_event, window_id } if window_id == self.vulkan_base.window.id() => {
+                    if let WindowEvent::ModifiersChanged(modifiers) = window_event {
+                        self.current_modifiers = modifiers.state();
+                    }
                     match window_event {
                         WindowEvent::RedrawRequested => {
                             if self.swapchain_is_known_bad {
@@ -254,7 +261,8 @@ impl App {
                 event: key_event, ..
             } => {
                 self.handle_keyboard_input(key_event);
-            }
+            },
+            // WindowEvent::ModifiersChanged is handled in the main event loop now
             _ => {}
         }
     }
@@ -316,7 +324,7 @@ impl App {
             }
             AppState::Gameplay => { 
                 if let Some(ref mut gs) = self.game_state {
-                    gameplay::handle_input(&key_event, gs); // Modifies gs, transition handled in update
+                    gameplay::handle_input(&key_event, gs, self.current_modifiers); // Pass modifiers
                 } else {
                     warn!("Received input in Gameplay state, but game_state is None.");
                     requested_state = None;
@@ -601,11 +609,11 @@ impl App {
 
         if let Some(fps) = self.fps_counter.update() {
             let title_suffix = match self.current_app_state {
-                AppState::Gameplay => format!(
-                    "Gameplay | FPS: {} | Beat: {:.2}",
-                    fps,
-                    self.game_state.as_ref().map_or(0.0, |gs| gs.current_beat)
-                ),
+                AppState::Gameplay => {
+                    let beat_str = self.game_state.as_ref().map_or_else(|| "N/A".to_string(), |gs| format!("{:.2}", gs.current_beat));
+                    let offset_str = self.game_state.as_ref().map_or_else(|| "".to_string(), |gs| format!(" (Offset: {:.3}s)", gs.current_global_offset_sec));
+                    format!("Gameplay | FPS: {} | Beat: {} {}", fps, beat_str, offset_str)
+                }
                 AppState::Menu => format!("Menu | FPS: {}", fps),
                 AppState::SelectMusic => format!("Select Music | FPS: {}", fps),
                 AppState::Options => format!("Options | FPS: {}", fps),

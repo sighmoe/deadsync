@@ -157,6 +157,9 @@ pub struct GameState {
     pub esc_held_since: Option<Instant>,
     pub is_enter_held: bool,
     pub enter_held_since: Option<Instant>,
+    pub current_global_offset_sec: f32,
+    pub offset_feedback_message: Option<String>,
+    pub offset_feedback_duration_remaining: f32,
 }
 
 // --- Gameplay Elements ---

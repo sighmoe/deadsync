@@ -13,7 +13,8 @@ use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::sync::Arc;
 use std::time::Instant;
-use winit::event::{ElementState, KeyEvent};
+use winit::{event::{ElementState, KeyEvent}, keyboard::ModifiersState};
+use winit::keyboard::{Key, NamedKey};
 use rand::Rng;
 
 
@@ -175,7 +176,78 @@ impl TimingData {
 }
 
 const MAX_DRAW_BEATS_FORWARD: f32 = 12.0; 
-const MAX_DRAW_BEATS_BACK: f32 = 3.0;   
+const MAX_DRAW_BEATS_BACK: f32 = 3.0;
+const GLOBAL_OFFSET_ADJUST_STEP_SEC: f32 = 0.001;
+const OFFSET_FEEDBACK_DISPLAY_DURATION_SEC: f32 = 2.0;
+
+// Helper function to create TimingData
+fn create_timing_data(
+    song_offset_sec: f32,
+    song: &Arc<SongInfo>,
+    chart_info: &ChartInfo,
+) -> TimingData {
+    let mut new_timing_data = TimingData { song_offset_sec, ..Default::default() };
+    
+    let mut combined_bpms = song.bpms_header.clone();
+    if let Some(chart_bpms_str) = &chart_info.bpms_chart {
+        if let Ok(chart_bpms_vec) = crate::parsing::simfile::parse_bpms(chart_bpms_str) {
+            if !chart_bpms_vec.is_empty() { combined_bpms = chart_bpms_vec; }
+        }
+    }
+    combined_bpms.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    combined_bpms.dedup_by_key(|k| k.0);
+    if combined_bpms.is_empty() || combined_bpms[0].0 != 0.0 {
+        let initial_bpm = combined_bpms.first().map_or(120.0, |p| p.1);
+        if combined_bpms.first().map_or(true, |p| p.0 != 0.0) {
+            combined_bpms.insert(0, (0.0, initial_bpm));
+        }
+    }
+    
+    let mut current_calc_time_from_offset = 0.0; 
+    let mut last_calc_beat = 0.0;
+    let mut last_calc_bpm = combined_bpms[0].1;
+    for (beat, bpm_val) in &combined_bpms { 
+        if *beat < last_calc_beat { continue; } 
+        if *beat > last_calc_beat && last_calc_bpm > 0.0 {
+            current_calc_time_from_offset += (*beat - last_calc_beat) * (60.0 / last_calc_bpm);
+        }
+        new_timing_data.points.push(BeatTimePoint {
+            beat: *beat,
+            time_sec: song_offset_sec + current_calc_time_from_offset, 
+            bpm: *bpm_val,
+        });
+        last_calc_beat = *beat;
+        last_calc_bpm = *bpm_val;
+    }
+
+    let mut combined_stops = song.stops_header.clone();
+    if let Some(chart_stops_str) = &chart_info.stops_chart {
+        if let Ok(chart_stops_vec) = crate::parsing::simfile::parse_stops(chart_stops_str) {
+            if !chart_stops_vec.is_empty() { combined_stops = chart_stops_vec; }
+        }
+    }
+    combined_stops.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    combined_stops.dedup_by_key(|k| k.0); 
+    for (beat, duration_simfile_value) in &combined_stops {
+        new_timing_data.stops_at_beat.push((*beat, *duration_simfile_value));
+    }
+    new_timing_data
+}
+
+
+fn update_timing_data_with_new_offset(game_state: &mut GameState) {
+    info!("Updating TimingData with new global offset: {:.3}s", game_state.current_global_offset_sec);
+    let effective_file_offset = -game_state.song_info.offset + -game_state.current_global_offset_sec;
+    let chart_info = &game_state.song_info.charts[game_state.selected_chart_idx];
+    
+    let new_timing_data = create_timing_data(
+        effective_file_offset,
+        &game_state.song_info,
+        chart_info,
+    );
+    game_state.timing_data = Arc::new(new_timing_data);
+}
+
 
 pub fn initialize_game_state(
     win_w: f32,
@@ -214,63 +286,11 @@ pub fn initialize_game_state(
     let mut arrows_map = HashMap::new();
     for dir in ALL_ARROW_DIRECTIONS.iter() { arrows_map.insert(*dir, Vec::new()); }
     
-    // Apply global offset to the song's intrinsic offset
-    let effective_file_offset = -song.offset + -config::GLOBAL_OFFSET_SEC; 
-
-    let mut temp_timing_data = TimingData { song_offset_sec: effective_file_offset, ..Default::default() };
+    let current_initial_global_offset_sec = config::GLOBAL_OFFSET_SEC; // Will be stored in GameState
+    let effective_file_offset = -song.offset + -current_initial_global_offset_sec; 
     let chart_info = &song.charts[selected_chart_idx];
-    let mut combined_bpms = song.bpms_header.clone();
-    if let Some(chart_bpms_str) = &chart_info.bpms_chart {
-        if let Ok(chart_bpms_vec) = crate::parsing::simfile::parse_bpms(chart_bpms_str) {
-            if !chart_bpms_vec.is_empty() { 
-                combined_bpms = chart_bpms_vec; 
-            }
-        }
-    }
-    combined_bpms.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    combined_bpms.dedup_by_key(|k| k.0);
 
-    if combined_bpms.is_empty() || combined_bpms[0].0 != 0.0 {
-        let initial_bpm = combined_bpms.first().map_or(120.0, |p| p.1);
-        if combined_bpms.first().map_or(true, |p| p.0 != 0.0) {
-             combined_bpms.insert(0, (0.0, initial_bpm));
-        }
-    }
-    
-    let mut current_calc_time_from_offset = 0.0; 
-    let mut last_calc_beat = 0.0;
-    let mut last_calc_bpm = combined_bpms[0].1; // Correctly access bpm from tuple
-
-    for (beat, bpm_val) in &combined_bpms { 
-        if *beat < last_calc_beat { continue; } 
-        if *beat > last_calc_beat { 
-            if last_calc_bpm > 0.0 {
-                current_calc_time_from_offset += (*beat - last_calc_beat) * (60.0 / last_calc_bpm);
-            }
-        }
-        temp_timing_data.points.push(BeatTimePoint {
-            beat: *beat,
-            time_sec: effective_file_offset + current_calc_time_from_offset, 
-            bpm: *bpm_val,
-        });
-        last_calc_beat = *beat;
-        last_calc_bpm = *bpm_val;
-    }
-
-    let mut combined_stops = song.stops_header.clone();
-     if let Some(chart_stops_str) = &chart_info.stops_chart {
-         if let Ok(chart_stops_vec) = crate::parsing::simfile::parse_stops(chart_stops_str) {
-             if !chart_stops_vec.is_empty() { 
-                combined_stops = chart_stops_vec;
-             }
-         }
-     }
-    combined_stops.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    combined_stops.dedup_by_key(|k| k.0); 
-
-    for (beat, duration_simfile_value) in &combined_stops {
-        temp_timing_data.stops_at_beat.push((*beat, *duration_simfile_value));
-    }
+    let initial_timing_data = create_timing_data(effective_file_offset, &song, chart_info);
 
     let processed_chart_data = chart_info.processed_data.as_ref().cloned().unwrap_or_else(|| {
         warn!("Chart {} for song {} has no processed data! Gameplay might be empty.", selected_chart_idx, song.title);
@@ -280,7 +300,7 @@ pub fn initialize_game_state(
     let time_at_visual_start_relative_to_audio_zero = -config::GAME_LEAD_IN_DURATION_SECONDS;
     
     let mut initial_actual_chart_beat_at_receptors_on_visual_start = 
-        temp_timing_data.get_beat_for_time(time_at_visual_start_relative_to_audio_zero);    
+        initial_timing_data.get_beat_for_time(time_at_visual_start_relative_to_audio_zero);    
     
     // Display beat is now the same as actual chart beat (after global offset is applied to TimingData)
     let mut initial_display_beat_at_receptors_on_visual_start = initial_actual_chart_beat_at_receptors_on_visual_start;
@@ -291,10 +311,10 @@ pub fn initialize_game_state(
     if effective_scroll_time_for_beat0_before_audio < MIN_GUARANTEED_SCROLL_TIME_FOR_CHART_START_NOTES {
         let time_deficit = MIN_GUARANTEED_SCROLL_TIME_FOR_CHART_START_NOTES - effective_scroll_time_for_beat0_before_audio;
         
-        let bpm_at_chart_beat_0 = temp_timing_data.points.iter()
+        let bpm_at_chart_beat_0 = initial_timing_data.points.iter()
             .rfind(|p| p.beat <= 0.0) 
             .map_or_else(
-                || temp_timing_data.points.first().map_or(120.0, |p_first| p_first.bpm), 
+                || initial_timing_data.points.first().map_or(120.0, |p_first| p_first.bpm), 
                 |p_at_zero| p_at_zero.bpm
             );
 
@@ -326,7 +346,7 @@ pub fn initialize_game_state(
         audio_start_time: Some(audio_start_time),
         song_info: song,
         selected_chart_idx,
-        timing_data: Arc::new(temp_timing_data),
+        timing_data: Arc::new(initial_timing_data),
         processed_chart: Arc::new(processed_chart_data),
         current_measure_idx: 0, 
         current_line_in_measure_idx: 0,
@@ -338,17 +358,54 @@ pub fn initialize_game_state(
         esc_held_since: None,
         is_enter_held: false,
         enter_held_since: None,
+        current_global_offset_sec: current_initial_global_offset_sec,
+        offset_feedback_message: None,
+        offset_feedback_duration_remaining: 0.0,
     }
 }
 
-pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState) {
+pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState, modifiers: ModifiersState) {
     if key_event.state == ElementState::Pressed && !key_event.repeat {
+        // Handle Shift+F11/F12 for global offset adjustment
+        if modifiers.shift_key() {
+            let old_offset = game_state.current_global_offset_sec;
+            let mut offset_changed = false;
+
+            match key_event.logical_key {
+                Key::Named(NamedKey::F11) => {
+                    game_state.current_global_offset_sec -= GLOBAL_OFFSET_ADJUST_STEP_SEC;
+                    offset_changed = true;
+                    info!("Global offset decreased to: {:.3}s", game_state.current_global_offset_sec);
+                }
+                Key::Named(NamedKey::F12) => {
+                    game_state.current_global_offset_sec += GLOBAL_OFFSET_ADJUST_STEP_SEC;
+                    offset_changed = true;
+                    info!("Global offset increased to: {:.3}s", game_state.current_global_offset_sec);
+                }
+                _ => {}
+            }
+
+            if offset_changed {
+                update_timing_data_with_new_offset(game_state);
+                game_state.offset_feedback_message = Some(format!(
+                    "Global Offset from {:.3}s to {:.3}s (notes {})",
+                    old_offset,
+                    game_state.current_global_offset_sec,
+                    if game_state.current_global_offset_sec > old_offset { "earlier" } else { "later" }
+                ));
+                game_state.offset_feedback_duration_remaining = OFFSET_FEEDBACK_DISPLAY_DURATION_SEC;
+                return; // Consume the input if it was an offset change
+            }
+        }
+
+        // Existing Escape handling (without Shift)
         if let Some(VirtualKeyCode::Escape) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
-            info!("Escape pressed in gameplay, returning to Select Music.");
-            // Transition is handled by hold logic in update
-            // return Some(AppState::SelectMusic); // This line is removed
+            if !modifiers.shift_key() { // Ensure shift is not held for this
+                info!("Escape pressed in gameplay, returning to Select Music.");
+            }
         }
     }
+
 
     if let Some(virtual_keycode) = crate::state::key_to_virtual_keycode(key_event.logical_key.clone()) {
         match virtual_keycode {
@@ -404,7 +461,6 @@ pub fn handle_input(key_event: &KeyEvent, game_state: &mut GameState) {
             _ => {}
         }
     }
-    // No direct state transition for Esc/Enter from here
 }
 
 
@@ -432,6 +488,15 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) -> Optio
             }
         }
     }
+
+    if game_state.offset_feedback_duration_remaining > 0.0 {
+        game_state.offset_feedback_duration_remaining -= dt;
+        if game_state.offset_feedback_duration_remaining <= 0.0 {
+            game_state.offset_feedback_message = None;
+            game_state.offset_feedback_duration_remaining = 0.0;
+        }
+    }
+
 
     if !game_state.music_started && game_state.lead_in_timer > 0.0 {
         game_state.lead_in_timer -= dt;
@@ -1035,4 +1100,29 @@ pub fn draw(
         }
     }
 
+    // Draw global offset feedback message
+    if let Some(feedback_msg) = &game_state.offset_feedback_message {
+        if game_state.offset_feedback_duration_remaining > 0.0 {
+            if let Some(font) = assets.get_font(FontId::Miso) {
+                let target_visual_height = 20.0 * height_scale;
+                let font_typographic_height_norm = (font.metrics.ascender - font.metrics.descender).max(1e-5);
+                let text_scale = target_visual_height / font_typographic_height_norm;
+                
+                let text_width_pixels = font.measure_text_normalized(feedback_msg) * text_scale;
+                let text_x = center_x - text_width_pixels / 2.0;
+
+                let bottom_margin_pixels = 125.0 * height_scale;
+                let text_bottom_edge_y = win_h - bottom_margin_pixels;
+                let baseline_y = text_bottom_edge_y - (font.metrics.descender * text_scale);
+
+
+                renderer.draw_text(
+                    device, cmd_buf, font, feedback_msg,
+                    text_x, baseline_y,
+                    [1.0, 1.0, 1.0, 1.0], // White text
+                    text_scale, None
+                );
+            }
+        }
+    }
 }
