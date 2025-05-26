@@ -1,4 +1,3 @@
-// src/app.rs
 use crate::assets::AssetManager;
 use crate::audio::AudioManager;
 use crate::config;
@@ -6,30 +5,29 @@ use crate::graphics::renderer::Renderer;
 use crate::graphics::vulkan_base::VulkanBase;
 use crate::parsing::simfile::{scan_packs, SongInfo}; // Import for gameplay transition AND helper
 use crate::screens::{gameplay, menu, options, score, select_music};
-use crate::state::{AppState, GameState, MenuState, OptionsState, ScoreScreenState, SelectMusicState, MusicWheelEntry, VirtualKeyCode, NavDirection};
-// use crate::screens::select_music::DIFFICULTY_NAMES; // No longer needed directly here for gameplay transition
+use crate::state::{
+    AppState, GameState, MenuState, MusicWheelEntry, OptionsState, ScoreScreenState,
+    SelectMusicState,
+};
 use crate::utils::fps::FPSCounter;
 
 use ash::vk;
 use log::{error, info, trace, warn};
 use std::collections::HashMap;
 use std::error::Error;
-// Removed fs, Path, PathBuf from here as find_pack_banner will move
-use std::sync::Arc;
+
 use std::time::{Duration, Instant};
 use winit::{
     dpi::PhysicalSize,
-    event::{ElementState, Event, KeyEvent, WindowEvent, Modifiers}, // Added Modifiers
+    event::{Event, KeyEvent, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
+    keyboard::ModifiersState,
     platform::run_on_demand::EventLoopExtRunOnDemand,
-    keyboard::ModifiersState, // Added ModifiersState
     window::WindowBuilder,
 };
 
 const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0);
 const PREVIEW_RESTART_DELAY: f32 = 0.25; // Seconds (used in App::update for SelectMusicState)
-// SELECTION_START_PLAY_DELAY moved to select_music.rs
-
 
 pub struct App {
     vulkan_base: VulkanBase,
@@ -89,8 +87,16 @@ impl App {
         let song_library = scan_packs(std::path::Path::new("songs")); // Explicit Path
         info!("Found {} songs.", song_library.len());
 
-        let mut unique_pack_names: Vec<String> = song_library.iter()
-            .map(|s| s.folder_path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()).unwrap_or("Unknown Pack").to_string())
+        let mut unique_pack_names: Vec<String> = song_library
+            .iter()
+            .map(|s| {
+                s.folder_path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Unknown Pack")
+                    .to_string()
+            })
             .collect();
         unique_pack_names.sort_unstable_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         unique_pack_names.dedup();
@@ -98,10 +104,12 @@ impl App {
         let mut pack_colors = HashMap::new();
         for (i, pack_name) in unique_pack_names.iter().enumerate() {
             let color_index = i % config::PACK_NAME_COLOR_PALETTE.len();
-            pack_colors.insert(pack_name.clone(), config::PACK_NAME_COLOR_PALETTE[color_index]);
+            pack_colors.insert(
+                pack_name.clone(),
+                config::PACK_NAME_COLOR_PALETTE[color_index],
+            );
         }
         info!("Assigned colors to {} unique packs.", pack_colors.len());
-
 
         vulkan_base
             .wait_idle()
@@ -261,7 +269,7 @@ impl App {
                 event: key_event, ..
             } => {
                 self.handle_keyboard_input(key_event);
-            },
+            }
             // WindowEvent::ModifiersChanged is handled in the main event loop now
             _ => {}
         }
@@ -276,7 +284,11 @@ impl App {
             &self.pack_colors,
         );
         // Logic related to resetting preview state is now inside rebuild_music_wheel_entries_logic
-        info!("Rebuilt music wheel. New #entries: {}, selected_index: {}", self.select_music_state.entries.len(), self.select_music_state.selected_index);
+        info!(
+            "Rebuilt music wheel. New #entries: {}, selected_index: {}",
+            self.select_music_state.entries.len(),
+            self.select_music_state.selected_index
+        );
     }
 
     // start_actual_preview_playback moved to select_music.rs
@@ -291,7 +303,6 @@ impl App {
         );
     }
 
-
     fn handle_keyboard_input(&mut self, key_event: KeyEvent) {
         trace!("Keyboard Input: {:?}", key_event);
         let mut requested_state: Option<AppState> = None;
@@ -304,8 +315,9 @@ impl App {
             }
             AppState::SelectMusic => {
                 // let _original_selected_index_before_input = self.select_music_state.selected_index; // Can be removed if not used
-                let original_expanded_pack_name = self.select_music_state.expanded_pack_name.clone(); // Capture before
- 
+                let original_expanded_pack_name =
+                    self.select_music_state.expanded_pack_name.clone(); // Capture before
+
                 let (next_state, sel_changed_by_nav_or_toggle) = select_music::handle_input(
                     &key_event,
                     &mut self.select_music_state,
@@ -313,25 +325,26 @@ impl App {
                 );
                 requested_state = next_state;
                 selection_changed_in_music_by_input = sel_changed_by_nav_or_toggle;
-                
+
                 if self.select_music_state.expanded_pack_name != original_expanded_pack_name {
                     self.rebuild_music_wheel_entries();
-                    selection_changed_in_music_by_input = true; 
+                    selection_changed_in_music_by_input = true;
                 }
             }
             AppState::Options => {
                 requested_state = options::handle_input(&key_event, &mut self.options_state);
             }
-            AppState::Gameplay => { 
+            AppState::Gameplay => {
                 if let Some(ref mut gs) = self.game_state {
-                    gameplay::handle_input(&key_event, gs, self.current_modifiers); // Pass modifiers
+                    gameplay::handle_input(&key_event, gs, self.current_modifiers);
+                // Pass modifiers
                 } else {
                     warn!("Received input in Gameplay state, but game_state is None.");
                     requested_state = None;
                 }
             }
             AppState::Exiting => {
-                 requested_state = None;
+                requested_state = None;
             }
             AppState::ScoreScreen => {
                 requested_state = score::handle_input(&key_event, &mut self.score_state);
@@ -364,9 +377,8 @@ impl App {
                 self.select_music_state.is_awaiting_preview_restart = false;
                 self.select_music_state.selection_landed_at = None;
                 self.select_music_state.is_preview_actions_scheduled = false;
-                self.select_music_state.last_difficulty_nav_key = None; 
+                self.select_music_state.last_difficulty_nav_key = None;
                 self.select_music_state.last_difficulty_nav_time = None;
-
 
                 if let Some(mut graph_tex) = self.select_music_state.current_graph_texture.take() {
                     info!("Destroying NPS graph texture on state transition from SelectMusic.");
@@ -376,44 +388,67 @@ impl App {
 
                 if new_state != AppState::Gameplay {
                     info!("Transitioning from SelectMusic to non-Gameplay state ({:?}). Resetting DynamicBanner.", new_state);
-                    if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                        self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
+                    if let Some(fallback_res) = self
+                        .asset_manager
+                        .get_texture(crate::assets::TextureId::FallbackBanner)
+                    {
+                        self.renderer.update_texture_descriptor(
+                            &self.vulkan_base.device,
+                            crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                            fallback_res,
+                        );
                     }
-                    self.asset_manager.clear_current_banner(&self.vulkan_base.device);
+                    self.asset_manager
+                        .clear_current_banner(&self.vulkan_base.device);
                 } else {
                     info!("Transitioning from SelectMusic to Gameplay. DynamicBanner for song should persist.");
                 }
             }
             AppState::Gameplay => {
-                self.audio_manager.stop_music(); 
+                self.audio_manager.stop_music();
                 self.game_state = None;
                 info!("Gameplay state cleared.");
 
                 if new_state != AppState::SelectMusic && new_state != AppState::ScoreScreen {
                     info!("Transitioning from Gameplay to non-SelectMusic state ({:?}). Resetting DynamicBanner.", new_state);
-                    if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                        self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
+                    if let Some(fallback_res) = self
+                        .asset_manager
+                        .get_texture(crate::assets::TextureId::FallbackBanner)
+                    {
+                        self.renderer.update_texture_descriptor(
+                            &self.vulkan_base.device,
+                            crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                            fallback_res,
+                        );
                     }
-                    self.asset_manager.clear_current_banner(&self.vulkan_base.device);
+                    self.asset_manager
+                        .clear_current_banner(&self.vulkan_base.device);
                 } else {
-                     info!("Transitioning from Gameplay to SelectMusic. SelectMusic will handle banner refresh.");
+                    info!("Transitioning from Gameplay to SelectMusic. SelectMusic will handle banner refresh.");
                 }
             }
             AppState::ScoreScreen => {
                 // Cleanup for ScoreScreen if any specific resources were used.
                 // Currently ScoreScreenState is simple.
                 // If transitioning away from ScoreScreen, reset banner if not going to Gameplay
-                if new_state != AppState::Gameplay { 
+                if new_state != AppState::Gameplay {
                     info!("Transitioning from ScoreScreen to non-Gameplay state ({:?}). Resetting DynamicBanner.", new_state);
-                    if let Some(fallback_res) = self.asset_manager.get_texture(crate::assets::TextureId::FallbackBanner) {
-                        self.renderer.update_texture_descriptor(&self.vulkan_base.device, crate::graphics::renderer::DescriptorSetId::DynamicBanner, fallback_res);
+                    if let Some(fallback_res) = self
+                        .asset_manager
+                        .get_texture(crate::assets::TextureId::FallbackBanner)
+                    {
+                        self.renderer.update_texture_descriptor(
+                            &self.vulkan_base.device,
+                            crate::graphics::renderer::DescriptorSetId::DynamicBanner,
+                            fallback_res,
+                        );
                     }
-                    self.asset_manager.clear_current_banner(&self.vulkan_base.device);
+                    self.asset_manager
+                        .clear_current_banner(&self.vulkan_base.device);
                 }
             }
             _ => {}
         }
-
 
         match new_state {
             AppState::Menu => {
@@ -432,19 +467,28 @@ impl App {
                 self.options_state = OptionsState::default();
             }
             AppState::Gameplay => {
-                 info!("Initializing Gameplay State...");
-                 let selected_entry_opt = self.select_music_state.entries.get(self.select_music_state.selected_index);
+                info!("Initializing Gameplay State...");
+                let selected_entry_opt = self
+                    .select_music_state
+                    .entries
+                    .get(self.select_music_state.selected_index);
 
                 if let Some(MusicWheelEntry::Song(selected_song_arc)) = selected_entry_opt {
-                    let target_difficulty_name = select_music::DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
-                    info!("Attempting to start gameplay for song '{}' with difficulty: {}", selected_song_arc.title, target_difficulty_name);
-
-                    let chart_to_play_idx_option = selected_song_arc.charts.iter().position(|c|
-                        c.difficulty.eq_ignore_ascii_case(target_difficulty_name) &&
-                        c.stepstype == "dance-single" && 
-                        c.processed_data.is_some() &&
-                        c.processed_data.as_ref().map_or(false, |pd| !pd.measures.is_empty())
+                    let target_difficulty_name = select_music::DIFFICULTY_NAMES
+                        [self.select_music_state.selected_difficulty_index];
+                    info!(
+                        "Attempting to start gameplay for song '{}' with difficulty: {}",
+                        selected_song_arc.title, target_difficulty_name
                     );
+
+                    let chart_to_play_idx_option = selected_song_arc.charts.iter().position(|c| {
+                        c.difficulty.eq_ignore_ascii_case(target_difficulty_name)
+                            && c.stepstype == "dance-single"
+                            && c.processed_data.is_some()
+                            && c.processed_data
+                                .as_ref()
+                                .map_or(false, |pd| !pd.measures.is_empty())
+                    });
 
                     let final_selected_chart_idx = match chart_to_play_idx_option {
                         Some(idx) => idx,
@@ -459,23 +503,26 @@ impl App {
                                 c.processed_data.as_ref().map_or(false, |pd| !pd.measures.is_empty())
                             ).unwrap_or_else(|| {
                                 warn!("No processable 'dance-single' charts found for song '{}', defaulting to chart index 0. Gameplay might be empty or wrong type.", selected_song_arc.title);
-                                0 
+                                0
                             })
                         }
                     };
-                     info!("Final selected chart index for gameplay: {}", final_selected_chart_idx);
+                    info!(
+                        "Final selected chart index for gameplay: {}",
+                        final_selected_chart_idx
+                    );
 
-
-                    if self.asset_manager.get_current_banner_path().as_ref() != selected_song_arc.banner_path.as_ref() {
+                    if self.asset_manager.get_current_banner_path().as_ref()
+                        != selected_song_arc.banner_path.as_ref()
+                    {
                         warn!("DynamicBanner might not be correctly set for Gameplay. Expected {:?}, AssetManager has {:?}. Re-loading.",
                             selected_song_arc.banner_path, self.asset_manager.get_current_banner_path());
-                         self.asset_manager.load_song_banner(
+                        self.asset_manager.load_song_banner(
                             &self.vulkan_base,
                             &self.renderer,
                             selected_song_arc,
                         );
                     }
-
 
                     if selected_song_arc.audio_path.is_none() {
                         error!("Cannot start gameplay: Audio path missing for selected song '{}'. Returning to SelectMusic.", selected_song_arc.title);
@@ -484,25 +531,28 @@ impl App {
                     }
                     let song_info_for_gameplay = selected_song_arc.clone();
 
-                    info!("Preparing gameplay for song: {}", song_info_for_gameplay.title);
-                    
+                    info!(
+                        "Preparing gameplay for song: {}",
+                        song_info_for_gameplay.title
+                    );
+
                     let window_size_f32 = (
                         self.vulkan_base.surface_resolution.width as f32,
                         self.vulkan_base.surface_resolution.height as f32,
                     );
-                    
+
                     let visual_and_logic_start_instant = Instant::now();
-                    let audio_target_start_instant = visual_and_logic_start_instant + Duration::from_secs_f32(config::GAME_LEAD_IN_DURATION_SECONDS);
+                    let audio_target_start_instant = visual_and_logic_start_instant
+                        + Duration::from_secs_f32(config::GAME_LEAD_IN_DURATION_SECONDS);
 
                     self.game_state = Some(gameplay::initialize_game_state(
                         window_size_f32.0,
                         window_size_f32.1,
-                        audio_target_start_instant, 
+                        audio_target_start_instant,
                         song_info_for_gameplay,
                         final_selected_chart_idx,
                     ));
                     info!("Gameplay state initialized. Music will start after lead-in.");
-
                 } else {
                     error!("Cannot start gameplay: Selected item is not a song or selection is invalid. Returning to SelectMusic.");
                     self.next_app_state = Some(AppState::SelectMusic);
@@ -524,7 +574,6 @@ impl App {
         ));
     }
 
-
     fn update(&mut self, dt: f32) {
         trace!("Update Start (dt: {:.4} s)", dt);
         let mut selection_changed_by_held_key_scroll = false;
@@ -541,8 +590,14 @@ impl App {
                         let elapsed_since_landed = Instant::now().duration_since(landed_at);
 
                         if elapsed_since_landed >= select_music::SELECTION_START_PLAY_DELAY {
-                            info!("{}ms play delay elapsed. Attempting to start preview playback.", select_music::SELECTION_START_PLAY_DELAY.as_millis());
-                            select_music::start_preview_playback_logic(&mut self.select_music_state, &mut self.audio_manager);
+                            info!(
+                                "{}ms play delay elapsed. Attempting to start preview playback.",
+                                select_music::SELECTION_START_PLAY_DELAY.as_millis()
+                            );
+                            select_music::start_preview_playback_logic(
+                                &mut self.select_music_state,
+                                &mut self.audio_manager,
+                            );
                             self.select_music_state.is_preview_actions_scheduled = false;
                             self.select_music_state.selection_landed_at = None;
                         }
@@ -555,14 +610,20 @@ impl App {
                 if self.select_music_state.is_awaiting_preview_restart {
                     self.select_music_state.preview_restart_delay_timer -= dt;
                     if self.select_music_state.preview_restart_delay_timer <= 0.0 {
-                        select_music::start_preview_playback_logic(&mut self.select_music_state, &mut self.audio_manager);
+                        select_music::start_preview_playback_logic(
+                            &mut self.select_music_state,
+                            &mut self.audio_manager,
+                        );
                         self.select_music_state.is_awaiting_preview_restart = false;
                     }
-                } else if self.select_music_state.preview_audio_path.is_some() &&
-                           self.select_music_state.preview_playback_started_at.is_some() &&
-                           !self.audio_manager.is_preview_playing() &&
-                           !self.select_music_state.is_preview_actions_scheduled
-                           {
+                } else if self.select_music_state.preview_audio_path.is_some()
+                    && self
+                        .select_music_state
+                        .preview_playback_started_at
+                        .is_some()
+                    && !self.audio_manager.is_preview_playing()
+                    && !self.select_music_state.is_preview_actions_scheduled
+                {
                     info!("Preview finished, scheduling restart.");
                     self.select_music_state.is_awaiting_preview_restart = true;
                     self.select_music_state.preview_restart_delay_timer = PREVIEW_RESTART_DELAY;
@@ -572,14 +633,18 @@ impl App {
             AppState::Options => options::update(&mut self.options_state, dt),
             AppState::Gameplay => {
                 if let Some(ref mut gs) = self.game_state {
-                    if let Some(next_app_state_from_gameplay) = gameplay::update(gs, dt, &mut self.rng) {
+                    if let Some(next_app_state_from_gameplay) =
+                        gameplay::update(gs, dt, &mut self.rng)
+                    {
                         self.next_app_state = Some(next_app_state_from_gameplay);
                     }
-                     
 
                     if !gs.music_started && gs.lead_in_timer <= 0.0 {
                         if let Some(audio_path) = &gs.song_info.audio_path {
-                            info!("Lead-in complete. Starting music playback for: {:?}", audio_path.file_name().unwrap_or_default());
+                            info!(
+                                "Lead-in complete. Starting music playback for: {:?}",
+                                audio_path.file_name().unwrap_or_default()
+                            );
                             match self.audio_manager.play_music(audio_path, 1.0) {
                                 Ok(_) => {
                                     gs.music_started = true;
@@ -606,13 +671,21 @@ impl App {
             self.handle_music_selection_change(); // Calls the local wrapper
         }
 
-
         if let Some(fps) = self.fps_counter.update() {
             let title_suffix = match self.current_app_state {
                 AppState::Gameplay => {
-                    let beat_str = self.game_state.as_ref().map_or_else(|| "N/A".to_string(), |gs| format!("{:.2}", gs.current_beat));
-                    let offset_str = self.game_state.as_ref().map_or_else(|| "".to_string(), |gs| format!(" (Offset: {:.3}s)", gs.current_global_offset_sec));
-                    format!("Gameplay | FPS: {} | Beat: {} {}", fps, beat_str, offset_str)
+                    let beat_str = self
+                        .game_state
+                        .as_ref()
+                        .map_or_else(|| "N/A".to_string(), |gs| format!("{:.2}", gs.current_beat));
+                    let offset_str = self.game_state.as_ref().map_or_else(
+                        || "".to_string(),
+                        |gs| format!(" (Offset: {:.3}s)", gs.current_global_offset_sec),
+                    );
+                    format!(
+                        "Gameplay | FPS: {} | Beat: {} {}",
+                        fps, beat_str, offset_str
+                    )
                 }
                 AppState::Menu => format!("Menu | FPS: {}", fps),
                 AppState::SelectMusic => format!("Select Music | FPS: {}", fps),

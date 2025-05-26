@@ -50,7 +50,12 @@ fn is_all_zero(line: &[u8; 4]) -> bool {
 #[inline]
 pub fn minimize_measure(measure: &mut Vec<[u8; 4]>) {
     while measure.len() >= 2 && measure.len() % 2 == 0 {
-        if measure.iter().skip(1).step_by(2).any(|line| !is_all_zero(line)) {
+        if measure
+            .iter()
+            .skip(1)
+            .step_by(2)
+            .any(|line| !is_all_zero(line))
+        {
             break;
         }
         let half_len = measure.len() / 2;
@@ -344,13 +349,13 @@ pub fn compute_stream_counts(measure_densities: &[usize]) -> StreamCounts {
         .collect();
 
     let first_run = cats.iter().position(|&c| c != RunDensity::Break);
-    let last_run  = cats.iter().rposition(|&c| c != RunDensity::Break);
+    let last_run = cats.iter().rposition(|&c| c != RunDensity::Break);
     if first_run.is_none() || last_run.is_none() {
         return sc;
     }
 
     let start_idx = first_run.unwrap();
-    let end_idx   = last_run.unwrap();
+    let end_idx = last_run.unwrap();
 
     for &cat in &cats[start_idx..=end_idx] {
         match cat {
@@ -441,7 +446,9 @@ pub fn generate_breakdown(measure_densities: &[usize], mode: BreakdownMode) -> S
                             break;
                         }
                         // Consume the Break.
-                        let Token::Break(bk) = iter.next().unwrap() else { unreachable!() };
+                        let Token::Break(bk) = iter.next().unwrap() else {
+                            unreachable!()
+                        };
                         // If followed by a Run...
                         if let Some(Token::Run(next_cat, next_len)) = iter.peek() {
                             if *next_cat == cat {

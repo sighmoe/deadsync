@@ -1,6 +1,6 @@
-use crate::parsing::simfile::{SongInfo, ProcessedChartData, NoteChar};
-use crate::screens::gameplay::{TimingData};
 use crate::graphics::texture::TextureResource;
+use crate::parsing::simfile::{NoteChar, ProcessedChartData, SongInfo};
+use crate::screens::gameplay::TimingData;
 use cgmath::Matrix4;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -37,7 +37,6 @@ impl Default for MenuState {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub enum MusicWheelEntry {
     Song(Arc<SongInfo>),
@@ -59,7 +58,7 @@ pub enum NavDirection {
 #[derive(Debug)]
 pub struct SelectMusicState {
     pub entries: Vec<MusicWheelEntry>,
-    pub selected_index: usize, // Song wheel index
+    pub selected_index: usize,            // Song wheel index
     pub selected_difficulty_index: usize, // 0 for Beginner, up to 4 for Challenge
     pub expanded_pack_name: Option<String>,
     pub meter_arrow_animation_timer: f32,
@@ -85,8 +84,8 @@ pub struct SelectMusicState {
     pub current_graph_song_chart_key: Option<String>,
 
     pub last_difficulty_nav_key: Option<VirtualKeyCode>, // For double-tap difficulty change
-    pub last_difficulty_nav_time: Option<Instant>,     // For double-tap difficulty change
-    pub active_chord_keys: HashSet<VirtualKeyCode>, // For Up+Down combo etc.
+    pub last_difficulty_nav_time: Option<Instant>,       // For double-tap difficulty change
+    pub active_chord_keys: HashSet<VirtualKeyCode>,      // For Up+Down combo etc.
 }
 
 impl Default for SelectMusicState {
@@ -151,8 +150,8 @@ pub struct GameState {
     pub current_line_in_measure_idx: usize,
     pub current_processed_beat: f32,
     pub judgment_counts: HashMap<Judgment, u32>,
-    pub lead_in_timer: f32,      // Counts down the lead-in duration
-    pub music_started: bool,       // Flag to indicate if music has been triggered
+    pub lead_in_timer: f32,  // Counts down the lead-in duration
+    pub music_started: bool, // Flag to indicate if music has been triggered
     pub is_esc_held: bool,
     pub esc_held_since: Option<Instant>,
     pub is_enter_held: bool,
@@ -165,22 +164,50 @@ pub struct GameState {
 // --- Gameplay Elements ---
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
-pub enum ArrowDirection { Left, Down, Up, Right, }
-pub const ALL_ARROW_DIRECTIONS: [ArrowDirection; 4] = [ ArrowDirection::Left, ArrowDirection::Down, ArrowDirection::Up, ArrowDirection::Right, ];
+pub enum ArrowDirection {
+    Left,
+    Down,
+    Up,
+    Right,
+}
+pub const ALL_ARROW_DIRECTIONS: [ArrowDirection; 4] = [
+    ArrowDirection::Left,
+    ArrowDirection::Down,
+    ArrowDirection::Up,
+    ArrowDirection::Right,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Judgment { W1, W2, W3, W4, W5, Miss }
-pub const ALL_JUDGMENTS: [Judgment; 6] = [Judgment::W1, Judgment::W2, Judgment::W3, Judgment::W4, Judgment::W5, Judgment::Miss];
+pub enum Judgment {
+    W1,
+    W2,
+    W3,
+    W4,
+    W5,
+    Miss,
+}
+pub const ALL_JUDGMENTS: [Judgment; 6] = [
+    Judgment::W1,
+    Judgment::W2,
+    Judgment::W3,
+    Judgment::W4,
+    Judgment::W5,
+    Judgment::Miss,
+];
 
-
-#[derive(Debug, Clone)] pub struct TargetInfo { pub x: f32, pub y: f32, pub direction: ArrowDirection, }
+#[derive(Debug, Clone)]
+pub struct TargetInfo {
+    pub x: f32,
+    pub y: f32,
+    pub direction: ArrowDirection,
+}
 #[derive(Debug, Clone)]
 pub struct Arrow {
     pub x: f32,
     pub y: f32,
     pub direction: ArrowDirection,
-    pub note_char: NoteChar,    // Type of note (tap, hold start, etc.)
-    pub target_beat: f32,       // The beat at which this arrow should be hit (this will be the DISPLAY beat)
+    pub note_char: NoteChar, // Type of note (tap, hold start, etc.)
+    pub target_beat: f32, // The beat at which this arrow should be hit (this will be the DISPLAY beat)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -190,9 +217,17 @@ pub struct ActiveExplosion {
     pub end_time: Instant,
 }
 
-
 // --- Input ---
-#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)] #[repr(u32)] pub enum VirtualKeyCode { Left, Down, Up, Right, Enter, Escape, }
+#[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
+#[repr(u32)]
+pub enum VirtualKeyCode {
+    Left,
+    Down,
+    Up,
+    Right,
+    Enter,
+    Escape,
+}
 pub fn key_to_virtual_keycode(key: Key) -> Option<VirtualKeyCode> {
     match key {
         Key::Named(NamedKey::ArrowLeft) => Some(VirtualKeyCode::Left),
@@ -203,13 +238,15 @@ pub fn key_to_virtual_keycode(key: Key) -> Option<VirtualKeyCode> {
         Key::Named(NamedKey::Escape) => Some(VirtualKeyCode::Escape),
         _ => None,
     }
- }
+}
 
 // --- Graphics Related ---
-#[repr(C)] #[derive(Debug, Clone, Copy)] pub struct PushConstantData {
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct PushConstantData {
     pub model: Matrix4<f32>,
     pub color: [f32; 4],
     pub uv_offset: [f32; 2],
     pub uv_scale: [f32; 2],
     pub px_range: f32,
- }
+}

@@ -77,9 +77,12 @@ pub fn create_texture_from_rgba_data(
     base.update_buffer(&staging_buffer, rgba_data)
         .map_err(|e| format!("Failed to update staging buffer for {}: {}", debug_name, e))?;
 
-
     let format = vk::Format::R8G8B8A8_UNORM;
-    let image_extent = vk::Extent3D { width, height, depth: 1 };
+    let image_extent = vk::Extent3D {
+        width,
+        height,
+        depth: 1,
+    };
 
     let image_create_info = vk::ImageCreateInfo::default()
         .image_type(vk::ImageType::TYPE_2D)
@@ -101,7 +104,10 @@ pub fn create_texture_from_rgba_data(
         &base.device_memory_properties,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )
-    .ok_or(format!("Failed to find suitable memory type for image {}", debug_name))?;
+    .ok_or(format!(
+        "Failed to find suitable memory type for image {}",
+        debug_name
+    ))?;
 
     let alloc_info = vk::MemoryAllocateInfo::default()
         .allocation_size(mem_requirements.size)
@@ -114,7 +120,9 @@ pub fn create_texture_from_rgba_data(
         base.setup_command_buffer,
         base.setup_commands_reuse_fence,
         base.present_queue,
-        &[], &[], &[],
+        &[],
+        &[],
+        &[],
         |device, command_buffer| {
             let barrier_to_transfer = vk::ImageMemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::NONE)
@@ -124,15 +132,20 @@ pub fn create_texture_from_rgba_data(
                 .image(image)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0, level_count: 1,
-                    base_array_layer: 0, layer_count: 1,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
                 });
             unsafe {
                 device.cmd_pipeline_barrier(
                     command_buffer,
-                    vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TOP_OF_PIPE,
+                    vk::PipelineStageFlags::TRANSFER,
                     vk::DependencyFlags::empty(),
-                    &[], &[], &[barrier_to_transfer],
+                    &[],
+                    &[],
+                    &[barrier_to_transfer],
                 );
             }
 
@@ -142,7 +155,9 @@ pub fn create_texture_from_rgba_data(
                 .buffer_image_height(0) // Tightly packed
                 .image_subresource(vk::ImageSubresourceLayers {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
-                    mip_level: 0, base_array_layer: 0, layer_count: 1,
+                    mip_level: 0,
+                    base_array_layer: 0,
+                    layer_count: 1,
                 })
                 .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
                 .image_extent(image_extent);
@@ -164,22 +179,28 @@ pub fn create_texture_from_rgba_data(
                 .image(image)
                 .subresource_range(vk::ImageSubresourceRange {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0, level_count: 1,
-                    base_array_layer: 0, layer_count: 1,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
                 });
             unsafe {
                 device.cmd_pipeline_barrier(
                     command_buffer,
-                    vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::FRAGMENT_SHADER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
                     vk::DependencyFlags::empty(),
-                    &[], &[], &[barrier_to_shader_read],
+                    &[],
+                    &[],
+                    &[barrier_to_shader_read],
                 );
             }
         },
     );
     unsafe {
         // Wait for the fence associated with setup_command_buffer
-        base.device.wait_for_fences(&[base.setup_commands_reuse_fence], true, u64::MAX)?;
+        base.device
+            .wait_for_fences(&[base.setup_commands_reuse_fence], true, u64::MAX)?;
         // Resetting the fence is handled by record_submit_commandbuffer
     }
 
@@ -192,8 +213,10 @@ pub fn create_texture_from_rgba_data(
         .components(vk::ComponentMapping::default())
         .subresource_range(vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0, level_count: 1,
-            base_array_layer: 0, layer_count: 1,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
         });
     let view = unsafe { base.device.create_image_view(&image_view_info, None)? };
 
@@ -208,8 +231,18 @@ pub fn create_texture_from_rgba_data(
         .mipmap_mode(vk::SamplerMipmapMode::LINEAR); // No mipmaps
     let sampler = unsafe { base.device.create_sampler(&sampler_info, None)? };
 
-    log::info!("Texture {} created successfully from RGBA data.", debug_name);
-    Ok(TextureResource { image, memory, view, sampler, width, height })
+    log::info!(
+        "Texture {} created successfully from RGBA data.",
+        debug_name
+    );
+    Ok(TextureResource {
+        image,
+        memory,
+        view,
+        sampler,
+        width,
+        height,
+    })
 }
 
 // NEW FUNCTION: Create a solid color texture (e.g., 1x1 white)

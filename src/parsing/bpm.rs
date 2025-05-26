@@ -11,12 +11,18 @@ pub fn normalize_float_digits(param: &str) -> String {
         }
 
         let mut eq_split = beat_bpm.split('=');
-        let beat_str = eq_split.next().unwrap_or("").trim_matches(|c: char| c.is_control());
-        let bpm_str  = eq_split.next().unwrap_or("").trim_matches(|c: char| c.is_control());
+        let beat_str = eq_split
+            .next()
+            .unwrap_or("")
+            .trim_matches(|c: char| c.is_control());
+        let bpm_str = eq_split
+            .next()
+            .unwrap_or("")
+            .trim_matches(|c: char| c.is_control());
 
         if let (Ok(beat_val), Ok(bpm_val)) = (beat_str.parse::<f64>(), bpm_str.parse::<f64>()) {
             let beat_rounded = (beat_val * 1000.0).round() / 1000.0;
-            let bpm_rounded  = (bpm_val * 1000.0).round() / 1000.0;
+            let bpm_rounded = (bpm_val * 1000.0).round() / 1000.0;
             let _ = write!(&mut output, "{:.3}={:.3}", beat_rounded, bpm_rounded);
         } else {
             output.push_str(beat_bpm);
@@ -43,7 +49,11 @@ pub fn parse_bpm_map(normalized_bpms: &str) -> Vec<(f64, f64)> {
 
 /// Returns the BPM in effect at a given beat
 pub fn get_current_bpm(beat: f64, bpm_map: &[(f64, f64)]) -> f64 {
-    let mut curr_bpm = if !bpm_map.is_empty() { bpm_map[0].1 } else { 0.0 };
+    let mut curr_bpm = if !bpm_map.is_empty() {
+        bpm_map[0].1
+    } else {
+        0.0
+    };
     for &(b_beat, b_bpm) in bpm_map {
         if beat >= b_beat {
             curr_bpm = b_bpm;
@@ -68,10 +78,7 @@ pub fn compute_bpm_range(bpm_map: &[(f64, f64)]) -> (i32, i32) {
             max_bpm = bpm;
         }
     }
-    (
-        min_bpm.round() as i32,
-        max_bpm.round() as i32,
-    )
+    (min_bpm.round() as i32, max_bpm.round() as i32)
 }
 
 pub fn compute_total_chart_length(measure_densities: &[usize], bpm_map: &[(f64, f64)]) -> i32 {
@@ -147,14 +154,24 @@ pub fn compute_bpm_stats(bpm_values: &[f64]) -> (f64, f64) {
     (median, average)
 }
 
-pub fn compute_tier_bpm(measure_densities: &[usize], bpm_map: &[(f64, f64)], beats_per_measure: f64) -> f64 {
+pub fn compute_tier_bpm(
+    measure_densities: &[usize],
+    bpm_map: &[(f64, f64)],
+    beats_per_measure: f64,
+) -> f64 {
     use super::stats::categorize_measure_density;
     use super::stats::RunDensity;
 
     // Calculate the maximum BPM from bpm_map
-    let max_bpm = bpm_map.iter().map(|&(_, bpm)| bpm).fold(f64::NEG_INFINITY, f64::max);
+    let max_bpm = bpm_map
+        .iter()
+        .map(|&(_, bpm)| bpm)
+        .fold(f64::NEG_INFINITY, f64::max);
 
-    let cats: Vec<RunDensity> = measure_densities.iter().map(|&d| categorize_measure_density(d)).collect();
+    let cats: Vec<RunDensity> = measure_densities
+        .iter()
+        .map(|&d| categorize_measure_density(d))
+        .collect();
     let mut max_e: f64 = 0.0;
 
     let mut i = 0;

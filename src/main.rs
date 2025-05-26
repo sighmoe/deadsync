@@ -15,17 +15,19 @@ mod utils;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // --- Logging Setup ---
+    // Consider making this configurable via command-line arguments or a config file in the future.
     env_logger::Builder::from_default_env()
         .filter_level(LevelFilter::Info) // Default level
-        // Example: Override specific module levels
-        .filter_module("deadsync::graphics::vulkan_base", LevelFilter::Warn)
-        .filter_module("deadsync::parsing", LevelFilter::Debug) // More detail for parsing
-        .filter_module("deadsync::screens", LevelFilter::Debug) // More detail for screens
+        .filter_module("deadsync::graphics::vulkan_base", LevelFilter::Warn) // Reduce Vulkan spam unless debugging
+        .filter_module("deadsync::parsing", LevelFilter::Debug)
+        .filter_module("deadsync::screens", LevelFilter::Debug)
+        .filter_module("deadsync::audio", LevelFilter::Info) // Set audio to Info by default
         .init();
 
     info!("Application starting...");
 
     // --- Event Loop Setup ---
+    // EventLoop::new() can return an error, handled by `?`
     let event_loop = EventLoop::new()?;
 
     // --- Application Creation ---
@@ -33,14 +35,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         Ok(app) => app,
         Err(e) => {
             error!("Failed to initialize application: {}", e);
+            // Consider more specific error handling or cleanup if partially initialized resources exist.
             return Err(e);
         }
     };
 
     // --- Run Application ---
+    // The app.run() method encapsulates the main loop and its error handling.
     if let Err(e) = app.run(event_loop) {
         error!("Application exited with error: {}", e);
-        return Err(e);
+        return Err(e); // Propagate the error
     }
 
     info!("Application exited gracefully.");

@@ -151,7 +151,6 @@ pub fn draw(
         [1.0; 2],
     );
 
-
     // --- Menu Options ---
     let default_item_pixel_size: f32 = 42.0 * (window_height / config::UI_REFERENCE_HEIGHT);
     let selected_item_pixel_size: f32 = 50.0 * (window_height / config::UI_REFERENCE_HEIGHT);
