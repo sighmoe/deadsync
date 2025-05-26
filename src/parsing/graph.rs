@@ -21,8 +21,8 @@ pub fn generate_density_graph_rgba(
     // Dimensions for the generated texture. These can be adjusted.
     // Width can be fairly high for good horizontal resolution.
     // Height should ideally match the target display height of the graph box for 1:1 mapping.
-    const IMAGE_WIDTH: u32 = 512; 
-    const IMAGE_HEIGHT: u32 = 96; // Matches LEFT_BOX_REF_HEIGHT, can be adjusted
+    const IMAGE_WIDTH: u32 = 960;
+    const IMAGE_HEIGHT: u32 = 376; // Matches LEFT_BOX_REF_HEIGHT, can be adjusted
 
     // Colors are defined in RGB, will be converted to RGBA
     let _bg_color_rgb = [30, 40, 47]; // This is the UI_BOX_DARK_COLOR, graph texture will be transparent over it.
