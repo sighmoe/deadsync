@@ -30,6 +30,7 @@ pub enum DescriptorSetId {
     ExplosionW4,
     ExplosionW5,
     NpsGraph,
+    JudgmentGraphics,
 }
 
 impl DescriptorSetId {
@@ -123,7 +124,7 @@ impl Renderer {
                 .create_descriptor_set_layout(&dsl_create_info, None)?
         };
 
-        const MAX_SETS: u32 = 16; // Increased for MeterArrow
+        const MAX_SETS: u32 = 17; // Increased for JudgmentGraphics
         let pool_sizes = [
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::UNIFORM_BUFFER,
@@ -165,6 +166,7 @@ impl Renderer {
         descriptor_sets.insert(DescriptorSetId::ExplosionW5, allocated_sets[13]);
         descriptor_sets.insert(DescriptorSetId::NpsGraph, allocated_sets[14]);
         descriptor_sets.insert(DescriptorSetId::MeterArrow, allocated_sets[15]);
+        descriptor_sets.insert(DescriptorSetId::JudgmentGraphics, allocated_sets[16]);
 
         let push_constant_ranges = [vk::PushConstantRange {
             stage_flags: vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,

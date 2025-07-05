@@ -24,6 +24,7 @@ pub enum TextureId {
     ExplosionW3,
     ExplosionW4,
     ExplosionW5,
+    JudgmentGraphics,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -119,6 +120,15 @@ impl AssetManager {
             TextureId::MeterArrow,
             config::METER_ARROW_TEXTURE_PATH,
             DescriptorSetId::MeterArrow,
+        )?;
+        
+        info!("Loading judgment graphic textures");
+        self.load_and_register_texture(
+            base,
+            renderer,
+            TextureId::JudgmentGraphics,
+            config::JUDGMENT_GRAPHICS_CHROMATIC_PATH,
+            DescriptorSetId::JudgmentGraphics,
         )?;
 
         info!("Loading gameplay explosion textures...");

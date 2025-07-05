@@ -215,6 +215,8 @@ pub struct ActiveExplosion {
     pub judgment: Judgment,
     pub direction: ArrowDirection,
     pub end_time: Instant,
+    pub show_judgment_graphic: bool,
+    pub judgment_fade_start: Instant,
 }
 
 // --- Input ---
