@@ -229,11 +229,11 @@ pub enum VirtualKeyCode {
     Escape,
 }
 pub fn key_to_virtual_keycode(key: Key) -> Option<VirtualKeyCode> {
-    match key {
-        Key::Named(NamedKey::ArrowLeft) => Some(VirtualKeyCode::Left),
-        Key::Named(NamedKey::ArrowDown) => Some(VirtualKeyCode::Down),
-        Key::Named(NamedKey::ArrowUp) => Some(VirtualKeyCode::Up),
-        Key::Named(NamedKey::ArrowRight) => Some(VirtualKeyCode::Right),
+    match key.as_ref() {
+        Key::Named(NamedKey::ArrowLeft) | Key::Character("d") => Some(VirtualKeyCode::Left),
+        Key::Named(NamedKey::ArrowDown) | Key::Character("f") => Some(VirtualKeyCode::Down),
+        Key::Named(NamedKey::ArrowUp) | Key::Character("j") => Some(VirtualKeyCode::Up),
+        Key::Named(NamedKey::ArrowRight) | Key::Character("k") => Some(VirtualKeyCode::Right),
         Key::Named(NamedKey::Enter) => Some(VirtualKeyCode::Enter),
         Key::Named(NamedKey::Escape) => Some(VirtualKeyCode::Escape),
         _ => None,
