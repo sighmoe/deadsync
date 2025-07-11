@@ -2,17 +2,16 @@
 name = "deadsync"
 version = "0.0.80"
 authors = ["Patrik Nilsson <perfecttaste@pm.me>"]
-edition = "2021"
+edition = "2024"
 description = "Rust-based ITG engine with Vulkan, designed for accurate sync and competitive performance."
 license = "GPL-3.0"
-license-file = "LICENSE"
 repository = "https://github.com/pnn64/deadsync"
 keywords = ["deadsync", "stepmania", "itg", "musicgame", "rust", "vulkan"]
 
 [dependencies]
 winit = { version = "0.29.15", features = ["rwh_06"] }
-ash = { version = "0.38", features=["linked"] }
-ash-window = "0.13"
+ash = { version = "0.38.0", features=["linked"] }
+ash-window = "0.13.0"
 raw-window-handle = "0.6.2"
 
 cgmath = "0.18.0"

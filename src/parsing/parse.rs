@@ -77,7 +77,7 @@ pub fn extract_sections<'a>(
             if let Some((idx, tag)) = tags
                 .iter()
                 .enumerate()
-                .find(|(_, &tag)| data[i..].starts_with(tag))
+                .find(|&(_, &tag)| data[i..].starts_with(tag))
             {
                 sections[idx] = parse_tag(&data[i..], tag.len());
                 i += 1;
