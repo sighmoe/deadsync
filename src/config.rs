@@ -28,8 +28,10 @@ pub const EXPLOSION_W3_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explo
 pub const EXPLOSION_W4_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w4.png";
 pub const EXPLOSION_W5_TEXTURE_PATH: &str = "assets/noteskins/cel/down_tap_explosion_dim_w5.png";
 
+pub const JUDGMENT_GRAPHICS_CHROMATIC_PATH: &str = "assets/graphics/judgments/chromatic.png";
+
 // Gameplay Constants
-pub const ARROW_SPEED: f32 = 1300.0; // Speed of arrows scrolling up
+pub const ARROW_SPEED: f32 = 700.0; // Speed of arrows scrolling up
 pub const GAME_LEAD_IN_DURATION_SECONDS: f32 = 3.0;
 pub const GLOBAL_OFFSET_SEC: f32 = -0.009;
 pub const SPAWN_LOOKAHEAD_BEATS: f32 = 10.0;
@@ -104,6 +106,14 @@ pub const GAMEPLAY_BANNER_HEIGHT_REF: f32 = 98.0;
 // Visual Constants
 pub const TARGET_TINT: [f32; 4] = [0.7, 0.7, 0.7, 0.5];
 pub const EXPLOSION_DURATION: Duration = Duration::from_millis(80);
+
+pub const JUDGMENT_GRAPHICS_DURATION: Duration = Duration::from_millis(160);
+pub const JUDGMENT_GRAPHICS_FADE_DURATION: Duration = Duration::from_millis(20);
+pub const JUDGMENT_GRAPHICS_SPRITE_SHEET_WIDTH: f32 = 880.0; 
+pub const JUDGMENT_GRAPHICS_SPRITE_SHEET_HEIGHT: f32 = 1008.0; 
+pub const JUDGMENT_GRAPHICS_SPRITE_WIDTH: f32 = 440.0; 
+pub const JUDGMENT_GRAPHICS_SPRITE_HEIGHT: f32 = 144.0; 
+pub const JUDGMENT_GRAPHICS_OFFSET_Y: f32 = 400.0; // Below receptors
 
 // New Arrow Quantization Colors (RGBA directly as [f32; 4])
 pub const ARROW_TINT_4TH: [f32; 4] = [1.0, 0.6, 0.6, 1.0]; // #FF9999

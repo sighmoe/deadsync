@@ -19,6 +19,7 @@ use winit::{
     event::{ElementState, KeyEvent},
     keyboard::ModifiersState,
 };
+use crate::config::{JUDGMENT_GRAPHICS_SPRITE_SHEET_HEIGHT, JUDGMENT_GRAPHICS_SPRITE_SHEET_WIDTH};
 
 // --- TimingData struct and its impl ---
 #[derive(Debug, Clone, Default)]
@@ -624,10 +625,15 @@ pub fn update(game_state: &mut GameState, dt: f32, _rng: &mut impl Rng) -> Optio
 
     check_misses(game_state);
 
-    let now = Instant::now();
     game_state
         .active_explosions
-        .retain(|_dir, explosion| now < explosion.end_time);
+        .retain(|_dir, explosion| {
+            let now = Instant::now();
+            let explosion_alive = now < explosion.end_time;
+            let judgment_alive = explosion.show_judgment_graphic && now < explosion.judgment_fade_start + config::JUDGMENT_GRAPHICS_FADE_DURATION;
+            
+            explosion_alive || judgment_alive
+        });
 
     next_state
 }
@@ -841,12 +847,15 @@ pub fn check_hits_on_press(state: &mut GameState, keycode: VirtualKeyCode) {
                 );
 
                 let explosion_end_time = Instant::now() + config::EXPLOSION_DURATION;
+                let judgment_fade_start = Instant::now() + config::JUDGMENT_GRAPHICS_DURATION - config::JUDGMENT_GRAPHICS_FADE_DURATION;
                 state.active_explosions.insert(
                     dir,
                     ActiveExplosion {
                         judgment,
                         direction: dir,
                         end_time: explosion_end_time,
+                        show_judgment_graphic: true,
+                        judgment_fade_start,
                     },
                 );
                 column_arrows.remove(idx_to_remove);
@@ -981,6 +990,73 @@ fn draw_judgment_line(
         label_scale,
         None,
     );
+}
+
+fn draw_judgment_graphics(
+    renderer: &Renderer,
+    game_state: &GameState,
+    device: &ash::Device,
+    cmd_buf: vk::CommandBuffer,
+) {
+    let current_time = Instant::now();
+
+    for (direction, explosion) in &game_state.active_explosions {
+        if !explosion.show_judgment_graphic {
+            continue;
+        }
+
+        // Calculate alpha based on timing
+        let alpha = if current_time >= explosion.judgment_fade_start {
+            let fade_progress = current_time.duration_since(explosion.judgment_fade_start).as_secs_f32()
+                / config::JUDGMENT_GRAPHICS_FADE_DURATION.as_secs_f32();
+            (1.0 - fade_progress).max(0.0)
+        } else {
+            1.0
+        };
+
+        if alpha <= 0.0 {
+            continue;
+        }
+
+        // Calculate UV coordinates for sprite sheet
+        // Chromatic sprite sheet is 2 columns x 7 rows (engine doesn't support white fantastic so skip it)
+        let judgment_row = match explosion.judgment {
+            Judgment::W1 => 0,    // FANTASTIC (top row)
+            Judgment::W2 => 2,    // EXCELLENT 
+            Judgment::W3 => 3,    // GREAT
+            Judgment::W4 => 4,    // DECENT
+            Judgment::W5 => 5,    // WAY OFF
+            Judgment::Miss => 6,  // MISS (bottom row)
+        };
+
+        // Use column 0 for now (you can animate between columns later)
+        let column = 0;
+
+        // Calculate UV coordinates
+        let uv_width = 1.0 / 2.0;   // 2 columns
+        let uv_height = 1.0 / 7.0;  // 7 rows
+        let uv_x_start = (column as f32 * config::JUDGMENT_GRAPHICS_SPRITE_WIDTH) / JUDGMENT_GRAPHICS_SPRITE_SHEET_WIDTH;
+        let uv_y_start = (judgment_row as f32 * config::JUDGMENT_GRAPHICS_SPRITE_HEIGHT) / JUDGMENT_GRAPHICS_SPRITE_SHEET_HEIGHT;
+
+        // Get center of up/down targets
+        let target_pos_up = &game_state.targets[ArrowDirection::Up as usize];
+        let target_pos_down = &game_state.targets[ArrowDirection::Down as usize];
+        let graphics_x = target_pos_down.x + (target_pos_up.x - target_pos_down.x) / 2.0;
+        let graphics_y = target_pos_up.y + config::JUDGMENT_GRAPHICS_OFFSET_Y;
+
+        // Draw the judgment graphic
+        renderer.draw_quad(
+            device,
+            cmd_buf,
+            DescriptorSetId::JudgmentGraphics,
+            Vector3::new(graphics_x, graphics_y, 0f32),
+            (config::JUDGMENT_GRAPHICS_SPRITE_WIDTH,config::JUDGMENT_GRAPHICS_SPRITE_HEIGHT),
+            Rad(0.0), // No rotation
+            [1.0, 1.0, 1.0, alpha], // White tint with alpha
+            [uv_x_start, uv_y_start], // UV offset
+            [uv_width, uv_height],    // UV scale
+        );
+    }
 }
 
 pub fn draw(
@@ -1441,6 +1517,8 @@ pub fn draw(
             }
         }
     }
+    
+    draw_judgment_graphics(renderer, game_state, device, cmd_buf);
 
     let center_x = win_w / 2.0; // For centering text
 
