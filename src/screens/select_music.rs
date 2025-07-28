@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 
 pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
-pub(crate) const SELECTION_START_PLAY_DELAY: Duration = Duration::from_millis(500);
+pub(crate) const SELECTION_START_PLAY_DELAY: Duration = Duration::from_millis(100);
 
 // Helper function to check if a specific difficulty index has a playable chart for the given song
 pub(crate) fn is_difficulty_playable(song: &Arc<SongInfo>, difficulty_index: usize) -> bool {
