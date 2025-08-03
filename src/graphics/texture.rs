@@ -1,11 +1,9 @@
-use crate::graphics::vulkan_base::{
-    find_memorytype_index, record_submit_commandbuffer, VulkanBase,
-};
+use crate::graphics::vulkan_base::{self, VulkanBase};
 use ash::{vk, Device};
-use image::RgbaImage; // Keep this if load_texture still needs it elsewhere
+use image::RgbaImage;
 use log;
 use std::error::Error;
-use std::path::Path; // Make sure log is imported
+use std::path::Path;
 
 #[derive(Debug)]
 pub struct TextureResource {
@@ -20,7 +18,6 @@ pub struct TextureResource {
 impl TextureResource {
     pub fn destroy(&mut self, device: &Device) {
         unsafe {
-            // Check for null handles before destroying, good practice
             if self.sampler != vk::Sampler::null() {
                 device.destroy_sampler(self.sampler, None);
                 self.sampler = vk::Sampler::null();
@@ -46,7 +43,7 @@ pub fn create_texture_from_rgba_data(
     width: u32,
     height: u32,
     rgba_data: &[u8],
-    debug_name: &str, // For logging
+    debug_name: &str,
 ) -> Result<TextureResource, Box<dyn Error>> {
     log::info!(
         "Creating {}x{} texture from RGBA data (debug_name: {})",
@@ -66,15 +63,14 @@ pub fn create_texture_from_rgba_data(
         .into());
     }
 
-    let mut staging_buffer = base.create_buffer(
+    let mut staging_buffer = vulkan_base::create_buffer(
+        base,
         image_data_size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
     )?;
 
-    // Assuming base.update_buffer is generic or handles &[u8].
-    // The `Copy` trait bound on `T` in `update_buffer<T: Copy>` means `u8` is fine.
-    base.update_buffer(&staging_buffer, rgba_data)
+    vulkan_base::update_buffer(base, &staging_buffer, rgba_data)
         .map_err(|e| format!("Failed to update staging buffer for {}: {}", debug_name, e))?;
 
     let format = vk::Format::R8G8B8A8_UNORM;
@@ -99,7 +95,7 @@ pub fn create_texture_from_rgba_data(
     let image = unsafe { base.device.create_image(&image_create_info, None)? };
 
     let mem_requirements = unsafe { base.device.get_image_memory_requirements(image) };
-    let mem_type_index = find_memorytype_index(
+    let mem_type_index = vulkan_base::find_memorytype_index(
         &mem_requirements,
         &base.device_memory_properties,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -115,7 +111,7 @@ pub fn create_texture_from_rgba_data(
     let memory = unsafe { base.device.allocate_memory(&alloc_info, None)? };
     unsafe { base.device.bind_image_memory(image, memory, 0)? };
 
-    record_submit_commandbuffer(
+    vulkan_base::record_submit_commandbuffer(
         &base.device,
         base.setup_command_buffer,
         base.setup_commands_reuse_fence,
@@ -151,8 +147,8 @@ pub fn create_texture_from_rgba_data(
 
             let buffer_image_copy = vk::BufferImageCopy::default()
                 .buffer_offset(0)
-                .buffer_row_length(0) // Tightly packed
-                .buffer_image_height(0) // Tightly packed
+                .buffer_row_length(0)
+                .buffer_image_height(0)
                 .image_subresource(vk::ImageSubresourceLayers {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     mip_level: 0,
@@ -198,10 +194,8 @@ pub fn create_texture_from_rgba_data(
         },
     );
     unsafe {
-        // Wait for the fence associated with setup_command_buffer
         base.device
             .wait_for_fences(&[base.setup_commands_reuse_fence], true, u64::MAX)?;
-        // Resetting the fence is handled by record_submit_commandbuffer
     }
 
     staging_buffer.destroy(&base.device);
@@ -221,14 +215,14 @@ pub fn create_texture_from_rgba_data(
     let view = unsafe { base.device.create_image_view(&image_view_info, None)? };
 
     let sampler_info = vk::SamplerCreateInfo::default()
-        .mag_filter(vk::Filter::LINEAR) // Linear filtering might be good for the graph
+        .mag_filter(vk::Filter::LINEAR)
         .min_filter(vk::Filter::LINEAR)
         .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
         .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
         .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
         .anisotropy_enable(false)
         .unnormalized_coordinates(false)
-        .mipmap_mode(vk::SamplerMipmapMode::LINEAR); // No mipmaps
+        .mipmap_mode(vk::SamplerMipmapMode::LINEAR);
     let sampler = unsafe { base.device.create_sampler(&sampler_info, None)? };
 
     log::info!(
@@ -245,10 +239,9 @@ pub fn create_texture_from_rgba_data(
     })
 }
 
-// NEW FUNCTION: Create a solid color texture (e.g., 1x1 white)
 pub fn create_solid_color_texture(
     base: &VulkanBase,
-    color: [u8; 4], // RGBA color data
+    color: [u8; 4],
 ) -> Result<TextureResource, Box<dyn Error>> {
     let width = 1;
     let height = 1;
@@ -258,23 +251,21 @@ pub fn create_solid_color_texture(
         height,
         color
     );
-    let image_data = color; // Use the provided color directly
-    let image_data_size = std::mem::size_of_val(&image_data) as vk::DeviceSize; // 4 bytes
+    let image_data = color;
+    let image_data_size = std::mem::size_of_val(&image_data) as vk::DeviceSize;
 
-    // --- 2. Create Staging Buffer ---
     log::debug!("Creating staging buffer for solid color texture");
-    let mut staging_buffer = base.create_buffer(
+    let mut staging_buffer = vulkan_base::create_buffer(
+        base,
         image_data_size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
     )?;
     log::debug!("Staging buffer created");
 
-    // Update buffer needs a slice, so pass color as a slice
-    base.update_buffer(&staging_buffer, &[image_data])?;
+    vulkan_base::update_buffer(base, &staging_buffer, &[image_data])?;
     log::debug!("Staging buffer updated with solid color data");
 
-    // --- 3. Create Vulkan Image ---
     let format = vk::Format::R8G8B8A8_UNORM;
     let image_extent = vk::Extent3D {
         width,
@@ -290,7 +281,6 @@ pub fn create_solid_color_texture(
         .array_layers(1)
         .samples(vk::SampleCountFlags::TYPE_1)
         .tiling(vk::ImageTiling::OPTIMAL)
-        // Need TRANSFER_DST for copy, SAMPLED for shader access
         .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED)
         .sharing_mode(vk::SharingMode::EXCLUSIVE)
         .initial_layout(vk::ImageLayout::UNDEFINED);
@@ -299,12 +289,11 @@ pub fn create_solid_color_texture(
     let image = unsafe { base.device.create_image(&image_create_info, None)? };
     log::debug!("Vulkan image created");
 
-    // --- 4. Allocate Memory for Image ---
     let mem_requirements = unsafe { base.device.get_image_memory_requirements(image) };
-    let mem_type_index = find_memorytype_index(
+    let mem_type_index = vulkan_base::find_memorytype_index(
         &mem_requirements,
         &base.device_memory_properties,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL, // Store on GPU
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )
     .ok_or("Failed to find suitable memory type for solid color image")?;
 
@@ -319,10 +308,8 @@ pub fn create_solid_color_texture(
     unsafe { base.device.bind_image_memory(image, memory, 0)? };
     log::debug!("Memory bound to solid color image");
 
-    // --- 5. Transition Layout and Copy Buffer to Image ---
     log::debug!("Recording command buffer for solid color texture copy");
-    // Reuse the same command buffer submission logic
-    record_submit_commandbuffer(
+    vulkan_base::record_submit_commandbuffer(
         &base.device,
         base.setup_command_buffer,
         base.setup_commands_reuse_fence,
@@ -331,7 +318,6 @@ pub fn create_solid_color_texture(
         &[],
         &[],
         |device, command_buffer| {
-            // Transition UNDEFINED -> TRANSFER_DST_OPTIMAL
             let barrier_to_transfer = vk::ImageMemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::NONE)
                 .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
@@ -359,11 +345,10 @@ pub fn create_solid_color_texture(
                 );
             }
 
-            // Copy Buffer to Image
             let buffer_image_copy = vk::BufferImageCopy::default()
                 .buffer_offset(0)
                 .buffer_row_length(0)
-                .buffer_image_height(0) // Tightly packed
+                .buffer_image_height(0)
                 .image_subresource(vk::ImageSubresourceLayers {
                     aspect_mask: vk::ImageAspectFlags::COLOR,
                     mip_level: 0,
@@ -382,7 +367,6 @@ pub fn create_solid_color_texture(
                 );
             }
 
-            // Transition TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
             let barrier_to_shader_read = vk::ImageMemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
                 .dst_access_mask(vk::AccessFlags::SHADER_READ)
@@ -413,27 +397,23 @@ pub fn create_solid_color_texture(
     );
     log::debug!("Command buffer submitted");
 
-    // Wait for the copy operation to complete (important!)
     unsafe {
         log::debug!("Waiting for solid color texture copy fence...");
         base.device
             .wait_for_fences(&[base.setup_commands_reuse_fence], true, u64::MAX)?;
         log::debug!("Fence signaled.");
-        // Don't reset the fence here, record_submit_commandbuffer handles it
     }
 
-    // --- 6. Clean up Staging Buffer ---
     log::debug!("Destroying staging buffer for solid color");
     staging_buffer.destroy(&base.device);
     log::debug!("Staging buffer destroyed");
 
-    // --- 7. Create Image View ---
     log::debug!("Creating image view for solid color");
     let image_view_info = vk::ImageViewCreateInfo::default()
         .image(image)
         .view_type(vk::ImageViewType::TYPE_2D)
         .format(format)
-        .components(vk::ComponentMapping::default()) // Identity mapping
+        .components(vk::ComponentMapping::default())
         .subresource_range(vk::ImageSubresourceRange {
             aspect_mask: vk::ImageAspectFlags::COLOR,
             base_mip_level: 0,
@@ -444,9 +424,6 @@ pub fn create_solid_color_texture(
     let view = unsafe { base.device.create_image_view(&image_view_info, None)? };
     log::debug!("Image view created");
 
-    // --- 8. Create Sampler ---
-    // For a 1x1 texture, NEAREST is fine, filtering doesn't matter much.
-    // REPEAT vs CLAMP doesn't matter much either, but CLAMP is typical.
     log::debug!("Creating sampler for solid color");
     let sampler_info = vk::SamplerCreateInfo::default()
         .mag_filter(vk::Filter::NEAREST)
@@ -456,7 +433,7 @@ pub fn create_solid_color_texture(
         .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
         .anisotropy_enable(false)
         .unnormalized_coordinates(false)
-        .mipmap_mode(vk::SamplerMipmapMode::NEAREST); // No mipmaps needed
+        .mipmap_mode(vk::SamplerMipmapMode::NEAREST);
 
     let sampler = unsafe { base.device.create_sampler(&sampler_info, None)? };
     log::debug!("Sampler created");
@@ -472,35 +449,30 @@ pub fn create_solid_color_texture(
     })
 }
 
-// load_texture function remains here (make sure RgbaImage import is still valid)
 pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, Box<dyn Error>> {
-    // ... (keep existing load_texture implementation) ...
-    // --- 1. Load Image with `image` crate ---
     log::info!("Starting to load texture from: {:?}", path);
     let img = image::open(path).map_err(|e| format!("Failed to open image {:?}: {}", path, e))?;
     log::info!("Image file opened successfully: {:?}", path);
 
-    // No need to flip Y for Vulkan texture coordinates if UVs are handled correctly
-    let img_rgba: RgbaImage = img.to_rgba8(); // Ensure RGBA format
+    let img_rgba: RgbaImage = img.to_rgba8();
     let (width, height) = img_rgba.dimensions();
     log::info!("Image converted to RGBA8, dimensions: {}x{}", width, height);
     let image_data = img_rgba.into_raw();
-    let image_data_size = (width * height * 4) as vk::DeviceSize; // 4 bytes per pixel (RGBA)
+    let image_data_size = (width * height * 4) as vk::DeviceSize;
 
-    // --- 2. Create Staging Buffer ---
     log::info!("Creating staging buffer for image data");
-    let mut staging_buffer = base.create_buffer(
+    let mut staging_buffer = vulkan_base::create_buffer(
+        base,
         image_data_size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
     )?;
     log::info!("Staging buffer created successfully");
 
-    base.update_buffer(&staging_buffer, &image_data)?;
+    vulkan_base::update_buffer(base, &staging_buffer, &image_data)?;
     log::info!("Staging buffer updated with image data");
 
-    // --- 3. Create Vulkan Image ---
-    let format = vk::Format::R8G8B8A8_UNORM; // Standard RGBA format
+    let format = vk::Format::R8G8B8A8_UNORM;
     let image_extent = vk::Extent3D {
         width,
         height,
@@ -523,11 +495,10 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
     let image = unsafe { base.device.create_image(&image_create_info, None)? };
     log::info!("Vulkan image created successfully");
 
-    // --- 4. Allocate Memory for Image ---
     let mem_requirements = unsafe { base.device.get_image_memory_requirements(image) };
     log::info!("Got memory requirements for image");
 
-    let mem_type_index = find_memorytype_index(
+    let mem_type_index = vulkan_base::find_memorytype_index(
         &mem_requirements,
         &base.device_memory_properties,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -546,9 +517,8 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
     unsafe { base.device.bind_image_memory(image, memory, 0)? };
     log::info!("Memory bound to image successfully");
 
-    // --- 5. Transition Layout and Copy Buffer to Image ---
     log::info!("Recording and submitting command buffer for image transitions and copy");
-    record_submit_commandbuffer(
+    vulkan_base::record_submit_commandbuffer(
         &base.device,
         base.setup_command_buffer,
         base.setup_commands_reuse_fence,
@@ -558,7 +528,6 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
         &[],
         |device, command_buffer| {
             log::info!("Recording command buffer: Transition UNDEFINED -> TRANSFER_DST_OPTIMAL");
-            // Transition UNDEFINED -> TRANSFER_DST_OPTIMAL
             let barrier_to_transfer = vk::ImageMemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::NONE)
                 .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
@@ -589,7 +558,6 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
             log::info!("Recorded barrier for UNDEFINED -> TRANSFER_DST_OPTIMAL");
 
             log::info!("Recording buffer to image copy");
-            // Copy Buffer to Image
             let buffer_image_copy = vk::BufferImageCopy::default()
                 .buffer_offset(0)
                 .buffer_row_length(0)
@@ -615,7 +583,6 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
             log::info!("Recorded buffer to image copy");
 
             log::info!("Recording transition TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL");
-            // Transition TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
             let barrier_to_shader_read = vk::ImageMemoryBarrier::default()
                 .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
                 .dst_access_mask(vk::AccessFlags::SHADER_READ)
@@ -658,12 +625,10 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
 
     log::info!("Command buffer execution finished successfully");
 
-    // --- 6. Clean up Staging Buffer ---
     log::info!("Destroying staging buffer");
     staging_buffer.destroy(&base.device);
     log::info!("Staging buffer destroyed");
 
-    // --- 7. Create Image View ---
     log::info!("Creating image view");
     let image_view_info = vk::ImageViewCreateInfo::default()
         .image(image)
@@ -685,7 +650,6 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
     let view = unsafe { base.device.create_image_view(&image_view_info, None)? };
     log::info!("Image view created successfully");
 
-    // --- 8. Create Sampler ---
     log::info!("Creating sampler");
     let sampler_info = vk::SamplerCreateInfo::default()
         .mag_filter(vk::Filter::LINEAR)

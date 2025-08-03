@@ -2,8 +2,9 @@ use crate::assets::AssetManager;
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::Renderer;
+use crate::graphics::vulkan_base;
 use crate::graphics::vulkan_base::VulkanBase;
-use crate::parsing::simfile::{scan_packs, SongInfo}; // Import for gameplay transition AND helper
+use crate::parsing::simfile::{scan_packs, SongInfo};
 use crate::screens::{gameplay, menu, options, score, select_music};
 use crate::state::{
     AppState, GameState, MenuState, MusicWheelEntry, OptionsState, ScoreScreenState,
@@ -27,7 +28,7 @@ use winit::{
 };
 
 const RESIZE_DEBOUNCE_DURATION: Duration = Duration::from_millis(0);
-const PREVIEW_RESTART_DELAY: f32 = 0.25; // Seconds (used in App::update for SelectMusicState)
+const PREVIEW_RESTART_DELAY: f32 = 0.25;
 
 pub struct App {
     vulkan_base: VulkanBase,
@@ -48,7 +49,7 @@ pub struct App {
     pending_resize: Option<(PhysicalSize<u32>, Instant)>,
     swapchain_is_known_bad: bool,
     pack_colors: HashMap<String, [f32; 4]>,
-    current_modifiers: ModifiersState, // Added
+    current_modifiers: ModifiersState,
 }
 
 impl App {
@@ -63,10 +64,10 @@ impl App {
             ))
             .build(event_loop)?;
 
-        let vulkan_base = VulkanBase::new(window)?;
-        info!("Vulkan Initialized. GPU: {}", vulkan_base.get_gpu_name());
+        let vulkan_base = vulkan_base::init(window)?;
+        info!("Vulkan Initialized. GPU: {}", vulkan_base::get_gpu_name(&vulkan_base));
 
-        let initial_surface_resolution = vulkan_base.surface_resolution;
+        let initial_surface_resolution = vulkan_base.swapchain_resources.surface_resolution;
         let renderer = Renderer::new(
             &vulkan_base,
             (
@@ -84,7 +85,7 @@ impl App {
         info!("Asset Manager Initialized and Assets Loaded.");
 
         info!("Scanning for songs...");
-        let song_library = scan_packs(std::path::Path::new("songs")); // Explicit Path
+        let song_library = scan_packs(std::path::Path::new("songs"));
         info!("Found {} songs.", song_library.len());
 
         let mut unique_pack_names: Vec<String> = song_library
@@ -111,8 +112,7 @@ impl App {
         }
         info!("Assigned colors to {} unique packs.", pack_colors.len());
 
-        vulkan_base
-            .wait_idle()
+        vulkan_base::wait_idle(&vulkan_base)
             .map_err(|e| format!("Error waiting for GPU idle after setup: {}", e))?;
         info!("GPU idle after setup.");
 
@@ -135,7 +135,7 @@ impl App {
             pending_resize: None,
             swapchain_is_known_bad: false,
             pack_colors,
-            current_modifiers: ModifiersState::empty(), // Initialize
+            current_modifiers: ModifiersState::empty(),
         })
     }
 
@@ -147,7 +147,7 @@ impl App {
             elwt.set_control_flow(ControlFlow::Poll);
 
             match event {
-                Event::WindowEvent { event: window_event, window_id } if window_id == self.vulkan_base.window.id() => {
+                Event::WindowEvent { event: window_event, window_id } if window_id == vulkan_base::get_window_id(&self.vulkan_base) => {
                     if let WindowEvent::ModifiersChanged(modifiers) = window_event {
                         self.current_modifiers = modifiers.state();
                     }
@@ -270,12 +270,9 @@ impl App {
             } => {
                 self.handle_keyboard_input(key_event);
             }
-            // WindowEvent::ModifiersChanged is handled in the main event loop now
             _ => {}
         }
     }
-
-    // find_pack_banner moved to select_music.rs as a private helper
 
     fn rebuild_music_wheel_entries(&mut self) {
         select_music::rebuild_music_wheel_entries_logic(
@@ -283,15 +280,12 @@ impl App {
             &self.song_library,
             &self.pack_colors,
         );
-        // Logic related to resetting preview state is now inside rebuild_music_wheel_entries_logic
         info!(
             "Rebuilt music wheel. New #entries: {}, selected_index: {}",
             self.select_music_state.entries.len(),
             self.select_music_state.selected_index
         );
     }
-
-    // start_actual_preview_playback moved to select_music.rs
 
     fn handle_music_selection_change(&mut self) {
         select_music::handle_selection_change_logic(
@@ -314,9 +308,8 @@ impl App {
                     menu::handle_input(&key_event, &mut self.menu_state, &self.audio_manager);
             }
             AppState::SelectMusic => {
-                // let _original_selected_index_before_input = self.select_music_state.selected_index; // Can be removed if not used
                 let original_expanded_pack_name =
-                    self.select_music_state.expanded_pack_name.clone(); // Capture before
+                    self.select_music_state.expanded_pack_name.clone();
 
                 let (next_state, sel_changed_by_nav_or_toggle) = select_music::handle_input(
                     &key_event,
@@ -337,15 +330,11 @@ impl App {
             AppState::Gameplay => {
                 if let Some(ref mut gs) = self.game_state {
                     gameplay::handle_input(&key_event, gs, self.current_modifiers);
-                // Pass modifiers
                 } else {
                     warn!("Received input in Gameplay state, but game_state is None.");
-                    requested_state = None;
                 }
             }
-            AppState::Exiting => {
-                requested_state = None;
-            }
+            AppState::Exiting => {}
             AppState::ScoreScreen => {
                 requested_state = score::handle_input(&key_event, &mut self.score_state);
             }
@@ -428,9 +417,6 @@ impl App {
                 }
             }
             AppState::ScoreScreen => {
-                // Cleanup for ScoreScreen if any specific resources were used.
-                // Currently ScoreScreenState is simple.
-                // If transitioning away from ScoreScreen, reset banner if not going to Gameplay
                 if new_state != AppState::Gameplay {
                     info!("Transitioning from ScoreScreen to non-Gameplay state ({:?}). Resetting DynamicBanner.", new_state);
                     if let Some(fallback_res) = self
@@ -456,8 +442,8 @@ impl App {
             }
             AppState::SelectMusic => {
                 self.select_music_state = SelectMusicState::default();
-                self.rebuild_music_wheel_entries(); // Calls the local wrapper
-                self.handle_music_selection_change(); // Calls the local wrapper
+                self.rebuild_music_wheel_entries();
+                self.handle_music_selection_change();
                 info!(
                     "Populated SelectMusic state with {} entries and handled initial selection.",
                     self.select_music_state.entries.len()
@@ -537,8 +523,8 @@ impl App {
                     );
 
                     let window_size_f32 = (
-                        self.vulkan_base.surface_resolution.width as f32,
-                        self.vulkan_base.surface_resolution.height as f32,
+                        self.vulkan_base.swapchain_resources.surface_resolution.width as f32,
+                        self.vulkan_base.swapchain_resources.surface_resolution.height as f32,
                     );
 
                     let visual_and_logic_start_instant = Instant::now();
@@ -668,31 +654,15 @@ impl App {
         }
 
         if self.current_app_state == AppState::SelectMusic && selection_changed_by_held_key_scroll {
-            self.handle_music_selection_change(); // Calls the local wrapper
+            self.handle_music_selection_change();
         }
 
         if let Some(fps) = self.fps_counter.update() {
-            let title_suffix = match self.current_app_state {
-                AppState::Gameplay => {
-                    let beat_str = self
-                        .game_state
-                        .as_ref()
-                        .map_or_else(|| "N/A".to_string(), |gs| format!("{:.2}", gs.current_beat));
-                    let offset_str = self.game_state.as_ref().map_or_else(
-                        || "".to_string(),
-                        |gs| format!(" (Offset: {:.3}s)", gs.current_global_offset_sec),
-                    );
-                    format!(
-                        "Gameplay | FPS: {} | Beat: {} {}",
-                        fps, beat_str, offset_str
-                    )
-                }
-                AppState::Menu => format!("Menu | FPS: {}", fps),
-                AppState::SelectMusic => format!("Select Music | FPS: {}", fps),
-                AppState::Options => format!("Options | FPS: {}", fps),
-                AppState::ScoreScreen => format!("Score Screen | FPS: {}", fps),
-                AppState::Exiting => "Exiting...".to_string(),
-            };
+            let title_suffix = format!(
+                "{:?} | FPS: {}",
+                self.current_app_state,
+                fps
+            );
             self.vulkan_base.window.set_title(&format!(
                 "{} | {}",
                 config::WINDOW_TITLE,
@@ -718,10 +688,14 @@ impl App {
             return Ok(());
         }
 
-        self.vulkan_base
-            .rebuild_swapchain_resources(target_size.width, target_size.height)?;
+        // REFACTOR: Call the procedural function
+        vulkan_base::rebuild_swapchain_resources(
+            &mut self.vulkan_base,
+            target_size.width,
+            target_size.height,
+        )?;
 
-        let new_vulkan_surface_extent = self.vulkan_base.surface_resolution;
+        let new_vulkan_surface_extent = self.vulkan_base.swapchain_resources.surface_resolution;
         let new_vulkan_size_f32 = (
             new_vulkan_surface_extent.width as f32,
             new_vulkan_surface_extent.height as f32,
@@ -742,77 +716,65 @@ impl App {
     }
 
     fn render(&mut self) -> Result<bool, vk::Result> {
-        let current_surface_resolution = self.vulkan_base.surface_resolution;
+        let current_surface_resolution = self.vulkan_base.swapchain_resources.surface_resolution;
         if current_surface_resolution.width == 0 || current_surface_resolution.height == 0 {
             trace!("Skipping render due to zero-sized surface resolution.");
             return Ok(true);
         }
 
-        let draw_result = self.vulkan_base.draw_frame(|device, cmd_buf| {
-            trace!("Render: Beginning frame drawing...");
-            self.renderer
-                .begin_frame(device, cmd_buf, current_surface_resolution);
+        unsafe {
+            let frame_data = match vulkan_base::begin_frame(&mut self.vulkan_base) {
+                Ok(Some(data)) => data,
+                Ok(None) => return Ok(true), // Swapchain is suboptimal, needs rebuild
+                Err(e) => return Err(e),
+            };
 
+            let (cmd_buf, present_index) = frame_data;
+
+            // Begin render pass inside the command buffer
+            let clear_values = [
+                vk::ClearValue { color: vk::ClearColorValue { float32: [0.1, 0.1, 0.1, 1.0] } },
+                vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 } },
+            ];
+            let render_pass_begin_info = vk::RenderPassBeginInfo::default()
+                .render_pass(self.vulkan_base.render_pass)
+                .framebuffer(self.vulkan_base.swapchain_resources.framebuffers[present_index as usize])
+                .render_area(vk::Rect2D {
+                    offset: vk::Offset2D::default(),
+                    extent: current_surface_resolution,
+                })
+                .clear_values(&clear_values);
+
+            self.vulkan_base.device.cmd_begin_render_pass(cmd_buf, &render_pass_begin_info, vk::SubpassContents::INLINE);
+
+            // --- App-level drawing commands ---
+            self.renderer.begin_frame(&self.vulkan_base.device, cmd_buf, current_surface_resolution);
             match self.current_app_state {
                 AppState::Menu => {
-                    menu::draw(
-                        &self.renderer,
-                        &self.menu_state,
-                        &self.asset_manager,
-                        device,
-                        cmd_buf,
-                    );
+                    menu::draw(&self.renderer, &self.menu_state, &self.asset_manager, &self.vulkan_base.device, cmd_buf);
                 }
                 AppState::SelectMusic => {
-                    select_music::draw(
-                        &self.renderer,
-                        &self.select_music_state,
-                        &self.asset_manager,
-                        device,
-                        cmd_buf,
-                    );
+                    select_music::draw(&self.renderer, &self.select_music_state, &self.asset_manager, &self.vulkan_base.device, cmd_buf);
                 }
                 AppState::Options => {
-                    options::draw(
-                        &self.renderer,
-                        &self.options_state,
-                        &self.asset_manager,
-                        device,
-                        cmd_buf,
-                    );
+                    options::draw(&self.renderer, &self.options_state, &self.asset_manager, &self.vulkan_base.device, cmd_buf);
                 }
                 AppState::Gameplay => {
                     if let Some(ref gs) = self.game_state {
-                        gameplay::draw(&self.renderer, gs, &self.asset_manager, device, cmd_buf);
-                    } else {
-                        warn!("Attempted to draw Gameplay state, but game_state is None.");
+                        gameplay::draw(&self.renderer, gs, &self.asset_manager, &self.vulkan_base.device, cmd_buf);
                     }
                 }
                 AppState::ScoreScreen => {
-                    score::draw(
-                        &self.renderer,
-                        &self.score_state,
-                        &self.asset_manager,
-                        device,
-                        cmd_buf,
-                    );
+                    score::draw(&self.renderer, &self.score_state, &self.asset_manager, &self.vulkan_base.device, cmd_buf);
                 }
-                AppState::Exiting => {
-                    trace!("Render: In Exiting state, drawing nothing specific.");
-                }
+                AppState::Exiting => {}
             }
-            trace!("Render: Frame drawing commands recorded.");
-        });
+            // --- End App-level drawing ---
 
-        match draw_result {
-            Ok(needs_resize) => Ok(needs_resize),
-            Err(e @ vk::Result::ERROR_OUT_OF_DATE_KHR) | Err(e @ vk::Result::SUBOPTIMAL_KHR) => {
-                Err(e)
-            }
-            Err(e) => {
-                error!("Error during Vulkan draw_frame: {:?}", e);
-                Err(e)
-            }
+            self.vulkan_base.device.cmd_end_render_pass(cmd_buf);
+
+            // End the frame
+            vulkan_base::end_frame(&mut self.vulkan_base, cmd_buf, present_index)
         }
     }
 }
@@ -820,7 +782,8 @@ impl App {
 impl Drop for App {
     fn drop(&mut self) {
         info!("Dropping App - Cleaning up resources...");
-        if let Err(e) = self.vulkan_base.wait_idle() {
+        // REFACTOR: Call procedural wait_idle
+        if let Err(e) = vulkan_base::wait_idle(&self.vulkan_base) {
             error!("Error waiting for GPU idle during App drop: {}", e);
         }
 
