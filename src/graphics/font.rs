@@ -1,6 +1,6 @@
 use crate::graphics::renderer::DescriptorSetId;
 use crate::graphics::texture::{load_texture, TextureResource};
-use crate::graphics::vulkan_base::VulkanBase;
+use crate::graphics::vulkan::VulkanBase;
 use ash::Device;
 use log::{debug, error, info, warn};
 use serde::Deserialize;

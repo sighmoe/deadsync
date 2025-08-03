@@ -2,8 +2,8 @@ use crate::assets::AssetManager;
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::Renderer;
-use crate::graphics::vulkan_base;
-use crate::graphics::vulkan_base::VulkanBase;
+use crate::graphics::vulkan;
+use crate::graphics::vulkan::VulkanBase;
 use crate::parsing::simfile::{scan_packs, SongInfo};
 use crate::screens::{gameplay, menu, options, score, select_music};
 use crate::state::{
@@ -64,8 +64,8 @@ impl App {
             ))
             .build(event_loop)?;
 
-        let vulkan_base = vulkan_base::init(window)?;
-        info!("Vulkan Initialized. GPU: {}", vulkan_base::get_gpu_name(&vulkan_base));
+        let vulkan_base = vulkan::init(window)?;
+        info!("Vulkan Initialized. GPU: {}", vulkan::get_gpu_name(&vulkan_base));
 
         let initial_surface_resolution = vulkan_base.swapchain_resources.surface_resolution;
         let renderer = Renderer::new(
@@ -112,7 +112,7 @@ impl App {
         }
         info!("Assigned colors to {} unique packs.", pack_colors.len());
 
-        vulkan_base::wait_idle(&vulkan_base)
+        vulkan::wait_idle(&vulkan_base)
             .map_err(|e| format!("Error waiting for GPU idle after setup: {}", e))?;
         info!("GPU idle after setup.");
 
@@ -147,7 +147,7 @@ impl App {
             elwt.set_control_flow(ControlFlow::Poll);
 
             match event {
-                Event::WindowEvent { event: window_event, window_id } if window_id == vulkan_base::get_window_id(&self.vulkan_base) => {
+                Event::WindowEvent { event: window_event, window_id } if window_id == vulkan::get_window_id(&self.vulkan_base) => {
                     if let WindowEvent::ModifiersChanged(modifiers) = window_event {
                         self.current_modifiers = modifiers.state();
                     }
@@ -689,7 +689,7 @@ impl App {
         }
 
         // REFACTOR: Call the procedural function
-        vulkan_base::rebuild_swapchain_resources(
+        vulkan::rebuild_swapchain_resources(
             &mut self.vulkan_base,
             target_size.width,
             target_size.height,
@@ -723,7 +723,7 @@ impl App {
         }
 
         unsafe {
-            let frame_data = match vulkan_base::begin_frame(&mut self.vulkan_base) {
+            let frame_data = match vulkan::begin_frame(&mut self.vulkan_base) {
                 Ok(Some(data)) => data,
                 Ok(None) => return Ok(true), // Swapchain is suboptimal, needs rebuild
                 Err(e) => return Err(e),
@@ -774,7 +774,7 @@ impl App {
             self.vulkan_base.device.cmd_end_render_pass(cmd_buf);
 
             // End the frame
-            vulkan_base::end_frame(&mut self.vulkan_base, cmd_buf, present_index)
+            vulkan::end_frame(&mut self.vulkan_base, cmd_buf, present_index)
         }
     }
 }
@@ -783,7 +783,7 @@ impl Drop for App {
     fn drop(&mut self) {
         info!("Dropping App - Cleaning up resources...");
         // REFACTOR: Call procedural wait_idle
-        if let Err(e) = vulkan_base::wait_idle(&self.vulkan_base) {
+        if let Err(e) = vulkan::wait_idle(&self.vulkan_base) {
             error!("Error waiting for GPU idle during App drop: {}", e);
         }
 

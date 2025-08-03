@@ -2,7 +2,7 @@ use crate::assets::{AssetManager, FontId, SoundId, TextureId};
 use crate::audio::AudioManager;
 use crate::config;
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
-use crate::graphics::vulkan_base::VulkanBase;
+use crate::graphics::vulkan::VulkanBase;
 use crate::parsing::simfile::{SongInfo};
 use crate::state::{AppState, MusicWheelEntry, NavDirection, SelectMusicState, VirtualKeyCode};
 use ash::vk;

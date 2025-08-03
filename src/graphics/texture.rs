@@ -1,4 +1,4 @@
-use crate::graphics::vulkan_base::{self, VulkanBase};
+use crate::graphics::vulkan::{self, VulkanBase};
 use ash::{vk, Device};
 use image::RgbaImage;
 use log;
@@ -63,14 +63,14 @@ pub fn create_texture_from_rgba_data(
         .into());
     }
 
-    let mut staging_buffer = vulkan_base::create_buffer(
+    let mut staging_buffer = vulkan::create_buffer(
         base,
         image_data_size,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
     )?;
 
-    vulkan_base::update_buffer(base, &staging_buffer, rgba_data)
+    vulkan::update_buffer(base, &staging_buffer, rgba_data)
         .map_err(|e| format!("Failed to update staging buffer for {}: {}", debug_name, e))?;
 
     let format = vk::Format::R8G8B8A8_UNORM;
@@ -95,7 +95,7 @@ pub fn create_texture_from_rgba_data(
     let image = unsafe { base.device.create_image(&image_create_info, None)? };
 
     let mem_requirements = unsafe { base.device.get_image_memory_requirements(image) };
-    let mem_type_index = vulkan_base::find_memorytype_index(
+    let mem_type_index = vulkan::find_memorytype_index(
         &mem_requirements,
         &base.device_memory_properties,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -111,7 +111,7 @@ pub fn create_texture_from_rgba_data(
     let memory = unsafe { base.device.allocate_memory(&alloc_info, None)? };
     unsafe { base.device.bind_image_memory(image, memory, 0)? };
 
-    vulkan_base::record_submit_commandbuffer(
+    vulkan::record_submit_commandbuffer(
         &base.device,
         base.setup_command_buffer,
         base.setup_commands_reuse_fence,
@@ -255,7 +255,7 @@ pub fn create_solid_color_texture(
     let image_data_size = std::mem::size_of_val(&image_data) as vk::DeviceSize;
 
     log::debug!("Creating staging buffer for solid color texture");
-    let mut staging_buffer = vulkan_base::create_buffer(
+    let mut staging_buffer = vulkan::create_buffer(
         base,
         image_data_size,
         vk::BufferUsageFlags::TRANSFER_SRC,
@@ -263,7 +263,7 @@ pub fn create_solid_color_texture(
     )?;
     log::debug!("Staging buffer created");
 
-    vulkan_base::update_buffer(base, &staging_buffer, &[image_data])?;
+    vulkan::update_buffer(base, &staging_buffer, &[image_data])?;
     log::debug!("Staging buffer updated with solid color data");
 
     let format = vk::Format::R8G8B8A8_UNORM;
@@ -290,7 +290,7 @@ pub fn create_solid_color_texture(
     log::debug!("Vulkan image created");
 
     let mem_requirements = unsafe { base.device.get_image_memory_requirements(image) };
-    let mem_type_index = vulkan_base::find_memorytype_index(
+    let mem_type_index = vulkan::find_memorytype_index(
         &mem_requirements,
         &base.device_memory_properties,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -309,7 +309,7 @@ pub fn create_solid_color_texture(
     log::debug!("Memory bound to solid color image");
 
     log::debug!("Recording command buffer for solid color texture copy");
-    vulkan_base::record_submit_commandbuffer(
+    vulkan::record_submit_commandbuffer(
         &base.device,
         base.setup_command_buffer,
         base.setup_commands_reuse_fence,
@@ -461,7 +461,7 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
     let image_data_size = (width * height * 4) as vk::DeviceSize;
 
     log::info!("Creating staging buffer for image data");
-    let mut staging_buffer = vulkan_base::create_buffer(
+    let mut staging_buffer = vulkan::create_buffer(
         base,
         image_data_size,
         vk::BufferUsageFlags::TRANSFER_SRC,
@@ -469,7 +469,7 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
     )?;
     log::info!("Staging buffer created successfully");
 
-    vulkan_base::update_buffer(base, &staging_buffer, &image_data)?;
+    vulkan::update_buffer(base, &staging_buffer, &image_data)?;
     log::info!("Staging buffer updated with image data");
 
     let format = vk::Format::R8G8B8A8_UNORM;
@@ -498,7 +498,7 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
     let mem_requirements = unsafe { base.device.get_image_memory_requirements(image) };
     log::info!("Got memory requirements for image");
 
-    let mem_type_index = vulkan_base::find_memorytype_index(
+    let mem_type_index = vulkan::find_memorytype_index(
         &mem_requirements,
         &base.device_memory_properties,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
@@ -518,7 +518,7 @@ pub fn load_texture(base: &VulkanBase, path: &Path) -> Result<TextureResource, B
     log::info!("Memory bound to image successfully");
 
     log::info!("Recording and submitting command buffer for image transitions and copy");
-    vulkan_base::record_submit_commandbuffer(
+    vulkan::record_submit_commandbuffer(
         &base.device,
         base.setup_command_buffer,
         base.setup_commands_reuse_fence,

@@ -1,6 +1,6 @@
 use crate::graphics::font::Font;
 use crate::graphics::texture::{self, TextureResource};
-use crate::graphics::vulkan_base::{self, BufferResource, UniformBufferObject, Vertex, VulkanBase};
+use crate::graphics::vulkan::{self, BufferResource, UniformBufferObject, Vertex, VulkanBase};
 use crate::state::{Judgment, PushConstantData};
 use ash::util::read_spv;
 use ash::{vk, Device};
@@ -82,25 +82,25 @@ impl Renderer {
             },
         ];
         let vertex_buffer_size = (quad_vertices.len() * mem::size_of::<Vertex>()) as vk::DeviceSize;
-        let quad_vertex_buffer = vulkan_base::create_buffer(
+        let quad_vertex_buffer = vulkan::create_buffer(
             base,
             vertex_buffer_size,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
-        vulkan_base::update_buffer(base, &quad_vertex_buffer, &quad_vertices)?;
+        vulkan::update_buffer(base, &quad_vertex_buffer, &quad_vertices)?;
         let quad_indices: [u32; 6] = [0, 1, 2, 2, 3, 0];
         let index_buffer_size = (quad_indices.len() * mem::size_of::<u32>()) as vk::DeviceSize;
-        let quad_index_buffer = vulkan_base::create_buffer(
+        let quad_index_buffer = vulkan::create_buffer(
             base,
             index_buffer_size,
             vk::BufferUsageFlags::INDEX_BUFFER,
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
-        vulkan_base::update_buffer(base, &quad_index_buffer, &quad_indices)?;
+        vulkan::update_buffer(base, &quad_index_buffer, &quad_indices)?;
         let quad_index_count = quad_indices.len() as u32;
         let ubo_size = mem::size_of::<UniformBufferObject>() as vk::DeviceSize;
-        let projection_ubo = vulkan_base::create_buffer(
+        let projection_ubo = vulkan::create_buffer(
             base,
             ubo_size,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -334,7 +334,7 @@ impl Renderer {
         self.current_window_size = window_size;
         let proj = ortho(0.0, window_size.0, 0.0, window_size.1, -1.0, 1.0);
         let ubo = UniformBufferObject { projection: proj };
-        vulkan_base::update_buffer(base, &self.projection_ubo, &[ubo])?;
+        vulkan::update_buffer(base, &self.projection_ubo, &[ubo])?;
         debug!(
             "Projection matrix UBO updated for size: {:?}, Y-DOWN (0,0 top-left)",
             window_size

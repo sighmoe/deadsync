@@ -3,7 +3,7 @@ use crate::config;
 use crate::graphics::font::{load_font, Font, LoadedFontData};
 use crate::graphics::renderer::{DescriptorSetId, Renderer};
 use crate::graphics::texture::{load_texture, TextureResource};
-use crate::graphics::vulkan_base::VulkanBase;
+use crate::graphics::vulkan::VulkanBase;
 use crate::parsing::simfile::SongInfo;
 use ash::Device;
 use log::{error, info, trace};
