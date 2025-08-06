@@ -2,8 +2,8 @@ use crate::screen::{Screen, ScreenObject};
 use cgmath::Matrix4;
 use glow::{HasContext, UniformLocation};
 use glutin::{
+    config::ConfigTemplateBuilder,
     context::{ContextAttributesBuilder, PossiblyCurrentContext},
-    config::{ConfigTemplateBuilder},
     display::{Display, DisplayApiPreference},
     prelude::*,
     surface::{Surface, SurfaceAttributesBuilder, WindowSurface},
@@ -38,16 +38,10 @@ pub fn init(window: Arc<Window>, screen: &Screen) -> Result<State, Box<dyn Error
     let (gl_surface, gl_context, gl) = create_opengl_context(&window)?;
     let (program, mvp_location, color_location) = create_graphics_program(&gl)?;
 
-    let mut gl_objects = Vec::new();
-    for object in &screen.objects {
-        gl_objects.push(create_object_resources(&gl, object)?);
-    }
-
     let initial_size = window.inner_size();
     let projection = create_projection_matrix(initial_size.width, initial_size.height);
 
-    info!("OpenGL backend initialized successfully.");
-    Ok(State {
+    let mut state = State {
         gl,
         gl_surface,
         gl_context,
@@ -56,13 +50,48 @@ pub fn init(window: Arc<Window>, screen: &Screen) -> Result<State, Box<dyn Error
         color_location,
         projection,
         window_size: (initial_size.width, initial_size.height),
-        gl_objects,
-    })
+        gl_objects: Vec::new(),
+    };
+
+    load_screen(&mut state, screen)?;
+
+    info!("OpenGL backend initialized successfully.");
+    Ok(state)
+}
+
+pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
+    info!("Loading new screen for OpenGL...");
+    unsafe {
+        for object in state.gl_objects.iter() {
+            state.gl.delete_vertex_array(object.vao);
+            state.gl.delete_buffer(object._vbo);
+            state.gl.delete_buffer(object._ibo);
+        }
+    }
+    state.gl_objects.clear();
+
+    if screen.objects.is_empty() {
+        info!("New screen has no objects to load.");
+        return Ok(());
+    }
+
+    for object in &screen.objects {
+        let gl_object =
+            create_object_resources(&state.gl, object).map_err(|e| e.to_string())?;
+        state.gl_objects.push(gl_object);
+    }
+    info!("OpenGL screen loaded successfully.");
+    Ok(())
 }
 
 pub fn draw(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
     let (width, height) = state.window_size;
     if width == 0 || height == 0 {
+        return Ok(());
+    }
+
+    if state.gl_objects.len() != screen.objects.len() {
+        warn!("Mismatch between GL objects and screen objects. A screen load may be needed.");
         return Ok(());
     }
 
@@ -77,17 +106,22 @@ pub fn draw(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
             let mvp = state.projection * object.transform;
             let mvp_array: [[f32; 4]; 4] = mvp.into();
 
-            state
-                .gl
-                .uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, &mvp_array.concat());
+            state.gl.uniform_matrix_4_f32_slice(
+                Some(&state.mvp_location),
+                false,
+                &mvp_array.concat(),
+            );
             state
                 .gl
                 .uniform_4_f32_slice(Some(&state.color_location), &object.color);
 
             state.gl.bind_vertex_array(Some(gl_object.vao));
-            state
-                .gl
-                .draw_elements(glow::TRIANGLES, gl_object.index_count, glow::UNSIGNED_SHORT, 0);
+            state.gl.draw_elements(
+                glow::TRIANGLES,
+                gl_object.index_count,
+                glow::UNSIGNED_SHORT,
+                0,
+            );
         }
     }
     state.gl_surface.swap_buffers(&state.gl_context)?;
@@ -96,8 +130,11 @@ pub fn draw(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
 
 pub fn resize(state: &mut State, width: u32, height: u32) {
     if width > 0 && height > 0 {
-        if let (Some(width_nz), Some(height_nz)) = (NonZeroU32::new(width), NonZeroU32::new(height)) {
-            state.gl_surface.resize(&state.gl_context, width_nz, height_nz);
+        if let (Some(width_nz), Some(height_nz)) = (NonZeroU32::new(width), NonZeroU32::new(height))
+        {
+            state
+                .gl_surface
+                .resize(&state.gl_context, width_nz, height_nz);
             unsafe {
                 state.gl.viewport(0, 0, width as i32, height as i32);
             }
@@ -128,7 +165,6 @@ fn create_opengl_context(
     let preference = DisplayApiPreference::Wgl(None);
     let display = unsafe { Display::new(window.display_handle()?.into(), preference)? };
 
-    // FIX: Revert to the original, more robust config search.
     let template = ConfigTemplateBuilder::new()
         .with_alpha_size(8)
         .with_stencil_size(8)
@@ -151,7 +187,6 @@ fn create_opengl_context(
     let context = unsafe { display.create_context(&config, &context_attributes)? }
         .make_current(&surface)?;
 
-    // This is the most important part for correct sRGB color.
     unsafe {
         let gl = glow::Context::from_loader_function_cstr(|s: &CStr| display.get_proc_address(s));
         gl.enable(glow::FRAMEBUFFER_SRGB);
@@ -166,8 +201,14 @@ fn create_graphics_program(
     unsafe {
         let program = gl.create_program()?;
         let shader_sources = [
-            (glow::VERTEX_SHADER, include_str!("../shaders/opengl_shader.vert")),
-            (glow::FRAGMENT_SHADER, include_str!("../shaders/opengl_shader.frag")),
+            (
+                glow::VERTEX_SHADER,
+                include_str!("../shaders/opengl_shader.vert"),
+            ),
+            (
+                glow::FRAGMENT_SHADER,
+                include_str!("../shaders/opengl_shader.frag"),
+            ),
         ];
 
         let mut shaders = Vec::with_capacity(shader_sources.len());
@@ -192,9 +233,11 @@ fn create_graphics_program(
             gl.delete_shader(shader);
         }
 
-        let mvp_location = gl.get_uniform_location(program, "u_model_view_proj")
+        let mvp_location = gl
+            .get_uniform_location(program, "u_model_view_proj")
             .ok_or("Could not find 'u_model_view_proj' uniform")?;
-        let color_location = gl.get_uniform_location(program, "u_color")
+        let color_location = gl
+            .get_uniform_location(program, "u_color")
             .ok_or("Could not find 'u_color' uniform")?;
 
         Ok((program, mvp_location, color_location))
@@ -245,11 +288,19 @@ fn create_projection_matrix(width: u32, height: u32) -> Matrix4<f32> {
     } else {
         (400.0, 400.0 / aspect_ratio)
     };
-    cgmath::ortho(-ortho_width, ortho_width, -ortho_height, ortho_height, -1.0, 1.0)
+    cgmath::ortho(
+        -ortho_width,
+        ortho_width,
+        -ortho_height,
+        ortho_height,
+        -1.0,
+        1.0,
+    )
 }
 
 mod bytemuck {
     pub unsafe fn cast_slice<T, U>(slice: &[T]) -> &[U] {
+        // FIX: Add explicit unsafe block to satisfy the compiler lint.
         unsafe {
             std::slice::from_raw_parts(
                 slice.as_ptr() as *const U,

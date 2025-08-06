@@ -30,6 +30,14 @@ pub fn create_backend(
     }
 }
 
+// NEW: Function to load resources for a new screen
+pub fn load_screen(backend: &mut Backend, screen: &Screen) -> Result<(), Box<dyn Error>> {
+    match backend {
+        Backend::Vulkan(state) => vulkan::load_screen(state, screen),
+        Backend::OpenGL(state) => opengl::load_screen(state, screen),
+    }
+}
+
 pub fn draw(backend: &mut Backend, screen: &Screen) -> Result<(), Box<dyn Error>> {
     match backend {
         Backend::Vulkan(state) => vulkan::draw(state, screen),

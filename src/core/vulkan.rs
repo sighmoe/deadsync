@@ -57,8 +57,8 @@ pub struct State {
     render_pass: vk::RenderPass,
     pipeline_layout: vk::PipelineLayout,
     pipeline: vk::Pipeline,
-    vertex_buffer: BufferResource,
-    index_buffer: BufferResource,
+    vertex_buffer: Option<BufferResource>,
+    index_buffer: Option<BufferResource>,
     object_draw_info: Vec<ObjectDrawInfo>,
     command_buffers: Vec<vk::CommandBuffer>,
     image_available_semaphores: Vec<vk::Semaphore>,
@@ -96,51 +96,12 @@ pub fn init(window: &Window, screen: &Screen) -> Result<State, Box<dyn Error>> {
     recreate_framebuffers(&device, &mut swapchain_resources, render_pass)?;
     let (pipeline_layout, pipeline) = create_graphics_pipeline(&device, render_pass)?;
 
-    let mut all_vertices = Vec::new();
-    let mut all_indices = Vec::new();
-    let mut object_draw_info = Vec::new();
-
-    for object in &screen.objects {
-        let first_index = all_indices.len() as u32;
-        let vertex_offset = all_vertices.len() as u16;
-
-        all_vertices.extend_from_slice(&object.vertices);
-        let adjusted_indices = object.indices.iter().map(|i| i + vertex_offset);
-        all_indices.extend(adjusted_indices);
-
-        object_draw_info.push(ObjectDrawInfo {
-            index_count: object.indices.len() as u32,
-            first_index,
-        });
-    }
-
-    let vertex_buffer = create_buffer_with_data(
-        &instance,
-        &device,
-        pdevice,
-        command_pool,
-        queue,
-        &all_vertices,
-        vk::BufferUsageFlags::VERTEX_BUFFER,
-    )?;
-    let index_buffer = create_buffer_with_data(
-        &instance,
-        &device,
-        pdevice,
-        command_pool,
-        queue,
-        &all_indices,
-        vk::BufferUsageFlags::INDEX_BUFFER,
-    )?;
-
     let command_buffers = create_command_buffers(&device, command_pool, MAX_FRAMES_IN_FLIGHT)?;
     let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
         create_sync_objects(&device)?;
-
     let images_in_flight = vec![vk::Fence::null(); swapchain_resources._images.len()];
 
-    info!("Vulkan backend initialized successfully.");
-    Ok(State {
+    let mut state = State {
         _entry: entry,
         instance,
         debug_messenger,
@@ -155,9 +116,9 @@ pub fn init(window: &Window, screen: &Screen) -> Result<State, Box<dyn Error>> {
         render_pass,
         pipeline_layout,
         pipeline,
-        vertex_buffer,
-        index_buffer,
-        object_draw_info,
+        vertex_buffer: None, // Initialize as None
+        index_buffer: None,  // Initialize as None
+        object_draw_info: Vec::new(),
         command_buffers,
         image_available_semaphores,
         render_finished_semaphores,
@@ -165,7 +126,76 @@ pub fn init(window: &Window, screen: &Screen) -> Result<State, Box<dyn Error>> {
         images_in_flight,
         current_frame: 0,
         window_size: initial_size,
-    })
+    };
+
+    // Load the initial screen's resources. This will create the first set of buffers.
+    load_screen(&mut state, screen)?;
+
+    info!("Vulkan backend initialized successfully.");
+    Ok(state)
+}
+
+pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
+    info!("Loading new screen for Vulkan...");
+    unsafe {
+        // Wait until the GPU is idle before destroying and creating resources.
+        state.device.device_wait_idle()?;
+    }
+
+    // Destroy old buffers if they exist.
+    if let Some(buffer) = state.vertex_buffer.take() {
+        destroy_buffer(&state.device, &buffer);
+    }
+    if let Some(buffer) = state.index_buffer.take() {
+        destroy_buffer(&state.device, &buffer);
+    }
+    state.object_draw_info.clear();
+
+    // If the new screen is empty, there's nothing to load.
+    if screen.objects.is_empty() {
+        info!("New screen has no objects to load.");
+        return Ok(());
+    }
+
+    // Aggregate all vertex and index data from the screen objects.
+    let mut all_vertices = Vec::new();
+    let mut all_indices = Vec::new();
+    for object in &screen.objects {
+        let first_index = all_indices.len() as u32;
+        let vertex_offset = all_vertices.len() as u16;
+
+        all_vertices.extend_from_slice(&object.vertices);
+        let adjusted_indices = object.indices.iter().map(|i| i + vertex_offset);
+        all_indices.extend(adjusted_indices);
+
+        state.object_draw_info.push(ObjectDrawInfo {
+            index_count: object.indices.len() as u32,
+            first_index,
+        });
+    }
+
+    // Create new buffers with the aggregated data.
+    state.vertex_buffer = Some(create_buffer_with_data(
+        &state.instance,
+        &state.device,
+        state.pdevice,
+        state.command_pool,
+        state.queue,
+        &all_vertices,
+        vk::BufferUsageFlags::VERTEX_BUFFER,
+    )?);
+    state.index_buffer = Some(create_buffer_with_data(
+        &state.instance,
+        &state.device,
+        state.pdevice,
+        state.command_pool,
+        state.queue,
+        &all_indices,
+        vk::BufferUsageFlags::INDEX_BUFFER,
+    )?);
+
+    info!("Vulkan screen loaded successfully.");
+    Ok(())
 }
 
 pub fn draw(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
@@ -194,69 +224,110 @@ pub fn draw(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
 
         let image_in_flight_fence = state.images_in_flight[image_index as usize];
         if image_in_flight_fence != vk::Fence::null() {
-            state.device.wait_for_fences(&[image_in_flight_fence], true, u64::MAX)?;
+            state
+                .device
+                .wait_for_fences(&[image_in_flight_fence], true, u64::MAX)?;
         }
         state.images_in_flight[image_index as usize] = fence;
 
         state.device.reset_fences(&[fence])?;
         let cmd = state.command_buffers[state.current_frame];
-        state.device.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
+        state
+            .device
+            .reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
 
-        let begin_info = vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        let begin_info =
+            vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         state.device.begin_command_buffer(cmd, &begin_info)?;
 
         let c = screen.clear_color;
-        let clear_value = vk::ClearValue { color: vk::ClearColorValue { float32: [c[0], c[1], c[2], c[3]] } };
+        let clear_value = vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [c[0], c[1], c[2], c[3]],
+            },
+        };
         let render_pass_info = vk::RenderPassBeginInfo::default()
             .render_pass(state.render_pass)
             .framebuffer(state.swapchain_resources.framebuffers[image_index as usize])
-            .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent })
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D::default(),
+                extent: state.swapchain_resources.extent,
+            })
             .clear_values(std::slice::from_ref(&clear_value));
 
-        state.device.cmd_begin_render_pass(cmd, &render_pass_info, vk::SubpassContents::INLINE);
-        state.device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.pipeline);
+        state
+            .device
+            .cmd_begin_render_pass(cmd, &render_pass_info, vk::SubpassContents::INLINE);
 
-        // FIX: The correct way to handle Vulkan's inverted Y coordinate system.
-        // We flip the viewport's Y-axis. The `y` becomes the height, and the `height`
-        // becomes negative, effectively drawing from top-to-bottom.
-        let viewport = vk::Viewport {
-            x: 0.0,
-            y: state.swapchain_resources.extent.height as f32,
-            width: state.swapchain_resources.extent.width as f32,
-            height: -(state.swapchain_resources.extent.height as f32),
-            min_depth: 0.0,
-            max_depth: 1.0,
-        };
-        state.device.cmd_set_viewport(cmd, 0, &[viewport]);
+        // Only issue draw calls if there are buffers to draw from.
+        if let (Some(vertex_buffer), Some(index_buffer)) =
+            (&state.vertex_buffer, &state.index_buffer)
+        {
+            state
+                .device
+                .cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.pipeline);
 
-        let scissor = vk::Rect2D {
-            offset: vk::Offset2D::default(),
-            extent: state.swapchain_resources.extent,
-        };
-        state.device.cmd_set_scissor(cmd, 0, &[scissor]);
-
-        state.device.cmd_bind_vertex_buffers(cmd, 0, &[state.vertex_buffer.buffer], &[0]);
-        state.device.cmd_bind_index_buffer(cmd, state.index_buffer.buffer, 0, vk::IndexType::UINT16);
-
-        let aspect_ratio = state.window_size.width as f32 / state.window_size.height as f32;
-        let (ortho_width, ortho_height) = if aspect_ratio >= 1.0 {
-            (400.0 * aspect_ratio, 400.0)
-        } else {
-            (400.0, 400.0 / aspect_ratio)
-        };
-        
-        // FIX: The projection matrix no longer needs to be modified.
-        let proj = ortho(-ortho_width, ortho_width, -ortho_height, ortho_height, -1.0, 1.0);
-
-        for (i, object) in screen.objects.iter().enumerate() {
-            let draw_info = &state.object_draw_info[i];
-            let push_constants = PushConstants {
-                mvp: proj * object.transform,
-                color: object.color,
+            let viewport = vk::Viewport {
+                x: 0.0,
+                y: state.swapchain_resources.extent.height as f32,
+                width: state.swapchain_resources.extent.width as f32,
+                height: -(state.swapchain_resources.extent.height as f32),
+                min_depth: 0.0,
+                max_depth: 1.0,
             };
-            let push_constants_bytes = std::slice::from_raw_parts(&push_constants as *const _ as *const u8, mem::size_of::<PushConstants>());
-            state.device.cmd_push_constants(cmd, state.pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, push_constants_bytes);
-            state.device.cmd_draw_indexed(cmd, draw_info.index_count, 1, draw_info.first_index, 0, 0);
+            state.device.cmd_set_viewport(cmd, 0, &[viewport]);
+
+            let scissor = vk::Rect2D {
+                offset: vk::Offset2D::default(),
+                extent: state.swapchain_resources.extent,
+            };
+            state.device.cmd_set_scissor(cmd, 0, &[scissor]);
+
+            state
+                .device
+                .cmd_bind_vertex_buffers(cmd, 0, &[vertex_buffer.buffer], &[0]);
+            state
+                .device
+                .cmd_bind_index_buffer(cmd, index_buffer.buffer, 0, vk::IndexType::UINT16);
+
+            let aspect_ratio = state.window_size.width as f32 / state.window_size.height as f32;
+            let (ortho_width, ortho_height) = if aspect_ratio >= 1.0 {
+                (400.0 * aspect_ratio, 400.0)
+            } else {
+                (400.0, 400.0 / aspect_ratio)
+            };
+            let proj = ortho(
+                -ortho_width,
+                ortho_width,
+                -ortho_height,
+                ortho_height,
+                -1.0,
+                1.0,
+            );
+
+            for (i, object) in screen.objects.iter().enumerate() {
+                let draw_info = &state.object_draw_info[i];
+                let push_constants = PushConstants {
+                    mvp: proj * object.transform,
+                    color: object.color,
+                };
+                let push_constants_bytes = std::slice::from_raw_parts(
+                    &push_constants as *const _ as *const u8,
+                    mem::size_of::<PushConstants>(),
+                );
+                state.device.cmd_push_constants(
+                    cmd,
+                    state.pipeline_layout,
+                    vk::ShaderStageFlags::VERTEX,
+                    0,
+                    push_constants_bytes,
+                );
+                state
+                    .device
+                    .cmd_draw_indexed(cmd, draw_info.index_count, 1, draw_info.first_index, 0, 0);
+            }
+        } else {
+            // This is not an error, just a state where nothing needs to be drawn.
         }
 
         state.device.cmd_end_render_pass(cmd);
@@ -282,7 +353,10 @@ pub fn draw(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
             .swapchains(&swapchains)
             .image_indices(&image_indices);
 
-        let present_result = state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present_info);
+        let present_result = state
+            .swapchain_resources
+            .swapchain_loader
+            .queue_present(state.queue, &present_info);
         let is_out_of_date = match present_result {
             Ok(suboptimal) => suboptimal,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => true,
@@ -315,13 +389,21 @@ pub fn cleanup(state: &mut State) {
         cleanup_swapchain_and_dependents(state);
 
         for i in 0..MAX_FRAMES_IN_FLIGHT {
-            state.device.destroy_semaphore(state.render_finished_semaphores[i], None);
-            state.device.destroy_semaphore(state.image_available_semaphores[i], None);
+            state
+                .device
+                .destroy_semaphore(state.render_finished_semaphores[i], None);
+            state
+                .device
+                .destroy_semaphore(state.image_available_semaphores[i], None);
             state.device.destroy_fence(state.in_flight_fences[i], None);
         }
 
-        destroy_buffer(&state.device, &state.vertex_buffer);
-        destroy_buffer(&state.device, &state.index_buffer);
+        if let Some(buffer) = state.vertex_buffer.take() {
+            destroy_buffer(&state.device, &buffer);
+        }
+        if let Some(buffer) = state.index_buffer.take() {
+            destroy_buffer(&state.device, &buffer);
+        }
 
         state.device.destroy_pipeline(state.pipeline, None);
         state.device.destroy_pipeline_layout(state.pipeline_layout, None);
