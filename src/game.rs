@@ -1,4 +1,3 @@
-// ===== FILE: /mnt/c/Users/perfe/Code/vulkan-opengl-mix/src/game.rs =====
 use crate::input::InputState;
 use cgmath::Vector3;
 

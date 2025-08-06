@@ -1,4 +1,3 @@
-// ===== FILE: /mnt/c/Users/perfe/Code/vulkan-opengl-mix/src/opengl_renderer.rs =====
 use crate::screen::{Screen, ScreenObject};
 use cgmath::Matrix4;
 use glow::{HasContext, UniformLocation};

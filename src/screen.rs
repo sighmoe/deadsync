@@ -1,4 +1,3 @@
-// ===== FILE: /mnt/c/Users/perfe/Code/vulkan-opengl-mix/src/screen.rs =====
 use cgmath::Matrix4;
 
 #[derive(Clone)]
