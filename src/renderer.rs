@@ -1,11 +1,18 @@
-use crate::{core::{vulkan, opengl}, screen::Screen};
-use std::{error::Error, sync::Arc};
+use crate::{core::{opengl, vulkan}, screen::Screen};
+use image::RgbaImage;
+use std::{collections::HashMap, error::Error, sync::Arc};
 use winit::window::Window;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendType {
     Vulkan,
     OpenGL,
+}
+
+// NEW: Texture abstractions
+pub enum Texture {
+    Vulkan(vulkan::Texture),
+    OpenGL(opengl::Texture),
 }
 
 pub enum Backend {
@@ -19,18 +26,27 @@ pub fn create_backend(
     screen: &Screen,
 ) -> Result<Backend, Box<dyn Error>> {
     match backend_type {
-        BackendType::Vulkan => {
-            let state = vulkan::init(&window, screen)?;
-            Ok(Backend::Vulkan(state))
+        BackendType::Vulkan => Ok(Backend::Vulkan(vulkan::init(&window, screen)?)),
+        BackendType::OpenGL => Ok(Backend::OpenGL(opengl::init(window.clone(), screen)?)),
+    }
+}
+
+pub fn create_texture(
+    backend: &mut Backend,
+    image: &RgbaImage,
+) -> Result<Texture, Box<dyn Error>> {
+    match backend {
+        Backend::Vulkan(state) => {
+            let texture = vulkan::create_texture(state, image)?;
+            Ok(Texture::Vulkan(texture))
         }
-        BackendType::OpenGL => {
-            let state = opengl::init(window.clone(), screen)?;
-            Ok(Backend::OpenGL(state))
+        Backend::OpenGL(state) => {
+            let texture = opengl::create_texture(&state.gl, image)?;
+            Ok(Texture::OpenGL(texture))
         }
     }
 }
 
-// NEW: Function to load resources for a new screen
 pub fn load_screen(backend: &mut Backend, screen: &Screen) -> Result<(), Box<dyn Error>> {
     match backend {
         Backend::Vulkan(state) => vulkan::load_screen(state, screen),
@@ -38,10 +54,14 @@ pub fn load_screen(backend: &mut Backend, screen: &Screen) -> Result<(), Box<dyn
     }
 }
 
-pub fn draw(backend: &mut Backend, screen: &Screen) -> Result<(), Box<dyn Error>> {
+pub fn draw(
+    backend: &mut Backend,
+    screen: &Screen,
+    textures: &HashMap<String, Texture>,
+) -> Result<(), Box<dyn Error>> {
     match backend {
-        Backend::Vulkan(state) => vulkan::draw(state, screen),
-        Backend::OpenGL(state) => opengl::draw(state, screen),
+        Backend::Vulkan(state) => vulkan::draw(state, screen, textures),
+        Backend::OpenGL(state) => opengl::draw(state, screen, textures),
     }
 }
 

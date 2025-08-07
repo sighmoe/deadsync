@@ -1,6 +1,9 @@
-use crate::screen::{Screen, ScreenObject};
+use crate::{
+    renderer,
+    screen::{ObjectType, Screen, ScreenObject},
+};
 use cgmath::Matrix4;
-use glow::{HasContext, UniformLocation};
+use glow::{HasContext, PixelUnpackData, UniformLocation};
 use glutin::{
     config::ConfigTemplateBuilder,
     context::{ContextAttributesBuilder, PossiblyCurrentContext},
@@ -8,10 +11,15 @@ use glutin::{
     prelude::*,
     surface::{Surface, SurfaceAttributesBuilder, WindowSurface},
 };
+use image::RgbaImage;
 use log::{info, warn};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use std::{error::Error, ffi::CStr, mem, num::NonZeroU32, sync::Arc};
+use std::{collections::HashMap, error::Error, ffi::CStr, mem, num::NonZeroU32, sync::Arc};
 use winit::window::Window;
+
+// A handle to an OpenGL texture on the GPU.
+#[derive(Debug, Clone, Copy)]
+pub struct Texture(pub glow::Texture);
 
 struct OpenGLObject {
     vao: glow::VertexArray,
@@ -21,12 +29,14 @@ struct OpenGLObject {
 }
 
 pub struct State {
-    gl: glow::Context,
+    pub gl: glow::Context,
     gl_surface: Surface<WindowSurface>,
     gl_context: PossiblyCurrentContext,
     program: glow::Program,
     mvp_location: UniformLocation,
     color_location: UniformLocation,
+    use_texture_location: UniformLocation,
+    texture_location: UniformLocation,
     projection: Matrix4<f32>,
     window_size: (u32, u32),
     gl_objects: Vec<OpenGLObject>,
@@ -36,7 +46,8 @@ pub fn init(window: Arc<Window>, screen: &Screen) -> Result<State, Box<dyn Error
     info!("Initializing OpenGL backend...");
 
     let (gl_surface, gl_context, gl) = create_opengl_context(&window)?;
-    let (program, mvp_location, color_location) = create_graphics_program(&gl)?;
+    let (program, mvp_location, color_location, use_texture_location, texture_location) =
+        create_graphics_program(&gl)?;
 
     let initial_size = window.inner_size();
     let projection = create_projection_matrix(initial_size.width, initial_size.height);
@@ -48,6 +59,8 @@ pub fn init(window: Arc<Window>, screen: &Screen) -> Result<State, Box<dyn Error
         program,
         mvp_location,
         color_location,
+        use_texture_location,
+        texture_location,
         projection,
         window_size: (initial_size.width, initial_size.height),
         gl_objects: Vec::new(),
@@ -57,6 +70,51 @@ pub fn init(window: Arc<Window>, screen: &Screen) -> Result<State, Box<dyn Error
 
     info!("OpenGL backend initialized successfully.");
     Ok(state)
+}
+
+pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, String> {
+    unsafe {
+        let texture = gl.create_texture()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+
+        // Set texture parameters (unchanged)
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_S,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_T,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MIN_FILTER,
+            glow::LINEAR as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::LINEAR as i32,
+        );
+
+        // Updated to match glow 0.16.0's PixelUnpackData::Slice(Option<&[u8]>)
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::SRGB_ALPHA as i32,
+            image.width() as i32,
+            image.height() as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),  // Add Some() inside Slice
+        );
+
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        Ok(Texture(texture))
+    }
 }
 
 pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
@@ -71,7 +129,6 @@ pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Err
     state.gl_objects.clear();
 
     if screen.objects.is_empty() {
-        info!("New screen has no objects to load.");
         return Ok(());
     }
 
@@ -84,7 +141,11 @@ pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Err
     Ok(())
 }
 
-pub fn draw(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
+pub fn draw(
+    state: &mut State,
+    screen: &Screen,
+    textures: &HashMap<String, renderer::Texture>,
+) -> Result<(), Box<dyn Error>> {
     let (width, height) = state.window_size;
     if width == 0 || height == 0 {
         return Ok(());
@@ -101,6 +162,16 @@ pub fn draw(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
         state.gl.clear(glow::COLOR_BUFFER_BIT);
         state.gl.use_program(Some(state.program));
 
+        // Enable blending for transparency
+        state.gl.enable(glow::BLEND);
+        state.gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+
+        // Activate a texture unit once. We'll only use unit 0.
+        state.gl.active_texture(glow::TEXTURE0);
+        state
+            .gl
+            .uniform_1_i32(Some(&state.texture_location), 0);
+
         for (i, object) in screen.objects.iter().enumerate() {
             let gl_object = &state.gl_objects[i];
             let mvp = state.projection * object.transform;
@@ -111,9 +182,33 @@ pub fn draw(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
                 false,
                 &mvp_array.concat(),
             );
-            state
-                .gl
-                .uniform_4_f32_slice(Some(&state.color_location), &object.color);
+
+            // --- Switch between solid color and texture ---
+            match &object.object_type {
+                ObjectType::SolidColor { color } => {
+                    // Tell shader to use the color uniform.
+                    state
+                        .gl
+                        .uniform_1_i32(Some(&state.use_texture_location), 0);
+                    state
+                        .gl
+                        .uniform_4_f32_slice(Some(&state.color_location), color);
+                }
+                ObjectType::Textured { texture_id } => {
+                    // Tell shader to use the texture sampler.
+                    state
+                        .gl
+                        .uniform_1_i32(Some(&state.use_texture_location), 1);
+
+                    // Find and bind the correct texture.
+                    if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
+                        state.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
+                    } else {
+                        warn!("Texture ID '{}' not found in texture manager!", texture_id);
+                        // Optional: Bind a fallback texture here.
+                    }
+                }
+            }
 
             state.gl.bind_vertex_array(Some(gl_object.vao));
             state.gl.draw_elements(
@@ -149,6 +244,8 @@ pub fn resize(state: &mut State, width: u32, height: u32) {
 pub fn cleanup(state: &mut State) {
     info!("Cleaning up OpenGL resources...");
     unsafe {
+        // Note: Textures are cleaned up from the main `App` struct,
+        // as the backend `State` doesn't own them.
         state.gl.delete_program(state.program);
         for object in state.gl_objects.iter() {
             state.gl.delete_vertex_array(object.vao);
@@ -197,7 +294,16 @@ fn create_opengl_context(
 
 fn create_graphics_program(
     gl: &glow::Context,
-) -> Result<(glow::Program, UniformLocation, UniformLocation), String> {
+) -> Result<
+    (
+        glow::Program,
+        UniformLocation,
+        UniformLocation,
+        UniformLocation,
+        UniformLocation,
+    ),
+    String,
+> {
     unsafe {
         let program = gl.create_program()?;
         let shader_sources = [
@@ -239,8 +345,20 @@ fn create_graphics_program(
         let color_location = gl
             .get_uniform_location(program, "u_color")
             .ok_or("Could not find 'u_color' uniform")?;
+        let use_texture_location = gl
+            .get_uniform_location(program, "u_use_texture")
+            .ok_or("Could not find 'u_use_texture' uniform")?;
+        let texture_location = gl
+            .get_uniform_location(program, "u_texture")
+            .ok_or("Could not find 'u_texture' uniform")?;
 
-        Ok((program, mvp_location, color_location))
+        Ok((
+            program,
+            mvp_location,
+            color_location,
+            use_texture_location,
+            texture_location,
+        ))
     }
 }
 
@@ -300,7 +418,6 @@ fn create_projection_matrix(width: u32, height: u32) -> Matrix4<f32> {
 
 mod bytemuck {
     pub unsafe fn cast_slice<T, U>(slice: &[T]) -> &[U] {
-        // FIX: Add explicit unsafe block to satisfy the compiler lint.
         unsafe {
             std::slice::from_raw_parts(
                 slice.as_ptr() as *const U,

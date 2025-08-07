@@ -1,5 +1,12 @@
 use cgmath::Matrix4;
 
+// NEW: An enum to differentiate object types for rendering.
+#[derive(Clone)]
+pub enum ObjectType {
+    SolidColor { color: [f32; 4] },
+    Textured { texture_id: String },
+}
+
 #[derive(Clone)]
 pub struct Screen {
     pub clear_color: [f32; 4],
@@ -10,6 +17,6 @@ pub struct Screen {
 pub struct ScreenObject {
     pub vertices: Vec<[f32; 2]>,
     pub indices: Vec<u16>,
-    pub color: [f32; 4],
+    pub object_type: ObjectType, // MODIFIED from `color`
     pub transform: Matrix4<f32>,
 }

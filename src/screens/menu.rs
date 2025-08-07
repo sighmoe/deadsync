@@ -1,4 +1,4 @@
-use crate::api::{Quad, UIElement};
+use crate::api::{Quad, Sprite, UIElement};
 use crate::screens::{Screen, ScreenAction};
 use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};
@@ -45,9 +45,17 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 
 pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
     let mut elements = Vec::new();
+    
+    // 1. Draw the logo sprite above the menu options
+    elements.push(UIElement::Sprite(Sprite {
+        center: Vector2::new(0.0, 250.0),
+        size: Vector2::new(600.0, 200.0), // Shrink the logo to fit nicely
+        texture_id: "logo.png".to_string(),
+    }));
+
+    // 2. Draw the menu option quads
     let option_texts = ["Play", "Options", "Exit"];
     let size = Vector2::new(200.0, 60.0);
-
     for (i, &text) in option_texts.iter().enumerate() {
         let y_pos = 100.0 - (i as f32 * 80.0);
         let color = if i == state.selected_index {
@@ -61,10 +69,16 @@ pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
             size,
             color,
         }));
-
-        // NOTE: Text rendering is not implemented yet.
-        // We would add a `UIElement::Text` here in the future.
-        let _ = text; // To avoid unused variable warning
+        let _ = text; // Placeholder for future text rendering
     }
+    
+    // 3. Draw the arrow sprite next to the selected option
+    let selected_y_pos = 100.0 - (state.selected_index as f32 * 80.0);
+    elements.push(UIElement::Sprite(Sprite {
+        center: Vector2::new(-150.0, selected_y_pos),
+        size: Vector2::new(64.0, 64.0),
+        texture_id: "meter_arrow.png".to_string(),
+    }));
+
     elements
 }

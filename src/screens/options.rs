@@ -1,10 +1,10 @@
-use crate::api::{Quad, UIElement};
+use crate::api::{Quad, Sprite, UIElement};
 use crate::screens::{Screen, ScreenAction};
 use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-pub struct State; // No state needed for this simple screen
+pub struct State;
 
 pub fn init() -> State {
     State
@@ -20,8 +20,15 @@ pub fn handle_key_press(_state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 pub fn get_ui_elements(_state: &State) -> Vec<UIElement> {
-    // We can just draw some colored shapes as placeholders
     vec![
+        // Draw the sprite above the colored boxes
+        UIElement::Sprite(Sprite {
+            center: Vector2::new(0.0, 150.0),
+            size: Vector2::new(400.0, 128.0),
+            texture_id: "dance.png".to_string(),
+        }),
+
+        // The original colored quads
         UIElement::Quad(Quad {
             center: Vector2::new(-150.0, 0.0),
             size: Vector2::new(100.0, 100.0),

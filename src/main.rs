@@ -9,11 +9,11 @@ use input::InputState;
 use log::{error, info};
 use renderer::{create_backend, BackendType};
 use screens::{gameplay, menu, options, Screen as CurrentScreen, ScreenAction};
-use std::{error::Error, sync::Arc, time::Instant};
+use std::{collections::HashMap, error::Error, path::Path, sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
-    event::WindowEvent, // Removed unused `ElementState`
+    event::WindowEvent,
     event_loop::{ActiveEventLoop, EventLoop},
     window::Window,
 };
@@ -21,16 +21,17 @@ use winit::{
 const WINDOW_WIDTH: u32 = 800;
 const WINDOW_HEIGHT: u32 = 600;
 
+// The main application struct, now with asset management.
 struct App {
     window: Option<Arc<Window>>,
     backend: Option<renderer::Backend>,
     backend_type: BackendType,
-    // --- State Management ---
+    // NEW: Manages textures that have been loaded into the GPU.
+    texture_manager: HashMap<String, renderer::Texture>,
     current_screen: CurrentScreen,
     menu_state: menu::State,
     gameplay_state: gameplay::State,
     options_state: options::State,
-    // --- Input and timing ---
     input_state: InputState,
     frame_count: u32,
     last_title_update: Instant,
@@ -43,6 +44,7 @@ impl App {
             window: None,
             backend: None,
             backend_type,
+            texture_manager: HashMap::new(), // Initialize as empty.
             current_screen: CurrentScreen::Menu,
             menu_state: menu::init(),
             gameplay_state: gameplay::init(),
@@ -54,7 +56,36 @@ impl App {
         }
     }
 
-    // FIX: Reordered logic to solve the borrow checker error.
+    // NEW: A function to load all required textures from disk into the GPU.
+    fn load_textures(&mut self) -> Result<(), Box<dyn Error>> {
+        info!("Loading textures...");
+        let backend = self
+            .backend
+            .as_mut()
+            .ok_or("Backend not initialized when trying to load textures")?;
+
+        let texture_paths = [
+            "logo.png",
+            "dance.png",
+            "meter_arrow.png",
+            "fallback_banner.png",
+        ];
+
+        for path_str in texture_paths {
+            let full_path = Path::new("assets/graphics").join(path_str);
+            let image = image::open(&full_path)?.to_rgba8();
+
+            // NOTE: The following line will cause a compile error until we update `renderer.rs`
+            let texture = renderer::create_texture(backend, &image)?;
+
+            self.texture_manager
+                .insert(path_str.to_string(), texture);
+            info!("Loaded texture: {}", full_path.display());
+        }
+
+        Ok(())
+    }
+
     fn handle_action(
         &mut self,
         action: ScreenAction,
@@ -65,11 +96,9 @@ impl App {
                 info!("Navigating to screen: {:?}", screen);
                 self.current_screen = screen;
 
-                // 1. Get the screen data first (immutable borrow of self ends here).
                 let (ui_elements, clear_color) = self.get_current_ui_elements();
                 let new_screen_data = create_screen_from_ui(&ui_elements, clear_color);
 
-                // 2. Now, mutably borrow the backend to load the data.
                 if let Some(backend) = &mut self.backend {
                     renderer::load_screen(backend, &new_screen_data)?;
                 }
@@ -83,7 +112,6 @@ impl App {
         Ok(())
     }
 
-    // Helper to get the UI elements for the currently active screen
     fn get_current_ui_elements(&self) -> (Vec<api::UIElement>, [f32; 4]) {
         match self.current_screen {
             CurrentScreen::Menu => (
@@ -121,6 +149,14 @@ impl ApplicationHandler for App {
                         Ok(backend) => {
                             self.window = Some(window);
                             self.backend = Some(backend);
+
+                            // Load textures now that the backend exists.
+                            if let Err(e) = self.load_textures() {
+                                error!("Failed to load textures: {}", e);
+                                event_loop.exit();
+                                return;
+                            }
+
                             info!("Starting event loop...");
                         }
                         Err(e) => {
@@ -184,7 +220,6 @@ impl ApplicationHandler for App {
                         let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
                         self.last_frame_time = now;
 
-                        // Update State
                         if self.current_screen == CurrentScreen::Gameplay {
                             gameplay::update(
                                 &mut self.gameplay_state,
@@ -193,11 +228,9 @@ impl ApplicationHandler for App {
                             );
                         }
 
-                        // Get current screen elements to draw
                         let (ui_elements, clear_color) = self.get_current_ui_elements();
                         let screen = create_screen_from_ui(&ui_elements, clear_color);
 
-                        // Update FPS Counter
                         self.frame_count += 1;
                         let elapsed = now.duration_since(self.last_title_update);
                         if elapsed.as_secs_f32() >= 1.0 {
@@ -211,9 +244,11 @@ impl ApplicationHandler for App {
                             self.last_title_update = now;
                         }
 
-                        // Draw
                         if let Some(backend) = &mut self.backend {
-                            if let Err(e) = renderer::draw(backend, &screen) {
+                            // NOTE: This call is updated and will cause a compile error
+                            // until `renderer.rs` is also updated.
+                            if let Err(e) = renderer::draw(backend, &screen, &self.texture_manager)
+                            {
                                 error!("Failed to draw frame: {}", e);
                                 event_loop.exit();
                             }
@@ -233,6 +268,7 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         info!("Cleaning up resources...");
+        self.texture_manager.clear();
         if let Some(backend) = &mut self.backend {
             renderer::cleanup(backend);
         }
@@ -251,7 +287,9 @@ fn create_screen_from_ui(
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init();
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .init();
 
     let args: Vec<String> = std::env::args().collect();
     let backend_type = match args.get(1).map(|s| s.as_str()) {
