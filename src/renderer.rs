@@ -24,10 +24,11 @@ pub fn create_backend(
     backend_type: BackendType,
     window: Arc<Window>,
     screen: &Screen,
+    vsync_enabled: bool, // New parameter
 ) -> Result<Backend, Box<dyn Error>> {
     match backend_type {
-        BackendType::Vulkan => Ok(Backend::Vulkan(vulkan::init(&window, screen)?)),
-        BackendType::OpenGL => Ok(Backend::OpenGL(opengl::init(window.clone(), screen)?)),
+        BackendType::Vulkan => Ok(Backend::Vulkan(vulkan::init(&window, screen, vsync_enabled)?)),
+        BackendType::OpenGL => Ok(Backend::OpenGL(opengl::init(window.clone(), screen, vsync_enabled)?)),
     }
 }
 

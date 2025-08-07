@@ -21,12 +21,43 @@ use winit::{
 const WINDOW_WIDTH: u32 = 800;
 const WINDOW_HEIGHT: u32 = 600;
 
-// The main application struct, now with asset management.
+fn parse_args(args: &[String]) -> (BackendType, bool) {
+    let mut backend = BackendType::Vulkan; // Default
+    let mut vsync = true; // Default: on
+
+    let mut i = 1; // Skip executable name
+    while i < args.len() {
+        match args[i].as_str() {
+            "--opengl" => backend = BackendType::OpenGL,
+            "--vulkan" => backend = BackendType::Vulkan,
+            "--vsync" => {
+                if i + 1 < args.len() {
+                    vsync = match args[i + 1].as_str() {
+                        "on" => true,
+                        "off" => false,
+                        _ => {
+                            log::warn!("Invalid --vsync value '{}'; defaulting to on", args[i + 1]);
+                            true
+                        }
+                    };
+                    i += 1; // Skip the value
+                } else {
+                    log::warn!("--vsync requires 'on' or 'off'; defaulting to on");
+                }
+            }
+            _ => log::warn!("Unknown arg: {}", args[i]),
+        }
+        i += 1;
+    }
+
+    (backend, vsync)
+}
+
+// Update the App struct (add vsync_enabled field)
 struct App {
     window: Option<Arc<Window>>,
     backend: Option<renderer::Backend>,
     backend_type: BackendType,
-    // NEW: Manages textures that have been loaded into the GPU.
     texture_manager: HashMap<String, renderer::Texture>,
     current_screen: CurrentScreen,
     menu_state: menu::State,
@@ -36,15 +67,17 @@ struct App {
     frame_count: u32,
     last_title_update: Instant,
     last_frame_time: Instant,
+    vsync_enabled: bool, // New immutable field
 }
 
+// Update App::new to accept vsync_enabled
 impl App {
-    fn new(backend_type: BackendType) -> Self {
+    fn new(backend_type: BackendType, vsync_enabled: bool) -> Self {
         App {
             window: None,
             backend: None,
             backend_type,
-            texture_manager: HashMap::new(), // Initialize as empty.
+            texture_manager: HashMap::new(),
             current_screen: CurrentScreen::Menu,
             menu_state: menu::init(),
             gameplay_state: gameplay::init(),
@@ -53,6 +86,7 @@ impl App {
             frame_count: 0,
             last_title_update: Instant::now(),
             last_frame_time: Instant::now(),
+            vsync_enabled,
         }
     }
 
@@ -145,12 +179,11 @@ impl ApplicationHandler for App {
                     let (ui_elements, clear_color) = self.get_current_ui_elements();
                     let initial_screen = create_screen_from_ui(&ui_elements, clear_color);
 
-                    match create_backend(self.backend_type, window.clone(), &initial_screen) {
+                    match create_backend(self.backend_type, window.clone(), &initial_screen, self.vsync_enabled) {
                         Ok(backend) => {
                             self.window = Some(window);
                             self.backend = Some(backend);
 
-                            // Load textures now that the backend exists.
                             if let Err(e) = self.load_textures() {
                                 error!("Failed to load textures: {}", e);
                                 event_loop.exit();
@@ -292,18 +325,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     let args: Vec<String> = std::env::args().collect();
-    let backend_type = match args.get(1).map(|s| s.as_str()) {
-        Some("--opengl") => BackendType::OpenGL,
-        Some("--vulkan") => BackendType::Vulkan,
-        _ => {
-            info!("No backend specified. Defaulting to Vulkan.");
-            info!("Use '--opengl' or '--vulkan' to select a backend.");
-            BackendType::Vulkan
-        }
-    };
+    let (backend_type, vsync_enabled) = parse_args(&args);
+
+    if backend_type == BackendType::Vulkan {
+        info!("No backend specified. Defaulting to Vulkan.");
+        info!("Use '--opengl' or '--vulkan' to select a backend.");
+    }
 
     let event_loop = EventLoop::new()?;
-    let mut app = App::new(backend_type);
+    let mut app = App::new(backend_type, vsync_enabled);
     event_loop.run_app(&mut app)?;
 
     Ok(())

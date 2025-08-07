@@ -9,7 +9,7 @@ use glutin::{
     context::{ContextAttributesBuilder, PossiblyCurrentContext},
     display::{Display, DisplayApiPreference},
     prelude::*,
-    surface::{Surface, SurfaceAttributesBuilder, WindowSurface},
+    surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface},
 };
 use image::RgbaImage;
 use log::{info, warn};
@@ -40,12 +40,13 @@ pub struct State {
     projection: Matrix4<f32>,
     window_size: (u32, u32),
     gl_objects: Vec<OpenGLObject>,
+    vsync_enabled: bool, // New immutable field
 }
 
-pub fn init(window: Arc<Window>, screen: &Screen) -> Result<State, Box<dyn Error>> {
+pub fn init(window: Arc<Window>, screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
     info!("Initializing OpenGL backend...");
 
-    let (gl_surface, gl_context, gl) = create_opengl_context(&window)?;
+    let (gl_surface, gl_context, gl) = create_opengl_context(&window, vsync_enabled)?;
     let (program, mvp_location, color_location, use_texture_location, texture_location) =
         create_graphics_program(&gl)?;
 
@@ -64,6 +65,7 @@ pub fn init(window: Arc<Window>, screen: &Screen) -> Result<State, Box<dyn Error
         projection,
         window_size: (initial_size.width, initial_size.height),
         gl_objects: Vec::new(),
+        vsync_enabled, // Set the new field
     };
 
     load_screen(&mut state, screen)?;
@@ -258,6 +260,7 @@ pub fn cleanup(state: &mut State) {
 
 fn create_opengl_context(
     window: &Window,
+    vsync_enabled: bool, // Still accept it for logging/consistency
 ) -> Result<(Surface<WindowSurface>, PossiblyCurrentContext, glow::Context), Box<dyn Error>> {
     let preference = DisplayApiPreference::Wgl(None);
     let display = unsafe { Display::new(window.display_handle()?.into(), preference)? };
@@ -284,6 +287,18 @@ fn create_opengl_context(
     let context = unsafe { display.create_context(&config, &context_attributes)? }
         .make_current(&surface)?;
 
+    // New: Set VSync via swap interval AFTER context creation
+    let swap_interval = if vsync_enabled {
+        SwapInterval::Wait(NonZeroU32::new(1).unwrap()) // VSync on (wait 1 frame)
+    } else {
+        SwapInterval::DontWait // VSync off
+    };
+    if let Err(e) = surface.set_swap_interval(&context, swap_interval) {
+        log::warn!("Failed to set swap interval (VSync): {}. Using default.", e);
+    } else {
+        info!("VSync set to: {}", if vsync_enabled { "on" } else { "off" });
+    }
+
     unsafe {
         let gl = glow::Context::from_loader_function_cstr(|s: &CStr| display.get_proc_address(s));
         gl.enable(glow::FRAMEBUFFER_SRGB);
@@ -291,6 +306,7 @@ fn create_opengl_context(
         Ok((surface, context, gl))
     }
 }
+
 
 fn create_graphics_program(
     gl: &glow::Context,

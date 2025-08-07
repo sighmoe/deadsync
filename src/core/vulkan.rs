@@ -86,7 +86,7 @@ pub struct State {
     surface: vk::SurfaceKHR,
     surface_loader: surface::Instance,
     pub pdevice: vk::PhysicalDevice,
-    pub device: Option<Arc<Device>>, // Changed to Option for explicit drop in cleanup
+    pub device: Option<Arc<Device>>,
     pub queue: vk::Queue,
     pub command_pool: vk::CommandPool,
     swapchain_resources: SwapchainResources,
@@ -108,10 +108,11 @@ pub struct State {
     images_in_flight: Vec<vk::Fence>,
     current_frame: usize,
     window_size: PhysicalSize<u32>,
+    vsync_enabled: bool, // New immutable field
 }
 
 // --- Main Procedural Functions ---
-pub fn init(window: &Window, screen: &Screen) -> Result<State, Box<dyn Error>> {
+pub fn init(window: &Window, screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
     info!("Initializing Vulkan backend...");
     let entry = Entry::linked();
     let instance = create_instance(&entry, window)?;
@@ -133,6 +134,7 @@ pub fn init(window: &Window, screen: &Screen) -> Result<State, Box<dyn Error>> {
         &surface_loader,
         initial_size,
         None,
+        vsync_enabled, // Pass new param
     )?;
     let render_pass = create_render_pass(device.as_ref().unwrap(), swapchain_resources.format.format)?;
     recreate_framebuffers(device.as_ref().unwrap(), &mut swapchain_resources, render_pass)?;
@@ -152,6 +154,7 @@ pub fn init(window: &Window, screen: &Screen) -> Result<State, Box<dyn Error>> {
     let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
         create_sync_objects(device.as_ref().unwrap())?;
     let images_in_flight = vec![vk::Fence::null(); swapchain_resources._images.len()];
+
 
     let mut state = State {
         _entry: entry,
@@ -183,6 +186,7 @@ pub fn init(window: &Window, screen: &Screen) -> Result<State, Box<dyn Error>> {
         images_in_flight,
         current_frame: 0,
         window_size: initial_size,
+        vsync_enabled, // Set the new field
     };
 
     load_screen(&mut state, screen)?;
@@ -1052,6 +1056,7 @@ fn create_swapchain(
     surface_loader: &surface::Instance,
     window_size: PhysicalSize<u32>,
     old_swapchain: Option<vk::SwapchainKHR>,
+    vsync_enabled: bool, // New parameter
 ) -> Result<SwapchainResources, Box<dyn Error>> {
     let capabilities = unsafe { surface_loader.get_physical_device_surface_capabilities(pdevice, surface)? };
     let formats = unsafe { surface_loader.get_physical_device_surface_formats(pdevice, surface)? };
@@ -1061,7 +1066,11 @@ fn create_swapchain(
         f.format == vk::Format::B8G8R8A8_SRGB && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
     }).cloned().unwrap_or(formats[0]);
     
-    let present_mode = present_modes.iter().cloned().find(|&mode| mode == vk::PresentModeKHR::MAILBOX).unwrap_or(vk::PresentModeKHR::FIFO);
+    let present_mode = if vsync_enabled {
+        present_modes.iter().cloned().find(|&mode| mode == vk::PresentModeKHR::FIFO).unwrap_or(vk::PresentModeKHR::FIFO)
+    } else {
+        present_modes.iter().cloned().find(|&mode| mode == vk::PresentModeKHR::IMMEDIATE).unwrap_or(vk::PresentModeKHR::FIFO) // Fallback to VSync if IMMEDIATE not available
+    };
 
     let extent = if capabilities.current_extent.width != u32::MAX {
         capabilities.current_extent
@@ -1184,6 +1193,7 @@ fn recreate_swapchain_and_dependents(state: &mut State) -> Result<(), Box<dyn Er
     cleanup_swapchain_and_dependents(state);
     state.swapchain_resources = create_swapchain(
         &state.instance, state.device.as_ref().unwrap(), state.pdevice, state.surface, &state.surface_loader, state.window_size, None,
+        state.vsync_enabled, // Pass the stored value
     )?;
     recreate_framebuffers(state.device.as_ref().unwrap(), &mut state.swapchain_resources, state.render_pass)?;
     state.images_in_flight = vec![vk::Fence::null(); state.swapchain_resources._images.len()];
