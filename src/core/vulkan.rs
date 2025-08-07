@@ -109,6 +109,7 @@ pub struct State {
     current_frame: usize,
     window_size: PhysicalSize<u32>,
     vsync_enabled: bool, // New immutable field
+    projection: Matrix4<f32>,
 }
 
 // --- Main Procedural Functions ---
@@ -122,7 +123,7 @@ pub fn init(window: &Window, screen: &Screen, vsync_enabled: bool) -> Result<Sta
     let pdevice = select_physical_device(&instance, &surface_loader, surface)?;
     let (device, queue, queue_family_index) =
         create_logical_device(&instance, pdevice, &surface_loader, surface)?;
-    let device = Some(Arc::new(device)); // Wrap in Option<Arc>
+    let device = Some(Arc::new(device));
     let command_pool = create_command_pool(device.as_ref().unwrap(), queue_family_index)?;
 
     let initial_size = window.inner_size();
@@ -134,27 +135,29 @@ pub fn init(window: &Window, screen: &Screen, vsync_enabled: bool) -> Result<Sta
         &surface_loader,
         initial_size,
         None,
-        vsync_enabled, // Pass new param
+        vsync_enabled,
     )?;
-    let render_pass = create_render_pass(device.as_ref().unwrap(), swapchain_resources.format.format)?;
+    let render_pass =
+        create_render_pass(device.as_ref().unwrap(), swapchain_resources.format.format)?;
     recreate_framebuffers(device.as_ref().unwrap(), &mut swapchain_resources, render_pass)?;
 
-    // --- NEW: Create resources required for texturing ---
     let sampler = create_sampler(device.as_ref().unwrap())?;
     let descriptor_set_layout = create_descriptor_set_layout(device.as_ref().unwrap())?;
     let descriptor_pool = create_descriptor_pool(device.as_ref().unwrap())?;
 
-    // --- NEW: Create the two distinct graphics pipelines ---
     let (solid_pipeline_layout, solid_pipeline) =
         create_solid_pipeline(device.as_ref().unwrap(), render_pass)?;
     let (texture_pipeline_layout, texture_pipeline) =
         create_texture_pipeline(device.as_ref().unwrap(), render_pass, descriptor_set_layout)?;
 
-    let command_buffers = create_command_buffers(device.as_ref().unwrap(), command_pool, MAX_FRAMES_IN_FLIGHT)?;
+    let command_buffers =
+        create_command_buffers(device.as_ref().unwrap(), command_pool, MAX_FRAMES_IN_FLIGHT)?;
     let (image_available_semaphores, render_finished_semaphores, in_flight_fences) =
         create_sync_objects(device.as_ref().unwrap())?;
     let images_in_flight = vec![vk::Fence::null(); swapchain_resources._images.len()];
 
+    // Cache projection once; keep it updated on resize.
+    let projection = create_projection_matrix(initial_size.width, initial_size.height);
 
     let mut state = State {
         _entry: entry,
@@ -186,7 +189,8 @@ pub fn init(window: &Window, screen: &Screen, vsync_enabled: bool) -> Result<Sta
         images_in_flight,
         current_frame: 0,
         window_size: initial_size,
-        vsync_enabled, // Set the new field
+        vsync_enabled,
+        projection, // new field
     };
 
     load_screen(&mut state, screen)?;
@@ -496,7 +500,10 @@ pub fn draw(
         state.device.as_ref().unwrap().wait_for_fences(&[fence], true, u64::MAX)?;
 
         let result = state.swapchain_resources.swapchain_loader.acquire_next_image(
-            state.swapchain_resources.swapchain, u64::MAX, state.image_available_semaphores[state.current_frame], vk::Fence::null(),
+            state.swapchain_resources.swapchain,
+            u64::MAX,
+            state.image_available_semaphores[state.current_frame],
+            vk::Fence::null(),
         );
         let image_index = match result {
             Ok((index, _)) => index,
@@ -515,88 +522,155 @@ pub fn draw(
         state.device.as_ref().unwrap().reset_fences(&[fence])?;
         let cmd = state.command_buffers[state.current_frame];
         state.device.as_ref().unwrap().reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
-        let begin_info = vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        let begin_info =
+            vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         state.device.as_ref().unwrap().begin_command_buffer(cmd, &begin_info)?;
 
         let c = screen.clear_color;
-        let clear_value = vk::ClearValue { color: vk::ClearColorValue { float32: [c[0], c[1], c[2], c[3]] } };
+        let clear_value = vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [c[0], c[1], c[2], c[3]],
+            },
+        };
         let render_pass_info = vk::RenderPassBeginInfo::default()
             .render_pass(state.render_pass)
             .framebuffer(state.swapchain_resources.framebuffers[image_index as usize])
-            .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent })
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D::default(),
+                extent: state.swapchain_resources.extent,
+            })
             .clear_values(std::slice::from_ref(&clear_value));
-        
+
         state.device.as_ref().unwrap().cmd_begin_render_pass(cmd, &render_pass_info, vk::SubpassContents::INLINE);
 
-        if let (Some(vertex_buffer), Some(index_buffer)) = (&state.vertex_buffer, &state.index_buffer) {
+        if let (Some(vertex_buffer), Some(index_buffer)) =
+            (&state.vertex_buffer, &state.index_buffer)
+        {
             let viewport = vk::Viewport {
-                x: 0.0, y: state.swapchain_resources.extent.height as f32, width: state.swapchain_resources.extent.width as f32,
-                height: -(state.swapchain_resources.extent.height as f32), min_depth: 0.0, max_depth: 1.0,
+                x: 0.0,
+                y: state.swapchain_resources.extent.height as f32,
+                width: state.swapchain_resources.extent.width as f32,
+                height: -(state.swapchain_resources.extent.height as f32),
+                min_depth: 0.0,
+                max_depth: 1.0,
             };
             state.device.as_ref().unwrap().cmd_set_viewport(cmd, 0, &[viewport]);
-            let scissor = vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent };
+            let scissor = vk::Rect2D {
+                offset: vk::Offset2D::default(),
+                extent: state.swapchain_resources.extent,
+            };
             state.device.as_ref().unwrap().cmd_set_scissor(cmd, 0, &[scissor]);
 
             state.device.as_ref().unwrap().cmd_bind_vertex_buffers(cmd, 0, &[vertex_buffer.buffer], &[0]);
             state.device.as_ref().unwrap().cmd_bind_index_buffer(cmd, index_buffer.buffer, 0, vk::IndexType::UINT16);
 
-            let proj = create_projection_matrix(state.window_size.width, state.window_size.height);
+            // Use cached projection
+            let proj = state.projection;
 
             for (i, object) in screen.objects.iter().enumerate() {
                 if let Some(draw_info) = state.object_draw_info.get(i) {
                     match &object.object_type {
                         ObjectType::SolidColor { color } => {
-                            state.device.as_ref().unwrap().cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.solid_pipeline);
-                            let push_constants = SolidPushConstants { mvp: proj * object.transform, color: *color };
-                            let bytes = std::slice::from_raw_parts(&push_constants as *const _ as *const u8, mem::size_of::<SolidPushConstants>());
-                            state.device.as_ref().unwrap().cmd_push_constants(cmd, state.solid_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes);
+                            state.device.as_ref().unwrap().cmd_bind_pipeline(
+                                cmd,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                state.solid_pipeline,
+                            );
+                            let push_constants =
+                                SolidPushConstants { mvp: proj * object.transform, color: *color };
+                            let bytes = std::slice::from_raw_parts(
+                                &push_constants as *const _ as *const u8,
+                                mem::size_of::<SolidPushConstants>(),
+                            );
+                            state.device.as_ref().unwrap().cmd_push_constants(
+                                cmd,
+                                state.solid_pipeline_layout,
+                                vk::ShaderStageFlags::VERTEX,
+                                0,
+                                bytes,
+                            );
                         }
                         ObjectType::Textured { texture_id } => {
-                            state.device.as_ref().unwrap().cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline);
-                            if let Some(renderer::Texture::Vulkan(texture)) = textures.get(texture_id) {
-                                state.device.as_ref().unwrap().cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline_layout, 0, &[texture.descriptor_set], &[]);
-                                let push_constants = TexturedPushConstants { mvp: proj * object.transform };
-                                let bytes = std::slice::from_raw_parts(&push_constants as *const _ as *const u8, mem::size_of::<TexturedPushConstants>());
-                                state.device.as_ref().unwrap().cmd_push_constants(cmd, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes);
+                            state.device.as_ref().unwrap().cmd_bind_pipeline(
+                                cmd,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                state.texture_pipeline,
+                            );
+                            if let Some(renderer::Texture::Vulkan(texture)) = textures.get(texture_id)
+                            {
+                                state.device.as_ref().unwrap().cmd_bind_descriptor_sets(
+                                    cmd,
+                                    vk::PipelineBindPoint::GRAPHICS,
+                                    state.texture_pipeline_layout,
+                                    0,
+                                    &[texture.descriptor_set],
+                                    &[],
+                                );
+                                let push_constants =
+                                    TexturedPushConstants { mvp: proj * object.transform };
+                                let bytes = std::slice::from_raw_parts(
+                                    &push_constants as *const _ as *const u8,
+                                    mem::size_of::<TexturedPushConstants>(),
+                                );
+                                state.device.as_ref().unwrap().cmd_push_constants(
+                                    cmd,
+                                    state.texture_pipeline_layout,
+                                    vk::ShaderStageFlags::VERTEX,
+                                    0,
+                                    bytes,
+                                );
                             } else {
-                                warn!("Vulkan texture ID '{}' not found in texture manager!", texture_id);
+                                warn!(
+                                    "Vulkan texture ID '{}' not found in texture manager!",
+                                    texture_id
+                                );
                                 continue;
                             }
                         }
                     }
-                    state.device.as_ref().unwrap().cmd_draw_indexed(cmd, draw_info.index_count, 1, draw_info.first_index, 0, 0);
+                    state.device.as_ref().unwrap().cmd_draw_indexed(
+                        cmd,
+                        draw_info.index_count,
+                        1,
+                        draw_info.first_index,
+                        0,
+                        0,
+                    );
                 }
             }
         }
-        
+
         state.device.as_ref().unwrap().cmd_end_render_pass(cmd);
         state.device.as_ref().unwrap().end_command_buffer(cmd)?;
 
         let wait_semaphores = [state.image_available_semaphores[state.current_frame]];
         let signal_semaphores = [state.render_finished_semaphores[state.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let cmd_buffers = [cmd]; // This is the fix
+        let cmd_buffers = [cmd];
 
         let submit_info = vk::SubmitInfo::default()
             .wait_semaphores(&wait_semaphores)
             .wait_dst_stage_mask(&wait_stages)
-            .command_buffers(&cmd_buffers) // Use the binding
+            .command_buffers(&cmd_buffers)
             .signal_semaphores(&signal_semaphores);
 
         state.device.as_ref().unwrap().queue_submit(state.queue, &[submit_info], fence)?;
 
-        // FIX: Create bindings for slices to extend their lifetimes.
         let swapchains = [state.swapchain_resources.swapchain];
         let image_indices = [image_index];
 
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(&signal_semaphores)
-            .swapchains(&swapchains) // Use the binding
-            .image_indices(&image_indices); // Use the binding
-        
-        let present_result = state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present_info);
+            .swapchains(&swapchains)
+            .image_indices(&image_indices);
 
-        let is_out_of_date = matches!(present_result, Ok(true) | Err(vk::Result::ERROR_OUT_OF_DATE_KHR));
+        let present_result = state
+            .swapchain_resources
+            .swapchain_loader
+            .queue_present(state.queue, &present_info);
+
+        let is_out_of_date =
+            matches!(present_result, Ok(true) | Err(vk::Result::ERROR_OUT_OF_DATE_KHR));
         if is_out_of_date {
             recreate_swapchain_and_dependents(state)?;
         } else if let Err(e) = present_result {
@@ -669,6 +743,8 @@ pub fn resize(state: &mut State, width: u32, height: u32) {
     info!("Vulkan resize requested to {}x{}", width, height);
     state.window_size = PhysicalSize::new(width, height);
     if width > 0 && height > 0 {
+        // Keep projection in sync with window size
+        state.projection = create_projection_matrix(width, height);
         if let Err(e) = recreate_swapchain_and_dependents(state) {
             error!("Failed to recreate swapchain: {}", e);
         }
