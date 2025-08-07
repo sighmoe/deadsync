@@ -260,53 +260,76 @@ fn create_solid_pipeline(
     let main_name = ffi::CStr::from_bytes_with_nul(b"main\0")?;
 
     let shader_stages = [
-        vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::VERTEX).module(vert_module).name(&main_name),
-        vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::FRAGMENT).module(frag_module).name(&main_name),
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(vert_module)
+            .name(main_name),
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(frag_module)
+            .name(main_name),
     ];
 
-    let binding_descriptions = [vk::VertexInputBindingDescription::default()
-        .binding(0)
-        .stride(mem::size_of::<[f32;4]>() as u32)
-        .input_rate(vk::VertexInputRate::VERTEX)];
-
-    let attribute_descriptions = [
-        vk::VertexInputAttributeDescription::default()
-            .binding(0)
-            .location(0)
-            .format(vk::Format::R32G32_SFLOAT)
-            .offset(0),
-        vk::VertexInputAttributeDescription::default()
-            .binding(0)
-            .location(1)
-            .format(vk::Format::R32G32_SFLOAT)
-            .offset(8),
-    ];
+    let (binding_descriptions, attribute_descriptions) = vertex_input_descriptions();
     let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&binding_descriptions)
         .vertex_attribute_descriptions(&attribute_descriptions);
-    let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-    let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
-    let rasterizer = vk::PipelineRasterizationStateCreateInfo::default().polygon_mode(vk::PolygonMode::FILL).line_width(1.0).cull_mode(vk::CullModeFlags::BACK).front_face(vk::FrontFace::COUNTER_CLOCKWISE);
-    let multisampling = vk::PipelineMultisampleStateCreateInfo::default().rasterization_samples(vk::SampleCountFlags::TYPE_1);
-    let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default().color_write_mask(vk::ColorComponentFlags::RGBA);
-    let color_blending = vk::PipelineColorBlendStateCreateInfo::default().attachments(std::slice::from_ref(&color_blend_attachment));
+    let input_assembly =
+        vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+    let viewport_state =
+        vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
+    let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
+        .polygon_mode(vk::PolygonMode::FILL)
+        .line_width(1.0)
+        .cull_mode(vk::CullModeFlags::BACK)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
+    let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+
+    // Enable alpha blending for solid quads (matches OpenGL)
+    let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default()
+        .color_write_mask(vk::ColorComponentFlags::RGBA)
+        .blend_enable(true)
+        .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+        .color_blend_op(vk::BlendOp::ADD)
+        .src_alpha_blend_factor(vk::BlendFactor::ONE)
+        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+        .alpha_blend_op(vk::BlendOp::ADD);
+
+    let color_blending = vk::PipelineColorBlendStateCreateInfo::default()
+        .attachments(std::slice::from_ref(&color_blend_attachment));
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-    let dynamic_state = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+    let dynamic_state =
+        vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
     let push_constant_range = vk::PushConstantRange::default()
         .stage_flags(vk::ShaderStageFlags::VERTEX)
         .offset(0)
         .size(mem::size_of::<SolidPushConstants>() as u32);
-        
-    let pipeline_layout_info = vk::PipelineLayoutCreateInfo::default().push_constant_ranges(std::slice::from_ref(&push_constant_range));
+
+    let pipeline_layout_info =
+        vk::PipelineLayoutCreateInfo::default().push_constant_ranges(std::slice::from_ref(&push_constant_range));
     let pipeline_layout = unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
 
     let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
-        .stages(&shader_stages).vertex_input_state(&vertex_input_info).input_assembly_state(&input_assembly).viewport_state(&viewport_state)
-        .rasterization_state(&rasterizer).multisample_state(&multisampling).color_blend_state(&color_blending).dynamic_state(&dynamic_state)
-        .layout(pipeline_layout).render_pass(render_pass).subpass(0);
+        .stages(&shader_stages)
+        .vertex_input_state(&vertex_input_info)
+        .input_assembly_state(&input_assembly)
+        .viewport_state(&viewport_state)
+        .rasterization_state(&rasterizer)
+        .multisample_state(&multisampling)
+        .color_blend_state(&color_blending)
+        .dynamic_state(&dynamic_state)
+        .layout(pipeline_layout)
+        .render_pass(render_pass)
+        .subpass(0);
 
-    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None).map_err(|e| e.1)?[0] };
+    let pipeline = unsafe {
+        device
+            .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+            .map_err(|e| e.1)?[0]
+    };
 
     unsafe {
         device.destroy_shader_module(vert_module, None);
@@ -329,36 +352,32 @@ fn create_texture_pipeline(
     let main_name = ffi::CStr::from_bytes_with_nul(b"main\0")?;
 
     let shader_stages = [
-        vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::VERTEX).module(vert_module).name(&main_name),
-        vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::FRAGMENT).module(frag_module).name(&main_name),
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(vert_module)
+            .name(main_name),
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(frag_module)
+            .name(main_name),
     ];
-    
-    // Vertex format is the same for both pipelines
-    let binding_descriptions = [vk::VertexInputBindingDescription::default()
-        .binding(0)
-        .stride(mem::size_of::<[f32;4]>() as u32)
-        .input_rate(vk::VertexInputRate::VERTEX)];
 
-    let attribute_descriptions = [
-        vk::VertexInputAttributeDescription::default()
-            .binding(0)
-            .location(0)
-            .format(vk::Format::R32G32_SFLOAT)
-            .offset(0),
-        vk::VertexInputAttributeDescription::default()
-            .binding(0)
-            .location(1)
-            .format(vk::Format::R32G32_SFLOAT)
-            .offset(8),
-    ];
+    let (binding_descriptions, attribute_descriptions) = vertex_input_descriptions();
     let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&binding_descriptions)
         .vertex_attribute_descriptions(&attribute_descriptions);
-    let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-    let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
-    let rasterizer = vk::PipelineRasterizationStateCreateInfo::default().polygon_mode(vk::PolygonMode::FILL).line_width(1.0).cull_mode(vk::CullModeFlags::BACK).front_face(vk::FrontFace::COUNTER_CLOCKWISE);
-    let multisampling = vk::PipelineMultisampleStateCreateInfo::default().rasterization_samples(vk::SampleCountFlags::TYPE_1);
-    
+    let input_assembly =
+        vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+    let viewport_state =
+        vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
+    let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
+        .polygon_mode(vk::PolygonMode::FILL)
+        .line_width(1.0)
+        .cull_mode(vk::CullModeFlags::BACK)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
+    let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+
     // Enable alpha blending for textures
     let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default()
         .color_write_mask(vk::ColorComponentFlags::RGBA)
@@ -370,15 +389,17 @@ fn create_texture_pipeline(
         .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
         .alpha_blend_op(vk::BlendOp::ADD);
 
-    let color_blending = vk::PipelineColorBlendStateCreateInfo::default().attachments(std::slice::from_ref(&color_blend_attachment));
+    let color_blending = vk::PipelineColorBlendStateCreateInfo::default()
+        .attachments(std::slice::from_ref(&color_blend_attachment));
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-    let dynamic_state = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+    let dynamic_state =
+        vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
     let push_constant_range = vk::PushConstantRange::default()
         .stage_flags(vk::ShaderStageFlags::VERTEX)
         .offset(0)
         .size(mem::size_of::<TexturedPushConstants>() as u32);
-        
+
     // The key difference: This layout USES the descriptor set for textures.
     let pipeline_layout_info = vk::PipelineLayoutCreateInfo::default()
         .set_layouts(std::slice::from_ref(&set_layout))
@@ -387,11 +408,23 @@ fn create_texture_pipeline(
     let pipeline_layout = unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
 
     let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
-        .stages(&shader_stages).vertex_input_state(&vertex_input_info).input_assembly_state(&input_assembly).viewport_state(&viewport_state)
-        .rasterization_state(&rasterizer).multisample_state(&multisampling).color_blend_state(&color_blending).dynamic_state(&dynamic_state)
-        .layout(pipeline_layout).render_pass(render_pass).subpass(0);
+        .stages(&shader_stages)
+        .vertex_input_state(&vertex_input_info)
+        .input_assembly_state(&input_assembly)
+        .viewport_state(&viewport_state)
+        .rasterization_state(&rasterizer)
+        .multisample_state(&multisampling)
+        .color_blend_state(&color_blending)
+        .dynamic_state(&dynamic_state)
+        .layout(pipeline_layout)
+        .render_pass(render_pass)
+        .subpass(0);
 
-    let pipeline = unsafe { device.create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None).map_err(|e| e.1)?[0] };
+    let pipeline = unsafe {
+        device
+            .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+            .map_err(|e| e.1)?[0]
+    };
 
     unsafe {
         device.destroy_shader_module(vert_module, None);
@@ -889,6 +922,30 @@ fn create_texture_descriptor_set(
         state.device.as_ref().unwrap().update_descriptor_sets(&[descriptor_write], &[]);
     }
     Ok(descriptor_set)
+}
+
+#[inline(always)]
+fn vertex_input_descriptions() -> (
+    [vk::VertexInputBindingDescription; 1],
+    [vk::VertexInputAttributeDescription; 2],
+) {
+    let binding = vk::VertexInputBindingDescription::default()
+        .binding(0)
+        .stride(mem::size_of::<[f32; 4]>() as u32)
+        .input_rate(vk::VertexInputRate::VERTEX);
+    let attrs = [
+        vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(0)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(0),
+        vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(1)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(8),
+    ];
+    ([binding], attrs)
 }
 
 // --- Buffer & Command Helpers ---
