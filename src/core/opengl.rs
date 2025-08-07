@@ -144,6 +144,7 @@ pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Err
 pub fn draw(
     state: &mut State,
     screen: &Screen,
+    // FIX: The texture HashMap still uses String as the key, not &'static str.
     textures: &HashMap<String, renderer::Texture>,
 ) -> Result<(), Box<dyn Error>> {
     let (width, height) = state.window_size;
@@ -175,11 +176,16 @@ pub fn draw(
             let mvp = state.projection * object.transform;
             let mvp_array: [[f32; 4]; 4] = mvp.into();
 
-            state.gl.uniform_matrix_4_f32_slice(
-                Some(&state.mvp_location),
-                false,
-                &mvp_array.concat(),
-            );
+            // --- ZERO-ALLOCATION CHANGE ---
+            // SAFETY: [[f32; 4]; 4] is a contiguous block of 16 floats in memory.
+            // We create a safe, read-only slice view into this data instead of allocating a new Vec.
+            let mvp_slice: &[f32] =
+                std::slice::from_raw_parts(mvp_array.as_ptr() as *const f32, 16);
+
+            state
+                .gl
+                .uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
+            // --- END CHANGE ---
 
             match &object.object_type {
                 ObjectType::SolidColor { color } => {
@@ -191,6 +197,7 @@ pub fn draw(
                     state.gl.bind_texture(glow::TEXTURE_2D, None);
                 }
                 ObjectType::Textured { texture_id } => {
+                    // This `get` call will now work correctly with a &String key.
                     if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
                         state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
                         state.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
@@ -202,7 +209,6 @@ pub fn draw(
                         state
                             .gl
                             .uniform_4_f32_slice(Some(&state.color_location), &magenta);
-                        // FIX: Corrected typo from TEXTURE_D to TEXTURE_2D
                         state.gl.bind_texture(glow::TEXTURE_2D, None);
                     }
                 }
