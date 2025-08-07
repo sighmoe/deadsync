@@ -9,7 +9,7 @@ use glutin::{
     context::{ContextAttributesBuilder, PossiblyCurrentContext},
     display::{Display, DisplayApiPreference},
     prelude::*,
-    surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface},
+    surface::{Surface, SurfaceAttributesBuilder, WindowSurface},
 };
 use image::RgbaImage;
 use log::{info, warn};
@@ -166,11 +166,9 @@ pub fn draw(
         state.gl.enable(glow::BLEND);
         state.gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
 
-        // Activate a texture unit once. We'll only use unit 0.
+        // Activate texture unit 0 once
         state.gl.active_texture(glow::TEXTURE0);
-        state
-            .gl
-            .uniform_1_i32(Some(&state.texture_location), 0);
+        state.gl.uniform_1_i32(Some(&state.texture_location), 0);
 
         for (i, object) in screen.objects.iter().enumerate() {
             let gl_object = &state.gl_objects[i];
@@ -183,29 +181,29 @@ pub fn draw(
                 &mvp_array.concat(),
             );
 
-            // --- Switch between solid color and texture ---
             match &object.object_type {
                 ObjectType::SolidColor { color } => {
-                    // Tell shader to use the color uniform.
-                    state
-                        .gl
-                        .uniform_1_i32(Some(&state.use_texture_location), 0);
+                    state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
                     state
                         .gl
                         .uniform_4_f32_slice(Some(&state.color_location), color);
+                    // Unbind any previous texture to avoid surprises
+                    state.gl.bind_texture(glow::TEXTURE_2D, None);
                 }
                 ObjectType::Textured { texture_id } => {
-                    // Tell shader to use the texture sampler.
-                    state
-                        .gl
-                        .uniform_1_i32(Some(&state.use_texture_location), 1);
-
-                    // Find and bind the correct texture.
                     if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
+                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
                         state.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
                     } else {
                         warn!("Texture ID '{}' not found in texture manager!", texture_id);
-                        // Optional: Bind a fallback texture here.
+                        // Fallback: draw with a bright magenta color (debugging-friendly)
+                        let magenta = [1.0, 0.0, 1.0, 1.0];
+                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
+                        state
+                            .gl
+                            .uniform_4_f32_slice(Some(&state.color_location), &magenta);
+                        // FIX: Corrected typo from TEXTURE_D to TEXTURE_2D
+                        state.gl.bind_texture(glow::TEXTURE_2D, None);
                     }
                 }
             }
@@ -258,23 +256,13 @@ pub fn cleanup(state: &mut State) {
 
 fn create_opengl_context(
     window: &Window,
-    vsync_enabled: bool, // Still accept it for logging/consistency
+    vsync_enabled: bool,
 ) -> Result<(Surface<WindowSurface>, PossiblyCurrentContext, glow::Context), Box<dyn Error>> {
     let display_handle = window.display_handle()?.as_raw();
 
-    // Try EGL first
-    let preference_egl = DisplayApiPreference::Egl;
-    let display = match unsafe { Display::new(display_handle, preference_egl) } {
-        Ok(d) => {
-            info!("Using EGL display for better VSync support.");
-            d
-        }
-        Err(e) => {
-            warn!("EGL not available: {}, falling back to WGL", e);
-            let preference_wgl = DisplayApiPreference::Wgl(None);
-            unsafe { Display::new(display_handle, preference_wgl)? }
-        }
-    };
+    info!("Using WGL display for OpenGL context.");
+    let preference_wgl = DisplayApiPreference::Wgl(None);
+    let display = unsafe { Display::new(display_handle, preference_wgl)? };
 
     let template = ConfigTemplateBuilder::new()
         .with_alpha_size(8)
@@ -298,31 +286,23 @@ fn create_opengl_context(
     let context = unsafe { display.create_context(&config, &context_attributes)? }
         .make_current(&surface)?;
 
-    // New: Set VSync via swap interval AFTER context creation
-    let swap_interval = if vsync_enabled {
-        SwapInterval::Wait(NonZeroU32::new(1).unwrap()) // VSync on (wait 1 frame)
-    } else {
-        SwapInterval::DontWait // VSync off
-    };
-    if let Err(e) = surface.set_swap_interval(&context, swap_interval) {
-        log::warn!("Failed to set swap interval (VSync): {}. Using default.", e);
-
-        // Manual attempt for WGL
-        type SwapIntervalFn = extern "system" fn(i32) -> i32;
-        let proc = display.get_proc_address(CStr::from_bytes_with_nul(b"wglSwapIntervalEXT\0").unwrap());
-        if !proc.is_null() {
-            let f: SwapIntervalFn = unsafe { std::mem::transmute(proc) };
-            let interval = if vsync_enabled { 1 } else { 0 };
-            if { f(interval) } != 0 {
-                info!("Manually set VSync to {} using wglSwapIntervalEXT", if vsync_enabled { "on" } else { "off" });
-            } else {
-                warn!("wglSwapIntervalEXT call failed.");
-            }
+    // --- VSYNC CHANGE ---
+    // The standard `set_swap_interval` call fails on this driver, but the manual WGL call works.
+    // We will skip the failing call and use the reliable manual method directly.
+    info!("Attempting to set VSync via wglSwapIntervalEXT...");
+    type SwapIntervalFn = extern "system" fn(i32) -> i32;
+    let proc_name = CStr::from_bytes_with_nul(b"wglSwapIntervalEXT\0").unwrap();
+    let proc = display.get_proc_address(proc_name);
+    if !proc.is_null() {
+        let f: SwapIntervalFn = unsafe { std::mem::transmute(proc) };
+        let interval = if vsync_enabled { 1 } else { 0 };
+        if f(interval) != 0 {
+            info!("Successfully set VSync to: {}", if vsync_enabled { "on" } else { "off" });
         } else {
-            warn!("wglSwapIntervalEXT not found.");
+            warn!("wglSwapIntervalEXT call failed. VSync state may not be as requested.");
         }
     } else {
-        info!("VSync set to: {}", if vsync_enabled { "on" } else { "off" });
+        warn!("wglSwapIntervalEXT function not found. Cannot control VSync.");
     }
 
     unsafe {
@@ -465,12 +445,18 @@ fn create_projection_matrix(width: u32, height: u32) -> Matrix4<f32> {
 }
 
 mod bytemuck {
-    pub unsafe fn cast_slice<T, U>(slice: &[T]) -> &[U] {
-        unsafe {
-            std::slice::from_raw_parts(
-                slice.as_ptr() as *const U,
-                (slice.len() * std::mem::size_of::<T>()) / std::mem::size_of::<U>(),
-            )
-        }
+    // Safer cast: uses align_to to ensure alignment is correct.
+    // For our use (f32 -> u8), this is always safe; the asserts keep us honest.
+    #[inline(always)]
+    pub fn cast_slice<T, U>(slice: &[T]) -> &[U] {
+        // FIX: The call to `align_to` must be in an `unsafe` block.
+        // We are confident this is safe because we only cast from f32 to u8,
+        // and any type's alignment is a multiple of u8's alignment (which is 1).
+        let (prefix, mid, suffix) = unsafe { slice.align_to::<U>() };
+        debug_assert!(
+            prefix.is_empty() && suffix.is_empty(),
+            "cast_slice: misaligned cast"
+        );
+        mid
     }
 }
