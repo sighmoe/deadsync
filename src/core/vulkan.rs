@@ -2,6 +2,7 @@ use crate::{
     renderer,
     screen::{ObjectType, Screen},
 };
+use crate::math::ortho_for_window;
 use ash::{
     khr::{surface, swapchain},
     vk, Device, Entry, Instance,
@@ -157,7 +158,7 @@ pub fn init(window: &Window, screen: &Screen, vsync_enabled: bool) -> Result<Sta
     let images_in_flight = vec![vk::Fence::null(); swapchain_resources._images.len()];
 
     // Cache projection once; keep it updated on resize.
-    let projection = create_projection_matrix(initial_size.width, initial_size.height);
+    let projection = ortho_for_window(initial_size.width, initial_size.height);
 
     let mut state = State {
         _entry: entry,
@@ -744,7 +745,7 @@ pub fn resize(state: &mut State, width: u32, height: u32) {
     state.window_size = PhysicalSize::new(width, height);
     if width > 0 && height > 0 {
         // Keep projection in sync with window size
-        state.projection = create_projection_matrix(width, height);
+        state.projection = ortho_for_window(width, height);
         if let Err(e) = recreate_swapchain_and_dependents(state) {
             error!("Failed to recreate swapchain: {}", e);
         }
@@ -752,16 +753,6 @@ pub fn resize(state: &mut State, width: u32, height: u32) {
 }
 
 // --- ALL HELPER FUNCTIONS ---
-
-fn create_projection_matrix(width: u32, height: u32) -> Matrix4<f32> {
-    let aspect_ratio = width as f32 / height as f32;
-    let (ortho_width, ortho_height) = if aspect_ratio >= 1.0 {
-        (400.0 * aspect_ratio, 400.0)
-    } else {
-        (400.0, 400.0 / aspect_ratio)
-    };
-    cgmath::ortho(-ortho_width, ortho_width, -ortho_height, ortho_height, -1.0, 1.0)
-}
 
 // --- Image & Texture Helpers ---
 

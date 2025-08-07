@@ -4,6 +4,7 @@ mod input;
 mod renderer;
 mod screen;
 mod screens;
+mod math;
 
 use input::InputState;
 use log::{error, info};

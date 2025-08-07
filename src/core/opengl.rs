@@ -2,6 +2,7 @@ use crate::{
     renderer,
     screen::{ObjectType, Screen, ScreenObject},
 };
+use crate::math::ortho_for_window;
 use cgmath::Matrix4;
 use glow::{HasContext, PixelUnpackData, UniformLocation};
 use glutin::{
@@ -50,7 +51,7 @@ pub fn init(window: Arc<Window>, screen: &Screen, vsync_enabled: bool) -> Result
         create_graphics_program(&gl)?;
 
     let initial_size = window.inner_size();
-    let projection = create_projection_matrix(initial_size.width, initial_size.height);
+    let projection = ortho_for_window(initial_size.width, initial_size.height);
 
     let mut state = State {
         gl,
@@ -237,7 +238,7 @@ pub fn resize(state: &mut State, width: u32, height: u32) {
             unsafe {
                 state.gl.viewport(0, 0, width as i32, height as i32);
             }
-            state.projection = create_projection_matrix(width, height);
+            state.projection = ortho_for_window(width, height);
             state.window_size = (width, height);
         }
     } else {
@@ -438,23 +439,6 @@ fn create_object_resources(
             index_count: object.indices.len() as i32,
         })
     }
-}
-
-fn create_projection_matrix(width: u32, height: u32) -> Matrix4<f32> {
-    let aspect_ratio = width as f32 / height as f32;
-    let (ortho_width, ortho_height) = if aspect_ratio >= 1.0 {
-        (400.0 * aspect_ratio, 400.0)
-    } else {
-        (400.0, 400.0 / aspect_ratio)
-    };
-    cgmath::ortho(
-        -ortho_width,
-        ortho_width,
-        -ortho_height,
-        ortho_height,
-        -1.0,
-        1.0,
-    )
 }
 
 mod bytemuck {
