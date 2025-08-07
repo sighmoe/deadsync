@@ -259,9 +259,26 @@ fn create_solid_pipeline(
         vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::FRAGMENT).module(frag_module).name(&main_name),
     ];
 
-    let binding_descriptions = [vk::VertexInputBindingDescription::default().binding(0).stride(mem::size_of::<[f32; 2]>() as u32).input_rate(vk::VertexInputRate::VERTEX)];
-    let attribute_descriptions = [vk::VertexInputAttributeDescription::default().binding(0).location(0).format(vk::Format::R32G32_SFLOAT).offset(0)];
-    let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default().vertex_binding_descriptions(&binding_descriptions).vertex_attribute_descriptions(&attribute_descriptions);
+    let binding_descriptions = [vk::VertexInputBindingDescription::default()
+        .binding(0)
+        .stride(mem::size_of::<[f32;4]>() as u32)
+        .input_rate(vk::VertexInputRate::VERTEX)];
+
+    let attribute_descriptions = [
+        vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(0)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(0),
+        vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(1)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(8),
+    ];
+    let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_binding_descriptions(&binding_descriptions)
+        .vertex_attribute_descriptions(&attribute_descriptions);
     let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
     let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
     let rasterizer = vk::PipelineRasterizationStateCreateInfo::default().polygon_mode(vk::PolygonMode::FILL).line_width(1.0).cull_mode(vk::CullModeFlags::BACK).front_face(vk::FrontFace::COUNTER_CLOCKWISE);
@@ -312,9 +329,26 @@ fn create_texture_pipeline(
     ];
     
     // Vertex format is the same for both pipelines
-    let binding_descriptions = [vk::VertexInputBindingDescription::default().binding(0).stride(mem::size_of::<[f32; 2]>() as u32).input_rate(vk::VertexInputRate::VERTEX)];
-    let attribute_descriptions = [vk::VertexInputAttributeDescription::default().binding(0).location(0).format(vk::Format::R32G32_SFLOAT).offset(0)];
-    let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default().vertex_binding_descriptions(&binding_descriptions).vertex_attribute_descriptions(&attribute_descriptions);
+    let binding_descriptions = [vk::VertexInputBindingDescription::default()
+        .binding(0)
+        .stride(mem::size_of::<[f32;4]>() as u32)
+        .input_rate(vk::VertexInputRate::VERTEX)];
+
+    let attribute_descriptions = [
+        vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(0)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(0),
+        vk::VertexInputAttributeDescription::default()
+            .binding(0)
+            .location(1)
+            .format(vk::Format::R32G32_SFLOAT)
+            .offset(8),
+    ];
+    let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_binding_descriptions(&binding_descriptions)
+        .vertex_attribute_descriptions(&attribute_descriptions);
     let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
     let viewport_state = vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
     let rasterizer = vk::PipelineRasterizationStateCreateInfo::default().polygon_mode(vk::PolygonMode::FILL).line_width(1.0).cull_mode(vk::CullModeFlags::BACK).front_face(vk::FrontFace::COUNTER_CLOCKWISE);
@@ -428,7 +462,7 @@ pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Err
         return Ok(());
     }
 
-    let mut all_vertices = Vec::new();
+    let mut all_vertices: Vec<[f32; 4]> = Vec::new();
     let mut all_indices = Vec::new();
     for object in &screen.objects {
         let first_index = all_indices.len() as u32;
@@ -441,7 +475,7 @@ pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Err
         });
     }
 
-    state.vertex_buffer = Some(create_buffer_with_data_vec(&state.instance, state.device.as_ref().unwrap(), state.pdevice, state.command_pool, state.queue, &all_vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?);
+state.vertex_buffer = Some(create_buffer_with_data_vec(&state.instance, state.device.as_ref().unwrap(), state.pdevice, state.command_pool, state.queue, &all_vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?);
     state.index_buffer = Some(create_buffer_with_data_vec(&state.instance, state.device.as_ref().unwrap(), state.pdevice, state.command_pool, state.queue, &all_indices, vk::BufferUsageFlags::INDEX_BUFFER)?);
     
     info!("Vulkan screen loaded successfully.");

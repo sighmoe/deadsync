@@ -1,8 +1,9 @@
 #version 450
 
 layout(location = 0) in vec2 in_position;
+layout(location = 1) in vec2 in_uv; // Unused, but included for consistent vertex format
 
-layout(location = 0) out vec4 out_color; // Output to fragment shader
+layout(location = 0) out vec4 out_color;
 
 layout(push_constant) uniform constants {
     mat4 mvp;
@@ -11,5 +12,5 @@ layout(push_constant) uniform constants {
 
 void main() {
     gl_Position = PushConstants.mvp * vec4(in_position, 0.0, 1.0);
-    out_color = PushConstants.color; // Pass color to frag
+    out_color = PushConstants.color;
 }

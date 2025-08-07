@@ -3,7 +3,7 @@ use cgmath::{Matrix4, Vector2};
 #[derive(Debug, Clone)]
 pub enum UIElement {
     Quad(Quad),
-    Sprite(Sprite), // New
+    Sprite(Sprite),
 }
 
 #[derive(Debug, Clone)]
@@ -13,7 +13,6 @@ pub struct Quad {
     pub color: [f32; 4],
 }
 
-// New struct for textured quads
 #[derive(Debug, Clone)]
 pub struct Sprite {
     pub center: Vector2<f32>,
@@ -21,7 +20,6 @@ pub struct Sprite {
     pub texture_id: String,
 }
 
-// Update the translation function
 pub fn to_screen_object(element: &UIElement) -> crate::screen::ScreenObject {
     match element {
         UIElement::Quad(quad) => {
@@ -55,12 +53,12 @@ pub fn to_screen_object(element: &UIElement) -> crate::screen::ScreenObject {
     }
 }
 
-// Helper to avoid repetition
-fn create_vertices(half_size: Vector2<f32>) -> Vec<[f32; 2]> {
+// Updated to include UVs in each vertex
+fn create_vertices(half_size: Vector2<f32>) -> Vec<[f32; 4]> {
     vec![
-        [-half_size.x, -half_size.y], // bottom-left
-        [half_size.x, -half_size.y],  // bottom-right
-        [half_size.x, half_size.y],   // top-right
-        [-half_size.x, half_size.y],  // top-left
+        [-half_size.x, -half_size.y, 0.0, 1.0], // bottom-left
+        [half_size.x, -half_size.y, 1.0, 1.0],  // bottom-right
+        [half_size.x, half_size.y, 1.0, 0.0],   // top-right
+        [-half_size.x, half_size.y, 0.0, 0.0],  // top-left
     ]
 }

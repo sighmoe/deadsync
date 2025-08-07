@@ -262,8 +262,21 @@ fn create_opengl_context(
     window: &Window,
     vsync_enabled: bool, // Still accept it for logging/consistency
 ) -> Result<(Surface<WindowSurface>, PossiblyCurrentContext, glow::Context), Box<dyn Error>> {
-    let preference = DisplayApiPreference::Wgl(None);
-    let display = unsafe { Display::new(window.display_handle()?.into(), preference)? };
+    let display_handle = window.display_handle()?.as_raw();
+
+    // Try EGL first
+    let preference_egl = DisplayApiPreference::Egl;
+    let display = match unsafe { Display::new(display_handle, preference_egl) } {
+        Ok(d) => {
+            info!("Using EGL display for better VSync support.");
+            d
+        }
+        Err(e) => {
+            warn!("EGL not available: {}, falling back to WGL", e);
+            let preference_wgl = DisplayApiPreference::Wgl(None);
+            unsafe { Display::new(display_handle, preference_wgl)? }
+        }
+    };
 
     let template = ConfigTemplateBuilder::new()
         .with_alpha_size(8)
@@ -274,16 +287,16 @@ fn create_opengl_context(
         .ok_or("Failed to find a suitable GL config")?;
 
     let (width, height): (u32, u32) = window.inner_size().into();
-    let raw_window_handle = window.window_handle()?;
+    let raw_window_handle = window.window_handle()?.as_raw();
     let surface_attributes = SurfaceAttributesBuilder::<WindowSurface>::new().build(
-        raw_window_handle.into(),
+        raw_window_handle,
         NonZeroU32::new(width).unwrap(),
         NonZeroU32::new(height).unwrap(),
     );
     let surface = unsafe { display.create_window_surface(&config, &surface_attributes)? };
 
     let context_attributes =
-        ContextAttributesBuilder::new().build(Some(raw_window_handle.into()));
+        ContextAttributesBuilder::new().build(Some(raw_window_handle));
     let context = unsafe { display.create_context(&config, &context_attributes)? }
         .make_current(&surface)?;
 
@@ -403,8 +416,14 @@ fn create_object_resources(
         gl.bind_vertex_array(Some(vao));
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
         gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ibo));
+
+        // Position attribute (location 0)
         gl.enable_vertex_attrib_array(0);
-        gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 2 * mem::size_of::<f32>() as i32, 0);
+        gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 4 * mem::size_of::<f32>() as i32, 0);
+
+        // UV attribute (location 1)
+        gl.enable_vertex_attrib_array(1);
+        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 4 * mem::size_of::<f32>() as i32, 2 * mem::size_of::<f32>() as i32);
 
         Ok(OpenGLObject {
             vao,
