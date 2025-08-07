@@ -308,6 +308,21 @@ fn create_opengl_context(
     };
     if let Err(e) = surface.set_swap_interval(&context, swap_interval) {
         log::warn!("Failed to set swap interval (VSync): {}. Using default.", e);
+
+        // Manual attempt for WGL
+        type SwapIntervalFn = extern "system" fn(i32) -> i32;
+        let proc = display.get_proc_address(CStr::from_bytes_with_nul(b"wglSwapIntervalEXT\0").unwrap());
+        if !proc.is_null() {
+            let f: SwapIntervalFn = unsafe { std::mem::transmute(proc) };
+            let interval = if vsync_enabled { 1 } else { 0 };
+            if unsafe { f(interval) } != 0 {
+                info!("Manually set VSync to {} using wglSwapIntervalEXT", if vsync_enabled { "on" } else { "off" });
+            } else {
+                warn!("wglSwapIntervalEXT call failed.");
+            }
+        } else {
+            warn!("wglSwapIntervalEXT not found.");
+        }
     } else {
         info!("VSync set to: {}", if vsync_enabled { "on" } else { "off" });
     }
