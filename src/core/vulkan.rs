@@ -270,7 +270,8 @@ fn create_solid_pipeline(
             .name(main_name),
     ];
 
-    let (binding_descriptions, attribute_descriptions) = vertex_input_descriptions();
+    // Use the specific vertex description for the solid pipeline.
+    let (binding_descriptions, attribute_descriptions) = vertex_input_descriptions_solid();
     let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&binding_descriptions)
         .vertex_attribute_descriptions(&attribute_descriptions);
@@ -362,7 +363,8 @@ fn create_texture_pipeline(
             .name(main_name),
     ];
 
-    let (binding_descriptions, attribute_descriptions) = vertex_input_descriptions();
+    // Use the specific vertex description for the textured pipeline.
+    let (binding_descriptions, attribute_descriptions) = vertex_input_descriptions_textured();
     let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&binding_descriptions)
         .vertex_attribute_descriptions(&attribute_descriptions);
@@ -925,27 +927,47 @@ fn create_texture_descriptor_set(
 }
 
 #[inline(always)]
-fn vertex_input_descriptions() -> (
+fn vertex_input_descriptions_solid() -> (
+    [vk::VertexInputBindingDescription; 1],
+    [vk::VertexInputAttributeDescription; 1],
+) {
+    let binding = vk::VertexInputBindingDescription::default()
+        .binding(0)
+        .stride(std::mem::size_of::<[f32; 4]>() as u32) // [x, y, u, v]
+        .input_rate(vk::VertexInputRate::VERTEX);
+
+    let position = vk::VertexInputAttributeDescription::default()
+        .binding(0)
+        .location(0)
+        .format(vk::Format::R32G32_SFLOAT)
+        .offset(0);
+
+    ([binding], [position])
+}
+
+#[inline(always)]
+fn vertex_input_descriptions_textured() -> (
     [vk::VertexInputBindingDescription; 1],
     [vk::VertexInputAttributeDescription; 2],
 ) {
     let binding = vk::VertexInputBindingDescription::default()
         .binding(0)
-        .stride(mem::size_of::<[f32; 4]>() as u32)
+        .stride(std::mem::size_of::<[f32; 4]>() as u32) // [x, y, u, v]
         .input_rate(vk::VertexInputRate::VERTEX);
-    let attrs = [
-        vk::VertexInputAttributeDescription::default()
-            .binding(0)
-            .location(0)
-            .format(vk::Format::R32G32_SFLOAT)
-            .offset(0),
-        vk::VertexInputAttributeDescription::default()
-            .binding(0)
-            .location(1)
-            .format(vk::Format::R32G32_SFLOAT)
-            .offset(8),
-    ];
-    ([binding], attrs)
+
+    let position = vk::VertexInputAttributeDescription::default()
+        .binding(0)
+        .location(0)
+        .format(vk::Format::R32G32_SFLOAT)
+        .offset(0);
+
+    let uv = vk::VertexInputAttributeDescription::default()
+        .binding(0)
+        .location(1)
+        .format(vk::Format::R32G32_SFLOAT)
+        .offset(8);
+
+    ([binding], [position, uv])
 }
 
 // --- Buffer & Command Helpers ---
