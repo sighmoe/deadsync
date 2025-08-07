@@ -25,9 +25,8 @@ pub fn get_ui_elements(_state: &State) -> Vec<UIElement> {
         UIElement::Sprite(Sprite {
             center: Vector2::new(0.0, 150.0),
             size: Vector2::new(400.0, 128.0),
-            texture_id: "dance.png".to_string(),
+            texture_id: "dance.png",
         }),
-
         // The original colored quads
         UIElement::Quad(Quad {
             center: Vector2::new(-150.0, 0.0),

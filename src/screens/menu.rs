@@ -45,12 +45,12 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 
 pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
     let mut elements = Vec::new();
-    
+
     // 1. Draw the logo sprite above the menu options
     elements.push(UIElement::Sprite(Sprite {
         center: Vector2::new(0.0, 250.0),
         size: Vector2::new(600.0, 200.0), // Shrink the logo to fit nicely
-        texture_id: "logo.png".to_string(),
+        texture_id: "logo.png",
     }));
 
     // 2. Draw the menu option quads
@@ -71,13 +71,13 @@ pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
         }));
         let _ = text; // Placeholder for future text rendering
     }
-    
+
     // 3. Draw the arrow sprite next to the selected option
     let selected_y_pos = 100.0 - (state.selected_index as f32 * 80.0);
     elements.push(UIElement::Sprite(Sprite {
         center: Vector2::new(-150.0, selected_y_pos),
         size: Vector2::new(64.0, 64.0),
-        texture_id: "meter_arrow.png".to_string(),
+        texture_id: "meter_arrow.png",
     }));
 
     elements

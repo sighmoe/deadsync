@@ -59,7 +59,7 @@ struct App {
     window: Option<Arc<Window>>,
     backend: Option<renderer::Backend>,
     backend_type: BackendType,
-    texture_manager: HashMap<String, renderer::Texture>,
+    texture_manager: HashMap<&'static str, renderer::Texture>, // Changed from String
     current_screen: CurrentScreen,
     menu_state: menu::State,
     gameplay_state: gameplay::State,
@@ -68,7 +68,7 @@ struct App {
     frame_count: u32,
     last_title_update: Instant,
     last_frame_time: Instant,
-    vsync_enabled: bool, // New immutable field
+    vsync_enabled: bool,
 }
 
 // Update App::new to accept vsync_enabled
@@ -99,7 +99,7 @@ impl App {
             .as_mut()
             .ok_or("Backend not initialized when trying to load textures")?;
 
-        let texture_paths = [
+        let texture_paths: [&'static str; 4] = [
             "logo.png",
             "dance.png",
             "meter_arrow.png",
@@ -110,11 +110,9 @@ impl App {
             let full_path = Path::new("assets/graphics").join(path_str);
             let image = image::open(&full_path)?.to_rgba8();
 
-            // NOTE: The following line will cause a compile error until we update `renderer.rs`
             let texture = renderer::create_texture(backend, &image)?;
 
-            self.texture_manager
-                .insert(path_str.to_string(), texture);
+            self.texture_manager.insert(path_str, texture);
             info!("Loaded texture: {}", full_path.display());
         }
 

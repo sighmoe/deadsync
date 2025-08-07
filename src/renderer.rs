@@ -1,4 +1,7 @@
-use crate::{core::{opengl, vulkan}, screen::Screen};
+use crate::{
+    core::{opengl, vulkan},
+    screen::Screen,
+};
 use image::RgbaImage;
 use std::{collections::HashMap, error::Error, sync::Arc};
 use winit::window::Window;
@@ -58,7 +61,7 @@ pub fn load_screen(backend: &mut Backend, screen: &Screen) -> Result<(), Box<dyn
 pub fn draw(
     backend: &mut Backend,
     screen: &Screen,
-    textures: &HashMap<String, Texture>,
+    textures: &HashMap<&'static str, Texture>, // Changed from String
 ) -> Result<(), Box<dyn Error>> {
     match backend {
         Backend::Vulkan(state) => vulkan::draw(state, screen, textures),
@@ -73,7 +76,7 @@ pub fn resize(backend: &mut Backend, width: u32, height: u32) {
     }
 }
 
-pub fn cleanup(backend: &mut Backend, textures: &mut HashMap<String, Texture>) {
+pub fn cleanup(backend: &mut Backend, textures: &mut HashMap<&'static str, Texture>) { // Changed from String
     match backend {
         Backend::Vulkan(state) => vulkan::cleanup(state, textures),
         Backend::OpenGL(state) => opengl::cleanup(state),

@@ -491,7 +491,7 @@ state.vertex_buffer = Some(create_buffer_with_data_vec(&state.instance, state.de
 pub fn draw(
     state: &mut State,
     screen: &Screen,
-    textures: &HashMap<String, renderer::Texture>,
+    textures: &HashMap<&'static str, renderer::Texture>, // Changed from String
 ) -> Result<(), Box<dyn Error>> {
     if state.window_size.width == 0 || state.window_size.height == 0 {
         return Ok(());
@@ -683,7 +683,7 @@ pub fn draw(
     Ok(())
 }
 
-pub fn cleanup(state: &mut State, textures: &mut HashMap<String, renderer::Texture>) {
+pub fn cleanup(state: &mut State, textures: &mut HashMap<&'static str, renderer::Texture>) {
     info!("Cleaning up Vulkan resources...");
     unsafe {
         // First, wait for the GPU to be completely idle.

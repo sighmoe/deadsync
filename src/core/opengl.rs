@@ -145,8 +145,7 @@ pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Err
 pub fn draw(
     state: &mut State,
     screen: &Screen,
-    // FIX: The texture HashMap still uses String as the key, not &'static str.
-    textures: &HashMap<String, renderer::Texture>,
+    textures: &HashMap<&'static str, renderer::Texture>, // Changed from String
 ) -> Result<(), Box<dyn Error>> {
     let (width, height) = state.window_size;
     if width == 0 || height == 0 {
