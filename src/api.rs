@@ -1,4 +1,6 @@
+use crate::screen::QUAD_INDICES;
 use cgmath::{Matrix4, Vector2};
+use std::borrow::Cow;
 
 #[derive(Debug, Clone)]
 pub enum UIElement {
@@ -26,7 +28,7 @@ pub fn to_screen_object(element: &UIElement) -> crate::screen::ScreenObject {
             let half_size = quad.size / 2.0;
             crate::screen::ScreenObject {
                 vertices: create_vertices(half_size),
-                indices: vec![0, 1, 2, 2, 3, 0],
+                indices: Cow::Borrowed(&QUAD_INDICES), // Use borrowed static slice
                 object_type: crate::screen::ObjectType::SolidColor { color: quad.color },
                 transform: Matrix4::from_translation(cgmath::Vector3::new(
                     quad.center.x,
@@ -39,7 +41,7 @@ pub fn to_screen_object(element: &UIElement) -> crate::screen::ScreenObject {
             let half_size = sprite.size / 2.0;
             crate::screen::ScreenObject {
                 vertices: create_vertices(half_size),
-                indices: vec![0, 1, 2, 2, 3, 0],
+                indices: Cow::Borrowed(&QUAD_INDICES), // Use borrowed static slice
                 object_type: crate::screen::ObjectType::Textured {
                     texture_id: sprite.texture_id.clone(),
                 },

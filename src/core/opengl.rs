@@ -401,7 +401,7 @@ fn create_object_resources(
         gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ibo));
         gl.buffer_data_u8_slice(
             glow::ELEMENT_ARRAY_BUFFER,
-            bytemuck::cast_slice(&object.indices),
+            bytemuck::cast_slice(object.indices.as_ref()), // Use .as_ref() to get a slice from the Cow
             glow::STATIC_DRAW,
         );
 
@@ -416,7 +416,14 @@ fn create_object_resources(
 
         // UV attribute (location 1)
         gl.enable_vertex_attrib_array(1);
-        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 4 * mem::size_of::<f32>() as i32, 2 * mem::size_of::<f32>() as i32);
+        gl.vertex_attrib_pointer_f32(
+            1,
+            2,
+            glow::FLOAT,
+            false,
+            4 * mem::size_of::<f32>() as i32,
+            2 * mem::size_of::<f32>() as i32,
+        );
 
         Ok(OpenGLObject {
             vao,
