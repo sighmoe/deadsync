@@ -40,7 +40,6 @@ pub struct State {
     projection: Matrix4<f32>,
     window_size: (u32, u32),
     gl_objects: Vec<OpenGLObject>,
-    vsync_enabled: bool, // New immutable field
 }
 
 pub fn init(window: Arc<Window>, screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
@@ -65,7 +64,6 @@ pub fn init(window: Arc<Window>, screen: &Screen, vsync_enabled: bool) -> Result
         projection,
         window_size: (initial_size.width, initial_size.height),
         gl_objects: Vec::new(),
-        vsync_enabled, // Set the new field
     };
 
     load_screen(&mut state, screen)?;
@@ -315,7 +313,7 @@ fn create_opengl_context(
         if !proc.is_null() {
             let f: SwapIntervalFn = unsafe { std::mem::transmute(proc) };
             let interval = if vsync_enabled { 1 } else { 0 };
-            if unsafe { f(interval) } != 0 {
+            if { f(interval) } != 0 {
                 info!("Manually set VSync to {} using wglSwapIntervalEXT", if vsync_enabled { "on" } else { "off" });
             } else {
                 warn!("wglSwapIntervalEXT call failed.");
