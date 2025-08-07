@@ -72,9 +72,13 @@ pub fn resize(backend: &mut Backend, width: u32, height: u32) {
     }
 }
 
-pub fn cleanup(backend: &mut Backend) {
+pub fn cleanup(backend: &mut Backend, textures: &mut HashMap<String, Texture>) {
     match backend {
-        Backend::Vulkan(state) => vulkan::cleanup(state),
-        Backend::OpenGL(state) => opengl::cleanup(state),
+        Backend::Vulkan(state) => vulkan::cleanup(state, textures),
+        Backend::OpenGL(state) => {
+            // OpenGL textures are also managed by the backend state, clearing the map is correct.
+            textures.clear();
+            opengl::cleanup(state);
+        }
     }
 }

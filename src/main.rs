@@ -268,9 +268,9 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         info!("Cleaning up resources...");
-        self.texture_manager.clear();
+
         if let Some(backend) = &mut self.backend {
-            renderer::cleanup(backend);
+            renderer::cleanup(backend, &mut self.texture_manager);
         }
     }
 }
