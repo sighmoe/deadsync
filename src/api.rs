@@ -25,10 +25,10 @@ pub struct Sprite {
 // A single, static unit quad with UVs.
 // We will scale this quad using the transform matrix instead of creating new vertices per object.
 const UNIT_QUAD_VERTICES: [[f32; 4]; 4] = [
-    [-0.5, -0.5, 0.0, 1.0], // bottom-left
-    [0.5, -0.5, 1.0, 1.0],  // bottom-right
-    [0.5, 0.5, 1.0, 0.0],   // top-right
-    [-0.5, 0.5, 0.0, 0.0],  // top-left
+    [-0.5, -0.5, 0.0, 1.0],
+    [ 0.5, -0.5, 1.0, 1.0],
+    [ 0.5,  0.5, 1.0, 0.0],
+    [-0.5,  0.5, 0.0, 0.0],
 ];
 
 pub fn to_screen_object(element: &UIElement) -> crate::screen::ScreenObject {
@@ -36,7 +36,7 @@ pub fn to_screen_object(element: &UIElement) -> crate::screen::ScreenObject {
         UIElement::Quad(quad) => {
             crate::screen::ScreenObject {
                 // All quads now share the same unit vertices.
-                vertices: UNIT_QUAD_VERTICES.to_vec(),
+                vertices: Cow::Borrowed(&UNIT_QUAD_VERTICES),
                 indices: Cow::Borrowed(&QUAD_INDICES),
                 object_type: crate::screen::ObjectType::SolidColor { color: quad.color },
                 // The transform now handles both position and size.
@@ -48,7 +48,7 @@ pub fn to_screen_object(element: &UIElement) -> crate::screen::ScreenObject {
         UIElement::Sprite(sprite) => {
             crate::screen::ScreenObject {
                 // All sprites also share the same unit vertices.
-                vertices: UNIT_QUAD_VERTICES.to_vec(),
+                vertices: Cow::Borrowed(&UNIT_QUAD_VERTICES),
                 indices: Cow::Borrowed(&QUAD_INDICES),
                 object_type: crate::screen::ObjectType::Textured {
                     texture_id: sprite.texture_id,

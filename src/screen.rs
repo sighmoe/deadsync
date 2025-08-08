@@ -17,7 +17,7 @@ pub struct Screen {
 
 #[derive(Clone)]
 pub struct ScreenObject {
-    pub vertices: Vec<[f32; 4]>,
+    pub vertices: Cow<'static, [[f32; 4]]>, // was Vec<[f32; 4]>
     pub indices: Cow<'static, [u16]>,
     pub object_type: ObjectType,
     pub transform: Matrix4<f32>,

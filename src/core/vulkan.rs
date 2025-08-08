@@ -507,7 +507,7 @@ pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Err
     for object in &screen.objects {
         let first_index = all_indices.len() as u32;
         let vertex_offset = all_vertices.len() as u16;
-        all_vertices.extend_from_slice(&object.vertices);
+        all_vertices.extend_from_slice(object.vertices.as_ref()); // <-- was &object.vertices
         all_indices.extend(object.indices.iter().map(|&i| i + vertex_offset));
         state.object_draw_info.push(ObjectDrawInfo {
             index_count: object.indices.len() as u32,

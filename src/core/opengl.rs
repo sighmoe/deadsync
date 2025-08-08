@@ -399,7 +399,7 @@ fn create_object_resources(
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
         gl.buffer_data_u8_slice(
             glow::ARRAY_BUFFER,
-            bytemuck::cast_slice(&object.vertices),
+            bytemuck::cast_slice(object.vertices.as_ref()), // <-- was &object.vertices
             glow::STATIC_DRAW,
         );
 
