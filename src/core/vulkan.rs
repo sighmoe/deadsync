@@ -1247,9 +1247,22 @@ fn create_swapchain(
     }).cloned().unwrap_or(formats[0]);
     
     let present_mode = if vsync_enabled {
-        present_modes.iter().cloned().find(|&mode| mode == vk::PresentModeKHR::FIFO).unwrap_or(vk::PresentModeKHR::FIFO)
+        vk::PresentModeKHR::FIFO
+    } else if present_modes.contains(&vk::PresentModeKHR::MAILBOX) {
+        vk::PresentModeKHR::MAILBOX
+    } else if present_modes.contains(&vk::PresentModeKHR::IMMEDIATE) {
+        vk::PresentModeKHR::IMMEDIATE
     } else {
-        present_modes.iter().cloned().find(|&mode| mode == vk::PresentModeKHR::IMMEDIATE).unwrap_or(vk::PresentModeKHR::FIFO) // Fallback to VSync if IMMEDIATE not available
+        vk::PresentModeKHR::FIFO
+    };
+
+    // choose image count
+    let desired_images =
+        if present_mode == vk::PresentModeKHR::MAILBOX { 3 } else { capabilities.min_image_count + 1 };
+
+    let image_count = match capabilities.max_image_count {
+        0 => desired_images,
+        max => desired_images.min(max),
     };
 
     let extent = if capabilities.current_extent.width != u32::MAX {
@@ -1261,10 +1274,9 @@ fn create_swapchain(
         }
     };
 
-    let image_count = (capabilities.min_image_count + 1).min(if capabilities.max_image_count > 0 { capabilities.max_image_count } else { u32::MAX });
-
     let create_info = vk::SwapchainCreateInfoKHR::default()
         .surface(surface).min_image_count(image_count).image_format(format.format)
+        .min_image_count(image_count)
         .image_color_space(format.color_space).image_extent(extent).image_array_layers(1)
         .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT).image_sharing_mode(vk::SharingMode::EXCLUSIVE)
         .pre_transform(capabilities.current_transform).composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
