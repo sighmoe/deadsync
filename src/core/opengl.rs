@@ -173,19 +173,14 @@ pub fn draw(
 
         for (i, object) in screen.objects.iter().enumerate() {
             let gl_object = &state.gl_objects[i];
-            let mvp = state.projection * object.transform;
-            let mvp_array: [[f32; 4]; 4] = mvp.into();
+            let mvp_array: [[f32; 4]; 4] = (state.projection * object.transform).into();
+            let mvp_slice: &[f32] = bytemuck::cast_slice(&mvp_array); // safe
 
-            // --- ZERO-ALLOCATION CHANGE ---
-            // SAFETY: [[f32; 4]; 4] is a contiguous block of 16 floats in memory.
-            // We create a safe, read-only slice view into this data instead of allocating a new Vec.
-            let mvp_slice: &[f32] =
-                std::slice::from_raw_parts(mvp_array.as_ptr() as *const f32, 16);
-
-            state
-                .gl
-                .uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
-            // --- END CHANGE ---
+            state.gl.uniform_matrix_4_f32_slice(
+                Some(&state.mvp_location),
+                false,
+                mvp_slice,
+            );
 
             match &object.object_type {
                 ObjectType::SolidColor { color } => {
