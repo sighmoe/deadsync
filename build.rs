@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // OUT_DIR used by include_bytes! in Vulkan source
     let out_dir = PathBuf::from(std::env::var("OUT_DIR")?);
 
-    // Compile Vulkan shaders with optimization
+    // Compile Vulkan shaders with optimization based on the build profile.
     compile_vulkan_shaders(&mut compiler, &out_dir)?;
 
     // Copy assets into target/<profile>
@@ -28,9 +28,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn compile_vulkan_shaders(compiler: &mut Compiler, out_dir: &Path) -> Result<(), Box<dyn Error>> {
-    // FIX: CompileOptions::new() also returns a Result.
     let mut opts = shaderc::CompileOptions::new()?;
-    opts.set_optimization_level(shaderc::OptimizationLevel::Performance);
+    
+    // Set shader optimization level based on the current cargo profile.
+    // In debug mode, prioritize fast compilation and debug info.
+    // In release mode, prioritize performance.
+    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    if profile == "release" {
+        opts.set_optimization_level(shaderc::OptimizationLevel::Performance);
+    } else {
+        opts.set_optimization_level(shaderc::OptimizationLevel::Zero);
+        opts.set_generate_debug_info();
+    }
 
     for ext in ["vert", "frag"] {
         for entry in glob::glob(&format!("src/shaders/vulkan_*.{}", ext))? {
@@ -50,9 +59,22 @@ fn compile_vulkan_shaders(compiler: &mut Compiler, out_dir: &Path) -> Result<(),
             )?;
 
             // Produce: <file_name>.<ext>.spv (matches include_bytes! paths in vulkan.rs)
-            let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+            let file_name = path.file_name().unwrap().to_string_lossy();
             let dest_path = out_dir.join(format!("{}.spv", file_name));
-            fs::write(dest_path, spirv.as_binary_u8())?;
+
+            let new_bytes = spirv.as_binary_u8();
+
+            // Only write the file if it doesn't exist or if its content has changed.
+            // This prevents unnecessary file modification, which can keep incremental
+            // builds faster by not triggering downstream recompiles.
+            let needs_write = match fs::read(&dest_path) {
+                Ok(old_bytes) => old_bytes != new_bytes,
+                Err(_) => true,
+            };
+
+            if needs_write {
+                fs::write(&dest_path, new_bytes)?;
+            }
         }
     }
     Ok(())
