@@ -1,6 +1,6 @@
 use crate::{
     renderer,
-    screen::{ObjectType, Screen, ScreenObject},
+    screen::{ObjectType, Screen},
 };
 use crate::math::ortho_for_window;
 use cgmath::Matrix4;
@@ -21,16 +21,6 @@ use winit::window::Window;
 // A handle to an OpenGL texture on the GPU.
 #[derive(Debug, Clone, Copy)]
 pub struct Texture(pub glow::Texture);
-
-// This struct is no longer needed, as its resources are now shared in State.
-/*
-struct OpenGLObject {
-    vao: glow::VertexArray,
-    _vbo: glow::Buffer,
-    _ibo: glow::Buffer,
-    index_count: i32,
-}
-*/
 
 pub struct State {
     pub gl: glow::Context,
