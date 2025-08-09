@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn compile_vulkan_shaders(compiler: &mut Compiler, out_dir: &Path) -> Result<(), Box<dyn Error>> {
-    use std::fmt::Write as _;
+    use std::{fmt::Write as _, time::SystemTime};
 
     fn kind_for_ext(ext: &str) -> Option<ShaderKind> {
         match ext {
@@ -51,25 +51,41 @@ fn compile_vulkan_shaders(compiler: &mut Compiler, out_dir: &Path) -> Result<(),
         opts.set_generate_debug_info();
     }
 
-    // Compile any file named: src/shaders/vulkan_*.<ext> with supported stage
-    for entry in glob::glob("src/shaders/vulkan_*.*")? {
-        let path = entry?;
-        let ext = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default();
+    // Gather candidates deterministically
+    let mut paths: Vec<_> = glob::glob("src/shaders/vulkan_*.*")?
+        .filter_map(Result::ok)
+        .collect();
+    paths.sort();
 
+    for path in paths {
+        println!("cargo:rerun-if-changed={}", path.display());
+
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
         let Some(kind) = kind_for_ext(ext) else { continue };
+
+        let src_meta = fs::metadata(&path)?;
+        let src_mtime = src_meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+
+        let file_name = path.file_name().unwrap().to_string_lossy().to_string();
+        let dest_path = out_dir.join(format!("{file_name}.spv"));
+
+        // Timestamp short-circuit (fast path)
+        if let Ok(dest_meta) = fs::metadata(&dest_path) {
+            if let Ok(dest_mtime) = dest_meta.modified() {
+                if dest_mtime >= src_mtime {
+                    // .spv is up-to-date for this profile/options — skip
+                    continue;
+                }
+            }
+        }
 
         let source = fs::read_to_string(&path)?;
         let src_name = path.to_string_lossy();
 
-        // Better error messages with file/line mapping
-        let result = compiler.compile_into_spirv(&source, kind, &src_name, "main", Some(&opts));
-        let spirv = match result {
+        let spirv = match compiler.compile_into_spirv(&source, kind, &src_name, "main", Some(&opts)) {
             Ok(ok) => ok,
             Err(e) => {
-                // Expand shaderc error with context so it's easy to fix
+                // Pretty error with annotated source
                 let mut msg = String::new();
                 writeln!(&mut msg, "Shader compile failed: {}", src_name)?;
                 for (i, line) in source.lines().enumerate() {
@@ -80,16 +96,16 @@ fn compile_vulkan_shaders(compiler: &mut Compiler, out_dir: &Path) -> Result<(),
             }
         };
 
-        // Emit .spv right under OUT_DIR with the same file name: <file>.<ext>.spv
-        let file_name = path.file_name().unwrap().to_string_lossy();
-        let dest_path = out_dir.join(format!("{file_name}.spv"));
-
+        // Byte-compare to avoid touching mtime if unchanged
         let new_bytes = spirv.as_binary_u8();
         let needs_write = match fs::read(&dest_path) {
             Ok(old_bytes) => old_bytes != new_bytes,
             Err(_) => true,
         };
         if needs_write {
+            if let Some(parent) = dest_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
             fs::write(&dest_path, new_bytes)?;
         }
     }
