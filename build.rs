@@ -28,11 +28,21 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn compile_vulkan_shaders(compiler: &mut Compiler, out_dir: &Path) -> Result<(), Box<dyn Error>> {
+    use std::fmt::Write as _;
+
+    fn kind_for_ext(ext: &str) -> Option<ShaderKind> {
+        match ext {
+            "vert" => Some(ShaderKind::Vertex),
+            "frag" => Some(ShaderKind::Fragment),
+            "comp" => Some(ShaderKind::Compute),
+            "geom" => Some(ShaderKind::Geometry),
+            "tesc" => Some(ShaderKind::TessControl),
+            "tese" => Some(ShaderKind::TessEvaluation),
+            _ => None,
+        }
+    }
+
     let mut opts = shaderc::CompileOptions::new()?;
-    
-    // Set shader optimization level based on the current cargo profile.
-    // In debug mode, prioritize fast compilation and debug info.
-    // In release mode, prioritize performance.
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     if profile == "release" {
         opts.set_optimization_level(shaderc::OptimizationLevel::Performance);
@@ -41,40 +51,46 @@ fn compile_vulkan_shaders(compiler: &mut Compiler, out_dir: &Path) -> Result<(),
         opts.set_generate_debug_info();
     }
 
-    for ext in ["vert", "frag"] {
-        for entry in glob::glob(&format!("src/shaders/vulkan_*.{}", ext))? {
-            let path = entry?;
-            let kind = match ext {
-                "vert" => ShaderKind::Vertex,
-                _ => ShaderKind::Fragment,
-            };
+    // Compile any file named: src/shaders/vulkan_*.<ext> with supported stage
+    for entry in glob::glob("src/shaders/vulkan_*.*")? {
+        let path = entry?;
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
 
-            let source = fs::read_to_string(&path)?;
-            let spirv = compiler.compile_into_spirv(
-                &source,
-                kind,
-                path.to_str().unwrap(),
-                "main",
-                Some(&opts),
-            )?;
+        let Some(kind) = kind_for_ext(ext) else { continue };
 
-            // Produce: <file_name>.<ext>.spv (matches include_bytes! paths in vulkan.rs)
-            let file_name = path.file_name().unwrap().to_string_lossy();
-            let dest_path = out_dir.join(format!("{}.spv", file_name));
+        let source = fs::read_to_string(&path)?;
+        let src_name = path.to_string_lossy();
 
-            let new_bytes = spirv.as_binary_u8();
-
-            // Only write the file if it doesn't exist or if its content has changed.
-            // This prevents unnecessary file modification, which can keep incremental
-            // builds faster by not triggering downstream recompiles.
-            let needs_write = match fs::read(&dest_path) {
-                Ok(old_bytes) => old_bytes != new_bytes,
-                Err(_) => true,
-            };
-
-            if needs_write {
-                fs::write(&dest_path, new_bytes)?;
+        // Better error messages with file/line mapping
+        let result = compiler.compile_into_spirv(&source, kind, &src_name, "main", Some(&opts));
+        let spirv = match result {
+            Ok(ok) => ok,
+            Err(e) => {
+                // Expand shaderc error with context so it's easy to fix
+                let mut msg = String::new();
+                writeln!(&mut msg, "Shader compile failed: {}", src_name)?;
+                for (i, line) in source.lines().enumerate() {
+                    writeln!(&mut msg, "{:4} | {}", i + 1, line)?;
+                }
+                writeln!(&mut msg, "\nError: {e}")?;
+                return Err(msg.into());
             }
+        };
+
+        // Emit .spv right under OUT_DIR with the same file name: <file>.<ext>.spv
+        let file_name = path.file_name().unwrap().to_string_lossy();
+        let dest_path = out_dir.join(format!("{file_name}.spv"));
+
+        let new_bytes = spirv.as_binary_u8();
+        let needs_write = match fs::read(&dest_path) {
+            Ok(old_bytes) => old_bytes != new_bytes,
+            Err(_) => true,
+        };
+        if needs_write {
+            fs::write(&dest_path, new_bytes)?;
         }
     }
     Ok(())
