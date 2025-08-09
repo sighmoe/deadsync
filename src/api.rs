@@ -1,6 +1,4 @@
-use crate::screen::QUAD_INDICES;
 use cgmath::{Matrix4, Vector2, Vector3};
-use std::borrow::Cow;
 
 #[derive(Debug, Clone)]
 pub enum UIElement {
@@ -22,22 +20,11 @@ pub struct Sprite {
     pub texture_id: &'static str, // Changed from String
 }
 
-// A single, static unit quad with UVs.
-// We will scale this quad using the transform matrix instead of creating new vertices per object.
-const UNIT_QUAD_VERTICES: [[f32; 4]; 4] = [
-    [-0.5, -0.5, 0.0, 1.0],
-    [ 0.5, -0.5, 1.0, 1.0],
-    [ 0.5,  0.5, 1.0, 0.0],
-    [-0.5,  0.5, 0.0, 0.0],
-];
-
+// This function no longer needs to provide vertex or index data.
 pub fn to_screen_object(element: &UIElement) -> crate::screen::ScreenObject {
     match element {
         UIElement::Quad(quad) => {
             crate::screen::ScreenObject {
-                // All quads now share the same unit vertices.
-                vertices: Cow::Borrowed(&UNIT_QUAD_VERTICES),
-                indices: Cow::Borrowed(&QUAD_INDICES),
                 object_type: crate::screen::ObjectType::SolidColor { color: quad.color },
                 // The transform now handles both position and size.
                 // Scale is applied first, then translation (T * S).
@@ -47,9 +34,6 @@ pub fn to_screen_object(element: &UIElement) -> crate::screen::ScreenObject {
         }
         UIElement::Sprite(sprite) => {
             crate::screen::ScreenObject {
-                // All sprites also share the same unit vertices.
-                vertices: Cow::Borrowed(&UNIT_QUAD_VERTICES),
-                indices: Cow::Borrowed(&QUAD_INDICES),
                 object_type: crate::screen::ObjectType::Textured {
                     texture_id: sprite.texture_id,
                 },

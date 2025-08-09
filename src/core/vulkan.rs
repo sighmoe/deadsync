@@ -58,11 +58,6 @@ impl Drop for Texture {
     }
 }
 
-struct ObjectDrawInfo {
-    index_count: u32,
-    first_index: u32,
-}
-
 struct BufferResource {
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,
@@ -98,7 +93,8 @@ pub struct State {
     texture_pipeline: vk::Pipeline,
     vertex_buffer: Option<BufferResource>,
     index_buffer: Option<BufferResource>,
-    object_draw_info: Vec<ObjectDrawInfo>,
+    // This field is removed, as we now draw a single static quad per object.
+    // object_draw_info: Vec<ObjectDrawInfo>,
     pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub descriptor_pool: vk::DescriptorPool,
     pub sampler: vk::Sampler,
@@ -114,7 +110,7 @@ pub struct State {
 }
 
 // --- Main Procedural Functions ---
-pub fn init(window: &Window, screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
+pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
     info!("Initializing Vulkan backend...");
     let entry = Entry::linked();
     let instance = create_instance(&entry, window)?;
@@ -168,7 +164,7 @@ pub fn init(window: &Window, screen: &Screen, vsync_enabled: bool) -> Result<Sta
         surface,
         surface_loader,
         pdevice,
-        device,
+        device: device.clone(), // Must clone for buffer creation
         queue,
         command_pool,
         swapchain_resources,
@@ -177,9 +173,8 @@ pub fn init(window: &Window, screen: &Screen, vsync_enabled: bool) -> Result<Sta
         solid_pipeline,
         texture_pipeline_layout,
         texture_pipeline,
-        vertex_buffer: None,
-        index_buffer: None,
-        object_draw_info: Vec::new(),
+        vertex_buffer: None, // Will be created next
+        index_buffer: None,  // Will be created next
         descriptor_set_layout,
         descriptor_pool,
         sampler,
@@ -194,7 +189,21 @@ pub fn init(window: &Window, screen: &Screen, vsync_enabled: bool) -> Result<Sta
         projection, // new field
     };
 
-    load_screen(&mut state, screen)?;
+    // Create one static set of buffers for a unit quad.
+    // The vertex format is [pos.x, pos.y, uv.x, uv.y].
+    let vertices: [[f32; 4]; 4] = [
+        [-0.5, -0.5, 0.0, 1.0],
+        [ 0.5, -0.5, 1.0, 1.0],
+        [ 0.5,  0.5, 1.0, 0.0],
+        [-0.5,  0.5, 0.0, 0.0],
+    ];
+    let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
+
+    let device_arc = device.as_ref().unwrap();
+    state.vertex_buffer = Some(create_buffer_with_data_vec(&state.instance, device_arc, state.pdevice, state.command_pool, state.queue, &vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?);
+    state.index_buffer = Some(create_buffer_with_data_vec(&state.instance, device_arc, state.pdevice, state.command_pool, state.queue, &indices, vk::BufferUsageFlags::INDEX_BUFFER)?);
+
+    // `load_screen` is no longer needed at initialization time.
 
     info!("Vulkan backend initialized successfully.");
     Ok(state)
@@ -485,40 +494,7 @@ pub fn create_texture(state: &mut State, image: &RgbaImage) -> Result<Texture, B
 }
 
 // --- NEW: `load_screen` full implementation ---
-pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
-    info!("Loading new screen for Vulkan...");
-    unsafe { state.device.as_ref().unwrap().device_wait_idle()? };
-
-    if let Some(buffer) = state.vertex_buffer.take() {
-        destroy_buffer(state.device.as_ref().unwrap(), &buffer);
-    }
-    if let Some(buffer) = state.index_buffer.take() {
-        destroy_buffer(state.device.as_ref().unwrap(), &buffer);
-    }
-    state.object_draw_info.clear();
-
-    if screen.objects.is_empty() {
-        info!("New screen has no objects to load.");
-        return Ok(());
-    }
-
-    let mut all_vertices: Vec<[f32; 4]> = Vec::new();
-    let mut all_indices = Vec::new();
-    for object in &screen.objects {
-        let first_index = all_indices.len() as u32;
-        let vertex_offset = all_vertices.len() as u16;
-        all_vertices.extend_from_slice(object.vertices.as_ref()); // <-- was &object.vertices
-        all_indices.extend(object.indices.iter().map(|&i| i + vertex_offset));
-        state.object_draw_info.push(ObjectDrawInfo {
-            index_count: object.indices.len() as u32,
-            first_index,
-        });
-    }
-
-state.vertex_buffer = Some(create_buffer_with_data_vec(&state.instance, state.device.as_ref().unwrap(), state.pdevice, state.command_pool, state.queue, &all_vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?);
-    state.index_buffer = Some(create_buffer_with_data_vec(&state.instance, state.device.as_ref().unwrap(), state.pdevice, state.command_pool, state.queue, &all_indices, vk::BufferUsageFlags::INDEX_BUFFER)?);
-    
-    info!("Vulkan screen loaded successfully.");
+pub fn load_screen(_state: &mut State, _screen: &Screen) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
@@ -533,7 +509,8 @@ pub fn draw(
     }
     unsafe {
         let fence = state.in_flight_fences[state.current_frame];
-        state.device.as_ref().unwrap().wait_for_fences(&[fence], true, u64::MAX)?;
+        let device = state.device.as_ref().unwrap();
+        device.wait_for_fences(&[fence], true, u64::MAX)?;
 
         let result = state.swapchain_resources.swapchain_loader.acquire_next_image(
             state.swapchain_resources.swapchain,
@@ -551,16 +528,16 @@ pub fn draw(
         };
         let image_in_flight_fence = state.images_in_flight[image_index as usize];
         if image_in_flight_fence != vk::Fence::null() {
-            state.device.as_ref().unwrap().wait_for_fences(&[image_in_flight_fence], true, u64::MAX)?;
+            device.wait_for_fences(&[image_in_flight_fence], true, u64::MAX)?;
         }
         state.images_in_flight[image_index as usize] = fence;
 
-        state.device.as_ref().unwrap().reset_fences(&[fence])?;
+        device.reset_fences(&[fence])?;
         let cmd = state.command_buffers[state.current_frame];
-        state.device.as_ref().unwrap().reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
+        device.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
         let begin_info =
             vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        state.device.as_ref().unwrap().begin_command_buffer(cmd, &begin_info)?;
+        device.begin_command_buffer(cmd, &begin_info)?;
 
         let c = screen.clear_color;
         let clear_value = vk::ClearValue {
@@ -577,7 +554,7 @@ pub fn draw(
             })
             .clear_values(std::slice::from_ref(&clear_value));
 
-        state.device.as_ref().unwrap().cmd_begin_render_pass(cmd, &render_pass_info, vk::SubpassContents::INLINE);
+        device.cmd_begin_render_pass(cmd, &render_pass_info, vk::SubpassContents::INLINE);
 
         if let (Some(vertex_buffer), Some(index_buffer)) =
             (&state.vertex_buffer, &state.index_buffer)
@@ -590,94 +567,76 @@ pub fn draw(
                 min_depth: 0.0,
                 max_depth: 1.0,
             };
-            state.device.as_ref().unwrap().cmd_set_viewport(cmd, 0, &[viewport]);
+            device.cmd_set_viewport(cmd, 0, &[viewport]);
             let scissor = vk::Rect2D {
                 offset: vk::Offset2D::default(),
                 extent: state.swapchain_resources.extent,
             };
-            state.device.as_ref().unwrap().cmd_set_scissor(cmd, 0, &[scissor]);
+            device.cmd_set_scissor(cmd, 0, &[scissor]);
 
-            state.device.as_ref().unwrap().cmd_bind_vertex_buffers(cmd, 0, &[vertex_buffer.buffer], &[0]);
-            state.device.as_ref().unwrap().cmd_bind_index_buffer(cmd, index_buffer.buffer, 0, vk::IndexType::UINT16);
+            // Bind the single, shared vertex and index buffers once.
+            device.cmd_bind_vertex_buffers(cmd, 0, &[vertex_buffer.buffer], &[0]);
+            device.cmd_bind_index_buffer(cmd, index_buffer.buffer, 0, vk::IndexType::UINT16);
 
-            // Use cached projection
             let proj = state.projection;
 
-            for (i, object) in screen.objects.iter().enumerate() {
-                if let Some(draw_info) = state.object_draw_info.get(i) {
-                    match &object.object_type {
-                        ObjectType::SolidColor { color } => {
-                            state.device.as_ref().unwrap().cmd_bind_pipeline(
-                                cmd,
-                                vk::PipelineBindPoint::GRAPHICS,
-                                state.solid_pipeline,
-                            );
-                            let push_constants =
-                                SolidPushConstants { mvp: proj * object.transform, color: *color };
-                            let bytes = std::slice::from_raw_parts(
-                                &push_constants as *const _ as *const u8,
-                                mem::size_of::<SolidPushConstants>(),
-                            );
-                            state.device.as_ref().unwrap().cmd_push_constants(
-                                cmd,
-                                state.solid_pipeline_layout,
-                                vk::ShaderStageFlags::VERTEX,
-                                0,
-                                bytes,
-                            );
+            // Sort objects to minimize pipeline and descriptor set switches.
+            let mut object_indices: Vec<usize> = (0..screen.objects.len()).collect();
+            object_indices.sort_by_key(|&i| {
+                match &screen.objects[i].object_type {
+                    ObjectType::SolidColor { .. } => (0, 0 as usize), // Group all solid objects first
+                    ObjectType::Textured { texture_id } => (1, texture_id.as_ptr() as usize),
+                }
+            });
+            
+            // Track current state to avoid redundant binds.
+            let mut current_pipeline = vk::Pipeline::null();
+            let mut current_pipeline_layout = vk::PipelineLayout::null();
+            let mut current_descriptor_set = vk::DescriptorSet::null();
+
+            for i in object_indices {
+                let object = &screen.objects[i];
+                match &object.object_type {
+                    ObjectType::SolidColor { color } => {
+                        if current_pipeline != state.solid_pipeline {
+                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.solid_pipeline);
+                            current_pipeline = state.solid_pipeline;
+                            current_pipeline_layout = state.solid_pipeline_layout;
+                            current_descriptor_set = vk::DescriptorSet::null();
                         }
-                        ObjectType::Textured { texture_id } => {
-                            state.device.as_ref().unwrap().cmd_bind_pipeline(
-                                cmd,
-                                vk::PipelineBindPoint::GRAPHICS,
-                                state.texture_pipeline,
-                            );
-                            if let Some(renderer::Texture::Vulkan(texture)) = textures.get(texture_id)
-                            {
-                                state.device.as_ref().unwrap().cmd_bind_descriptor_sets(
-                                    cmd,
-                                    vk::PipelineBindPoint::GRAPHICS,
-                                    state.texture_pipeline_layout,
-                                    0,
-                                    &[texture.descriptor_set],
-                                    &[],
-                                );
-                                let push_constants =
-                                    TexturedPushConstants { mvp: proj * object.transform };
-                                let bytes = std::slice::from_raw_parts(
-                                    &push_constants as *const _ as *const u8,
-                                    mem::size_of::<TexturedPushConstants>(),
-                                );
-                                state.device.as_ref().unwrap().cmd_push_constants(
-                                    cmd,
-                                    state.texture_pipeline_layout,
-                                    vk::ShaderStageFlags::VERTEX,
-                                    0,
-                                    bytes,
-                                );
-                            } else {
-                                warn!(
-                                    "Vulkan texture ID '{}' not found in texture manager!",
-                                    texture_id
-                                );
-                                continue;
+
+                        let push_constants = SolidPushConstants { mvp: proj * object.transform, color: *color };
+                        let bytes = std::slice::from_raw_parts(&push_constants as *const _ as *const u8, mem::size_of::<SolidPushConstants>());
+                        device.cmd_push_constants(cmd, current_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes);
+                    }
+                    ObjectType::Textured { texture_id } => {
+                        if let Some(renderer::Texture::Vulkan(texture)) = textures.get(texture_id) {
+                            if current_pipeline != state.texture_pipeline {
+                                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline);
+                                current_pipeline = state.texture_pipeline;
+                                current_pipeline_layout = state.texture_pipeline_layout;
                             }
+                            if current_descriptor_set != texture.descriptor_set {
+                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, current_pipeline_layout, 0, &[texture.descriptor_set], &[]);
+                                current_descriptor_set = texture.descriptor_set;
+                            }
+
+                            let push_constants = TexturedPushConstants { mvp: proj * object.transform };
+                            let bytes = std::slice::from_raw_parts(&push_constants as *const _ as *const u8, mem::size_of::<TexturedPushConstants>());
+                            device.cmd_push_constants(cmd, current_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes);
+                        } else {
+                            warn!("Vulkan texture ID '{}' not found in texture manager!", texture_id);
+                            continue;
                         }
                     }
-                    state.device.as_ref().unwrap().cmd_draw_indexed(
-                        cmd,
-                        draw_info.index_count,
-                        1,
-                        draw_info.first_index,
-                        0,
-                        0,
-                    );
                 }
+                // Draw the single, static quad using the bound state.
+                device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
             }
         }
 
-        state.device.as_ref().unwrap().cmd_end_render_pass(cmd);
-        state.device.as_ref().unwrap().end_command_buffer(cmd)?;
+        device.cmd_end_render_pass(cmd);
+        device.end_command_buffer(cmd)?;
 
         let wait_semaphores = [state.image_available_semaphores[state.current_frame]];
         let signal_semaphores = [state.render_finished_semaphores[state.current_frame]];
@@ -690,7 +649,7 @@ pub fn draw(
             .command_buffers(&cmd_buffers)
             .signal_semaphores(&signal_semaphores);
 
-        state.device.as_ref().unwrap().queue_submit(state.queue, &[submit_info], fence)?;
+        device.queue_submit(state.queue, &[submit_info], fence)?;
 
         let swapchains = [state.swapchain_resources.swapchain];
         let image_indices = [image_index];
