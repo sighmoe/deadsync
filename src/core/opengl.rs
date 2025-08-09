@@ -22,12 +22,15 @@ use winit::window::Window;
 #[derive(Debug, Clone, Copy)]
 pub struct Texture(pub glow::Texture);
 
+// This struct is no longer needed, as its resources are now shared in State.
+/*
 struct OpenGLObject {
     vao: glow::VertexArray,
     _vbo: glow::Buffer,
     _ibo: glow::Buffer,
     index_count: i32,
 }
+*/
 
 pub struct State {
     pub gl: glow::Context,
@@ -40,20 +43,68 @@ pub struct State {
     texture_location: UniformLocation,
     projection: Matrix4<f32>,
     window_size: (u32, u32),
-    gl_objects: Vec<OpenGLObject>,
+    // Replaced `gl_objects` with a single, shared set of buffers.
+    shared_vao: glow::VertexArray,
+    _shared_vbo: glow::Buffer,
+    _shared_ibo: glow::Buffer,
+    index_count: i32,
 }
 
-pub fn init(window: Arc<Window>, screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
+pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
     info!("Initializing OpenGL backend...");
 
     let (gl_surface, gl_context, gl) = create_opengl_context(&window, vsync_enabled)?;
     let (program, mvp_location, color_location, use_texture_location, texture_location) =
         create_graphics_program(&gl)?;
 
+    // Create one shared VAO/VBO/IBO for a unit quad, to be reused for all objects.
+    let (shared_vao, _shared_vbo, _shared_ibo, index_count) = unsafe {
+        // These constants are now defined once during initialization.
+        const UNIT_QUAD_VERTICES: [[f32; 4]; 4] = [
+            [-0.5, -0.5, 0.0, 1.0],
+            [ 0.5, -0.5, 1.0, 1.0],
+            [ 0.5,  0.5, 1.0, 0.0],
+            [-0.5,  0.5, 0.0, 0.0],
+        ];
+        const QUAD_INDICES: [u16; 6] = [0, 1, 2, 2, 3, 0];
+
+        let vao = gl.create_vertex_array()?;
+        let vbo = gl.create_buffer()?;
+        let ibo = gl.create_buffer()?;
+
+        gl.bind_vertex_array(Some(vao));
+
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+        gl.buffer_data_u8_slice(
+            glow::ARRAY_BUFFER,
+            bytemuck::cast_slice(&UNIT_QUAD_VERTICES),
+            glow::STATIC_DRAW,
+        );
+
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ibo));
+        gl.buffer_data_u8_slice(
+            glow::ELEMENT_ARRAY_BUFFER,
+            bytemuck::cast_slice(&QUAD_INDICES),
+            glow::STATIC_DRAW,
+        );
+
+        let stride = (4 * mem::size_of::<f32>()) as i32;
+        // Position attribute (location 0)
+        gl.enable_vertex_attrib_array(0);
+        gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
+        // UV attribute (location 1)
+        gl.enable_vertex_attrib_array(1);
+        gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, stride, (2 * mem::size_of::<f32>()) as i32);
+
+        gl.bind_vertex_array(None);
+
+        (vao, vbo, ibo, QUAD_INDICES.len() as i32)
+    };
+
     let initial_size = window.inner_size();
     let projection = ortho_for_window(initial_size.width, initial_size.height);
 
-    let mut state = State {
+    let state = State {
         gl,
         gl_surface,
         gl_context,
@@ -64,11 +115,13 @@ pub fn init(window: Arc<Window>, screen: &Screen, vsync_enabled: bool) -> Result
         texture_location,
         projection,
         window_size: (initial_size.width, initial_size.height),
-        gl_objects: Vec::new(),
+        shared_vao,
+        _shared_vbo,
+        _shared_ibo,
+        index_count,
     };
 
-    load_screen(&mut state, screen)?;
-
+    // `load_screen` is no longer needed at init time because resources are static.
     info!("OpenGL backend initialized successfully.");
     Ok(state)
 }
@@ -118,27 +171,9 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
     }
 }
 
-pub fn load_screen(state: &mut State, screen: &Screen) -> Result<(), Box<dyn Error>> {
-    info!("Loading new screen for OpenGL...");
-    unsafe {
-        for object in state.gl_objects.iter() {
-            state.gl.delete_vertex_array(object.vao);
-            state.gl.delete_buffer(object._vbo);
-            state.gl.delete_buffer(object._ibo);
-        }
-    }
-    state.gl_objects.clear();
-
-    if screen.objects.is_empty() {
-        return Ok(());
-    }
-
-    for object in &screen.objects {
-        let gl_object =
-            create_object_resources(&state.gl, object).map_err(|e| e.to_string())?;
-        state.gl_objects.push(gl_object);
-    }
-    info!("OpenGL screen loaded successfully.");
+// This function is now a no-op because the geometry buffers are static and shared.
+// It's kept to maintain a consistent interface with the Vulkan backend.
+pub fn load_screen(_state: &mut State, _screen: &Screen) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
@@ -149,11 +184,6 @@ pub fn draw(
 ) -> Result<(), Box<dyn Error>> {
     let (width, height) = state.window_size;
     if width == 0 || height == 0 {
-        return Ok(());
-    }
-
-    if state.gl_objects.len() != screen.objects.len() {
-        warn!("Mismatch between GL objects and screen objects. A screen load may be needed.");
         return Ok(());
     }
 
@@ -170,9 +200,11 @@ pub fn draw(
         // Activate texture unit 0 once
         state.gl.active_texture(glow::TEXTURE0);
         state.gl.uniform_1_i32(Some(&state.texture_location), 0);
+        
+        // Bind the single, shared VAO once for all draw calls.
+        state.gl.bind_vertex_array(Some(state.shared_vao));
 
-        for (i, object) in screen.objects.iter().enumerate() {
-            let gl_object = &state.gl_objects[i];
+        for object in screen.objects.iter() {
             let mvp_array: [[f32; 4]; 4] = (state.projection * object.transform).into();
             let mvp_slice: &[f32] = bytemuck::cast_slice(&mvp_array); // safe
 
@@ -209,14 +241,16 @@ pub fn draw(
                 }
             }
 
-            state.gl.bind_vertex_array(Some(gl_object.vao));
+            // The VAO is already bound, so we just issue the draw call.
             state.gl.draw_elements(
                 glow::TRIANGLES,
-                gl_object.index_count,
+                state.index_count,
                 glow::UNSIGNED_SHORT,
                 0,
             );
         }
+        // Unbind VAO after all objects are drawn.
+        state.gl.bind_vertex_array(None);
     }
     state.gl_surface.swap_buffers(&state.gl_context)?;
     Ok(())
@@ -246,11 +280,11 @@ pub fn cleanup(state: &mut State) {
         // Note: Textures are cleaned up from the main `App` struct,
         // as the backend `State` doesn't own them.
         state.gl.delete_program(state.program);
-        for object in state.gl_objects.iter() {
-            state.gl.delete_vertex_array(object.vao);
-            state.gl.delete_buffer(object._vbo);
-            state.gl.delete_buffer(object._ibo);
-        }
+        
+        // Delete the shared VAO and its buffers.
+        state.gl.delete_vertex_array(state.shared_vao);
+        state.gl.delete_buffer(state._shared_vbo);
+        state.gl.delete_buffer(state._shared_ibo);
     }
     info!("OpenGL resources cleaned up.");
 }
@@ -382,56 +416,6 @@ fn create_graphics_program(
             use_texture_location,
             texture_location,
         ))
-    }
-}
-
-fn create_object_resources(
-    gl: &glow::Context,
-    object: &ScreenObject,
-) -> Result<OpenGLObject, String> {
-    unsafe {
-        let vbo = gl.create_buffer()?;
-        gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
-        gl.buffer_data_u8_slice(
-            glow::ARRAY_BUFFER,
-            bytemuck::cast_slice(object.vertices.as_ref()), // <-- was &object.vertices
-            glow::STATIC_DRAW,
-        );
-
-        let ibo = gl.create_buffer()?;
-        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ibo));
-        gl.buffer_data_u8_slice(
-            glow::ELEMENT_ARRAY_BUFFER,
-            bytemuck::cast_slice(object.indices.as_ref()), // Use .as_ref() to get a slice from the Cow
-            glow::STATIC_DRAW,
-        );
-
-        let vao = gl.create_vertex_array()?;
-        gl.bind_vertex_array(Some(vao));
-        gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
-        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ibo));
-
-        // Position attribute (location 0)
-        gl.enable_vertex_attrib_array(0);
-        gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 4 * mem::size_of::<f32>() as i32, 0);
-
-        // UV attribute (location 1)
-        gl.enable_vertex_attrib_array(1);
-        gl.vertex_attrib_pointer_f32(
-            1,
-            2,
-            glow::FLOAT,
-            false,
-            4 * mem::size_of::<f32>() as i32,
-            2 * mem::size_of::<f32>() as i32,
-        );
-
-        Ok(OpenGLObject {
-            vao,
-            _vbo: vbo,
-            _ibo: ibo,
-            index_count: object.indices.len() as i32,
-        })
     }
 }
 
