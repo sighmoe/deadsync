@@ -670,7 +670,6 @@ pub fn draw(
     Ok(())
 }
 
-
 pub fn cleanup(state: &mut State) {
     info!("Cleaning up Vulkan resources...");
     unsafe {

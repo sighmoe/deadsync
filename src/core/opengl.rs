@@ -170,7 +170,7 @@ pub fn load_screen(_state: &mut State, _screen: &Screen) -> Result<(), Box<dyn E
 pub fn draw(
     state: &mut State,
     screen: &Screen,
-    textures: &HashMap<&'static str, renderer::Texture>, // Changed from String
+    textures: &HashMap<&'static str, renderer::Texture>,
 ) -> Result<(), Box<dyn Error>> {
     let (width, height) = state.window_size;
     if width == 0 || height == 0 {
@@ -178,70 +178,70 @@ pub fn draw(
     }
 
     unsafe {
+        // Clear + program once
         let c = screen.clear_color;
         state.gl.clear_color(c[0], c[1], c[2], c[3]);
         state.gl.clear(glow::COLOR_BUFFER_BIT);
         state.gl.use_program(Some(state.program));
 
-        // Enable blending for transparency
+        // Blending once
         state.gl.enable(glow::BLEND);
         state.gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
 
-        // Activate texture unit 0 once
+        // Texture unit setup once
         state.gl.active_texture(glow::TEXTURE0);
         state.gl.uniform_1_i32(Some(&state.texture_location), 0);
-        
-        // Bind the single, shared VAO once for all draw calls.
+
+        // Bind shared VAO once
         state.gl.bind_vertex_array(Some(state.shared_vao));
 
-        for object in screen.objects.iter() {
-            let mvp_array: [[f32; 4]; 4] = (state.projection * object.transform).into();
-            let mvp_slice: &[f32] = bytemuck::cast_slice(&mvp_array); // safe
+        // Cache only the *bound texture handle* to reduce redundant binds.
+        let mut last_bound_tex: Option<glow::Texture> = None;
 
-            state.gl.uniform_matrix_4_f32_slice(
-                Some(&state.mvp_location),
-                false,
-                mvp_slice,
-            );
+        for object in &screen.objects {
+            // MVP changes per object
+            let mvp_array: [[f32; 4]; 4] = (state.projection * object.transform).into();
+            let mvp_slice: &[f32] = bytemuck::cast_slice(&mvp_array);
+            state.gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
 
             match &object.object_type {
                 ObjectType::SolidColor { color } => {
+                    // Always force solid mode each object to prevent cross-frame leaks.
                     state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
-                    state
-                        .gl
-                        .uniform_4_f32_slice(Some(&state.color_location), color);
-                    // Unbind any previous texture to avoid surprises
-                    state.gl.bind_texture(glow::TEXTURE_2D, None);
+                    state.gl.uniform_4_f32_slice(Some(&state.color_location), color);
+                    if last_bound_tex.is_some() {
+                        state.gl.bind_texture(glow::TEXTURE_2D, None);
+                        last_bound_tex = None;
+                    }
                 }
                 ObjectType::Textured { texture_id } => {
-                    // This `get` call will now work correctly with a &String key.
+                    // Always force textured mode each object to prevent cross-frame leaks.
+                    state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
+
                     if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
-                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
-                        state.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
+                        if last_bound_tex != Some(gl_texture.0) {
+                            state.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
+                            last_bound_tex = Some(gl_texture.0);
+                        }
                     } else {
-                        warn!("Texture ID '{}' not found in texture manager!", texture_id);
-                        // Fallback: draw with a bright magenta color (debugging-friendly)
-                        let magenta = [1.0, 0.0, 1.0, 1.0];
+                        // Fallback: draw solid magenta if texture is missing.
                         state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
-                        state
-                            .gl
-                            .uniform_4_f32_slice(Some(&state.color_location), &magenta);
-                        state.gl.bind_texture(glow::TEXTURE_2D, None);
+                        let magenta = [1.0, 0.0, 1.0, 1.0];
+                        state.gl.uniform_4_f32_slice(Some(&state.color_location), &magenta);
+                        if last_bound_tex.is_some() {
+                            state.gl.bind_texture(glow::TEXTURE_2D, None);
+                            last_bound_tex = None;
+                        }
                     }
                 }
             }
 
-            // The VAO is already bound, so we just issue the draw call.
-            state.gl.draw_elements(
-                glow::TRIANGLES,
-                state.index_count,
-                glow::UNSIGNED_SHORT,
-                0,
-            );
+            state.gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
         }
-        // Unbind VAO after all objects are drawn.
+
         state.gl.bind_vertex_array(None);
     }
+
     state.gl_surface.swap_buffers(&state.gl_context)?;
     Ok(())
 }
