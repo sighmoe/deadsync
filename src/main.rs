@@ -332,7 +332,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let (backend_type, vsync_enabled) = parse_args(&args);
 
-    if backend_type == BackendType::Vulkan {
+    // FIX: Check if the user explicitly specified a backend flag in the arguments.
+    // The `any` iterator method stops searching as soon as it finds a match.
+    let backend_was_specified = args.iter().any(|arg| arg == "--opengl" || arg == "--vulkan");
+
+    // Only show the default message if no backend was specified by the user.
+    if !backend_was_specified {
         info!("No backend specified. Defaulting to Vulkan.");
         info!("Use '--opengl' or '--vulkan' to select a backend.");
     }
