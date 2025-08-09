@@ -677,17 +677,13 @@ pub fn draw(
     Ok(())
 }
 
-pub fn cleanup(state: &mut State, textures: &mut HashMap<&'static str, renderer::Texture>) {
+pub fn cleanup(state: &mut State) {
     info!("Cleaning up Vulkan resources...");
     unsafe {
-        // First, wait for the GPU to be completely idle.
-        // This is critical to ensure no resources are in use.
-        state.device.as_ref().unwrap().device_wait_idle().unwrap();
-
-        // Now that the device is idle, it is safe to clear the texture manager.
-        // This will trigger the `Drop` implementation for each `vulkan::Texture`,
-        // decrementing the reference count on the `Arc<Device>`.
-        textures.clear();
+        // CRITICAL: `device_wait_idle` is now called in `renderer::dispose_textures`
+        // before the texture map is cleared. This ensures that when the `Drop` trait
+        // is triggered for each `vulkan::Texture`, the GPU is not using them.
+        // We can now proceed to clean up all other resources.
 
         cleanup_swapchain_and_dependents(state);
         
@@ -721,14 +717,10 @@ pub fn cleanup(state: &mut State, textures: &mut HashMap<&'static str, renderer:
             loader.destroy_debug_utils_messenger(messenger, None);
         }
         
-        // THE FIX: The `drop(device_arc)` call in the original code was incorrect. It only
-        // drops the Arc smart pointer, but does not destroy the underlying Vulkan device
-        // object. We must call `destroy_device` explicitly before destroying the instance.
         if let Some(device_arc) = state.device.take() {
             device_arc.destroy_device(None);
         }
 
-        // Finally, destroy the instance, which is now safe to do.
         state.instance.destroy_instance(None);
     }
     info!("Vulkan resources cleaned up.");

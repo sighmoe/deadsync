@@ -302,7 +302,13 @@ impl ApplicationHandler for App {
         info!("Cleaning up resources...");
 
         if let Some(backend) = &mut self.backend {
-            renderer::cleanup(backend, &mut self.texture_manager);
+            // First, dispose all textures in a backend-symmetric way.
+            // This function handles waiting for the Vulkan device to be idle
+            // and using the GL context to delete textures before clearing the map.
+            renderer::dispose_textures(backend, &mut self.texture_manager);
+
+            // Now, clean up the rest of the backend-specific resources.
+            renderer::cleanup(backend);
         }
     }
 }
