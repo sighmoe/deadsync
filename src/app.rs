@@ -313,11 +313,15 @@ impl ApplicationHandler for App {
 }
 
 // ---- helpers ----
+#[inline(always)]
 fn create_screen_from_ui(
     elements: &[api::UIElement],
     clear_color: [f32; 4],
 ) -> renderer::Screen {
-    let objects = elements.iter().map(api::to_screen_object).collect();
+    let mut objects = Vec::with_capacity(elements.len());
+    for e in elements {
+        objects.push(api::to_screen_object(e));
+    }
     renderer::Screen { clear_color, objects }
 }
 
