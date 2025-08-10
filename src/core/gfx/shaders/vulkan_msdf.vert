@@ -8,7 +8,7 @@ layout(push_constant) uniform PC {
     vec2 uv_scale;
     vec2 uv_offset;
     vec4 color;
-    float px_range;
+    float px_range; // distanceRange from atlas JSON
 } pc;
 
 void main() {

@@ -121,11 +121,13 @@ impl MsdfAtlas {
 /// `atlas_tex_key` must match the texture key you inserted in the texture manager.
 /// `px_range_hint` is used if the JSON doesn't specify `distanceRange`.
 pub fn load_font(json_bytes: &[u8], atlas_tex_key: &'static str, px_range_hint: f32) -> Font {
-    let f: MsdfRoot = serde_json::from_slice(json_bytes)
-        .expect("msdf-atlas-gen JSON");
+    let f: MsdfRoot = serde_json::from_slice(json_bytes).expect("msdf-atlas-gen JSON");
+
+    // distanceRange from the atlas (fallback to hint)
+    let px_range = f.atlas.distance_range.unwrap_or(px_range_hint.max(0.0));
+    log::info!("MSDF '{}' distanceRange(px) = {}", atlas_tex_key, px_range);
 
     let (mut atlas_w, mut atlas_h) = f.atlas.dims();
-    // Guard against zero/invalid atlas sizes to avoid div-by-zero in UV math.
     if !atlas_w.is_finite() || atlas_w <= 0.0 { atlas_w = 1.0; }
     if !atlas_h.is_finite() || atlas_h <= 0.0 { atlas_h = 1.0; }
 
@@ -143,26 +145,21 @@ pub fn load_font(json_bytes: &[u8], atlas_tex_key: &'static str, px_range_hint: 
         let (xoff, yoff, plane_w, plane_h) = if let Some(pb) = &g.plane_bounds {
             let w = (pb.right - pb.left).abs();
             let h = (pb.top   - pb.bottom).abs();
-            (pb.left, -pb.top, w, h) // flip Y to our down-positive layout
+            (pb.left, -pb.top, w, h) // flip Y to down-positive for layout
         } else {
             (0.0, 0.0, 0.0, 0.0)
         };
 
-        // Atlas rect in pixels -> store top-left Y
+        // Atlas rect in pixels (store top-left Y)
         let (ax, ay, aw, ah) = if let Some(ab) = &g.atlas_bounds {
             let w = (ab.right - ab.left).abs();
             let h = (ab.top   - ab.bottom).abs();
-            let y_top_left = if y_bottom {
-                atlas_h - ab.top
-            } else {
-                ab.top
-            };
+            let y_top_left = if y_bottom { atlas_h - ab.top } else { ab.top };
             (ab.left, y_top_left, w, h)
         } else {
             (0.0, 0.0, 0.0, 0.0)
         };
 
-        // Track average advance for better space fallback
         if g.advance.is_finite() && g.advance > 0.0 {
             adv_sum += g.advance;
             adv_count += 1;
@@ -175,7 +172,6 @@ pub fn load_font(json_bytes: &[u8], atlas_tex_key: &'static str, px_range_hint: 
         });
     }
 
-    // Prefer real space glyph; otherwise fallback to mean advance of positive glyphs or 0.5
     let space_advance = glyphs
         .get(&' ')
         .map(|g| g.xadv)
@@ -187,7 +183,7 @@ pub fn load_font(json_bytes: &[u8], atlas_tex_key: &'static str, px_range_hint: 
         atlas_w,
         atlas_h,
         line_h: f.metrics.line_height,
-        px_range: f.atlas.distance_range.unwrap_or(px_range_hint.max(0.0)),
+        px_range,
         glyphs,
         space_advance,
     }

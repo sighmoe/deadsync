@@ -85,7 +85,7 @@ pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
     pixel_height: 48.0,
     color: [1.0,1.0,1.0,1.0],
     font_id: "wendy",
-    content: "Press Enter".to_string(),
+    content: "PRESS ENTER".to_string(),
     }));
 
     elements

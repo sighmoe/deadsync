@@ -9,15 +9,22 @@ layout(push_constant) uniform PC {
     vec2 uv_scale;
     vec2 uv_offset;
     vec4 color;
-    float px_range;
+    float px_range; // distanceRange from atlas JSON
 } pc;
 
 float median3(vec3 v){ return max(min(v.r,v.g), min(max(v.r,v.g), v.b)); }
 
 void main() {
-    vec4 s = texture(tex_sampler, out_uv);
-    float sd = median3(s.rgb) - 0.5;
-    float w  = fwidth(sd) * (pc.px_range * 1.0);
-    float a  = smoothstep(-w, w, sd);
+    vec3 msdf = texture(tex_sampler, out_uv).rgb;
+    float sd  = median3(msdf); // 0.5 is the edge in MSDF
+
+    // atlas texels per screen pixel
+    vec2 texSize = vec2(textureSize(tex_sampler, 0));
+    float texelsPerScreenPx = length(fwidth(out_uv * texSize));
+
+    // smoothing width scales INVERSELY with px_range
+    float w = 0.5 * texelsPerScreenPx / max(pc.px_range, 1e-6);
+
+    float a = smoothstep(0.5 - w, 0.5 + w, sd);
     out_frag_color = vec4(pc.color.rgb, a * pc.color.a);
 }

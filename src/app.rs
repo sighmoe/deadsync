@@ -167,14 +167,22 @@ impl App {
 
     fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
         let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
-        // Example: assets/fonts/wendy.json + wendy.png  (place files accordingly)
+
+        // Read JSON + atlas
         let json = std::fs::read("assets/fonts/wendy.json")?;
-        // Load atlas as **linear**
+        // IMPORTANT: upload atlas as **linear** (no sRGB), and disable mipmaps if your API exposes it
         let img = image::open("assets/fonts/wendy.png")?.to_rgba8();
-        let tex = renderer::create_texture_with_colorspace(backend, &img, renderer::TextureColorSpace::Linear)?;
+        let tex = renderer::create_texture_with_colorspace(
+            backend,
+            &img,
+            renderer::TextureColorSpace::Linear,
+        )?;
         self.texture_manager.insert("wendy.png", tex);
-        let font = msdf::load_font(&json, "wendy.png", /*px_range=*/ 4.0); // set to your generator's range
+
+        // `px_range_hint` is only a fallback; real value comes from JSON distanceRange
+        let font = msdf::load_font(&json, "wendy.png", /* px_range_hint */ 4.0);
         self.fonts.insert("wendy", font);
+
         Ok(())
     }
 
