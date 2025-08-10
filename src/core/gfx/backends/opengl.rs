@@ -119,29 +119,19 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
         let texture = gl.create_texture()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
-        // Set texture parameters (unchanged)
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_S,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_T,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_MIN_FILTER,
-            glow::LINEAR as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_MAG_FILTER,
-            glow::LINEAR as i32,
-        );
+        // Tight packing for RGBA8 uploads
+        let prev_unpack = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
 
-        // Updated to match glow 0.16.0's PixelUnpackData::Slice(Option<&[u8]>)
+        // Crisp UI defaults: no mipmaps, nearest for magnification
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);   // downscale = linear
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);  // upscale = crisp
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_BASE_LEVEL, 0);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0); // disable mip levels
+
+        // sRGB upload to match FRAMEBUFFER_SRGB
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -151,13 +141,17 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),  // Add Some() inside Slice
+            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),
         );
 
+        // Restore state + unbind
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, prev_unpack);
         gl.bind_texture(glow::TEXTURE_2D, None);
+
         Ok(Texture(texture))
     }
 }
+
 
 // This function is now a no-op because the geometry buffers are static and shared.
 // It's kept to maintain a consistent interface with the Vulkan backend.
