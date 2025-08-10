@@ -22,26 +22,40 @@ const WINDOW_HEIGHT: u32 = 768;
 
 // ---- args ----
 fn parse_args(args: &[String]) -> (BackendType, bool) {
+    use log::warn;
+
     let mut backend = BackendType::Vulkan;
     let mut vsync = true;
 
     let mut i = 1;
     while i < args.len() {
-        match args[i].as_str() {
-            "--opengl" => backend = BackendType::OpenGL,
-            "--vulkan" => backend = BackendType::Vulkan,
-            "--vsync" => {
-                if i + 1 < args.len() {
-                    vsync = matches!(args[i + 1].as_str(), "on");
-                    i += 1;
-                } else {
-                    log::warn!("--vsync requires 'on' or 'off'; defaulting to on");
-                }
+        let a = args[i].as_str();
+
+        if a == "--opengl" {
+            backend = BackendType::OpenGL;
+        } else if a == "--vulkan" {
+            backend = BackendType::Vulkan;
+        } else if let Some(val) = a.strip_prefix("--vsync=") {
+            // allow on/off/true/false/1/0 (case-insensitive)
+            let v = val.to_ascii_lowercase();
+            vsync = matches!(v.as_str(), "on" | "true" | "1");
+        } else if a == "--vsync" {
+            // also allow "--vsync on"
+            if let Some(next) = args.get(i + 1) {
+                let v = next.to_ascii_lowercase();
+                vsync = matches!(v.as_str(), "on" | "true" | "1");
+                i += 1;
+            } else {
+                warn!("--vsync requires a value (on/off|true/false|1/0); defaulting to 'on'");
+                vsync = true;
             }
-            _ => log::warn!("Unknown arg: {}", args[i]),
+        } else {
+            warn!("Unknown arg: {}", a);
         }
+
         i += 1;
     }
+
     (backend, vsync)
 }
 
