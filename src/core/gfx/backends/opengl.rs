@@ -119,29 +119,22 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
         let texture = gl.create_texture()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
-        // Set texture parameters (unchanged)
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_S,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_T,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_MIN_FILTER,
-            glow::LINEAR as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_MAG_FILTER,
-            glow::LINEAR as i32,
-        );
+        // Make sure the byte rows are tightly packed
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
 
-        // Updated to match glow 0.16.0's PixelUnpackData::Slice(Option<&[u8]>)
+        // Clamp edges (good for atlas/UI), no wrapping beyond edges
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+
+        // CRISP sampling for pixel art / UI (LINEAR looks better than NEAREST)
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+
+        // No mip levels (we don't generate mipmaps)
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_BASE_LEVEL, 0);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
+
+        // sRGB correct texture upload
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -151,7 +144,7 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),  // Add Some() inside Slice
+            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),
         );
 
         gl.bind_texture(glow::TEXTURE_2D, None);
