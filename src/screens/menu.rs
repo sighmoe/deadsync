@@ -44,24 +44,25 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
-    let mut elements = Vec::new();
+    // logo + OPTION_COUNT boxes + arrow
+    let mut elements = Vec::with_capacity(1 + OPTION_COUNT + 1);
 
-    // 1. Draw the logo sprite above the menu options
+    // 1) Logo sprite
     elements.push(UIElement::Sprite(Sprite {
         center: Vector2::new(0.0, 250.0),
-        size: Vector2::new(600.0, 200.0), // Shrink the logo to fit nicely
+        size: Vector2::new(600.0, 200.0),
         texture_id: "logo.png",
     }));
 
-    // 2. Draw the menu option quads
-    let option_texts = ["Play", "Options", "Exit"];
+    // 2) Menu option quads
     let size = Vector2::new(200.0, 60.0);
-    for (i, &text) in option_texts.iter().enumerate() {
+    for i in 0..OPTION_COUNT {
         let y_pos = 100.0 - (i as f32 * 80.0);
-        let color = if i == state.selected_index {
-            [0.2, 0.6, 0.2, 1.0] // Selected color
+        let selected = i == state.selected_index;
+        let color = if selected {
+            [0.2, 0.6, 0.2, 1.0]
         } else {
-            [0.2, 0.2, 0.2, 1.0] // Default color
+            [0.2, 0.2, 0.2, 1.0]
         };
 
         elements.push(UIElement::Quad(Quad {
@@ -69,10 +70,9 @@ pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
             size,
             color,
         }));
-        let _ = text; // Placeholder for future text rendering
     }
 
-    // 3. Draw the arrow sprite next to the selected option
+    // 3) Arrow sprite next to selected option
     let selected_y_pos = 100.0 - (state.selected_index as f32 * 80.0);
     elements.push(UIElement::Sprite(Sprite {
         center: Vector2::new(-150.0, selected_y_pos),
