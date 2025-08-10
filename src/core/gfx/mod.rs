@@ -1,7 +1,9 @@
-use crate::{
-    core::{opengl, vulkan},
-    screen::Screen,
-};
+pub mod types;
+pub mod backends;
+
+pub use types::{ObjectType, Screen, ScreenObject};
+
+use crate::core::gfx::backends::{opengl, vulkan};
 use glow::HasContext; // <--- ADD THIS LINE
 use image::RgbaImage;
 use std::{collections::HashMap, error::Error, sync::Arc};

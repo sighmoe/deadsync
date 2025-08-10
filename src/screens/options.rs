@@ -1,4 +1,4 @@
-use crate::api::{Quad, Sprite, UIElement};
+use crate::ui::primitives::{Quad, Sprite, UIElement};
 use crate::screens::{Screen, ScreenAction};
 use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};

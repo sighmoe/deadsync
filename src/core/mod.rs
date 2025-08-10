@@ -1,2 +1,2 @@
-pub mod vulkan;
-pub mod opengl;
+pub mod gfx;
+pub mod input;

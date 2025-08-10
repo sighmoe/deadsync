@@ -1,5 +1,6 @@
-use crate::api::{Quad, UIElement};
-use crate::input::InputState;
+use crate::ui::primitives::{Quad, UIElement};
+
+use crate::core::input::InputState;
 use crate::screens::{Screen, ScreenAction};
 use cgmath::{InnerSpace, Vector2, Vector3};
 use winit::event::{ElementState, KeyEvent};

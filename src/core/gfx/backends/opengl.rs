@@ -1,8 +1,6 @@
-use crate::{
-    renderer,
-    screen::{ObjectType, Screen},
-};
-use crate::math::ortho_for_window;
+use crate::core::gfx as renderer;
+use crate::core::gfx::{ObjectType, Screen};
+use crate::utils::math::ortho_for_window;
 use cgmath::Matrix4;
 use glow::{HasContext, PixelUnpackData, UniformLocation};
 use glutin::{

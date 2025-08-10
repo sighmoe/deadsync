@@ -1,14 +1,14 @@
-mod api;
 mod core;
-mod input;
-mod renderer;
-mod screen;
+mod ui;
 mod screens;
-mod math;
+mod utils;
 
-use input::InputState;
+use crate::core::input;
+use crate::core::input::InputState;
 use log::{error, info};
-use renderer::{create_backend, BackendType};
+use crate::core::gfx::{create_backend, BackendType};
+use crate::core::gfx as renderer;
+use crate::ui::primitives as api;
 use screens::{gameplay, menu, options, Screen as CurrentScreen, ScreenAction};
 use std::{collections::HashMap, error::Error, path::Path, sync::Arc, time::Instant};
 use winit::{
@@ -316,12 +316,9 @@ impl ApplicationHandler for App {
 fn create_screen_from_ui(
     elements: &[api::UIElement],
     clear_color: [f32; 4],
-) -> screen::Screen {
+) -> crate::core::gfx::Screen {
     let objects = elements.iter().map(api::to_screen_object).collect();
-    screen::Screen {
-        clear_color,
-        objects,
-    }
+    crate::core::gfx::Screen { clear_color, objects }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
