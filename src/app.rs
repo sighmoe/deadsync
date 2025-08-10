@@ -189,7 +189,7 @@ impl App {
                 self.current_screen = screen;
 
                 let (ui_elements, clear_color) = self.get_current_ui_elements();
-                let new_screen_data = create_screen_from_ui(&ui_elements, clear_color);
+                let new_screen_data = create_screen_from_ui(&ui_elements, clear_color, &self.fonts);
                 if let Some(backend) = &mut self.backend {
                     renderer::load_screen(backend, &new_screen_data)?;
                 }
@@ -204,48 +204,10 @@ impl App {
     }
 
     fn build_screen(&self, elements: &[api::UIElement], clear_color: [f32;4]) -> renderer::Screen {
-        use cgmath::{Matrix4, Vector3};
-        let mut objects = Vec::new();
-        for e in elements {
-            match e {
-                api::UIElement::Quad(q) => {
-                    let t = Matrix4::from_translation(Vector3::new(q.center.x, q.center.y, 0.0))
-                          * Matrix4::from_nonuniform_scale(q.size.x, q.size.y, 1.0);
-                    objects.push(renderer::ScreenObject {
-                        object_type: renderer::ObjectType::SolidColor { color: q.color },
-                        transform: t,
-                    });
-                }
-                api::UIElement::Sprite(s) => {
-                    let t = Matrix4::from_translation(Vector3::new(s.center.x, s.center.y, 0.0))
-                          * Matrix4::from_nonuniform_scale(s.size.x, s.size.y, 1.0);
-                    objects.push(renderer::ScreenObject {
-                        object_type: renderer::ObjectType::Textured { texture_id: s.texture_id },
-                        transform: t,
-                    });
-                }
-                api::UIElement::Text(txt) => {
-                    if let Some(font) = self.fonts.get(txt.font_id) {
-                        let laid = msdf::layout_line(font, &txt.content, txt.pixel_height, txt.origin);
-                        for g in laid {
-                            let t = Matrix4::from_translation(Vector3::new(g.center.x, g.center.y, 0.0))
-                                  * Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
-                            objects.push(renderer::ScreenObject {
-                                object_type: renderer::ObjectType::MsdfGlyph {
-                                    texture_id: font.atlas_tex_key,
-                                    uv_scale: g.uv_scale,
-                                    uv_offset: g.uv_offset,
-                                    color: txt.color,
-                                    px_range: font.px_range,
-                                },
-                                transform: t,
-                            });
-                        }
-                    }
-                }
-            }
+        renderer::Screen {
+            clear_color,
+            objects: expand_ui_to_objects(elements, &self.fonts),
         }
-        renderer::Screen { clear_color, objects }
     }
 
     fn get_current_ui_elements(&self) -> (Vec<api::UIElement>, [f32; 4]) {
@@ -393,8 +355,21 @@ impl ApplicationHandler for App {
 fn create_screen_from_ui(
     elements: &[api::UIElement],
     clear_color: [f32; 4],
+    fonts: &HashMap<&'static str, msdf::Font>,
 ) -> renderer::Screen {
+    renderer::Screen {
+        clear_color,
+        objects: expand_ui_to_objects(elements, fonts),
+    }
+}
+
+#[inline(always)]
+fn expand_ui_to_objects(
+    elements: &[api::UIElement],
+    fonts: &HashMap<&'static str, msdf::Font>,
+) -> Vec<renderer::ScreenObject> {
     use cgmath::{Matrix4, Vector3};
+
     let mut objects = Vec::with_capacity(elements.len());
     for e in elements {
         match e {
@@ -414,12 +389,28 @@ fn create_screen_from_ui(
                     transform: t,
                 });
             }
-            api::UIElement::Text(_) => {
-                // Text is expanded into glyph quads in App::build_screen(); we intentionally skip it here.
+            api::UIElement::Text(txt) => {
+                if let Some(font) = fonts.get(txt.font_id) {
+                    let laid = msdf::layout_line(font, &txt.content, txt.pixel_height, txt.origin);
+                    for g in laid {
+                        let t = Matrix4::from_translation(Vector3::new(g.center.x, g.center.y, 0.0))
+                            * Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
+                        objects.push(renderer::ScreenObject {
+                            object_type: renderer::ObjectType::MsdfGlyph {
+                                texture_id: font.atlas_tex_key,
+                                uv_scale: g.uv_scale,
+                                uv_offset: g.uv_offset,
+                                color: txt.color,
+                                px_range: font.px_range,
+                            },
+                            transform: t,
+                        });
+                    }
+                }
             }
         }
     }
-    renderer::Screen { clear_color, objects }
+    objects
 }
 
 // ---- public entry point ----
