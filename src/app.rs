@@ -32,62 +32,23 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
         let a = args[i].as_str();
 
         match a {
-            // legacy toggles
+            // backend selection (only legacy flags)
             "--opengl" => backend = BackendType::OpenGL,
             "--vulkan" => backend = BackendType::Vulkan,
-
-            // --backend=opengl|vulkan (case-insensitive)
-            s if s.starts_with("--backend=") => {
-                let val = &s["--backend=".len()..];
-                if val.eq_ignore_ascii_case("opengl") {
-                    backend = BackendType::OpenGL;
-                } else if val.eq_ignore_ascii_case("vulkan") {
-                    backend = BackendType::Vulkan;
-                } else {
-                    warn!("Unknown backend '{}'; keeping {:?}", val, backend);
-                }
-            }
-
-            // -b opengl|vulkan (case-insensitive)
-            "-b" => {
-                if i + 1 < args.len() {
-                    let v = args[i + 1].as_str();
-                    if v.eq_ignore_ascii_case("opengl") {
-                        backend = BackendType::OpenGL;
-                        i += 1;
-                    } else if v.eq_ignore_ascii_case("vulkan") {
-                        backend = BackendType::Vulkan;
-                        i += 1;
-                    } else {
-                        warn!("Unknown backend '{}'; keeping {:?}", v, backend);
-                    }
-                } else {
-                    warn!("-b requires a value (opengl|vulkan); keeping {:?}", backend);
-                }
-            }
 
             // vsync controls
             "--no-vsync" => vsync = false,
             s if s.starts_with("--vsync=") => {
                 let v = &s["--vsync=".len()..];
-                vsync = v.eq_ignore_ascii_case("on") || v.eq_ignore_ascii_case("true") || v == "1";
+                vsync = matches!(v, "on" | "true" | "1");
             }
             "--vsync" => {
                 if i + 1 < args.len() {
                     let v = args[i + 1].as_str();
-                    if matches!(v, "on" | "off" | "true" | "false" | "1" | "0")
-                        || v.eq_ignore_ascii_case("on")
-                        || v.eq_ignore_ascii_case("off")
-                        || v.eq_ignore_ascii_case("true")
-                        || v.eq_ignore_ascii_case("false")
-                    {
-                        vsync = v.eq_ignore_ascii_case("on")
-                            || v.eq_ignore_ascii_case("true")
-                            || v == "1";
-                        i += 1;
-                    } else {
-                        // plain `--vsync` means "on"
-                        vsync = true;
+                    match v {
+                        "on" | "true" | "1" => { vsync = true; i += 1; }
+                        "off" | "false" | "0" => { vsync = false; i += 1; }
+                        _ => vsync = true, // plain `--vsync` or unknown -> on
                     }
                 } else {
                     vsync = true;
@@ -362,11 +323,14 @@ fn create_screen_from_ui(
 
 // ---- public entry point ----
 pub fn run() -> Result<(), Box<dyn Error>> {
+    use log::info;
+
     let args: Vec<String> = std::env::args().collect();
     let (backend_type, vsync_enabled) = parse_args(&args);
 
-    let backend_was_specified = args.iter().any(|a| a == "--opengl" || a == "--vulkan");
-    if !backend_was_specified {
+    // Only consider the legacy flags for detection
+    let backend_specified = args.iter().any(|a| a == "--opengl" || a == "--vulkan");
+    if !backend_specified {
         info!("No backend specified. Defaulting to Vulkan.");
         info!("Use '--opengl' or '--vulkan' to select a backend.");
     }
@@ -376,3 +340,4 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     event_loop.run_app(&mut app)?;
     Ok(())
 }
+
