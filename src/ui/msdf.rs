@@ -124,44 +124,49 @@ pub fn load_font(json_bytes: &[u8], atlas_tex_key: &'static str, px_range_hint: 
     let f: MsdfRoot = serde_json::from_slice(json_bytes)
         .expect("msdf-atlas-gen JSON");
 
-    let (atlas_w, atlas_h) = f.atlas.dims();
+    let (mut atlas_w, mut atlas_h) = f.atlas.dims();
+    // Guard against zero/invalid atlas sizes to avoid div-by-zero in UV math.
+    if !atlas_w.is_finite() || atlas_w <= 0.0 { atlas_w = 1.0; }
+    if !atlas_h.is_finite() || atlas_h <= 0.0 { atlas_h = 1.0; }
+
     let y_bottom = f.atlas.y_origin_bottom();
 
     let mut glyphs = HashMap::new();
+    let mut adv_sum = 0.0f32;
+    let mut adv_count = 0usize;
 
     for g in &f.glyphs {
         let Some(code) = g.unicode else { continue; };
-        let Some(ch) = std::char::from_u32(code) else { continue; };
+        let Some(ch)   = std::char::from_u32(code) else { continue; };
 
-        // Layout metrics from planeBounds (font units, Y up in data)
+        // Layout metrics from plane bounds
         let (xoff, yoff, plane_w, plane_h) = if let Some(pb) = &g.plane_bounds {
             let w = (pb.right - pb.left).abs();
-            let h = (pb.top - pb.bottom).abs();
-            // Our layout uses +Y down from baseline; flip sign
-            (pb.left, -pb.top, w, h)
+            let h = (pb.top   - pb.bottom).abs();
+            (pb.left, -pb.top, w, h) // flip Y to our down-positive layout
         } else {
             (0.0, 0.0, 0.0, 0.0)
         };
 
-        // Atlas rectangle in pixels.
-        // msdf-atlas-gen gives bottom/top depending on yOrigin.
+        // Atlas rect in pixels -> store top-left Y
         let (ax, ay, aw, ah) = if let Some(ab) = &g.atlas_bounds {
             let w = (ab.right - ab.left).abs();
-            let h = (ab.top - ab.bottom).abs();
-
-            // Store atlas_y as top-left Y to match our unit quad UVs (v=0 is top)
+            let h = (ab.top   - ab.bottom).abs();
             let y_top_left = if y_bottom {
-                // bottom-origin: ab.top is measured from bottom -> convert
                 atlas_h - ab.top
             } else {
-                // top-origin: ab.top already measured from top
                 ab.top
             };
-
             (ab.left, y_top_left, w, h)
         } else {
             (0.0, 0.0, 0.0, 0.0)
         };
+
+        // Track average advance for better space fallback
+        if g.advance.is_finite() && g.advance > 0.0 {
+            adv_sum += g.advance;
+            adv_count += 1;
+        }
 
         glyphs.insert(ch, Glyph {
             atlas_x: ax, atlas_y: ay, atlas_w: aw, atlas_h: ah,
@@ -170,14 +175,19 @@ pub fn load_font(json_bytes: &[u8], atlas_tex_key: &'static str, px_range_hint: 
         });
     }
 
-    let space_advance = glyphs.get(&' ').map(|g| g.xadv).unwrap_or(0.5);
+    // Prefer real space glyph; otherwise fallback to mean advance of positive glyphs or 0.5
+    let space_advance = glyphs
+        .get(&' ')
+        .map(|g| g.xadv)
+        .or_else(|| if adv_count > 0 { Some(adv_sum / adv_count as f32) } else { None })
+        .unwrap_or(0.5);
 
     Font {
         atlas_tex_key,
         atlas_w,
         atlas_h,
         line_h: f.metrics.line_height,
-        px_range: f.atlas.distance_range.unwrap_or(px_range_hint),
+        px_range: f.atlas.distance_range.unwrap_or(px_range_hint.max(0.0)),
         glyphs,
         space_advance,
     }
