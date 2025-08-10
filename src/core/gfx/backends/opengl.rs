@@ -119,19 +119,29 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
         let texture = gl.create_texture()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
-        // Tight packing for RGBA8 uploads
-        let prev_unpack = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        // Set texture parameters (unchanged)
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_S,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_T,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MIN_FILTER,
+            glow::LINEAR as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::LINEAR as i32,
+        );
 
-        // Crisp UI defaults: no mipmaps, nearest for magnification
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);   // downscale = linear
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);  // upscale = crisp
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_BASE_LEVEL, 0);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0); // disable mip levels
-
-        // sRGB upload to match FRAMEBUFFER_SRGB
+        // Updated to match glow 0.16.0's PixelUnpackData::Slice(Option<&[u8]>)
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -141,17 +151,13 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),
+            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),  // Add Some() inside Slice
         );
 
-        // Restore state + unbind
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, prev_unpack);
         gl.bind_texture(glow::TEXTURE_2D, None);
-
         Ok(Texture(texture))
     }
 }
-
 
 // This function is now a no-op because the geometry buffers are static and shared.
 // It's kept to maintain a consistent interface with the Vulkan backend.
@@ -170,45 +176,56 @@ pub fn draw(
     }
 
     unsafe {
-        // Clear + program once
+        // Clear once
         let c = screen.clear_color;
         state.gl.clear_color(c[0], c[1], c[2], c[3]);
         state.gl.clear(glow::COLOR_BUFFER_BIT);
-        state.gl.use_program(Some(state.program));
 
-        // Blending once
+        // Program + fixed state once
+        state.gl.use_program(Some(state.program));
         state.gl.enable(glow::BLEND);
         state.gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
 
-        // Texture unit setup once
+        // Texture unit 0 for all textured draws
         state.gl.active_texture(glow::TEXTURE0);
         state.gl.uniform_1_i32(Some(&state.texture_location), 0);
 
-        // Bind shared VAO once
+        // Shared geometry
         state.gl.bind_vertex_array(Some(state.shared_vao));
 
-        // Cache only the *bound texture handle* to reduce redundant binds.
+        // Track to avoid redundant GL calls
         let mut last_bound_tex: Option<glow::Texture> = None;
+        let mut last_use_texture: Option<bool> = None;
+        let mut last_color: Option<[f32; 4]> = None;
 
         for object in &screen.objects {
-            // MVP changes per object
+            // Per-object transform
             let mvp_array: [[f32; 4]; 4] = (state.projection * object.transform).into();
             let mvp_slice: &[f32] = bytemuck::cast_slice(&mvp_array);
             state.gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
 
             match &object.object_type {
                 ObjectType::SolidColor { color } => {
-                    // Always force solid mode each object to prevent cross-frame leaks.
-                    state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
-                    state.gl.uniform_4_f32_slice(Some(&state.color_location), color);
+                    // Switch to solid only if needed
+                    if last_use_texture != Some(false) {
+                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
+                        last_use_texture = Some(false);
+                    }
                     if last_bound_tex.is_some() {
                         state.gl.bind_texture(glow::TEXTURE_2D, None);
                         last_bound_tex = None;
                     }
+                    if last_color.map_or(true, |c| c != *color) {
+                        state.gl.uniform_4_f32_slice(Some(&state.color_location), color);
+                        last_color = Some(*color);
+                    }
                 }
                 ObjectType::Textured { texture_id } => {
-                    // Always force textured mode each object to prevent cross-frame leaks.
-                    state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
+                    // Switch to textured only if needed
+                    if last_use_texture != Some(true) {
+                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
+                        last_use_texture = Some(true);
+                    }
 
                     if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
                         if last_bound_tex != Some(gl_texture.0) {
@@ -216,13 +233,19 @@ pub fn draw(
                             last_bound_tex = Some(gl_texture.0);
                         }
                     } else {
-                        // Fallback: draw solid magenta if texture is missing.
-                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
-                        let magenta = [1.0, 0.0, 1.0, 1.0];
-                        state.gl.uniform_4_f32_slice(Some(&state.color_location), &magenta);
+                        // Missing texture fallback = solid magenta (one-time uniform update)
+                        if last_use_texture != Some(false) {
+                            state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
+                            last_use_texture = Some(false);
+                        }
                         if last_bound_tex.is_some() {
                             state.gl.bind_texture(glow::TEXTURE_2D, None);
                             last_bound_tex = None;
+                        }
+                        let magenta = [1.0, 0.0, 1.0, 1.0];
+                        if last_color.map_or(true, |c| c != magenta) {
+                            state.gl.uniform_4_f32_slice(Some(&state.color_location), &magenta);
+                            last_color = Some(magenta);
                         }
                     }
                 }
