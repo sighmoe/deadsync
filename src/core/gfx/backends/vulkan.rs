@@ -516,19 +516,21 @@ pub fn draw(
         let fence = state.in_flight_fences[state.current_frame];
         device.wait_for_fences(&[fence], true, u64::MAX)?;
 
-        let (image_index, _) = match state.swapchain_resources.swapchain_loader.acquire_next_image(
-            state.swapchain_resources.swapchain,
-            u64::MAX,
-            state.image_available_semaphores[state.current_frame],
-            vk::Fence::null(),
-        ) {
-            Ok(x) => x,
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                recreate_swapchain_and_dependents(state)?;
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        };
+        // Acquire next image — capture "suboptimal" signal
+        let (image_index, acquired_suboptimal) =
+            match state.swapchain_resources.swapchain_loader.acquire_next_image(
+                state.swapchain_resources.swapchain,
+                u64::MAX,
+                state.image_available_semaphores[state.current_frame],
+                vk::Fence::null(),
+            ) {
+                Ok(pair) => pair, // (index, suboptimal: bool)
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+                    recreate_swapchain_and_dependents(state)?;
+                    return Ok(());
+                }
+                Err(e) => return Err(e.into()),
+            };
 
         let in_flight = state.images_in_flight[image_index as usize];
         if in_flight != vk::Fence::null() {
@@ -539,15 +541,25 @@ pub fn draw(
         device.reset_fences(&[fence])?;
         let cmd = state.command_buffers[state.current_frame];
         device.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
-        device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::default()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT))?;
+        device.begin_command_buffer(
+            cmd,
+            &vk::CommandBufferBeginInfo::default()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+        )?;
 
         let c = screen.clear_color;
-        let clear_value = vk::ClearValue { color: vk::ClearColorValue { float32: [c[0], c[1], c[2], c[3]] } };
+        let clear_value = vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [c[0], c[1], c[2], c[3]],
+            },
+        };
         let rp_info = vk::RenderPassBeginInfo::default()
             .render_pass(state.render_pass)
             .framebuffer(state.swapchain_resources.framebuffers[image_index as usize])
-            .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent })
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D::default(),
+                extent: state.swapchain_resources.extent,
+            })
             .clear_values(std::slice::from_ref(&clear_value));
         device.cmd_begin_render_pass(cmd, &rp_info, vk::SubpassContents::INLINE);
 
@@ -562,14 +574,21 @@ pub fn draw(
                 max_depth: 1.0,
             };
             device.cmd_set_viewport(cmd, 0, &[vp]);
-            let sc = vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent };
+            let sc = vk::Rect2D {
+                offset: vk::Offset2D::default(),
+                extent: state.swapchain_resources.extent,
+            };
             device.cmd_set_scissor(cmd, 0, &[sc]);
 
             // Static buffers
             device.cmd_bind_vertex_buffers(cmd, 0, &[vb.buffer], &[0]);
             device.cmd_bind_index_buffer(cmd, ib.buffer, 0, vk::IndexType::UINT16);
 
-            enum Active { None, Solid, Textured }
+            enum Active {
+                None,
+                Solid,
+                Textured,
+            }
             let mut active = Active::None;
             let mut last_set = vk::DescriptorSet::null();
             let proj = state.projection;
@@ -578,16 +597,33 @@ pub fn draw(
                 match &o.object_type {
                     ObjectType::SolidColor { color } => {
                         if !matches!(active, Active::Solid) {
-                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.solid_pipeline);
+                            device.cmd_bind_pipeline(
+                                cmd,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                state.solid_pipeline,
+                            );
                             active = Active::Solid;
                         }
-                        let pc = SolidPushConstants { mvp: proj * o.transform, color: *color };
-                        device.cmd_push_constants(cmd, state.solid_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+                        let pc = SolidPushConstants {
+                            mvp: proj * o.transform,
+                            color: *color,
+                        };
+                        device.cmd_push_constants(
+                            cmd,
+                            state.solid_pipeline_layout,
+                            vk::ShaderStageFlags::VERTEX,
+                            0,
+                            bytes_of(&pc),
+                        );
                         device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                     }
                     ObjectType::Textured { texture_id } => {
                         if !matches!(active, Active::Textured) {
-                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline);
+                            device.cmd_bind_pipeline(
+                                cmd,
+                                vk::PipelineBindPoint::GRAPHICS,
+                                state.texture_pipeline,
+                            );
                             active = Active::Textured;
                             last_set = vk::DescriptorSet::null();
                         }
@@ -606,8 +642,16 @@ pub fn draw(
                             );
                             last_set = tex.descriptor_set;
                         }
-                        let pc = TexturedPushConstants { mvp: proj * o.transform };
-                        device.cmd_push_constants(cmd, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+                        let pc = TexturedPushConstants {
+                            mvp: proj * o.transform,
+                        };
+                        device.cmd_push_constants(
+                            cmd,
+                            state.texture_pipeline_layout,
+                            vk::ShaderStageFlags::VERTEX,
+                            0,
+                            bytes_of(&pc),
+                        );
                         device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                     }
                 }
@@ -628,18 +672,31 @@ pub fn draw(
             .signal_semaphores(&signal_semaphores);
         device.queue_submit(state.queue, &[submit], fence)?;
 
-        let present = vk::PresentInfoKHR::default()
+        // Present — handle suboptimal from present AND from acquire
+        let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(&signal_semaphores)
             .swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain))
             .image_indices(std::slice::from_ref(&image_index));
-        match state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present) {
-            Ok(true) | Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => recreate_swapchain_and_dependents(state)?,
-            Ok(false) => {}
+
+        match state
+            .swapchain_resources
+            .swapchain_loader
+            .queue_present(state.queue, &present_info)
+        {
+            Ok(suboptimal_present) => {
+                if suboptimal_present || acquired_suboptimal {
+                    recreate_swapchain_and_dependents(state)?;
+                }
+            }
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
+                recreate_swapchain_and_dependents(state)?;
+            }
             Err(e) => return Err(e.into()),
         }
 
         state.current_frame = (state.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
+
     Ok(())
 }
 
