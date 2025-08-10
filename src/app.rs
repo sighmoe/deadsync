@@ -96,9 +96,24 @@ impl App {
     }
 
     fn load_textures(&mut self) -> Result<(), Box<dyn Error>> {
+        use log::{info, warn};
+
         info!("Loading textures...");
         let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
 
+        // Helper: tiny 2x2 magenta checker fallback
+        #[inline(always)]
+        fn fallback_rgba() -> image::RgbaImage {
+            // 2x2: M G
+            //      G M   (M=magenta, G=gray)
+            let data: [u8; 16] = [
+                255, 0,   255, 255,   128, 128, 128, 255,
+                128, 128, 128, 255,   255, 0,   255, 255,
+            ];
+            image::RgbaImage::from_raw(2, 2, data.to_vec()).expect("fallback image")
+        }
+
+        // Keep desired logical IDs -> filenames
         let texture_paths: [&'static str; 4] = [
             "logo.png",
             "dance.png",
@@ -106,12 +121,26 @@ impl App {
             "fallback_banner.png",
         ];
 
-        for path_str in texture_paths {
-            let full_path = Path::new("assets/graphics").join(path_str);
-            let image = image::open(&full_path)?.to_rgba8();
-            let texture = renderer::create_texture(backend, &image)?;
-            self.texture_manager.insert(path_str, texture);
-            info!("Loaded texture: {}", full_path.display());
+        for key in texture_paths {
+            let full_path = Path::new("assets/graphics").join(key);
+            match image::open(&full_path) {
+                Ok(img_dyn) => {
+                    let image = img_dyn.to_rgba8();
+                    let texture = renderer::create_texture(backend, &image)?;
+                    self.texture_manager.insert(key, texture);
+                    info!("Loaded texture: {}", full_path.display());
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to load '{}': {}. Using generated fallback.",
+                        full_path.display(),
+                        e
+                    );
+                    let fb = fallback_rgba();
+                    let texture = renderer::create_texture(backend, &fb)?;
+                    self.texture_manager.insert(key, texture);
+                }
+            }
         }
 
         Ok(())
