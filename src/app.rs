@@ -27,30 +27,39 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
     let mut backend = BackendType::Vulkan;
     let mut vsync = true;
 
-    let mut it = args.iter().skip(1).peekable();
-    while let Some(a) = it.next() {
-        let a = a.as_str();
+    let mut i = 1;
+    while i < args.len() {
+        let a = args[i].as_str();
 
         match a {
-            // legacy toggles (kept)
+            // legacy toggles
             "--opengl" => backend = BackendType::OpenGL,
             "--vulkan" => backend = BackendType::Vulkan,
 
-            // new: --backend=opengl|vulkan and -b opengl|vulkan
+            // --backend=opengl|vulkan (case-insensitive)
             s if s.starts_with("--backend=") => {
-                match &s["--backend=".len()..].to_ascii_lowercase()[..] {
-                    "opengl" => backend = BackendType::OpenGL,
-                    "vulkan" => backend = BackendType::Vulkan,
-                    other => warn!("Unknown backend '{}'; keeping {:?}", other, backend),
+                let val = &s["--backend=".len()..];
+                if val.eq_ignore_ascii_case("opengl") {
+                    backend = BackendType::OpenGL;
+                } else if val.eq_ignore_ascii_case("vulkan") {
+                    backend = BackendType::Vulkan;
+                } else {
+                    warn!("Unknown backend '{}'; keeping {:?}", val, backend);
                 }
             }
+
+            // -b opengl|vulkan (case-insensitive)
             "-b" => {
-                if let Some(next) = it.peek() {
-                    let v = next.to_ascii_lowercase();
-                    match v.as_str() {
-                        "opengl" => { backend = BackendType::OpenGL; it.next(); }
-                        "vulkan" => { backend = BackendType::Vulkan; it.next(); }
-                        _ => warn!("Unknown backend '{}'; keeping {:?}", v, backend),
+                if i + 1 < args.len() {
+                    let v = args[i + 1].as_str();
+                    if v.eq_ignore_ascii_case("opengl") {
+                        backend = BackendType::OpenGL;
+                        i += 1;
+                    } else if v.eq_ignore_ascii_case("vulkan") {
+                        backend = BackendType::Vulkan;
+                        i += 1;
+                    } else {
+                        warn!("Unknown backend '{}'; keeping {:?}", v, backend);
                     }
                 } else {
                     warn!("-b requires a value (opengl|vulkan); keeping {:?}", backend);
@@ -60,15 +69,22 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
             // vsync controls
             "--no-vsync" => vsync = false,
             s if s.starts_with("--vsync=") => {
-                let v = s["--vsync=".len()..].to_ascii_lowercase();
-                vsync = matches!(v.as_str(), "on" | "true" | "1");
+                let v = &s["--vsync=".len()..];
+                vsync = v.eq_ignore_ascii_case("on") || v.eq_ignore_ascii_case("true") || v == "1";
             }
             "--vsync" => {
-                if let Some(next) = it.peek() {
-                    let v = next.to_ascii_lowercase();
-                    if matches!(v.as_str(), "on" | "off" | "true" | "false" | "1" | "0") {
-                        vsync = matches!(v.as_str(), "on" | "true" | "1");
-                        it.next();
+                if i + 1 < args.len() {
+                    let v = args[i + 1].as_str();
+                    if matches!(v, "on" | "off" | "true" | "false" | "1" | "0")
+                        || v.eq_ignore_ascii_case("on")
+                        || v.eq_ignore_ascii_case("off")
+                        || v.eq_ignore_ascii_case("true")
+                        || v.eq_ignore_ascii_case("false")
+                    {
+                        vsync = v.eq_ignore_ascii_case("on")
+                            || v.eq_ignore_ascii_case("true")
+                            || v == "1";
+                        i += 1;
                     } else {
                         // plain `--vsync` means "on"
                         vsync = true;
@@ -81,6 +97,8 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
             // unknown
             other => warn!("Unknown arg: {}", other),
         }
+
+        i += 1;
     }
 
     (backend, vsync)
