@@ -4,7 +4,7 @@ pub mod backends;
 pub use types::{ObjectType, Screen, ScreenObject};
 
 use crate::core::gfx::backends::{opengl, vulkan};
-use glow::HasContext; // <--- ADD THIS LINE
+use glow::HasContext;
 use image::RgbaImage;
 use std::{collections::HashMap, error::Error, sync::Arc};
 use winit::window::Window;
@@ -24,6 +24,8 @@ pub enum Backend {
     Vulkan(vulkan::State),
     OpenGL(opengl::State),
 }
+
+pub enum TextureColorSpace { Srgb, Linear }
 
 pub fn create_backend(
     backend_type: BackendType,
@@ -49,6 +51,23 @@ pub fn create_texture(
         Backend::OpenGL(state) => {
             let texture = opengl::create_texture(&state.gl, image)?;
             Ok(Texture::OpenGL(texture))
+        }
+    }
+}
+
+pub fn create_texture_with_colorspace(
+    backend: &mut Backend,
+    image: &RgbaImage,
+    cs: TextureColorSpace,
+) -> Result<Texture, Box<dyn Error>> {
+    match backend {
+        Backend::Vulkan(state) => {
+            let tex = vulkan::create_texture_with_colorspace(state, image, matches!(cs, TextureColorSpace::Srgb))?;
+            Ok(Texture::Vulkan(tex))
+        }
+        Backend::OpenGL(state) => {
+            let tex = opengl::create_texture_with_colorspace(&state.gl, image, matches!(cs, TextureColorSpace::Srgb))?;
+            Ok(Texture::OpenGL(tex))
         }
     }
 }

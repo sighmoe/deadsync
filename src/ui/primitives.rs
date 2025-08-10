@@ -1,10 +1,10 @@
-use cgmath::{Matrix4, Vector2, Vector3};
-use crate::core::gfx::{ObjectType, ScreenObject};
+use cgmath::Vector2;
 
 #[derive(Debug, Clone)]
 pub enum UIElement {
     Quad(Quad),
     Sprite(Sprite),
+    Text(Text),
 }
 
 #[derive(Debug, Clone)]
@@ -21,28 +21,11 @@ pub struct Sprite {
     pub texture_id: &'static str, // Changed from String
 }
 
-#[inline(always)]
-pub fn to_screen_object(element: &UIElement) -> ScreenObject {
-    match element {
-        UIElement::Quad(quad) => {
-            let transform =
-                Matrix4::from_translation(Vector3::new(quad.center.x, quad.center.y, 0.0))
-                * Matrix4::from_nonuniform_scale(quad.size.x, quad.size.y, 1.0);
-
-            ScreenObject {
-                object_type: ObjectType::SolidColor { color: quad.color },
-                transform,
-            }
-        }
-        UIElement::Sprite(sprite) => {
-            let transform =
-                Matrix4::from_translation(Vector3::new(sprite.center.x, sprite.center.y, 0.0))
-                * Matrix4::from_nonuniform_scale(sprite.size.x, sprite.size.y, 1.0);
-
-            ScreenObject {
-                object_type: ObjectType::Textured { texture_id: sprite.texture_id },
-                transform,
-            }
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct Text {
+    pub origin: Vector2<f32>,      // baseline-left origin in your world coords
+    pub pixel_height: f32,         // desired font pixel height
+    pub color: [f32;4],
+    pub font_id: &'static str,     // e.g. "wendy"
+    pub content: String,
 }

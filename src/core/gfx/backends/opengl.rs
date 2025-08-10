@@ -36,14 +36,28 @@ pub struct State {
     _shared_vbo: glow::Buffer,
     _shared_ibo: glow::Buffer,
     index_count: i32,
+    uv_scale_location: UniformLocation,
+    uv_offset_location: UniformLocation,
+    is_msdf_location: UniformLocation,
+    px_range_location: UniformLocation,
+
 }
 
 pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
     info!("Initializing OpenGL backend...");
 
     let (gl_surface, gl_context, gl) = create_opengl_context(&window, vsync_enabled)?;
-    let (program, mvp_location, color_location, use_texture_location, texture_location) =
-        create_graphics_program(&gl)?;
+    let (
+        program,
+        mvp_location,
+        color_location,
+        use_texture_location,
+        texture_location,
+        uv_scale_location,
+        uv_offset_location,
+        is_msdf_location,
+        px_range_location,
+    ) = create_graphics_program(&gl)?;
 
     // Create one shared VAO/VBO/IBO for a unit quad, to be reused for all objects.
     let (shared_vao, _shared_vbo, _shared_ibo, index_count) = unsafe {
@@ -89,11 +103,18 @@ pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Resul
     let initial_size = window.inner_size();
     let projection = ortho_for_window(initial_size.width, initial_size.height);
 
-    // Set constant program state once: sampler uses texture unit 0, and make 0 active globally.
+    // Set constant program state once
     unsafe {
         gl.use_program(Some(program));
         gl.active_texture(glow::TEXTURE0);
         gl.uniform_1_i32(Some(&texture_location), 0);
+
+        // default UVs and MSDF off
+        gl.uniform_2_f32(Some(&uv_scale_location), 1.0, 1.0);
+        gl.uniform_2_f32(Some(&uv_offset_location), 0.0, 0.0);
+        gl.uniform_1_i32(Some(&is_msdf_location), 0);
+        gl.uniform_1_f32(Some(&px_range_location), 4.0);
+
         gl.use_program(None);
     }
 
@@ -112,6 +133,10 @@ pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Resul
         _shared_vbo,
         _shared_ibo,
         index_count,
+        uv_scale_location,
+        uv_offset_location,
+        is_msdf_location,
+        px_range_location,
     };
 
     info!("OpenGL backend initialized successfully.");
@@ -142,10 +167,11 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
 
         // sRGB-correct upload
+        let internal = glow::SRGB8_ALPHA8 as i32;
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
-            glow::SRGB_ALPHA as i32,
+            internal,
             image.width() as i32,
             image.height() as i32,
             0,
@@ -156,6 +182,28 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
 
         gl.bind_texture(glow::TEXTURE_2D, None);
         Ok(Texture(texture))
+    }
+}
+
+pub fn create_texture_with_colorspace(gl: &glow::Context, image: &RgbaImage, srgb: bool) -> Result<Texture, String> {
+    unsafe {
+        let t = gl.create_texture()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(t));
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+
+        let internal = if srgb { glow::SRGB8_ALPHA8 } else { glow::RGBA8 };
+        gl.tex_image_2d(
+            glow::TEXTURE_2D, 0, internal as i32,
+            image.width() as i32, image.height() as i32, 0,
+            glow::RGBA, glow::UNSIGNED_BYTE,
+            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),
+        );
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        Ok(Texture(t))
     }
 }
 
@@ -206,11 +254,11 @@ pub fn draw(
 
             match &object.object_type {
                 ObjectType::SolidColor { color } => {
-                    // Switch to solid only if needed
                     if last_use_texture != Some(false) {
                         state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
                         last_use_texture = Some(false);
                     }
+                    state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
                     if last_bound_tex.is_some() {
                         state.gl.bind_texture(glow::TEXTURE_2D, None);
                         last_bound_tex = None;
@@ -221,11 +269,13 @@ pub fn draw(
                     }
                 }
                 ObjectType::Textured { texture_id } => {
-                    // Switch to textured only if needed
                     if last_use_texture != Some(true) {
                         state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
                         last_use_texture = Some(true);
                     }
+                    state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
+                    state.gl.uniform_2_f32(Some(&state.uv_scale_location), 1.0, 1.0);
+                    state.gl.uniform_2_f32(Some(&state.uv_offset_location), 0.0, 0.0);
 
                     if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
                         if last_bound_tex != Some(gl_texture.0) {
@@ -233,7 +283,7 @@ pub fn draw(
                             last_bound_tex = Some(gl_texture.0);
                         }
                     } else {
-                        // Missing texture fallback = solid magenta (one-time uniform update)
+                        // fallback to solid magenta
                         if last_use_texture != Some(false) {
                             state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
                             last_use_texture = Some(false);
@@ -246,6 +296,24 @@ pub fn draw(
                         if last_color.map_or(true, |c| c != magenta) {
                             state.gl.uniform_4_f32_slice(Some(&state.color_location), &magenta);
                             last_color = Some(magenta);
+                        }
+                    }
+                }
+                ObjectType::MsdfGlyph { texture_id, uv_scale, uv_offset, color, px_range } => {
+                    if last_use_texture != Some(true) {
+                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
+                        last_use_texture = Some(true);
+                    }
+                    state.gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
+                    state.gl.uniform_2_f32(Some(&state.uv_scale_location),  uv_scale[0],  uv_scale[1]);
+                    state.gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
+                    state.gl.uniform_4_f32_slice(Some(&state.color_location), color);
+                    state.gl.uniform_1_f32(Some(&state.px_range_location), *px_range);
+
+                    if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
+                        if last_bound_tex != Some(gl_texture.0) {
+                            state.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
+                            last_bound_tex = Some(gl_texture.0);
                         }
                     }
                 }
@@ -353,30 +421,27 @@ fn create_opengl_context(
     }
 }
 
-
 fn create_graphics_program(
     gl: &glow::Context,
 ) -> Result<
     (
         glow::Program,
-        UniformLocation,
-        UniformLocation,
-        UniformLocation,
-        UniformLocation,
+        UniformLocation, // u_model_view_proj
+        UniformLocation, // u_color
+        UniformLocation, // u_use_texture
+        UniformLocation, // u_texture
+        UniformLocation, // u_uv_scale
+        UniformLocation, // u_uv_offset
+        UniformLocation, // u_is_msdf
+        UniformLocation, // u_px_range
     ),
     String,
 > {
     unsafe {
         let program = gl.create_program()?;
         let shader_sources = [
-            (
-                glow::VERTEX_SHADER,
-                include_str!("../shaders/opengl_shader.vert"),
-            ),
-            (
-                glow::FRAGMENT_SHADER,
-                include_str!("../shaders/opengl_shader.frag"),
-            ),
+            (glow::VERTEX_SHADER,   include_str!("../shaders/opengl_shader.vert")),
+            (glow::FRAGMENT_SHADER, include_str!("../shaders/opengl_shader.frag")),
         ];
 
         let mut shaders = Vec::with_capacity(shader_sources.len());
@@ -395,24 +460,19 @@ fn create_graphics_program(
         if !gl.get_program_link_status(program) {
             return Err(gl.get_program_info_log(program));
         }
-
         for shader in shaders {
             gl.detach_shader(program, shader);
             gl.delete_shader(shader);
         }
 
-        let mvp_location = gl
-            .get_uniform_location(program, "u_model_view_proj")
-            .ok_or("Could not find 'u_model_view_proj' uniform")?;
-        let color_location = gl
-            .get_uniform_location(program, "u_color")
-            .ok_or("Could not find 'u_color' uniform")?;
-        let use_texture_location = gl
-            .get_uniform_location(program, "u_use_texture")
-            .ok_or("Could not find 'u_use_texture' uniform")?;
-        let texture_location = gl
-            .get_uniform_location(program, "u_texture")
-            .ok_or("Could not find 'u_texture' uniform")?;
+        let mvp_location        = gl.get_uniform_location(program, "u_model_view_proj").ok_or("u_model_view_proj")?;
+        let color_location      = gl.get_uniform_location(program, "u_color").ok_or("u_color")?;
+        let use_texture_location= gl.get_uniform_location(program, "u_use_texture").ok_or("u_use_texture")?;
+        let texture_location    = gl.get_uniform_location(program, "u_texture").ok_or("u_texture")?;
+        let uv_scale_location   = gl.get_uniform_location(program, "u_uv_scale").ok_or("u_uv_scale")?;
+        let uv_offset_location  = gl.get_uniform_location(program, "u_uv_offset").ok_or("u_uv_offset")?;
+        let is_msdf_location    = gl.get_uniform_location(program, "u_is_msdf").ok_or("u_is_msdf")?;
+        let px_range_location   = gl.get_uniform_location(program, "u_px_range").ok_or("u_px_range")?;
 
         Ok((
             program,
@@ -420,6 +480,10 @@ fn create_graphics_program(
             color_location,
             use_texture_location,
             texture_location,
+            uv_scale_location,
+            uv_offset_location,
+            is_msdf_location,
+            px_range_location,
         ))
     }
 }

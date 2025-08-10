@@ -71,6 +71,16 @@ struct SwapchainResources {
     format: vk::SurfaceFormatKHR,
 }
 
+#[repr(C)]
+struct MsdfPush {
+    mvp: Matrix4<f32>,
+    uv_scale: [f32;2],
+    uv_offset: [f32;2],
+    color: [f32;4],
+    px_range: f32,
+    _pad: [f32;3],
+}
+
 // The main Vulkan state struct, now with resources for two pipelines and texturing.
 pub struct State {
     _entry: Entry,
@@ -105,6 +115,8 @@ pub struct State {
     window_size: PhysicalSize<u32>,
     vsync_enabled: bool, // New immutable field
     projection: Matrix4<f32>,
+    msdf_pipeline_layout: vk::PipelineLayout,
+    msdf_pipeline: vk::Pipeline,
 }
 
 // --- Main Procedural Functions ---
@@ -144,6 +156,8 @@ pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<St
         create_solid_pipeline(device.as_ref().unwrap(), render_pass)?;
     let (texture_pipeline_layout, texture_pipeline) =
         create_texture_pipeline(device.as_ref().unwrap(), render_pass, descriptor_set_layout)?;
+    let (msdf_pipeline_layout, msdf_pipeline) =
+        create_msdf_pipeline(device.as_ref().unwrap(), render_pass, descriptor_set_layout)?;
 
     let command_buffers =
         create_command_buffers(device.as_ref().unwrap(), command_pool, MAX_FRAMES_IN_FLIGHT)?;
@@ -151,7 +165,6 @@ pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<St
         create_sync_objects(device.as_ref().unwrap())?;
     let images_in_flight = vec![vk::Fence::null(); swapchain_resources._images.len()];
 
-    // Cache projection once; keep it updated on resize.
     let projection = ortho_for_window(initial_size.width, initial_size.height);
 
     let mut state = State {
@@ -162,7 +175,7 @@ pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<St
         surface,
         surface_loader,
         pdevice,
-        device: device.clone(), // Must clone for buffer creation
+        device: device.clone(),
         queue,
         command_pool,
         swapchain_resources,
@@ -171,8 +184,8 @@ pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<St
         solid_pipeline,
         texture_pipeline_layout,
         texture_pipeline,
-        vertex_buffer: None, // Will be created next
-        index_buffer: None,  // Will be created next
+        vertex_buffer: None,
+        index_buffer: None,
         descriptor_set_layout,
         descriptor_pool,
         sampler,
@@ -184,11 +197,12 @@ pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<St
         current_frame: 0,
         window_size: initial_size,
         vsync_enabled,
-        projection, // new field
+        projection,
+        msdf_pipeline_layout,
+        msdf_pipeline,
     };
 
-    // Create one static set of buffers for a unit quad.
-    // The vertex format is [pos.x, pos.y, uv.x, uv.y].
+    // Static unit quad buffers
     let vertices: [[f32; 4]; 4] = [
         [-0.5, -0.5, 0.0, 1.0],
         [ 0.5, -0.5, 1.0, 1.0],
@@ -200,8 +214,6 @@ pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<St
     let device_arc = device.as_ref().unwrap();
     state.vertex_buffer = Some(create_buffer_with_data_vec(&state.instance, device_arc, state.pdevice, state.command_pool, state.queue, &vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?);
     state.index_buffer = Some(create_buffer_with_data_vec(&state.instance, device_arc, state.pdevice, state.command_pool, state.queue, &indices, vk::BufferUsageFlags::INDEX_BUFFER)?);
-
-    // `load_screen` is no longer needed at initialization time.
 
     info!("Vulkan backend initialized successfully.");
     Ok(state)
@@ -443,6 +455,97 @@ fn create_texture_pipeline(
     Ok((pipeline_layout, pipeline))
 }
 
+fn create_msdf_pipeline(
+    device: &Device,
+    render_pass: vk::RenderPass,
+    set_layout: vk::DescriptorSetLayout,
+) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
+    let vert = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_msdf.vert.spv"));
+    let frag = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_msdf.frag.spv"));
+    let vert_module = create_shader_module(device, vert)?;
+    let frag_module = create_shader_module(device, frag)?;
+    let main = std::ffi::CStr::from_bytes_with_nul(b"main\0")?;
+
+    let stages = [
+        vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::VERTEX).module(vert_module).name(main),
+        vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::FRAGMENT).module(frag_module).name(main),
+    ];
+
+    let (bind, attr) = vertex_input_descriptions_textured();
+    let vi = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_binding_descriptions(&bind)
+        .vertex_attribute_descriptions(&attr);
+
+    let ia = vk::PipelineInputAssemblyStateCreateInfo::default()
+        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+
+    let vp = vk::PipelineViewportStateCreateInfo::default()
+        .viewport_count(1)
+        .scissor_count(1);
+
+    let rs = vk::PipelineRasterizationStateCreateInfo::default()
+        .polygon_mode(vk::PolygonMode::FILL)
+        .cull_mode(vk::CullModeFlags::BACK)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
+        .line_width(1.0);
+
+    let ms = vk::PipelineMultisampleStateCreateInfo::default()
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+
+    let blend_att = vk::PipelineColorBlendAttachmentState::default()
+        .color_write_mask(vk::ColorComponentFlags::RGBA)
+        .blend_enable(true)
+        .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+        .color_blend_op(vk::BlendOp::ADD)
+        .src_alpha_blend_factor(vk::BlendFactor::ONE)
+        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+        .alpha_blend_op(vk::BlendOp::ADD);
+
+    let blend = vk::PipelineColorBlendStateCreateInfo::default()
+        .attachments(std::slice::from_ref(&blend_att));
+
+    let dyns = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+    let dyn_state = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dyns);
+
+    // Single range used by both stages (0..sizeof MsdfPush)
+    let range = vk::PushConstantRange::default()
+        .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
+        .offset(0)
+        .size(std::mem::size_of::<MsdfPush>() as u32);
+
+    let layout_info = vk::PipelineLayoutCreateInfo::default()
+        .set_layouts(std::slice::from_ref(&set_layout))
+        .push_constant_ranges(std::slice::from_ref(&range));
+
+    let layout = unsafe { device.create_pipeline_layout(&layout_info, None)? };
+
+    let info = vk::GraphicsPipelineCreateInfo::default()
+        .stages(&stages)
+        .vertex_input_state(&vi)
+        .input_assembly_state(&ia)
+        .viewport_state(&vp)
+        .rasterization_state(&rs)
+        .multisample_state(&ms)
+        .color_blend_state(&blend)
+        .dynamic_state(&dyn_state)
+        .layout(layout)
+        .render_pass(render_pass)
+        .subpass(0);
+
+    let pipe = unsafe {
+        device
+            .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)
+            .map_err(|e| e.1)?[0]
+    };
+
+    unsafe {
+        device.destroy_shader_module(vert_module, None);
+        device.destroy_shader_module(frag_module, None);
+    }
+    Ok((layout, pipe))
+}
+
 pub fn create_texture(state: &mut State, image: &RgbaImage) -> Result<Texture, Box<dyn Error>> {
     let (width, height) = image.dimensions();
     let image_size = (width * height * 4) as vk::DeviceSize;
@@ -491,11 +594,58 @@ pub fn create_texture(state: &mut State, image: &RgbaImage) -> Result<Texture, B
     })
 }
 
+pub fn create_texture_with_colorspace(
+    state: &mut State,
+    image: &RgbaImage,
+    srgb: bool,
+) -> Result<Texture, Box<dyn Error>> {
+    let (width, height) = image.dimensions();
+    let image_size = (width * height * 4) as vk::DeviceSize;
+    let image_data = image.as_raw();
+
+    // staging buffer
+    let staging = create_buffer_with_data_raw(
+        &state.instance, state.device.as_ref().unwrap(), state.pdevice,
+        image_size, vk::BufferUsageFlags::TRANSFER_SRC,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+    )?;
+    unsafe {
+        let mapped = state.device.as_ref().unwrap()
+            .map_memory(staging.memory, 0, image_size, vk::MemoryMapFlags::empty())?;
+        std::ptr::copy_nonoverlapping(image_data.as_ptr(), mapped as *mut u8, image_data.len());
+        state.device.as_ref().unwrap().unmap_memory(staging.memory);
+    }
+
+    let fmt = if srgb { vk::Format::R8G8B8A8_SRGB } else { vk::Format::R8G8B8A8_UNORM };
+
+    let (tex_image, tex_mem) = create_image(
+        state, width, height, fmt, vk::ImageTiling::OPTIMAL,
+        vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+    )?;
+
+    transition_image_layout(state, tex_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL)?;
+    copy_buffer_to_image(state, staging.buffer, tex_image, width, height)?;
+    transition_image_layout(state, tex_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)?;
+    destroy_buffer(state.device.as_ref().unwrap(), &staging);
+
+    let view = create_image_view(state.device.as_ref().unwrap(), tex_image, fmt)?;
+    let set  = create_texture_descriptor_set(state, view, state.sampler)?;
+
+    Ok(Texture {
+        device: state.device.as_ref().unwrap().clone(),
+        image: tex_image,
+        memory: tex_mem,
+        view,
+        descriptor_set: set,
+        pool: state.descriptor_pool,
+    })
+}
+
 // --- NEW: `load_screen` full implementation ---
 pub fn load_screen(_state: &mut State, _screen: &Screen) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
-
 
 pub fn draw(
     state: &mut State,
@@ -516,7 +666,7 @@ pub fn draw(
         let fence = state.in_flight_fences[state.current_frame];
         device.wait_for_fences(&[fence], true, u64::MAX)?;
 
-        // Acquire next image — capture "suboptimal" signal
+        // Acquire next image (capture "suboptimal" bit)
         let (image_index, acquired_suboptimal) =
             match state.swapchain_resources.swapchain_loader.acquire_next_image(
                 state.swapchain_resources.swapchain,
@@ -524,7 +674,7 @@ pub fn draw(
                 state.image_available_semaphores[state.current_frame],
                 vk::Fence::null(),
             ) {
-                Ok(pair) => pair, // (index, suboptimal: bool)
+                Ok(pair) => pair, // (index, suboptimal)
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                     recreate_swapchain_and_dependents(state)?;
                     return Ok(());
@@ -548,11 +698,7 @@ pub fn draw(
         )?;
 
         let c = screen.clear_color;
-        let clear_value = vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [c[0], c[1], c[2], c[3]],
-            },
-        };
+        let clear_value = vk::ClearValue { color: vk::ClearColorValue { float32: [c[0], c[1], c[2], c[3]] } };
         let rp_info = vk::RenderPassBeginInfo::default()
             .render_pass(state.render_pass)
             .framebuffer(state.swapchain_resources.framebuffers[image_index as usize])
@@ -574,21 +720,14 @@ pub fn draw(
                 max_depth: 1.0,
             };
             device.cmd_set_viewport(cmd, 0, &[vp]);
-            let sc = vk::Rect2D {
-                offset: vk::Offset2D::default(),
-                extent: state.swapchain_resources.extent,
-            };
+            let sc = vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent };
             device.cmd_set_scissor(cmd, 0, &[sc]);
 
             // Static buffers
             device.cmd_bind_vertex_buffers(cmd, 0, &[vb.buffer], &[0]);
             device.cmd_bind_index_buffer(cmd, ib.buffer, 0, vk::IndexType::UINT16);
 
-            enum Active {
-                None,
-                Solid,
-                Textured,
-            }
+            enum Active { None, Solid, Textured, Msdf }
             let mut active = Active::None;
             let mut last_set = vk::DescriptorSet::null();
             let proj = state.projection;
@@ -597,33 +736,16 @@ pub fn draw(
                 match &o.object_type {
                     ObjectType::SolidColor { color } => {
                         if !matches!(active, Active::Solid) {
-                            device.cmd_bind_pipeline(
-                                cmd,
-                                vk::PipelineBindPoint::GRAPHICS,
-                                state.solid_pipeline,
-                            );
+                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.solid_pipeline);
                             active = Active::Solid;
                         }
-                        let pc = SolidPushConstants {
-                            mvp: proj * o.transform,
-                            color: *color,
-                        };
-                        device.cmd_push_constants(
-                            cmd,
-                            state.solid_pipeline_layout,
-                            vk::ShaderStageFlags::VERTEX,
-                            0,
-                            bytes_of(&pc),
-                        );
+                        let pc = SolidPushConstants { mvp: proj * o.transform, color: *color };
+                        device.cmd_push_constants(cmd, state.solid_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
                         device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                     }
                     ObjectType::Textured { texture_id } => {
                         if !matches!(active, Active::Textured) {
-                            device.cmd_bind_pipeline(
-                                cmd,
-                                vk::PipelineBindPoint::GRAPHICS,
-                                state.texture_pipeline,
-                            );
+                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline);
                             active = Active::Textured;
                             last_set = vk::DescriptorSet::null();
                         }
@@ -633,22 +755,43 @@ pub fn draw(
                         };
                         if tex.descriptor_set != last_set {
                             device.cmd_bind_descriptor_sets(
-                                cmd,
-                                vk::PipelineBindPoint::GRAPHICS,
-                                state.texture_pipeline_layout,
-                                0,
-                                &[tex.descriptor_set],
-                                &[],
+                                cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline_layout, 0, &[tex.descriptor_set], &[]
                             );
                             last_set = tex.descriptor_set;
                         }
-                        let pc = TexturedPushConstants {
+                        let pc = TexturedPushConstants { mvp: proj * o.transform };
+                        device.cmd_push_constants(cmd, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+                        device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
+                    }
+                    ObjectType::MsdfGlyph { texture_id, uv_scale, uv_offset, color, px_range } => {
+                        if !matches!(active, Active::Msdf) {
+                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.msdf_pipeline);
+                            active = Active::Msdf;
+                            last_set = vk::DescriptorSet::null();
+                        }
+                        let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) else {
+                            warn!("Vulkan MSDF atlas '{}' not found!", texture_id);
+                            continue;
+                        };
+                        if tex.descriptor_set != last_set {
+                            device.cmd_bind_descriptor_sets(
+                                cmd, vk::PipelineBindPoint::GRAPHICS, state.msdf_pipeline_layout, 0, &[tex.descriptor_set], &[]
+                            );
+                            last_set = tex.descriptor_set;
+                        }
+
+                        let pc = MsdfPush {
                             mvp: proj * o.transform,
+                            uv_scale: *uv_scale,
+                            uv_offset: *uv_offset,
+                            color: *color,
+                            px_range: *px_range,
+                            _pad: [0.0; 3],
                         };
                         device.cmd_push_constants(
                             cmd,
-                            state.texture_pipeline_layout,
-                            vk::ShaderStageFlags::VERTEX,
+                            state.msdf_pipeline_layout,
+                            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
                             0,
                             bytes_of(&pc),
                         );
@@ -672,17 +815,12 @@ pub fn draw(
             .signal_semaphores(&signal_semaphores);
         device.queue_submit(state.queue, &[submit], fence)?;
 
-        // Present — handle suboptimal from present AND from acquire
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(&signal_semaphores)
             .swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain))
             .image_indices(std::slice::from_ref(&image_index));
 
-        match state
-            .swapchain_resources
-            .swapchain_loader
-            .queue_present(state.queue, &present_info)
-        {
+        match state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present_info) {
             Ok(suboptimal_present) => {
                 if suboptimal_present || acquired_suboptimal {
                     recreate_swapchain_and_dependents(state)?;
@@ -699,7 +837,6 @@ pub fn draw(
 
     Ok(())
 }
-
 
 pub fn cleanup(state: &mut State) {
     info!("Cleaning up Vulkan resources...");
@@ -732,6 +869,8 @@ pub fn cleanup(state: &mut State) {
         state.device.as_ref().unwrap().destroy_pipeline_layout(state.solid_pipeline_layout, None);
         state.device.as_ref().unwrap().destroy_pipeline(state.texture_pipeline, None);
         state.device.as_ref().unwrap().destroy_pipeline_layout(state.texture_pipeline_layout, None);
+        state.device.as_ref().unwrap().destroy_pipeline(state.msdf_pipeline, None);
+        state.device.as_ref().unwrap().destroy_pipeline_layout(state.msdf_pipeline_layout, None);
 
         state.device.as_ref().unwrap().destroy_render_pass(state.render_pass, None);
         state.device.as_ref().unwrap().destroy_command_pool(state.command_pool, None);

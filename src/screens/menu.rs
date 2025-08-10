@@ -1,4 +1,4 @@
-use crate::ui::primitives::{Quad, Sprite, UIElement};
+use crate::ui::primitives::{Quad, Sprite, Text, UIElement};
 use crate::screens::{Screen, ScreenAction};
 use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};
@@ -78,6 +78,14 @@ pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
         center: Vector2::new(-150.0, selected_y_pos),
         size: Vector2::new(64.0, 64.0),
         texture_id: "meter_arrow.png",
+    }));
+
+    elements.push(UIElement::Text(Text{
+    origin: Vector2::new(-280.0, -220.0),
+    pixel_height: 48.0,
+    color: [1.0,1.0,1.0,1.0],
+    font_id: "wendy",
+    content: "Press Enter".to_string(),
     }));
 
     elements
