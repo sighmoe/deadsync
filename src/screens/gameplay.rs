@@ -2,7 +2,7 @@ use crate::ui::primitives::{Quad, UIElement};
 
 use crate::core::input::InputState;
 use crate::screens::{Screen, ScreenAction};
-use cgmath::{InnerSpace, Vector2, Vector3};
+use cgmath::{Vector2};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -28,28 +28,25 @@ pub fn handle_key_press(_state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
-    let distance = PLAYER_SPEED * delta_time;
-    let mut move_vector = Vector3::new(0.0, 0.0, 0.0);
+    // Compute axis as {-1,0,1} without branches
+    let dx = (input.right as i32 - input.left as i32) as f32;
+    let dy = (input.up as i32 - input.down as i32) as f32;
 
-    if input.up {
-        move_vector.y += 1.0;
-    }
-    if input.down {
-        move_vector.y -= 1.0;
-    }
-    if input.left {
-        move_vector.x -= 1.0;
-    }
-    if input.right {
-        move_vector.x += 1.0;
+    // Early-out if idle
+    if dx == 0.0 && dy == 0.0 {
+        return;
     }
 
-    if move_vector.x != 0.0 || move_vector.y != 0.0 {
-        let normalized_move = move_vector.normalize();
-        state.player_position.x += normalized_move.x * distance;
-        state.player_position.y += normalized_move.y * distance;
-    }
+    // Normalize and scale by speed * dt
+    let len_sq = dx * dx + dy * dy;
+    // `len_sq` can only be 1 or 2 here, but keep it general
+    let inv_len = 1.0 / len_sq.sqrt();
+    let step = PLAYER_SPEED * delta_time;
+
+    state.player_position.x += dx * inv_len * step;
+    state.player_position.y += dy * inv_len * step;
 }
+
 
 pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
     vec![UIElement::Quad(Quad {
