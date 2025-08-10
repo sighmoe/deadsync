@@ -21,18 +21,28 @@ pub struct Sprite {
     pub texture_id: &'static str, // Changed from String
 }
 
-// This function no longer needs to provide vertex or index data.
+#[inline(always)]
 pub fn to_screen_object(element: &UIElement) -> ScreenObject {
     match element {
-        UIElement::Quad(quad) => ScreenObject {
-            object_type: ObjectType::SolidColor { color: quad.color },
-            transform: Matrix4::from_translation(Vector3::new(quad.center.x, quad.center.y, 0.0))
-                * Matrix4::from_nonuniform_scale(quad.size.x, quad.size.y, 1.0),
-        },
-        UIElement::Sprite(sprite) => ScreenObject {
-            object_type: ObjectType::Textured { texture_id: sprite.texture_id },
-            transform: Matrix4::from_translation(Vector3::new(sprite.center.x, sprite.center.y, 0.0))
-                * Matrix4::from_nonuniform_scale(sprite.size.x, sprite.size.y, 1.0),
-        },
+        UIElement::Quad(quad) => {
+            let transform =
+                Matrix4::from_translation(Vector3::new(quad.center.x, quad.center.y, 0.0))
+                * Matrix4::from_nonuniform_scale(quad.size.x, quad.size.y, 1.0);
+
+            ScreenObject {
+                object_type: ObjectType::SolidColor { color: quad.color },
+                transform,
+            }
+        }
+        UIElement::Sprite(sprite) => {
+            let transform =
+                Matrix4::from_translation(Vector3::new(sprite.center.x, sprite.center.y, 0.0))
+                * Matrix4::from_nonuniform_scale(sprite.size.x, sprite.size.y, 1.0);
+
+            ScreenObject {
+                object_type: ObjectType::Textured { texture_id: sprite.texture_id },
+                transform,
+            }
+        }
     }
 }
