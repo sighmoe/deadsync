@@ -1298,13 +1298,45 @@ fn cleanup_swapchain_and_dependents(state: &mut State) {
 
 fn recreate_swapchain_and_dependents(state: &mut State) -> Result<(), Box<dyn Error>> {
     debug!("Recreating swapchain...");
-    unsafe { state.device.as_ref().unwrap().device_wait_idle()? };
-    cleanup_swapchain_and_dependents(state);
-    state.swapchain_resources = create_swapchain(
-        &state.instance, state.device.as_ref().unwrap(), state.pdevice, state.surface, &state.surface_loader, state.window_size, None,
-        state.vsync_enabled, // Pass the stored value
+    let device = state.device.as_ref().unwrap();
+
+    // Ensure GPU is quiescent but keep old swapchain alive for `oldSwapchain` reuse.
+    unsafe { device.device_wait_idle()?; }
+
+    // Keep handles to old resources
+    let old_swapchain_loader = state.swapchain_resources.swapchain_loader.clone();
+    let old_swapchain = state.swapchain_resources.swapchain;
+    let old_image_views = state.swapchain_resources.image_views.clone();
+    let old_framebuffers = state.swapchain_resources.framebuffers.clone();
+
+    // Create the new swapchain referencing the old one (driver can recycle)
+    let new_resources = create_swapchain(
+        &state.instance,
+        device,
+        state.pdevice,
+        state.surface,
+        &state.surface_loader,
+        state.window_size,
+        Some(old_swapchain),
+        state.vsync_enabled,
     )?;
-    recreate_framebuffers(state.device.as_ref().unwrap(), &mut state.swapchain_resources, state.render_pass)?;
+    state.swapchain_resources = new_resources;
+
+    // Build new framebuffers for the new images
+    recreate_framebuffers(device, &mut state.swapchain_resources, state.render_pass)?;
+
+    // Now it is safe to tear down the old image views/framebuffers and the old swapchain
+    unsafe {
+        for &fb in &old_framebuffers {
+            device.destroy_framebuffer(fb, None);
+        }
+        for &view in &old_image_views {
+            device.destroy_image_view(view, None);
+        }
+        old_swapchain_loader.destroy_swapchain(old_swapchain, None);
+    }
+
+    // Reset tracking for images-in-flight to the new swapchain length
     state.images_in_flight = vec![vk::Fence::null(); state.swapchain_resources._images.len()];
     debug!("Swapchain recreated.");
     Ok(())
