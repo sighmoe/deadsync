@@ -47,7 +47,6 @@ pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Resul
 
     // Create one shared VAO/VBO/IBO for a unit quad, to be reused for all objects.
     let (shared_vao, _shared_vbo, _shared_ibo, index_count) = unsafe {
-        // These constants are now defined once during initialization.
         const UNIT_QUAD_VERTICES: [[f32; 4]; 4] = [
             [-0.5, -0.5, 0.0, 1.0],
             [ 0.5, -0.5, 1.0, 1.0],
@@ -77,10 +76,8 @@ pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Resul
         );
 
         let stride = (4 * mem::size_of::<f32>()) as i32;
-        // Position attribute (location 0)
         gl.enable_vertex_attrib_array(0);
         gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
-        // UV attribute (location 1)
         gl.enable_vertex_attrib_array(1);
         gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, stride, (2 * mem::size_of::<f32>()) as i32);
 
@@ -91,6 +88,14 @@ pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Resul
 
     let initial_size = window.inner_size();
     let projection = ortho_for_window(initial_size.width, initial_size.height);
+
+    // Set constant program state once: sampler uses texture unit 0, and make 0 active globally.
+    unsafe {
+        gl.use_program(Some(program));
+        gl.active_texture(glow::TEXTURE0);
+        gl.uniform_1_i32(Some(&texture_location), 0);
+        gl.use_program(None);
+    }
 
     let state = State {
         gl,
@@ -109,7 +114,6 @@ pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Resul
         index_count,
     };
 
-    // `load_screen` is no longer needed at init time because resources are static.
     info!("OpenGL backend initialized successfully.");
     Ok(state)
 }
@@ -119,14 +123,17 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
         let texture = gl.create_texture()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
-        // Make sure the byte rows are tightly packed
+        // Make sure pixel store is in a known state for tightly-packed RGBA8.
         gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
+        gl.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
+        gl.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
 
         // Clamp edges (good for atlas/UI), no wrapping beyond edges
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 
-        // CRISP sampling for pixel art / UI (LINEAR looks better than NEAREST)
+        // Keep LINEAR (as requested)
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
 
@@ -134,7 +141,7 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_BASE_LEVEL, 0);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
 
-        // sRGB correct texture upload
+        // sRGB-correct upload
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
