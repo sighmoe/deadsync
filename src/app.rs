@@ -101,11 +101,8 @@ impl App {
         info!("Loading textures...");
         let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
 
-        // Helper: tiny 2x2 magenta checker fallback
         #[inline(always)]
         fn fallback_rgba() -> image::RgbaImage {
-            // 2x2: M G
-            //      G M   (M=magenta, G=gray)
             let data: [u8; 16] = [
                 255, 0,   255, 255,   128, 128, 128, 255,
                 128, 128, 128, 255,   255, 0,   255, 255,
@@ -121,28 +118,37 @@ impl App {
             "fallback_banner.png",
         ];
 
-        for key in texture_paths {
-            let full_path = Path::new("assets/graphics").join(key);
-            match image::open(&full_path) {
-                Ok(img_dyn) => {
-                    let image = img_dyn.to_rgba8();
-                    let texture = renderer::create_texture(backend, &image)?;
-                    self.texture_manager.insert(key, texture);
-                    info!("Loaded texture: {}", full_path.display());
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to load '{}': {}. Using generated fallback.",
-                        full_path.display(),
-                        e
-                    );
-                    let fb = fallback_rgba();
-                    let texture = renderer::create_texture(backend, &fb)?;
-                    self.texture_manager.insert(key, texture);
+        // 1) Decode images in parallel (CPU-only work)
+        let handles: Vec<_> = texture_paths
+            .iter()
+            .map(|&key| {
+                let p = Path::new("assets/graphics").join(key);
+                std::thread::spawn(move || {
+                    match image::open(&p) {
+                        Ok(img) => Ok::<(&'static str, image::RgbaImage), (&'static str, String)>((key, img.to_rgba8())),
+                        Err(e) => Err((key, e.to_string())),
+                    }
+                })
+            })
+            .collect();
+
+        let mut decoded: Vec<(&'static str, image::RgbaImage)> = Vec::with_capacity(texture_paths.len());
+        for h in handles {
+            match h.join().expect("texture decode thread panicked") {
+                Ok((key, rgba)) => decoded.push((key, rgba)),
+                Err((key, msg)) => {
+                    warn!("Failed to load 'assets/graphics/{}': {}. Using generated fallback.", key, msg);
+                    decoded.push((key, fallback_rgba()));
                 }
             }
         }
 
+        // 2) Create GPU textures sequentially
+        for (key, rgba) in decoded {
+            let texture = renderer::create_texture(backend, &rgba)?;
+            self.texture_manager.insert(key, texture);
+            info!("Loaded texture: assets/graphics/{}", key);
+        }
         Ok(())
     }
 
