@@ -504,7 +504,6 @@ pub fn draw(
 ) -> Result<(), Box<dyn Error>> {
     #[inline(always)]
     fn bytes_of<T>(v: &T) -> &[u8] {
-        // repr(C) POD; narrow unsafe kept local
         unsafe { std::slice::from_raw_parts((v as *const T) as *const u8, std::mem::size_of::<T>()) }
     }
 
@@ -513,19 +512,16 @@ pub fn draw(
     }
 
     unsafe {
-        let fence = state.in_flight_fences[state.current_frame];
         let device = state.device.as_ref().unwrap();
+        let fence = state.in_flight_fences[state.current_frame];
         device.wait_for_fences(&[fence], true, u64::MAX)?;
 
-        let (image_index, _) = match state
-            .swapchain_resources
-            .swapchain_loader
-            .acquire_next_image(
-                state.swapchain_resources.swapchain,
-                u64::MAX,
-                state.image_available_semaphores[state.current_frame],
-                vk::Fence::null(),
-            ) {
+        let (image_index, _) = match state.swapchain_resources.swapchain_loader.acquire_next_image(
+            state.swapchain_resources.swapchain,
+            u64::MAX,
+            state.image_available_semaphores[state.current_frame],
+            vk::Fence::null(),
+        ) {
             Ok(x) => x,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                 recreate_swapchain_and_dependents(state)?;
@@ -543,10 +539,8 @@ pub fn draw(
         device.reset_fences(&[fence])?;
         let cmd = state.command_buffers[state.current_frame];
         device.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
-
-        let begin_info =
-            vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        device.begin_command_buffer(cmd, &begin_info)?;
+        device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT))?;
 
         let c = screen.clear_color;
         let clear_value = vk::ClearValue { color: vk::ClearColorValue { float32: [c[0], c[1], c[2], c[3]] } };
@@ -555,12 +549,11 @@ pub fn draw(
             .framebuffer(state.swapchain_resources.framebuffers[image_index as usize])
             .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent })
             .clear_values(std::slice::from_ref(&clear_value));
-
         device.cmd_begin_render_pass(cmd, &rp_info, vk::SubpassContents::INLINE);
 
         if let (Some(vb), Some(ib)) = (&state.vertex_buffer, &state.index_buffer) {
-            // Dynamic state
-            let viewport = vk::Viewport {
+            // Dynamic viewport/scissor
+            let vp = vk::Viewport {
                 x: 0.0,
                 y: state.swapchain_resources.extent.height as f32,
                 width: state.swapchain_resources.extent.width as f32,
@@ -568,43 +561,36 @@ pub fn draw(
                 min_depth: 0.0,
                 max_depth: 1.0,
             };
-            device.cmd_set_viewport(cmd, 0, &[viewport]);
-            let scissor = vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent };
-            device.cmd_set_scissor(cmd, 0, &[scissor]);
+            device.cmd_set_viewport(cmd, 0, &[vp]);
+            let sc = vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent };
+            device.cmd_set_scissor(cmd, 0, &[sc]);
 
             // Static buffers
             device.cmd_bind_vertex_buffers(cmd, 0, &[vb.buffer], &[0]);
             device.cmd_bind_index_buffer(cmd, ib.buffer, 0, vk::IndexType::UINT16);
 
-            let (solids, textured): (Vec<_>, Vec<_>) = screen
-                .objects
-                .iter()
-                .partition(|o| matches!(o.object_type, ObjectType::SolidColor { .. }));
-
+            enum Active { None, Solid, Textured }
+            let mut active = Active::None;
+            let mut last_set = vk::DescriptorSet::null();
             let proj = state.projection;
 
-            // --- Solids block ---
-            if !solids.is_empty() {
-                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.solid_pipeline);
-                let layout = state.solid_pipeline_layout;
-
-                for o in &solids {
-                    if let ObjectType::SolidColor { color } = o.object_type {
-                        let pc = SolidPushConstants { mvp: proj * o.transform, color };
-                        device.cmd_push_constants(cmd, layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+            for o in &screen.objects {
+                match &o.object_type {
+                    ObjectType::SolidColor { color } => {
+                        if !matches!(active, Active::Solid) {
+                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.solid_pipeline);
+                            active = Active::Solid;
+                        }
+                        let pc = SolidPushConstants { mvp: proj * o.transform, color: *color };
+                        device.cmd_push_constants(cmd, state.solid_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
                         device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                     }
-                }
-            }
-
-            // --- Textured block ---
-            if !textured.is_empty() {
-                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline);
-                let layout = state.texture_pipeline_layout;
-
-                let mut last_set = vk::DescriptorSet::null();
-                for o in &textured {
-                    if let ObjectType::Textured { texture_id } = &o.object_type {
+                    ObjectType::Textured { texture_id } => {
+                        if !matches!(active, Active::Textured) {
+                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline);
+                            active = Active::Textured;
+                            last_set = vk::DescriptorSet::null();
+                        }
                         let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) else {
                             warn!("Vulkan texture ID '{}' not found!", texture_id);
                             continue;
@@ -613,7 +599,7 @@ pub fn draw(
                             device.cmd_bind_descriptor_sets(
                                 cmd,
                                 vk::PipelineBindPoint::GRAPHICS,
-                                layout,
+                                state.texture_pipeline_layout,
                                 0,
                                 &[tex.descriptor_set],
                                 &[],
@@ -621,7 +607,7 @@ pub fn draw(
                             last_set = tex.descriptor_set;
                         }
                         let pc = TexturedPushConstants { mvp: proj * o.transform };
-                        device.cmd_push_constants(cmd, layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+                        device.cmd_push_constants(cmd, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
                         device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                     }
                 }
@@ -631,42 +617,32 @@ pub fn draw(
         device.cmd_end_render_pass(cmd);
         device.end_command_buffer(cmd)?;
 
-        // --- FIX lifetimes: bind arrays to locals ---
+        // Submit/present
         let wait_semaphores = [state.image_available_semaphores[state.current_frame]];
         let signal_semaphores = [state.render_finished_semaphores[state.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let cmd_bufs = [cmd];
-
         let submit = vk::SubmitInfo::default()
             .wait_semaphores(&wait_semaphores)
             .wait_dst_stage_mask(&wait_stages)
-            .command_buffers(&cmd_bufs)
+            .command_buffers(std::slice::from_ref(&cmd))
             .signal_semaphores(&signal_semaphores);
-
         device.queue_submit(state.queue, &[submit], fence)?;
-
-        let swapchains = [state.swapchain_resources.swapchain];
-        let image_indices = [image_index];
 
         let present = vk::PresentInfoKHR::default()
             .wait_semaphores(&signal_semaphores)
-            .swapchains(&swapchains)
-            .image_indices(&image_indices);
-
-        let res = state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present);
-        match res {
-            Ok(true) | Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                recreate_swapchain_and_dependents(state)?;
-            }
+            .swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain))
+            .image_indices(std::slice::from_ref(&image_index));
+        match state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present) {
+            Ok(true) | Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => recreate_swapchain_and_dependents(state)?,
             Ok(false) => {}
             Err(e) => return Err(e.into()),
         }
 
         state.current_frame = (state.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
-
     Ok(())
 }
+
 
 pub fn cleanup(state: &mut State) {
     info!("Cleaning up Vulkan resources...");
