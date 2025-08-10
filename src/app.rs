@@ -27,27 +27,19 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
     let mut backend = BackendType::Vulkan;
     let mut vsync = true;
 
-    let mut i = 1;
-    while i < args.len() {
-        let a = args[i].as_str();
-
-        match a {
-            // backend selection (only legacy flags)
+    let mut it = args.iter().skip(1).peekable();
+    while let Some(a) = it.next() {
+        match a.as_str() {
             "--opengl" => backend = BackendType::OpenGL,
             "--vulkan" => backend = BackendType::Vulkan,
 
-            // vsync controls
             "--no-vsync" => vsync = false,
-            s if s.starts_with("--vsync=") => {
-                let v = &s["--vsync=".len()..];
-                vsync = matches!(v, "on" | "true" | "1");
-            }
+
             "--vsync" => {
-                if i + 1 < args.len() {
-                    let v = args[i + 1].as_str();
-                    match v {
-                        "on" | "true" | "1" => { vsync = true; i += 1; }
-                        "off" | "false" | "0" => { vsync = false; i += 1; }
+                if let Some(next) = it.peek() {
+                    match next.as_str() {
+                        "on" | "true" | "1" => { vsync = true;  it.next(); }
+                        "off" | "false" | "0" => { vsync = false; it.next(); }
                         _ => vsync = true, // plain `--vsync` or unknown -> on
                     }
                 } else {
@@ -55,11 +47,13 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
                 }
             }
 
-            // unknown
+            s if s.starts_with("--vsync=") => {
+                let v = &s["--vsync=".len()..];
+                vsync = matches!(v, "on" | "true" | "1");
+            }
+
             other => warn!("Unknown arg: {}", other),
         }
-
-        i += 1;
     }
 
     (backend, vsync)
