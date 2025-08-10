@@ -27,33 +27,60 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
     let mut backend = BackendType::Vulkan;
     let mut vsync = true;
 
-    let mut i = 1;
-    while i < args.len() {
-        let a = args[i].as_str();
+    let mut it = args.iter().skip(1).peekable();
+    while let Some(a) = it.next() {
+        let a = a.as_str();
 
-        if a == "--opengl" {
-            backend = BackendType::OpenGL;
-        } else if a == "--vulkan" {
-            backend = BackendType::Vulkan;
-        } else if let Some(val) = a.strip_prefix("--vsync=") {
-            // allow on/off/true/false/1/0 (case-insensitive)
-            let v = val.to_ascii_lowercase();
-            vsync = matches!(v.as_str(), "on" | "true" | "1");
-        } else if a == "--vsync" {
-            // also allow "--vsync on"
-            if let Some(next) = args.get(i + 1) {
-                let v = next.to_ascii_lowercase();
-                vsync = matches!(v.as_str(), "on" | "true" | "1");
-                i += 1;
-            } else {
-                warn!("--vsync requires a value (on/off|true/false|1/0); defaulting to 'on'");
-                vsync = true;
+        match a {
+            // legacy toggles (kept)
+            "--opengl" => backend = BackendType::OpenGL,
+            "--vulkan" => backend = BackendType::Vulkan,
+
+            // new: --backend=opengl|vulkan and -b opengl|vulkan
+            s if s.starts_with("--backend=") => {
+                match &s["--backend=".len()..].to_ascii_lowercase()[..] {
+                    "opengl" => backend = BackendType::OpenGL,
+                    "vulkan" => backend = BackendType::Vulkan,
+                    other => warn!("Unknown backend '{}'; keeping {:?}", other, backend),
+                }
             }
-        } else {
-            warn!("Unknown arg: {}", a);
-        }
+            "-b" => {
+                if let Some(next) = it.peek() {
+                    let v = next.to_ascii_lowercase();
+                    match v.as_str() {
+                        "opengl" => { backend = BackendType::OpenGL; it.next(); }
+                        "vulkan" => { backend = BackendType::Vulkan; it.next(); }
+                        _ => warn!("Unknown backend '{}'; keeping {:?}", v, backend),
+                    }
+                } else {
+                    warn!("-b requires a value (opengl|vulkan); keeping {:?}", backend);
+                }
+            }
 
-        i += 1;
+            // vsync controls
+            "--no-vsync" => vsync = false,
+            s if s.starts_with("--vsync=") => {
+                let v = s["--vsync=".len()..].to_ascii_lowercase();
+                vsync = matches!(v.as_str(), "on" | "true" | "1");
+            }
+            "--vsync" => {
+                if let Some(next) = it.peek() {
+                    let v = next.to_ascii_lowercase();
+                    if matches!(v.as_str(), "on" | "off" | "true" | "false" | "1" | "0") {
+                        vsync = matches!(v.as_str(), "on" | "true" | "1");
+                        it.next();
+                    } else {
+                        // plain `--vsync` means "on"
+                        vsync = true;
+                    }
+                } else {
+                    vsync = true;
+                }
+            }
+
+            // unknown
+            other => warn!("Unknown arg: {}", other),
+        }
     }
 
     (backend, vsync)
