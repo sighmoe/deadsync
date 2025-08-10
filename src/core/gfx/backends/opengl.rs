@@ -119,29 +119,16 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
         let texture = gl.create_texture()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
 
-        // Set texture parameters (unchanged)
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_S,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_T,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_MIN_FILTER,
-            glow::LINEAR as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_MAG_FILTER,
-            glow::LINEAR as i32,
-        );
+        // Robust pixel unpacking and standard wrap
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
 
-        // Updated to match glow 0.16.0's PixelUnpackData::Slice(Option<&[u8]>)
+        // Set MIN first (with mipmaps), MAG later (no mipmaps for MAG by spec)
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR_MIPMAP_LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+
+        // sRGB texture upload + generate mipmaps for cleaner minification
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -151,9 +138,10 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),  // Add Some() inside Slice
+            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),
         );
 
+        gl.generate_mipmap(glow::TEXTURE_2D);
         gl.bind_texture(glow::TEXTURE_2D, None);
         Ok(Texture(texture))
     }
