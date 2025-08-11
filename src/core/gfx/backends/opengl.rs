@@ -189,19 +189,38 @@ pub fn create_texture_with_colorspace(gl: &glow::Context, image: &RgbaImage, srg
     unsafe {
         let t = gl.create_texture()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(t));
+
+        // Ensure pixel-store state is well-defined for tightly-packed RGBA8 uploads.
         gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
+        gl.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
+        gl.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
+
+        // Clamp and linear sample (no mips) to mirror Vulkan setup & your UI needs.
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
 
+        // Explicitly pin to a single mip level (no accidental sampling beyond level 0).
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_BASE_LEVEL, 0);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
+
+        // Choose internal format based on desired color space.
         let internal = if srgb { glow::SRGB8_ALPHA8 } else { glow::RGBA8 };
+
         gl.tex_image_2d(
-            glow::TEXTURE_2D, 0, internal as i32,
-            image.width() as i32, image.height() as i32, 0,
-            glow::RGBA, glow::UNSIGNED_BYTE,
+            glow::TEXTURE_2D,
+            0,
+            internal as i32,
+            image.width() as i32,
+            image.height() as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
             PixelUnpackData::Slice(Some(image.as_raw().as_slice())),
         );
+
         gl.bind_texture(glow::TEXTURE_2D, None);
         Ok(Texture(t))
     }
