@@ -60,8 +60,13 @@ fn compile_vulkan_shaders(compiler: &mut Compiler, out_dir: &Path) -> Result<(),
     for path in paths {
         println!("cargo:rerun-if-changed={}", path.display());
 
-        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
-        let Some(kind) = kind_for_ext(ext) else { continue };
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        let Some(kind) = kind_for_ext(ext) else {
+            continue;
+        };
 
         let src_meta = fs::metadata(&path)?;
         let src_mtime = src_meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
@@ -82,7 +87,8 @@ fn compile_vulkan_shaders(compiler: &mut Compiler, out_dir: &Path) -> Result<(),
         let source = fs::read_to_string(&path)?;
         let src_name = path.to_string_lossy();
 
-        let spirv = match compiler.compile_into_spirv(&source, kind, &src_name, "main", Some(&opts)) {
+        let spirv = match compiler.compile_into_spirv(&source, kind, &src_name, "main", Some(&opts))
+        {
             Ok(ok) => ok,
             Err(e) => {
                 // Pretty error with annotated source

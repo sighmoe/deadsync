@@ -1,6 +1,8 @@
 use cgmath::Vector2;
 use crate::ui::primitives::{UIElement, Quad};
 
+pub mod logo; // <-- add this
+
 /// Three colored squares used on the Options screen.
 pub fn options_swatches() -> Vec<UIElement> {
     let size = Vector2::new(100.0, 100.0);

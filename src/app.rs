@@ -3,6 +3,7 @@ use crate::core::input;
 use crate::core::input::InputState;
 use crate::core::gfx as renderer;
 use crate::core::gfx::{create_backend, BackendType};
+use crate::utils::layout::{self, Metrics}; // +++ add
 use crate::ui::primitives as api;
 use crate::ui::msdf;
 use crate::screens::{gameplay, menu, options, Screen as CurrentScreen, ScreenAction};
@@ -18,8 +19,8 @@ use winit::{
     window::Window,
 };
 
-const WINDOW_WIDTH: u32 = 1024;
-const WINDOW_HEIGHT: u32 = 768;
+const WINDOW_WIDTH: u32 = 1280;
+const WINDOW_HEIGHT: u32 = 800;
 
 // ---- args ----
 fn parse_args(args: &[String]) -> (BackendType, bool) {
@@ -76,6 +77,7 @@ pub struct App {
     last_frame_time: Instant,
     vsync_enabled: bool,
     fonts: HashMap<&'static str, msdf::Font>,
+    metrics: Metrics,
 }
 
 impl App {
@@ -93,6 +95,7 @@ impl App {
             frame_count: 0,
             last_title_update: Instant::now(),
             last_frame_time: Instant::now(),
+            metrics: layout::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT), // +++ initial guess
             vsync_enabled,
             fonts: HashMap::new(),
         }
@@ -220,9 +223,9 @@ impl App {
 
     fn get_current_ui_elements(&self) -> (Vec<api::UIElement>, [f32; 4]) {
         match self.current_screen {
-            CurrentScreen::Menu => (menu::get_ui_elements(&self.menu_state), [0.03, 0.03, 0.03, 1.0]),
-            CurrentScreen::Gameplay => (gameplay::get_ui_elements(&self.gameplay_state), [0.03, 0.03, 0.03, 1.0]),
-            CurrentScreen::Options => (options::get_ui_elements(&self.options_state), [0.03, 0.03, 0.03, 1.0]),
+            CurrentScreen::Menu     => (menu::get_ui_elements(&self.menu_state,     &self.metrics), [0.03, 0.03, 0.03, 1.0]),
+            CurrentScreen::Gameplay => (gameplay::get_ui_elements(&self.gameplay_state, &self.metrics), [0.03, 0.03, 0.03, 1.0]),
+            CurrentScreen::Options  => (options::get_ui_elements(&self.options_state,  &self.metrics), [0.03, 0.03, 0.03, 1.0]),
         }
     }
 }
@@ -238,6 +241,8 @@ impl ApplicationHandler for App {
             match event_loop.create_window(window_attributes) {
                 Ok(window) => {
                     let window = Arc::new(window);
+                    let sz = window.inner_size();
+                    self.metrics = crate::utils::layout::metrics_for_window(sz.width, sz.height);
                     let (ui_elements, clear_color) = self.get_current_ui_elements();
                     let initial_screen = self.build_screen(&ui_elements, clear_color);
 
@@ -287,6 +292,8 @@ impl ApplicationHandler for App {
                     WindowEvent::Resized(new_size) => {
                         info!("Window resized to: {}x{}", new_size.width, new_size.height);
                         if new_size.width > 0 && new_size.height > 0 {
+                            // +++ keep metrics in sync
+                            self.metrics = layout::metrics_for_window(new_size.width, new_size.height);
                             if let Some(backend) = &mut self.backend {
                                 renderer::resize(backend, new_size.width, new_size.height);
                             }

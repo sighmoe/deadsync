@@ -1,5 +1,5 @@
 use crate::ui::primitives::{Quad, UIElement};
-
+use crate::utils::layout::Metrics; // +++
 use crate::core::input::InputState;
 use crate::screens::{Screen, ScreenAction};
 use cgmath::{Vector2};
@@ -48,7 +48,7 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
 }
 
 
-pub fn get_ui_elements(state: &State) -> Vec<UIElement> {
+pub fn get_ui_elements(state: &State, _m: &Metrics) -> Vec<UIElement> {
     vec![UIElement::Quad(Quad {
         center: state.player_position,
         size: Vector2::new(100.0, 100.0),
