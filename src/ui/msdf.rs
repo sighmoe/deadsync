@@ -200,19 +200,39 @@ pub struct LaidGlyph {
 /// Layout a single-line string to glyph quads (MSDF atlas subrect + world size/position).
 /// Missing glyphs advance by `space_advance` so text still flows.
 pub fn layout_line(font: &Font, text: &str, pixel_height: f32, origin: Vector2<f32>) -> Vec<LaidGlyph> {
-    let scale = if font.line_h != 0.0 { pixel_height / font.line_h } else { 1.0 };
+    // Fast paths / sanity
+    if pixel_height <= 0.0 || text.is_empty() || font.line_h == 0.0 {
+        return Vec::new();
+    }
+
+    let scale = pixel_height / font.line_h;
     let mut pen_x = origin.x;
     let baseline_y = origin.y;
 
-    let mut out = Vec::with_capacity(text.len());
+    // Precompute capacity for *renderable* glyphs (skips missing/zero-area).
+    let mut cap = 0usize;
+    for ch in text.chars() {
+        if ch == '\n' { continue; }
+        if let Some(g) = font.glyphs.get(&ch) {
+            if g.plane_w > 0.0 && g.plane_h > 0.0 {
+                cap += 1;
+            }
+        }
+    }
+
+    // Avoid repeated divides by using reciprocals once.
+    let inv_atlas_w = if font.atlas_w > 0.0 { 1.0 / font.atlas_w } else { 0.0 };
+    let inv_atlas_h = if font.atlas_h > 0.0 { 1.0 / font.atlas_h } else { 0.0 };
+
+    let mut out = Vec::with_capacity(cap);
 
     for ch in text.chars() {
         if ch == '\n' {
             continue; // single-line layout
         }
 
-        // Fetch glyph; if missing, advance by space and continue.
         let Some(g) = font.glyphs.get(&ch) else {
+            // Missing glyph: advance by space width for stable flow.
             pen_x += font.space_advance * scale;
             continue;
         };
@@ -220,24 +240,18 @@ pub fn layout_line(font: &Font, text: &str, pixel_height: f32, origin: Vector2<f
         let w = g.plane_w * scale;
         let h = g.plane_h * scale;
 
-        // baseline-left origin: center the quad
+        // Advance *before* continuing so missing-size glyphs still affect flow consistently.
         let cx = pen_x + (g.xoff * scale) + w * 0.5;
         let cy = baseline_y - (g.yoff * scale) - h * 0.5;
-
-        let uv_scale = if font.atlas_w > 0.0 && font.atlas_h > 0.0 {
-            [g.atlas_w / font.atlas_w, g.atlas_h / font.atlas_h]
-        } else { [0.0, 0.0] };
-
-        let uv_offset = if font.atlas_w > 0.0 && font.atlas_h > 0.0 {
-            [g.atlas_x / font.atlas_w, g.atlas_y / font.atlas_h]
-        } else { [0.0, 0.0] };
-
         pen_x += g.xadv * scale;
 
-        // Skip zero-area glyphs (just advance)
-        if w <= 0.0 || h <= 0.0 || uv_scale[0] <= 0.0 || uv_scale[1] <= 0.0 {
+        // Skip zero-area quads (still consumed advance above).
+        if w <= 0.0 || h <= 0.0 || inv_atlas_w == 0.0 || inv_atlas_h == 0.0 {
             continue;
         }
+
+        let uv_scale = [g.atlas_w * inv_atlas_w, g.atlas_h * inv_atlas_h];
+        let uv_offset = [g.atlas_x * inv_atlas_w, g.atlas_y * inv_atlas_h];
 
         out.push(LaidGlyph {
             center: Vector2::new(cx, cy),
