@@ -1,7 +1,6 @@
 mod core;
 mod ui;
 mod screens;
-mod utils;
 mod app;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

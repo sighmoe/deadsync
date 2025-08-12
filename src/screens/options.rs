@@ -1,7 +1,8 @@
 use crate::ui::components::options_swatches;
 use crate::ui::primitives::{Sprite, UIElement};
 use crate::screens::{Screen, ScreenAction};
-use crate::utils::layout::{Metrics, from_right, from_top, sm_rect_to_center_size}; // <- updated
+use crate::core::space::Metrics;
+use crate::ui::build::{from_right, from_top, sm_rect_to_center_size};
 use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};

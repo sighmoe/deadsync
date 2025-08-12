@@ -3,7 +3,7 @@ use crate::core::input;
 use crate::core::input::InputState;
 use crate::core::gfx as renderer;
 use crate::core::gfx::{create_backend, BackendType};
-use crate::utils::layout::{self, Metrics}; // +++ add
+use crate::core::space::{self as space, Metrics};
 use crate::ui::primitives as api;
 use crate::ui::msdf;
 use crate::screens::{gameplay, menu, options, Screen as CurrentScreen, ScreenAction};
@@ -95,7 +95,7 @@ impl App {
             frame_count: 0,
             last_title_update: Instant::now(),
             last_frame_time: Instant::now(),
-            metrics: layout::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT), // +++ initial guess
+            metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
             vsync_enabled,
             fonts: HashMap::new(),
         }
@@ -215,10 +215,7 @@ impl App {
     }
 
     fn build_screen(&self, elements: &[api::UIElement], clear_color: [f32;4]) -> renderer::Screen {
-        renderer::Screen {
-            clear_color,
-            objects: expand_ui_to_objects(elements, &self.fonts),
-        }
+        crate::ui::build::build_screen(elements, clear_color, &self.fonts)
     }
 
     fn get_current_ui_elements(&self) -> (Vec<api::UIElement>, [f32; 4]) {
@@ -242,7 +239,7 @@ impl ApplicationHandler for App {
                 Ok(window) => {
                     let window = Arc::new(window);
                     let sz = window.inner_size();
-                    self.metrics = crate::utils::layout::metrics_for_window(sz.width, sz.height);
+                    self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
                     let (ui_elements, clear_color) = self.get_current_ui_elements();
                     let initial_screen = self.build_screen(&ui_elements, clear_color);
 
@@ -293,7 +290,7 @@ impl ApplicationHandler for App {
                         info!("Window resized to: {}x{}", new_size.width, new_size.height);
                         if new_size.width > 0 && new_size.height > 0 {
                             // +++ keep metrics in sync
-                            self.metrics = layout::metrics_for_window(new_size.width, new_size.height);
+                            self.metrics = space::metrics_for_window(new_size.width, new_size.height);
                             if let Some(backend) = &mut self.backend {
                                 renderer::resize(backend, new_size.width, new_size.height);
                             }
@@ -372,60 +369,7 @@ fn create_screen_from_ui(
     clear_color: [f32; 4],
     fonts: &HashMap<&'static str, msdf::Font>,
 ) -> renderer::Screen {
-    renderer::Screen {
-        clear_color,
-        objects: expand_ui_to_objects(elements, fonts),
-    }
-}
-
-#[inline(always)]
-fn expand_ui_to_objects(
-    elements: &[api::UIElement],
-    fonts: &HashMap<&'static str, msdf::Font>,
-) -> Vec<renderer::ScreenObject> {
-    use cgmath::{Matrix4, Vector3};
-
-    let mut objects = Vec::with_capacity(elements.len());
-    for e in elements {
-        match e {
-            api::UIElement::Quad(q) => {
-                let t = Matrix4::from_translation(Vector3::new(q.center.x, q.center.y, 0.0))
-                    * Matrix4::from_nonuniform_scale(q.size.x, q.size.y, 1.0);
-                objects.push(renderer::ScreenObject {
-                    object_type: renderer::ObjectType::SolidColor { color: q.color },
-                    transform: t,
-                });
-            }
-            api::UIElement::Sprite(s) => {
-                let t = Matrix4::from_translation(Vector3::new(s.center.x, s.center.y, 0.0))
-                    * Matrix4::from_nonuniform_scale(s.size.x, s.size.y, 1.0);
-                objects.push(renderer::ScreenObject {
-                    object_type: renderer::ObjectType::Textured { texture_id: s.texture_id },
-                    transform: t,
-                });
-            }
-            api::UIElement::Text(txt) => {
-                if let Some(font) = fonts.get(txt.font_id) {
-                    let laid = msdf::layout_line(font, &txt.content, txt.pixel_height, txt.origin);
-                    for g in laid {
-                        let t = Matrix4::from_translation(Vector3::new(g.center.x, g.center.y, 0.0))
-                            * Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
-                        objects.push(renderer::ScreenObject {
-                            object_type: renderer::ObjectType::MsdfGlyph {
-                                texture_id: font.atlas_tex_key,
-                                uv_scale: g.uv_scale,
-                                uv_offset: g.uv_offset,
-                                color: txt.color,
-                                px_range: font.px_range,
-                            },
-                            transform: t,
-                        });
-                    }
-                }
-            }
-        }
-    }
-    objects
+    crate::ui::build::build_screen(elements, clear_color, fonts)
 }
 
 // ---- public entry point ----

@@ -1,7 +1,7 @@
 // src/ui/components/logo.rs
 use cgmath::Vector2;
 use crate::ui::primitives::{UIElement, Sprite};
-use crate::utils::layout::Metrics;
+use crate::core::space::Metrics;
 
 /// Native image sizes (only used for aspect).
 const LOGO_NATIVE_W: f32 = 752.0;

@@ -1,7 +1,7 @@
 // src/screens/menu.rs
 use crate::ui::primitives::{Text, UIElement};
 use crate::screens::{Screen, ScreenAction};
-use crate::utils::layout::Metrics;
+use crate::core::space::Metrics;
 use crate::ui::components::logo::{build_logo_default, LogoParams, build_logo};
 use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};
