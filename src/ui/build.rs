@@ -1,37 +1,37 @@
 use std::collections::HashMap;
 use cgmath::{Matrix4, Vector3};
 
-use crate::core::space::Metrics;
+use crate::core::space::{Metrics, logical_height, design_width_16_9};
 use crate::ui::primitives as api;
 use crate::ui::msdf;
 use crate::core::gfx as renderer;
 
-/* ---------- StepMania-style anchors & helpers (UI space) ---------- */
+/* ---------- StepMania-style anchors & helpers (UI space, SM top-left) ---------- */
 
-#[inline(always)] fn design_width_4_3() -> f32 { 640.0 }
-#[inline(always)] fn design_width_16_9() -> f32 { 854.0 }
+#[inline(always)] fn screen_width(m: &Metrics)  -> f32 { m.right - m.left }
+#[inline(always)] fn screen_height(m: &Metrics) -> f32 { m.top   - m.bottom }
 
-/// Wide scale between 4:3 and 16:9 based on `Metrics::width`.
+/// Wide scale between 4:3 and 16:9 based on logical width.
 #[inline(always)]
 pub fn wide_scale(v_4_3: f32, v_16_9: f32, m: &Metrics) -> f32 {
-    let x = m.width;
-    let a = design_width_4_3();
-    let b = design_width_16_9();
-    if x <= a { return v_4_3; }
-    if x >= b { return v_16_9; }
-    let t = (x - a) / (b - a);
+    let w_43  = logical_height() * (4.0 / 3.0);
+    let w_169 = design_width_16_9();
+    let w     = screen_width(m);
+    if w <= w_43 { return v_4_3; }
+    if w >= w_169 { return v_16_9; }
+    let t = (w - w_43) / (w_169 - w_43);
     v_4_3 + t * (v_16_9 - v_4_3)
 }
 
-#[inline(always)] pub fn SCREEN_LEFT(_m: &Metrics)   -> f32 { 0.0 }
-#[inline(always)] pub fn SCREEN_TOP(_m: &Metrics)    -> f32 { 0.0 }
-#[inline(always)] pub fn SCREEN_RIGHT(m: &Metrics)   -> f32 { m.width }
-#[inline(always)] pub fn SCREEN_BOTTOM(m: &Metrics)  -> f32 { m.height }
+#[inline(always)] pub fn screen_left(_m: &Metrics)   -> f32 { 0.0 }
+#[inline(always)] pub fn screen_top(_m: &Metrics)    -> f32 { 0.0 }
+#[inline(always)] pub fn screen_right(m: &Metrics)   -> f32 { screen_width(m) }
+#[inline(always)] pub fn screen_bottom(m: &Metrics)  -> f32 { screen_height(m) }
 
 #[inline(always)] pub fn from_left(px: f32, _m: &Metrics)  -> f32 { px }
 #[inline(always)] pub fn from_top(px: f32, _m: &Metrics)   -> f32 { px }
-#[inline(always)] pub fn from_right(px: f32, m: &Metrics)  -> f32 { m.width  - px }
-#[inline(always)] pub fn from_bottom(px: f32, m: &Metrics) -> f32 { m.height - px }
+#[inline(always)] pub fn from_right(px: f32, m: &Metrics)  -> f32 { screen_width(m)  - px }
+#[inline(always)] pub fn from_bottom(px: f32, m: &Metrics) -> f32 { screen_height(m) - px }
 
 #[inline(always)]
 pub fn sm_point_to_world(x_tl: f32, y_tl: f32, m: &Metrics) -> [f32; 2] {
@@ -65,7 +65,7 @@ pub fn expand_ui_to_objects(
     fonts: &HashMap<&'static str, msdf::Font>,
 ) -> Vec<renderer::ScreenObject> {
     let mut objects = Vec::with_capacity(elements.len());
-   for e in elements {
+    for e in elements {
         match e {
             api::UIElement::Quad(q) => {
                 let t = Matrix4::from_translation(Vector3::new(q.center.x, q.center.y, 0.0))

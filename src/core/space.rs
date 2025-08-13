@@ -5,15 +5,10 @@ use cgmath::Matrix4;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Metrics {
-    pub width:  f32,
-    pub height: f32,
-    pub aspect: f32,
     pub left:   f32,
     pub right:  f32,
     pub top:    f32,
     pub bottom: f32,
-    pub cx:     f32,
-    pub cy:     f32,
 }
 
 /// Compute logical metrics for a pixel window size (clamped ≤ 16:9).
@@ -27,10 +22,8 @@ pub fn metrics_for_window(px_w: u32, px_h: u32) -> Metrics {
     let half_h = 0.5 * h;
 
     Metrics {
-        width: w, height: h, aspect,
         left: -half_w, right: half_w,
         bottom: -half_h, top: half_h,
-        cx: 0.0, cy: 0.0,
     }
 }
 

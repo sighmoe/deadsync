@@ -1,8 +1,7 @@
-// src/screens/menu.rs
 use crate::ui::primitives::{Text, UIElement};
 use crate::screens::{Screen, ScreenAction};
 use crate::core::space::Metrics;
-use crate::ui::components::logo::{build_logo_default, LogoParams, build_logo};
+use crate::ui::components::logo::build_logo_default;
 use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -10,17 +9,14 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 const OPTION_COUNT: usize = 3;
 const MENU_OPTIONS: [&str; OPTION_COUNT] = ["GAMEPLAY", "OPTIONS", "EXIT"];
 
-// colors
 const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0];
 const MENU_NORMAL_COLOR:   [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 
-// menu text sizing/spacing
 const MENU_SELECTED_PX: f32 = 50.0;
 const MENU_NORMAL_PX:   f32 = 42.0;
-const MENU_BELOW_LOGO:  f32 = 28.0;   // gap from logo bottom
+const MENU_BELOW_LOGO:  f32 = 28.0;
 const MENU_ROW_SPACING: f32 = 70.0;
 
-// crude width estimate factor for centering MSDF text
 const TEXT_WIDTH_K: f32 = 0.45;
 
 pub struct State {
@@ -63,20 +59,11 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 pub fn get_ui_elements(state: &State, m: &Metrics) -> Vec<UIElement> {
     let mut elements = Vec::with_capacity(2 + OPTION_COUNT);
 
-    // ----- logo component -----
-    // Use defaults:
-    // let logo = build_logo_default(m);
-    //
-    // Or tweak if you want (example keeps your current "perfect" defaults):
-    let logo = build_logo(m, LogoParams {
-        target_h: 238.0,
-        top_margin: 102.0,
-        banner_y_offset_inside: 0.0,
-    });
-
+    // Build the logo via the component API.
+    let logo = build_logo_default(m);
     elements.extend(logo.ui);
 
-    // ----- menu options under the logo -----
+    // Menu options under the logo.
     let y_start = logo.logo_bottom_y - MENU_BELOW_LOGO;
 
     for i in 0..OPTION_COUNT {
@@ -88,7 +75,7 @@ pub fn get_ui_elements(state: &State, m: &Metrics) -> Vec<UIElement> {
         let est_w = label.len() as f32 * px * TEXT_WIDTH_K;
 
         let baseline_y = y_start - i as f32 * MENU_ROW_SPACING;
-        let origin = Vector2::new(-0.5 * est_w, baseline_y); // center by shifting left half the width
+        let origin = Vector2::new(-0.5 * est_w, baseline_y);
 
         elements.push(UIElement::Text(Text {
             origin,
