@@ -1,229 +1,317 @@
 // src/ui/actors.rs
-use crate::ui::primitives::{UIElement, Quad, Sprite, Text};
-use crate::ui::build::{sm_rect_to_center_size, screen_right, screen_bottom};
-use crate::core::space::Metrics;
 use cgmath::Vector2;
+use crate::core::space::Metrics;
+use crate::ui::primitives::{
+    UIElement,
+    Quad   as UiQuad,
+    Sprite as UiSprite,
+    Text   as UiText,
+};
 
-/* ---------- Declarative actor model (pure data) ---------- */
-
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Anchor {
-    TopLeft, TopRight, BottomLeft, BottomRight,
-    Center, TopCenter, BottomCenter, LeftCenter, RightCenter,
+    TopLeft, TopCenter, TopRight,
+    CenterLeft, Center, CenterRight,
+    BottomLeft, BottomCenter, BottomRight,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum SizeSpec {
     Px { w: f32, h: f32 },
     SquarePx(f32),
-    WPercentHpx { w_pct: f32, h: f32 },
-    HPercentWpx { h_pct: f32, w: f32 },
-    FillParent,
+    Fill, // take parent rect w/h
 }
+
+#[derive(Clone, Debug)]
+pub enum Actor {
+    Quad   { anchor: Anchor, offset: [f32; 2], size: SizeSpec, color: [f32; 4] },
+    Sprite { anchor: Anchor, offset: [f32; 2], size: SizeSpec, texture: &'static str },
+    Text   { anchor: Anchor, offset: [f32; 2], size: SizeSpec, px: f32, color: [f32; 4], font: &'static str, content: String },
+    Frame  { anchor: Anchor, offset: [f32; 2], size: SizeSpec, children: Vec<Actor> },
+}
+
+/* -------------------- BUILD (actors -> UI elements) -------------------- */
 
 #[derive(Clone, Copy)]
-pub struct Layout {
-    pub anchor: Anchor,
-    pub offset_px: [f32; 2], // top-left UI space, pixels
-    pub size: SizeSpec,
-}
-
-#[derive(Clone)]
-pub enum Actor {
-    Frame { layout: Layout, children: Vec<Actor> },
-    Quad  { layout: Layout, color: [f32;4] },
-    Sprite{ layout: Layout, texture_id: &'static str },
-    Text  { layout: Layout, font_id: &'static str, pixel_height: f32, color: [f32;4], content: String },
-}
-
-/* ---------- Pure resolver: Actor tree -> Vec<UIElement> ---------- */
+struct SmRect { x: f32, y: f32, w: f32, h: f32 } // top-left "SM px" space
 
 #[inline(always)]
-fn resolve_size(size: SizeSpec, avail_w: f32, avail_h: f32) -> (f32, f32) {
-    match size {
+fn screen_w(m: &Metrics) -> f32 { m.right - m.left }
+#[inline(always)]
+fn screen_h(m: &Metrics) -> f32 { m.top   - m.bottom }
+
+#[inline(always)]
+fn root_rect(m: &Metrics) -> SmRect {
+    SmRect { x: 0.0, y: 0.0, w: screen_w(m), h: screen_h(m) }
+}
+
+#[inline(always)]
+fn resolve_size(spec: SizeSpec, parent: SmRect) -> (f32, f32) {
+    match spec {
         SizeSpec::Px { w, h } => (w, h),
         SizeSpec::SquarePx(s) => (s, s),
-        SizeSpec::WPercentHpx { w_pct, h } => (w_pct.clamp(0.0, 1.0) * avail_w, h),
-        SizeSpec::HPercentWpx { h_pct, w } => (w, h_pct.clamp(0.0, 1.0) * avail_h),
-        SizeSpec::FillParent => (avail_w, avail_h),
+        SizeSpec::Fill        => (parent.w, parent.h),
     }
 }
 
+// Anchor reference point inside a parent rect (top-left space).
 #[inline(always)]
-fn anchor_tl(anchor: Anchor, pw: f32, ph: f32, w: f32, h: f32) -> (f32, f32) {
+fn anchor_ref(parent: SmRect, anchor: Anchor) -> (f32, f32) {
+    let rx = match anchor {
+        Anchor::TopLeft    | Anchor::CenterLeft  | Anchor::BottomLeft   => parent.x,
+        Anchor::TopCenter  | Anchor::Center      | Anchor::BottomCenter => parent.x + 0.5 * parent.w,
+        Anchor::TopRight   | Anchor::CenterRight | Anchor::BottomRight  => parent.x + parent.w,
+    };
+    let ry = match anchor {
+        Anchor::TopLeft    | Anchor::TopCenter   | Anchor::TopRight     => parent.y,
+        Anchor::CenterLeft | Anchor::Center      | Anchor::CenterRight  => parent.y + 0.5 * parent.h,
+        Anchor::BottomLeft | Anchor::BottomCenter| Anchor::BottomRight  => parent.y + parent.h,
+    };
+    (rx, ry)
+}
+
+#[inline(always)]
+fn horiz_align_factor(anchor: Anchor) -> f32 {
     match anchor {
-        Anchor::TopLeft       => (0.0,         0.0),
-        Anchor::TopRight      => (pw - w,      0.0),
-        Anchor::BottomLeft    => (0.0,         ph - h),
-        Anchor::BottomRight   => (pw - w,      ph - h),
-        Anchor::Center        => (0.5*(pw-w),  0.5*(ph-h)),
-        Anchor::TopCenter     => (0.5*(pw-w),  0.0),
-        Anchor::BottomCenter  => (0.5*(pw-w),  ph - h),
-        Anchor::LeftCenter    => (0.0,         0.5*(ph-h)),
-        Anchor::RightCenter   => (pw - w,      0.5*(ph-h)),
+        Anchor::TopLeft | Anchor::CenterLeft | Anchor::BottomLeft => 0.0,
+        Anchor::TopCenter | Anchor::Center | Anchor::BottomCenter => 0.5,
+        Anchor::TopRight | Anchor::CenterRight | Anchor::BottomRight => 1.0,
+    }
+}
+#[inline(always)]
+fn vert_align_factor(anchor: Anchor) -> f32 {
+    match anchor {
+        Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => 0.0,
+        Anchor::CenterLeft | Anchor::Center | Anchor::CenterRight => 0.5,
+        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => 1.0,
     }
 }
 
+// Place a rectangle (for quads/sprites) using SM top-left coords.
 #[inline(always)]
-fn push_rect(out: &mut Vec<UIElement>, m: &Metrics, x_tl: f32, y_tl: f32, w: f32, h: f32,
-             make: impl FnOnce([f32;2],[f32;2]) -> UIElement) {
-    let (c, s) = sm_rect_to_center_size(x_tl, y_tl, w, h, m);
-    out.push(make(c, s));
+fn place_rect(parent: SmRect, anchor: Anchor, offset: [f32;2], size: SizeSpec) -> SmRect {
+    let (w, h) = resolve_size(size, parent);
+    let (rx, ry) = anchor_ref(parent, anchor);
+    let ax = horiz_align_factor(anchor);
+    let ay = vert_align_factor(anchor);
+    SmRect {
+        x: rx + offset[0] - ax * w,
+        y: ry + offset[1] - ay * h,
+        w, h,
+    }
 }
 
-/// Public: build a full UI list from roots. Parent is whole screen (0..W, 0..H in UI px).
+// Convert SM rect to world center/size.
+#[inline(always)]
+fn sm_rect_to_world(rect: SmRect, m: &Metrics) -> (Vector2<f32>, Vector2<f32>) {
+    let cx = m.left + rect.x + 0.5 * rect.w;
+    let cy = m.top  - (rect.y + 0.5 * rect.h);
+    (Vector2::new(cx, cy), Vector2::new(rect.w, rect.h))
+}
+
+// Text: horizontal anchoring uses `size.w`.
+// Vertical uses a baseline from offset.y relative to the anchor reference.
+#[inline(always)]
+fn place_text_origin(parent: SmRect, anchor: Anchor, offset: [f32;2], size: SizeSpec, m: &Metrics) -> Vector2<f32> {
+    let (w, h) = resolve_size(size, parent);
+    let (rx, _) = anchor_ref(parent, anchor);
+    let ax = horiz_align_factor(anchor);
+
+    let left_sm_x = rx + offset[0] - ax * w;
+    let baseline_sm_y = match anchor {
+        Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => parent.y + offset[1],
+        Anchor::CenterLeft | Anchor::Center | Anchor::CenterRight => parent.y + 0.5 * parent.h + offset[1],
+        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => parent.y + parent.h - offset[1],
+    };
+    let world_x = m.left + left_sm_x;
+    let world_y = m.top  - baseline_sm_y;
+    let _ = h; // keep signature parallel
+    Vector2::new(world_x, world_y)
+}
+
+fn flatten_into(out: &mut Vec<UIElement>, actor: &Actor, parent: SmRect, m: &Metrics) {
+    match actor {
+        Actor::Quad { anchor, offset, size, color } => {
+            let rect = place_rect(parent, *anchor, *offset, *size);
+            let (center, size) = sm_rect_to_world(rect, m);
+            out.push(UIElement::Quad(UiQuad { center, size, color: *color }));
+        }
+        Actor::Sprite { anchor, offset, size, texture } => {
+            let rect = place_rect(parent, *anchor, *offset, *size);
+            let (center, size) = sm_rect_to_world(rect, m);
+            out.push(UIElement::Sprite(UiSprite { center, size, texture_id: *texture }));
+        }
+        Actor::Text { anchor, offset, size, px, color, font, content } => {
+            let origin = place_text_origin(parent, *anchor, *offset, *size, m);
+            out.push(UIElement::Text(UiText {
+                origin,
+                pixel_height: *px,
+                color: *color,
+                font_id: *font,
+                content: content.clone(),
+            }));
+        }
+        Actor::Frame { anchor, offset, size, children } => {
+            let rect = place_rect(parent, *anchor, *offset, *size);
+            for child in children {
+                flatten_into(out, child, rect, m);
+            }
+        }
+    }
+}
+
 pub fn build_actors(actors: &[Actor], m: &Metrics) -> Vec<UIElement> {
     let mut out = Vec::new();
-    let pw = screen_right(m);
-    let ph = screen_bottom(m);
+    let root = root_rect(m);
     for a in actors {
-        expand(a, m, 0.0, 0.0, pw, ph, &mut out);
+        flatten_into(&mut out, a, root, m);
     }
     out
 }
 
-fn expand(a: &Actor, m: &Metrics, px: f32, py: f32, pw: f32, ph: f32, out: &mut Vec<UIElement>) {
-    match a {
-        Actor::Frame { layout, children } => {
-            let (w,h)   = resolve_size(layout.size, pw, ph);
-            let (ax,ay) = anchor_tl(layout.anchor, pw, ph, w, h);
-            let x = px + ax + layout.offset_px[0];
-            let y = py + ay + layout.offset_px[1];
+/* -------------------- DSL MACROS -------------------- */
 
-            // Sub-rectangle metrics for children
-            let subm = Metrics { left: m.left + x, right: m.left + x + w, top: m.top - y, bottom: m.top - y - h };
-            for c in children { expand(c, &subm, 0.0, 0.0, w, h, out); }
-        }
-        Actor::Quad { layout, color } => {
-            let (w,h)   = resolve_size(layout.size, pw, ph);
-            let (ax,ay) = anchor_tl(layout.anchor, pw, ph, w, h);
-            let x = px + ax + layout.offset_px[0];
-            let y = py + ay + layout.offset_px[1];
-            push_rect(out, m, x, y, w, h, |c,s| UIElement::Quad(Quad {
-                center: Vector2::new(c[0], c[1]), size: Vector2::new(s[0], s[1]), color: *color
-            }));
-        }
-        Actor::Sprite { layout, texture_id } => {
-            let (w,h)   = resolve_size(layout.size, pw, ph);
-            let (ax,ay) = anchor_tl(layout.anchor, pw, ph, w, h);
-            let x = px + ax + layout.offset_px[0];
-            let y = py + ay + layout.offset_px[1];
-            push_rect(out, m, x, y, w, h, |c,s| UIElement::Sprite(Sprite {
-                center: Vector2::new(c[0], c[1]), size: Vector2::new(s[0], s[1]), texture_id: *texture_id
-            }));
-        }
-        Actor::Text { layout, font_id, pixel_height, color, content } => {
-            let (w,h)   = resolve_size(layout.size, pw, ph);
-            let (ax,ay) = anchor_tl(layout.anchor, pw, ph, w, h);
-            let x_tl = px + ax + layout.offset_px[0];
-            let y_tl = py + ay + layout.offset_px[1];
-            let origin_world_x = m.left + x_tl;
-            let origin_world_y = m.top  - y_tl;
-            out.push(UIElement::Text(Text {
-                origin: Vector2::new(origin_world_x, origin_world_y),
-                pixel_height: *pixel_height,
-                color: *color,
-                font_id: *font_id,
-                content: content.clone(),
-            }));
-        }
-    }
-}
-
-/* ---------- Tiny DSL (named-arg-ish macros) ---------- */
-
-// ---- quad! ----
 #[macro_export]
 macro_rules! quad {
     ( $( $k:ident : $v:tt ),* $(,)? ) => {{
-        use $crate::ui::actors::{Actor, Layout, Anchor, SizeSpec};
-        let (mut anchor, mut offset, mut size, mut color) =
-            (Anchor::TopLeft, [0.0f32,0.0], SizeSpec::SquarePx(10.0), [1.0f32,1.0,1.0,1.0]);
-        $( $crate::quad!(@set anchor, offset, size, color; $k : $v); )*
-        Actor::Quad { layout: Layout { anchor, offset_px: offset, size }, color }
-    }};
+        let mut anchor = $crate::ui::actors::Anchor::TopLeft;
+        let mut offset = [0.0_f32, 0.0_f32];
+        let mut size   = $crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 };
+        let mut color  = [1.0_f32, 1.0, 1.0, 1.0];
 
-    (@set $a:ident,$o:ident,$s:ident,$c:ident; anchor : $v:ident) => { $a = Anchor::$v; };
-    (@set $a:ident,$o:ident,$s:ident,$c:ident; offset : [ $x:expr , $y:expr ]) => { $o = [$x as f32, $y as f32]; };
-    (@set $a:ident,$o:ident,$s:ident,$c:ident; size   : [ $w:expr , $h:expr ]) => { $s = SizeSpec::Px { w: $w as f32, h: $h as f32 }; };
-    (@set $a:ident,$o:ident,$s:ident,$c:ident; square : $n:expr ) => { $s = SizeSpec::SquarePx($n as f32); };
-    (@set $a:ident,$o:ident,$s:ident,$c:ident; fill   : $flag:expr) => { if $flag { $s = SizeSpec::FillParent; } };
-    (@set $a:ident,$o:ident,$s:ident,$c:ident; wpercent_hpx : [ $pct:expr , $h:expr ]) => {
-        $s = SizeSpec::WPercentHpx { w_pct: $pct as f32, h: $h as f32 };
-    };
-    (@set $a:ident,$o:ident,$s:ident,$c:ident; hpercent_wpx : [ $pct:expr , $w:expr ]) => {
-        $s = SizeSpec::HPercentWpx { h_pct: $pct as f32, w: $w as f32 };
-    };
-    (@set $a:ident,$o:ident,$s:ident,$c:ident; color  : [ $r:expr , $g:expr , $b:expr , $al:expr ]) => {
-        $c = [$r as f32, $g as f32, $b as f32, $al as f32];
-    };
+        $(
+            $crate::__assign_quad_kv!([anchor, offset, size, color] $k : $v);
+        )*
+
+        $crate::ui::actors::Actor::Quad { anchor, offset, size, color }
+    }};
 }
 
-// ---- sprite! ----
 #[macro_export]
 macro_rules! sprite {
     ( $( $k:ident : $v:tt ),* $(,)? ) => {{
-        use $crate::ui::actors::{Actor, Layout, Anchor, SizeSpec};
-        let (mut anchor, mut offset, mut size, mut tex) =
-            (Anchor::TopLeft, [0.0f32,0.0], SizeSpec::SquarePx(64.0), "");
-        $( $crate::sprite!(@set anchor, offset, size, tex; $k : $v); )*
-        Actor::Sprite { layout: Layout { anchor, offset_px: offset, size }, texture_id: tex }
-    }};
+        let mut anchor  = $crate::ui::actors::Anchor::TopLeft;
+        let mut offset  = [0.0_f32, 0.0_f32];
+        let mut size    = $crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 };
+        let mut texture = "";
 
-    (@set $a:ident,$o:ident,$s:ident,$t:ident; anchor : $v:ident) => { $a = Anchor::$v; };
-    (@set $a:ident,$o:ident,$s:ident,$t:ident; offset : [ $x:expr , $y:expr ]) => { $o = [$x as f32, $y as f32]; };
-    (@set $a:ident,$o:ident,$s:ident,$t:ident; size   : [ $w:expr , $h:expr ]) => { $s = SizeSpec::Px { w: $w as f32, h: $h as f32 }; };
-    (@set $a:ident,$o:ident,$s:ident,$t:ident; square : $n:expr ) => { $s = SizeSpec::SquarePx($n as f32); };
-    (@set $a:ident,$o:ident,$s:ident,$t:ident; fill   : $flag:expr) => { if $flag { $s = SizeSpec::FillParent; } };
-    (@set $a:ident,$o:ident,$s:ident,$t:ident; texture: $id:expr ) => { $t = $id; };
+        $(
+            $crate::__assign_sprite_kv!([anchor, offset, size, texture] $k : $v);
+        )*
+
+        $crate::ui::actors::Actor::Sprite { anchor, offset, size, texture }
+    }};
 }
 
-// ---- text! ----
 #[macro_export]
 macro_rules! text {
     ( $( $k:ident : $v:tt ),* $(,)? ) => {{
-        use $crate::ui::actors::{Actor, Layout, Anchor, SizeSpec};
-        let (mut anchor, mut offset, mut size) = (Anchor::TopLeft, [0.0f32,0.0], SizeSpec::Px{w:0.0,h:0.0});
-        let (mut font, mut px, mut color, mut content) = ("wendy", 32.0f32, [1.0f32,1.0,1.0,1.0], String::new());
-        $( $crate::text!(@set anchor, offset, size, font, px, color, content; $k : $v); )*
-        Actor::Text { layout: Layout { anchor, offset_px: offset, size }, font_id: font, pixel_height: px, color, content }
-    }};
+        let mut anchor  = $crate::ui::actors::Anchor::TopLeft;
+        let mut offset  = [0.0_f32, 0.0_f32];
+        let mut size    = $crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 };
+        let mut px      = 32.0_f32;
+        let mut color   = [1.0_f32, 1.0, 1.0, 1.0];
+        let mut font    = "wendy";
+        let mut content = String::new();
 
-    (@set $a:ident,$o:ident,$s:ident,$f:ident,$px:ident,$c:ident,$t:ident; anchor : $v:ident) => { $a = Anchor::$v; };
-    (@set $a:ident,$o:ident,$s:ident,$f:ident,$px:ident,$c:ident,$t:ident; offset : [ $x:expr , $y:expr ]) => { $o = [$x as f32, $y as f32]; };
-    (@set $a:ident,$o:ident,$s:ident,$f:ident,$px:ident,$c:ident,$t:ident; size   : [ $w:expr , $h:expr ]) => { $s = SizeSpec::Px { w: $w as f32, h: $h as f32 }; };
-    (@set $a:ident,$o:ident,$s:ident,$f:ident,$px:ident,$c:ident,$t:ident; font   : $id:expr ) => { $f = $id; };
-    (@set $a:ident,$o:ident,$s:ident,$f:ident,$px:ident,$c:ident,$t:ident; px     : $v:expr ) => { $px = $v as f32; };
-    (@set $a:ident,$o:ident,$s:ident,$f:ident,$px:ident,$c:ident,$t:ident; color  : [ $r:expr , $g:expr , $b:expr , $al:expr ]) => {
-        $c = [$r as f32, $g as f32, $b as f32, $al as f32];
-    };
-    (@set $a:ident,$o:ident,$s:ident,$f:ident,$px:ident,$c:ident,$t:ident; content: $txt:expr) => { $t = $txt.to_string(); };
-    (@set $a:ident,$o:ident,$s:ident,$f:ident,$px:ident,$c:ident,$t:ident; text   : $txt:expr) => { $t = $txt.to_string(); };
+        $(
+            $crate::__assign_text_kv!([anchor, offset, size, px, color, font, content] $k : $v);
+        )*
+
+        $crate::ui::actors::Actor::Text { anchor, offset, size, px, color, font, content }
+    }};
 }
 
-// ---- frame! ----
 #[macro_export]
 macro_rules! frame {
     ( $( $k:ident : $v:tt ),* $(,)? ) => {{
-        use $crate::ui::actors::{Actor, Layout, Anchor, SizeSpec};
-        let (mut anchor, mut offset, mut size) = (Anchor::TopLeft, [0.0f32,0.0], SizeSpec::Px { w:0.0, h:0.0 });
-        let mut children: Vec<Actor> = Vec::new();
-        $( $crate::frame!(@set anchor, offset, size, children; $k : $v); )*
-        Actor::Frame { layout: Layout { anchor, offset_px: offset, size }, children }
-    }};
+        let mut anchor   = $crate::ui::actors::Anchor::TopLeft;
+        let mut offset   = [0.0_f32, 0.0_f32];
+        let mut size     = $crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 };
+        let mut children: ::std::vec::Vec<$crate::ui::actors::Actor> = ::std::vec![];
 
-    (@set $a:ident,$o:ident,$s:ident,$ch:ident; anchor : $v:ident) => { $a = Anchor::$v; };
-    (@set $a:ident,$o:ident,$s:ident,$ch:ident; offset : [ $x:expr , $y:expr ]) => { $o = [$x as f32, $y as f32]; };
-    (@set $a:ident,$o:ident,$s:ident,$ch:ident; size   : [ $w:expr , $h:expr ]) => { $s = SizeSpec::Px { w: $w as f32, h: $h as f32 }; };
-    (@set $a:ident,$o:ident,$s:ident,$ch:ident; square : $n:expr ) => { $s = SizeSpec::SquarePx($n as f32); };
-    (@set $a:ident,$o:ident,$s:ident,$ch:ident; fill   : $flag:expr) => { if $flag { $s = SizeSpec::FillParent; } };
-    (@set $a:ident,$o:ident,$s:ident,$ch:ident; wpercent_hpx : [ $pct:expr , $h:expr ]) => {
-        $s = SizeSpec::WPercentHpx { w_pct: $pct as f32, h: $h as f32 };
+        $(
+            $crate::__assign_frame_kv!([anchor, offset, size, children] $k : $v);
+        )*
+
+        $crate::ui::actors::Actor::Frame { anchor, offset, size, children }
+    }};
+}
+
+/* -------------------- KV helpers (exported) -------------------- */
+
+#[macro_export]
+macro_rules! __assign_anchor {
+    ( $var:ident = $name:ident ) => {
+        $var = $crate::ui::actors::Anchor::$name;
     };
-    (@set $a:ident,$o:ident,$s:ident,$ch:ident; hpercent_wpx : [ $pct:expr , $w:expr ]) => {
-        $s = SizeSpec::HPercentWpx { h_pct: $pct as f32, w: $w as f32 };
+}
+
+#[macro_export]
+macro_rules! __assign_size {
+    ( $var:ident = [ $w:expr , $h:expr ] ) => {
+        $var = $crate::ui::actors::SizeSpec::Px { w: ($w) as f32, h: ($h) as f32 };
     };
-    (@set $a:ident,$o:ident,$s:ident,$ch:ident; children : [ $( $child:expr ),* $(,)? ]) => {
-        $ch = vec![ $( $child ),* ];
+    ( $var:ident = $n:expr ) => {
+        $var = $crate::ui::actors::SizeSpec::SquarePx(($n) as f32);
+    };
+}
+
+#[macro_export]
+macro_rules! __assign_quad_kv {
+    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] anchor : $v:ident ) => { $crate::__assign_anchor!($a = $v); };
+    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] offset : [ $x:expr , $y:expr ] ) => { $o = [ ($x) as f32, ($y) as f32 ]; };
+    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] size   : [ $w:expr , $h:expr ] ) => { $crate::__assign_size!($s = [ $w , $h ]); };
+    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] square : $n:expr ) => { $s = $crate::ui::actors::SizeSpec::SquarePx(($n) as f32); };
+    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] fill   : true ) => { $s = $crate::ui::actors::SizeSpec::Fill; };
+    // inline literal array
+    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] color  : [ $r:expr , $g:expr , $b:expr , $a4:expr ] ) => {
+        $c = [ ($r) as f32, ($g) as f32, ($b) as f32, ($a4) as f32 ];
+    };
+    // any expression (e.g. BG / FG constants)
+    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] color  : $expr:expr ) => {
+        $c = $expr;
+    };
+}
+
+#[macro_export]
+macro_rules! __assign_sprite_kv {
+    ( [ $a:ident, $o:ident, $s:ident, $t:ident ] anchor  : $v:ident ) => { $crate::__assign_anchor!($a = $v); };
+    ( [ $a:ident, $o:ident, $s:ident, $t:ident ] offset  : [ $x:expr , $y:expr ] ) => { $o = [ ($x) as f32, ($y) as f32 ]; };
+    ( [ $a:ident, $o:ident, $s:ident, $t:ident ] size    : [ $w:expr , $h:expr ] ) => { $crate::__assign_size!($s = [ $w , $h ]); };
+    ( [ $a:ident, $o:ident, $s:ident, $t:ident ] square  : $n:expr ) => { $s = $crate::ui::actors::SizeSpec::SquarePx(($n) as f32); };
+    ( [ $a:ident, $o:ident, $s:ident, $t:ident ] fill    : true ) => { $s = $crate::ui::actors::SizeSpec::Fill; };
+    ( [ $a:ident, $o:ident, $s:ident, $t:ident ] texture : $tex:expr ) => { $t = $tex; };
+}
+
+#[macro_export]
+macro_rules! __assign_text_kv {
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] anchor : $v:ident ) => { $crate::__assign_anchor!($a = $v); };
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] offset : [ $x:expr , $y:expr ] ) => { $o = [ ($x) as f32, ($y) as f32 ]; };
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] size   : [ $w:expr , $h:expr ] ) => { $crate::__assign_size!($s = [ $w , $h ]); };
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] square : $n:expr ) => { $s = $crate::ui::actors::SizeSpec::SquarePx(($n) as f32); };
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] fill   : true ) => { $s = $crate::ui::actors::SizeSpec::Fill; };
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] px     : $v:expr ) => { $px = ($v) as f32; };
+    // inline literal array
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] color  : [ $r:expr , $g:expr , $b:expr , $a4:expr ] ) => {
+        $c = [ ($r) as f32, ($g) as f32, ($b) as f32, ($a4) as f32 ];
+    };
+    // any expression (e.g., FG constant)
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] color  : $expr:expr ) => {
+        $c = $expr;
+    };
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] font   : $name:expr ) => { $f = $name; };
+    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident ] text   : $val:expr ) => { $t = ($val).to_string(); };
+}
+
+#[macro_export]
+macro_rules! __assign_frame_kv {
+    ( [ $a:ident, $o:ident, $s:ident, $ch:ident ] anchor   : $v:ident ) => { $crate::__assign_anchor!($a = $v); };
+    ( [ $a:ident, $o:ident, $s:ident, $ch:ident ] offset   : [ $x:expr , $y:expr ] ) => { $o = [ ($x) as f32, ($y) as f32 ]; };
+    ( [ $a:ident, $o:ident, $s:ident, $ch:ident ] size     : [ $w:expr , $h:expr ] ) => { $crate::__assign_size!($s = [ $w , $h ]); };
+    ( [ $a:ident, $o:ident, $s:ident, $ch:ident ] square   : $n:expr ) => { $s = $crate::ui::actors::SizeSpec::SquarePx(($n) as f32); };
+    ( [ $a:ident, $o:ident, $s:ident, $ch:ident ] fill     : true ) => { $s = $crate::ui::actors::SizeSpec::Fill; };
+    ( [ $a:ident, $o:ident, $s:ident, $ch:ident ] children : [ $( $child:expr ),* $(,)? ] ) => {
+        $ch = ::std::vec![ $( $child ),* ];
     };
 }

@@ -6,7 +6,7 @@ use crate::ui::components::logo::build_logo_default;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use crate::ui::actors::{self}; // build_actors(...)
-use crate::text;
+use crate::{quad, sprite, text, frame};
 // macros: text! is #[macro_export], so just call text!(...) directly
 
 const OPTION_COUNT: usize = 3;
@@ -60,14 +60,11 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 pub fn get_ui_elements(state: &State, m: &Metrics) -> Vec<UIElement> {
-    // 1) Logo from existing component
     let logo = build_logo_default(m);
 
-    // 2) Text lines using the DSL, centered horizontally
-    let screen_w = m.right - m.left;
     let top_to_logo_bottom = m.top - logo.logo_bottom_y;
-
     let mut actors = Vec::with_capacity(OPTION_COUNT);
+
     for i in 0..OPTION_COUNT {
         let is_selected = i == state.selected_index;
         let px = if is_selected { MENU_SELECTED_PX } else { MENU_NORMAL_PX };
@@ -76,14 +73,13 @@ pub fn get_ui_elements(state: &State, m: &Metrics) -> Vec<UIElement> {
         let label = MENU_OPTIONS[i];
         let est_w = label.len() as f32 * px * TEXT_WIDTH_K;
 
-        // SM-style offsets (px from top-left)
+        // y in SM top-left pixels
         let y_tl = top_to_logo_bottom + MENU_BELOW_LOGO + (i as f32) * MENU_ROW_SPACING;
-        let x_tl = 0.5 * (screen_w - est_w); // center horizontally
 
         actors.push(text!(
-            anchor: TopLeft,
-            size: [est_w, px],     // lets anchor align by width
-            offset: [x_tl, y_tl],  // SM px from top-left
+            anchor: TopCenter,
+            size:   [est_w, px],      // allows anchor to center by width
+            offset: [0, y_tl],        // centered horizontally (x=0)
             px: px,
             color: [color[0], color[1], color[2], color[3]],
             text: label
