@@ -103,6 +103,11 @@ pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Resul
     let initial_size = window.inner_size();
     let projection = ortho_for_window(initial_size.width, initial_size.height);
 
+    // Set a valid viewport immediately so the very first frame renders correctly.
+    unsafe {
+        gl.viewport(0, 0, initial_size.width as i32, initial_size.height as i32);
+    }
+
     // Set constant program state once
     unsafe {
         gl.use_program(Some(program));
