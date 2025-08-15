@@ -1,7 +1,6 @@
 // src/screens/options.rs
 use crate::core::space::Metrics;
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::actors::{self};
 use crate::ui::msdf;
 use crate::ui::primitives::UIElement;
 use crate::{frame, quad, text};
