@@ -29,7 +29,6 @@ pub enum Anchor {
 #[derive(Clone, Copy, Debug)]
 pub enum SizeSpec {
     Px { w: f32, h: f32 },
-    SquarePx(f32),
     Fill, // take parent rect w/h
 }
 
@@ -75,7 +74,6 @@ fn root_rect(m: &Metrics) -> SmRect {
 fn resolve_size(spec: SizeSpec, parent: SmRect) -> (f32, f32) {
     match spec {
         SizeSpec::Px { w, h } => (w, h),
-        SizeSpec::SquarePx(s) => (s, s),
         SizeSpec::Fill => (parent.w, parent.h),
     }
 }
@@ -315,9 +313,6 @@ macro_rules! __assign_size {
     ( $var:ident = [ $w:expr , $h:expr ] ) => {
         $var = $crate::ui::actors::SizeSpec::Px { w: ($w) as f32, h: ($h) as f32 };
     };
-    ( $var:ident = $n:expr ) => {
-        $var = $crate::ui::actors::SizeSpec::SquarePx(($n) as f32);
-    };
 }
 
 #[macro_export]
@@ -325,7 +320,6 @@ macro_rules! __actor_common_props {
     ( [ $a:ident, $o:ident, $s:ident ] anchor : $v:ident ) => { $crate::__assign_anchor!($a = $v); };
     ( [ $a:ident, $o:ident, $s:ident ] offset : [ $x:expr , $y:expr ] ) => { $o = [ ($x) as f32, ($y) as f32 ]; };
     ( [ $a:ident, $o:ident, $s:ident ] size   : [ $w:expr , $h:expr ] ) => { $crate::__assign_size!($s = [ $w , $h ]); };
-    ( [ $a:ident, $o:ident, $s:ident ] square : $n:expr ) => { $s = $crate::ui::actors::SizeSpec::SquarePx(($n) as f32); };
     ( [ $a:ident, $o:ident, $s:ident ] fill   : true ) => { $s = $crate::ui::actors::SizeSpec::Fill; };
 }
 

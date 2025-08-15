@@ -56,10 +56,10 @@ pub fn get_ui_elements(
     ));
 
     // (Optional) corner markers you had before
-    actors.push(quad!(anchor: TopLeft,     offset: [ 12,  12], square: 10, color: [1.0,0.9,0.2,1.0]));
-    actors.push(quad!(anchor: TopRight,    offset: [-12,  12], square: 10, color: [0.2,1.0,0.6,1.0]));
-    actors.push(quad!(anchor: BottomLeft,  offset: [ 12, -12], square: 10, color: [0.6,0.6,1.0,1.0]));
-    actors.push(quad!(anchor: BottomRight, offset: [-12, -12], square: 10, color: [1.0,0.6,0.2,1.0]));
+    actors.push(quad!(anchor: TopLeft,     offset: [ 12,  12], size: [10, 10], color: [1.0,0.9,0.2,1.0]));
+    actors.push(quad!(anchor: TopRight,    offset: [-12,  12], size: [10, 10], color: [0.2,1.0,0.6,1.0]));
+    actors.push(quad!(anchor: BottomLeft,  offset: [ 12, -12], size: [10, 10], color: [0.6,0.6,1.0,1.0]));
+    actors.push(quad!(anchor: BottomRight, offset: [-12, -12], size: [10, 10], color: [1.0,0.6,0.2,1.0]));
 
     // New text message using the "miso" font
     actors.push(text!(
