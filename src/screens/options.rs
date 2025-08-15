@@ -1,3 +1,4 @@
+// src/screens/options.rs
 use crate::core::space::Metrics;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{self};
@@ -59,6 +60,17 @@ pub fn get_ui_elements(
     actors.push(quad!(anchor: TopRight,    offset: [-12,  12], square: 10, color: [0.2,1.0,0.6,1.0]));
     actors.push(quad!(anchor: BottomLeft,  offset: [ 12, -12], square: 10, color: [0.6,0.6,1.0,1.0]));
     actors.push(quad!(anchor: BottomRight, offset: [-12, -12], square: 10, color: [1.0,0.6,0.2,1.0]));
+
+    // New text message using the "miso" font
+    actors.push(text!(
+        anchor: BottomCenter,
+        offset: [0, -100], // 100px up from the absolute bottom
+        align: Center,
+        px: 60.0,
+        font: "miso",
+        color: [0.8, 0.9, 0.7, 1.0],
+        text: "This is miso font!"
+    ));
 
     actors::build_actors(&actors, m, fonts)
 }

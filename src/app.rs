@@ -171,20 +171,32 @@ impl App {
     fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
         let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
 
-        // Read JSON + atlas
-        let json = std::fs::read("assets/fonts/wendy.json")?;
+        // Read JSON + atlas for Wendy
+        let json_wendy = std::fs::read("assets/fonts/wendy.json")?;
         // IMPORTANT: upload atlas as **linear** (no sRGB), and disable mipmaps if your API exposes it
-        let img = image::open("assets/fonts/wendy.png")?.to_rgba8();
-        let tex = renderer::create_texture_with_colorspace(
+        let img_wendy = image::open("assets/fonts/wendy.png")?.to_rgba8();
+        let tex_wendy = renderer::create_texture_with_colorspace(
             backend,
-            &img,
+            &img_wendy,
             renderer::TextureColorSpace::Linear,
         )?;
-        self.texture_manager.insert("wendy.png", tex);
+        self.texture_manager.insert("wendy.png", tex_wendy);
 
         // `px_range_hint` is only a fallback; real value comes from JSON distanceRange
-        let font = msdf::load_font(&json, "wendy.png", /* px_range_hint */ 4.0);
-        self.fonts.insert("wendy", font);
+        let font_wendy = msdf::load_font(&json_wendy, "wendy.png", /* px_range_hint */ 4.0);
+        self.fonts.insert("wendy", font_wendy);
+
+        // Read JSON + atlas for Miso
+        let json_miso = std::fs::read("assets/fonts/miso.json")?;
+        let img_miso = image::open("assets/fonts/miso.png")?.to_rgba8();
+        let tex_miso = renderer::create_texture_with_colorspace(
+            backend,
+            &img_miso,
+            renderer::TextureColorSpace::Linear,
+        )?;
+        self.texture_manager.insert("miso.png", tex_miso);
+        let font_miso = msdf::load_font(&json_miso, "miso.png", 4.0);
+        self.fonts.insert("miso", font_miso);
 
         Ok(())
     }
