@@ -1,8 +1,10 @@
 // src/ui/components/logo.rs
 use crate::core::space::Metrics;
+use crate::sprite; // brings the sprite! macro into scope
+use crate::ui::actors::{self};
+use crate::ui::msdf;
 use crate::ui::primitives::UIElement;
-use crate::ui::actors::{self}; // build_actors(...)
-use crate::sprite;              // brings the sprite! macro into scope
+use std::collections::HashMap;
 
 /// Native image sizes (only used for aspect).
 const LOGO_NATIVE_W: f32 = 752.0;
@@ -42,7 +44,11 @@ fn center_x_tl(w: f32, m: &Metrics) -> f32 {
 
 /// Build the “banner inside logo” stack with the actor DSL.
 /// - Banner width == Logo width; banner centered within; order = banner, then logo (logo on top).
-pub fn build_logo(m: &Metrics, params: LogoParams) -> LogoOut {
+pub fn build_logo(
+    m: &Metrics,
+    params: LogoParams,
+    fonts: &HashMap<&'static str, msdf::Font>,
+) -> LogoOut {
     // Logo size from target height
     let logo_aspect = LOGO_NATIVE_W / LOGO_NATIVE_H;
     let logo_h = params.target_h;
@@ -70,11 +76,14 @@ pub fn build_logo(m: &Metrics, params: LogoParams) -> LogoOut {
         sprite!(anchor: TopLeft, offset: [logo_x_tl,  logo_y_tl ], size: [logo_w, logo_h ], texture: "logo.png"),
     ];
 
-    let ui = actors::build_actors(&scene, m);
+    let ui = actors::build_actors(&scene, m, fonts);
     LogoOut { ui, logo_bottom_y }
 }
 
 /// Convenience: build with default params.
-pub fn build_logo_default(m: &Metrics) -> LogoOut {
-    build_logo(m, LogoParams::default())
+pub fn build_logo_default(
+    m: &Metrics,
+    fonts: &HashMap<&'static str, msdf::Font>,
+) -> LogoOut {
+    build_logo(m, LogoParams::default(), fonts)
 }

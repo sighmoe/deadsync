@@ -220,9 +220,18 @@ impl App {
 
     fn get_current_ui_elements(&self) -> (Vec<api::UIElement>, [f32; 4]) {
         match self.current_screen {
-            CurrentScreen::Menu     => (menu::get_ui_elements(&self.menu_state,     &self.metrics), [0.03, 0.03, 0.03, 1.0]),
-            CurrentScreen::Gameplay => (gameplay::get_ui_elements(&self.gameplay_state, &self.metrics), [0.03, 0.03, 0.03, 1.0]),
-            CurrentScreen::Options  => (options::get_ui_elements(&self.options_state,  &self.metrics), [0.03, 0.03, 0.03, 1.0]),
+            CurrentScreen::Menu => (
+                menu::get_ui_elements(&self.menu_state, &self.metrics, &self.fonts),
+                [0.03, 0.03, 0.03, 1.0],
+            ),
+            CurrentScreen::Gameplay => (
+                gameplay::get_ui_elements(&self.gameplay_state, &self.metrics),
+                [0.03, 0.03, 0.03, 1.0],
+            ),
+            CurrentScreen::Options => (
+                options::get_ui_elements(&self.options_state, &self.metrics, &self.fonts),
+                [0.03, 0.03, 0.03, 1.0],
+            ),
         }
     }
 }
@@ -240,12 +249,15 @@ impl ApplicationHandler for App {
                     let window = Arc::new(window);
                     let sz = window.inner_size();
                     self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
-                    let (ui_elements, clear_color) = self.get_current_ui_elements();
-                    let initial_screen = self.build_screen(&ui_elements, clear_color);
 
-                    match create_backend(self.backend_type, window.clone(), &initial_screen, self.vsync_enabled) {
+                    // Pre-load fonts before building the initial screen.
+                    // This is a temporary move; ideally, backend creation doesn't need a screen.
+                    // But first, we need the backend to load the font atlas texture.
+                    let temp_screen = self.build_screen(&[], [0.0; 4]); // Dummy screen
+
+                    match create_backend(self.backend_type, window.clone(), &temp_screen, self.vsync_enabled) {
                         Ok(backend) => {
-                            self.window = Some(window);
+                            self.window = Some(window.clone());
                             self.backend = Some(backend);
                             if let Err(e) = self.load_textures() {
                                 error!("Failed to load textures: {}", e);
@@ -257,6 +269,18 @@ impl ApplicationHandler for App {
                                 event_loop.exit();
                                 return;
                             }
+
+                            // Now with fonts loaded, build the REAL initial screen.
+                            let (ui_elements, clear_color) = self.get_current_ui_elements();
+                            let initial_screen = self.build_screen(&ui_elements, clear_color);
+                            if let Some(b) = &mut self.backend {
+                                if let Err(e) = renderer::load_screen(b, &initial_screen) {
+                                    error!("Failed to load initial screen data: {}", e);
+                                    event_loop.exit();
+                                    return;
+                                }
+                            }
+
                             info!("Starting event loop...");
                         }
                         Err(e) => {
@@ -391,4 +415,3 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     event_loop.run_app(&mut app)?;
     Ok(())
 }
-

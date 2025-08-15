@@ -189,6 +189,21 @@ pub fn load_font(json_bytes: &[u8], atlas_tex_key: &'static str, px_range_hint: 
     }
 }
 
+impl Font {
+    /// Calculate the rendered width of a single line of text in world units.
+    pub fn measure_line_width(&self, text: &str, pixel_height: f32) -> f32 {
+        if self.line_h == 0.0 { return 0.0; }
+        let scale = pixel_height / self.line_h;
+        let mut width = 0.0;
+        for ch in text.chars() {
+            if ch == '\n' { continue; } // single-line
+            let advance = self.glyphs.get(&ch).map(|g| g.xadv).unwrap_or(self.space_advance);
+            width += advance * scale;
+        }
+        width
+    }
+}
+
 /// A positioned, sized glyph quad plus its atlas UV mapping.
 pub struct LaidGlyph {
     pub center: Vector2<f32>,
