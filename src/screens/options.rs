@@ -37,7 +37,7 @@ pub fn get_ui_elements(
     const FG: [f32; 4] = [0.90, 0.90, 1.00, 1.0];
     let title = "OPTIONS";
 
-    // Full-width top bar with centered title
+    // Full-width top bar with centered title (no magic offsets needed)
     actors.push(frame!(
         anchor: TopLeft,
         offset: [0, 0],
@@ -45,8 +45,8 @@ pub fn get_ui_elements(
         bg_color: BG,
         children: [
             text!(
-                anchor: TopCenter,
-                offset: [0, BAR_H * 0.5 + TITLE_PX * 0.35],
+                anchor: Center,
+                offset: [0, 0],
                 align:  Center,
                 px:     TITLE_PX,
                 color:  FG,
@@ -64,7 +64,7 @@ pub fn get_ui_elements(
     // New text message using the "miso" font
     actors.push(text!(
         anchor: BottomCenter,
-        offset: [0, -100], // 100px up from the absolute bottom
+        offset: [0, -100],
         align: Center,
         px: 60.0,
         font: "miso",
@@ -72,5 +72,5 @@ pub fn get_ui_elements(
         text: "This is miso font!"
     ));
 
-    actors::build_actors(&actors, m, fonts)
+    crate::ui::actors::build_actors(&actors, m, fonts)
 }

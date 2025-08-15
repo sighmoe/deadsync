@@ -130,24 +130,82 @@ fn place_text_baseline(
     offset: [f32; 2],
     align: TextAlign,
     measured_width: f32,
+    font: &msdf::Font,
+    content: &str,
+    pixel_height: f32,
     m: &Metrics,
 ) -> Vector2<f32> {
     let (rx, ry) = anchor_ref(parent, anchor);
 
+    // Horizontal alignment: Left / Center / Right
     let align_offset = match align {
-        TextAlign::Left => 0.0,
+        TextAlign::Left   => 0.0,
         TextAlign::Center => -0.5 * measured_width,
-        TextAlign::Right => -measured_width,
+        TextAlign::Right  => -measured_width,
+    };
+
+    // Exact ascender/descender for THIS line (no heuristics)
+    let (asc, desc) = line_extents_px(font, content, pixel_height);
+    let line_h_px = asc + desc;
+
+    // Convert anchor edge/center back to a baseline y in SM top-left space.
+    let baseline_sm_y = match anchor {
+        // Top edge + ascender moves us down to baseline
+        Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => ry + offset[1] + asc,
+
+        // Center line + (asc - half line height) moves to baseline
+        Anchor::CenterLeft | Anchor::Center | Anchor::CenterRight => ry + offset[1] + asc - 0.5 * line_h_px,
+
+        // Bottom edge - descender moves up to baseline
+        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => ry + offset[1] - desc,
     };
 
     let left_sm_x = rx + offset[0] + align_offset;
-    let baseline_sm_y = ry + offset[1];
 
     let world_x = m.left + left_sm_x;
-    let world_y = m.top - baseline_sm_y;
-
+    let world_y = m.top  - baseline_sm_y;
     Vector2::new(world_x, world_y)
-} 
+}
+
+#[inline(always)]
+fn line_extents_px(font: &msdf::Font, text: &str, pixel_height: f32) -> (f32, f32) {
+    if pixel_height <= 0.0 || font.line_h == 0.0 || text.is_empty() {
+        return (0.0, 0.0);
+    }
+    let s = pixel_height / font.line_h;
+
+    // Track minimum "top" (can be negative = above baseline) and maximum "bottom" (positive = below).
+    let mut any = false;
+    let mut min_top = 0.0_f32;
+    let mut max_bottom = 0.0_f32;
+
+    for ch in text.chars() {
+        if ch == '\n' { continue; }
+        if let Some(g) = font.glyphs.get(&ch) {
+            // In your loader: yoff = -pb.top (down-positive). plane_h >= 0.
+            let top_rel_down     = g.yoff * s;                 // distance from baseline to glyph top (down-positive)
+            let bottom_rel_down  = g.yoff * s + g.plane_h * s; // baseline to bottom (down-positive)
+            if !any {
+                min_top = top_rel_down;
+                max_bottom = bottom_rel_down;
+                any = true;
+            } else {
+                if top_rel_down < min_top { min_top = top_rel_down; }
+                if bottom_rel_down > max_bottom { max_bottom = bottom_rel_down; }
+            }
+        }
+    }
+
+    if !any {
+        return (0.0, 0.0);
+    }
+
+    // Ascender: distance ABOVE baseline (positive), so negate the most-negative top.
+    // Descender: distance BELOW baseline (positive).
+    let asc_px  = (-min_top).max(0.0);
+    let desc_px =  max_bottom.max(0.0);
+    (asc_px, desc_px)
+}
 
 pub fn build_actors(
     actors: &[Actor],
@@ -181,8 +239,17 @@ fn build_actor_recursive(
         Actor::Text { anchor, offset, size: _, px, color, font, content, align } => {
             if let Some(font_metrics) = fonts.get(font) {
                 let measured_width = font_metrics.measure_line_width(content, *px);
-                let origin =
-                    place_text_baseline(parent, *anchor, *offset, *align, measured_width, m);
+                let origin = place_text_baseline(
+                    parent,
+                    *anchor,
+                    *offset,
+                    *align,
+                    measured_width,
+                    font_metrics,
+                    content,
+                    *px,
+                    m,
+                );
 
                 vec![UIElement::Text(UiText {
                     origin,
@@ -210,7 +277,7 @@ fn build_actor_recursive(
                     }
                 }
             }
-            
+
             elements.extend(
                 children
                     .iter()
