@@ -118,9 +118,12 @@ fn place_rect(parent: SmRect, anchor: Anchor, offset: [f32; 2], size: SizeSpec) 
 // Convert SM rect to world center/size.
 #[inline(always)]
 fn sm_rect_to_world(rect: SmRect, m: &Metrics) -> (Vector2<f32>, Vector2<f32>) {
-    let cx = m.left + rect.x + 0.5 * rect.w;
-    let cy = m.top - (rect.y + 0.5 * rect.h);
-    (Vector2::new(cx, cy), Vector2::new(rect.w, rect.h))
+    let (center, size) =
+        crate::ui::build::sm_rect_to_center_size(rect.x, rect.y, rect.w, rect.h, m);
+    (
+        Vector2::new(center[0], size[1] * 0.0 + center[1]), // avoid reordering, stay explicit
+        Vector2::new(size[0],   size[1]),
+    )
 }
 
 #[inline(always)]
