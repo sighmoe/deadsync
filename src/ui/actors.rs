@@ -78,46 +78,35 @@ fn resolve_size(spec: SizeSpec, parent: SmRect) -> (f32, f32) {
     }
 }
 
-// Anchor reference point inside a parent rect (top-left space).
 #[inline(always)]
 fn anchor_ref(parent: SmRect, anchor: Anchor) -> (f32, f32) {
-    let rx = match anchor {
-        Anchor::TopLeft | Anchor::CenterLeft | Anchor::BottomLeft => parent.x,
-        Anchor::TopCenter | Anchor::Center | Anchor::BottomCenter => parent.x + 0.5 * parent.w,
-        Anchor::TopRight | Anchor::CenterRight | Anchor::BottomRight => parent.x + parent.w,
-    };
-    let ry = match anchor {
-        Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => parent.y,
-        Anchor::CenterLeft | Anchor::Center | Anchor::CenterRight => parent.y + 0.5 * parent.h,
-        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => parent.y + parent.h,
-    };
-    (rx, ry)
+    let (fx, fy) = anchor_factors(anchor);
+    (parent.x + fx * parent.w, parent.y + fy * parent.h)
 }
 
+/// Single canonical mapping from `Anchor` to alignment factors.
+/// (0.0 = start, 0.5 = center, 1.0 = end), for both axes.
 #[inline(always)]
-fn horiz_align_factor(anchor: Anchor) -> f32 {
+const fn anchor_factors(anchor: Anchor) -> (f32, f32) {
     match anchor {
-        Anchor::TopLeft | Anchor::CenterLeft | Anchor::BottomLeft => 0.0,
-        Anchor::TopCenter | Anchor::Center | Anchor::BottomCenter => 0.5,
-        Anchor::TopRight | Anchor::CenterRight | Anchor::BottomRight => 1.0,
-    }
-}
-#[inline(always)]
-fn vert_align_factor(anchor: Anchor) -> f32 {
-    match anchor {
-        Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => 0.0,
-        Anchor::CenterLeft | Anchor::Center | Anchor::CenterRight => 0.5,
-        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => 1.0,
+        Anchor::TopLeft      => (0.0, 0.0),
+        Anchor::TopCenter    => (0.5, 0.0),
+        Anchor::TopRight     => (1.0, 0.0),
+        Anchor::CenterLeft   => (0.0, 0.5),
+        Anchor::Center       => (0.5, 0.5),
+        Anchor::CenterRight  => (1.0, 0.5),
+        Anchor::BottomLeft   => (0.0, 1.0),
+        Anchor::BottomCenter => (0.5, 1.0),
+        Anchor::BottomRight  => (1.0, 1.0),
     }
 }
 
-// Place a rectangle (for quads/sprites) using SM top-left coords.
 #[inline(always)]
 fn place_rect(parent: SmRect, anchor: Anchor, offset: [f32; 2], size: SizeSpec) -> SmRect {
     let (w, h) = resolve_size(size, parent);
     let (rx, ry) = anchor_ref(parent, anchor);
-    let ax = horiz_align_factor(anchor);
-    let ay = vert_align_factor(anchor);
+    let (ax, ay) = anchor_factors(anchor);
+
     SmRect {
         x: rx + offset[0] - ax * w,
         y: ry + offset[1] - ay * h,
