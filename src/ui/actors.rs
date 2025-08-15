@@ -115,13 +115,12 @@ fn place_rect(parent: SmRect, anchor: Anchor, offset: [f32; 2], size: SizeSpec) 
     }
 }
 
-// Convert SM rect to world center/size.
 #[inline(always)]
 fn sm_rect_to_world(rect: SmRect, m: &Metrics) -> (Vector2<f32>, Vector2<f32>) {
     let (center, size) =
         crate::ui::build::sm_rect_to_center_size(rect.x, rect.y, rect.w, rect.h, m);
     (
-        Vector2::new(center[0], size[1] * 0.0 + center[1]), // avoid reordering, stay explicit
+        Vector2::new(center[0], center[1]),
         Vector2::new(size[0],   size[1]),
     )
 }
@@ -216,10 +215,11 @@ pub fn build_actors(
     fonts: &HashMap<&'static str, msdf::Font>,
 ) -> Vec<UIElement> {
     let root = root_rect(m);
-    actors
-        .iter()
-        .flat_map(|actor| build_actor_recursive(actor, root, m, fonts))
-        .collect()
+    let mut out = Vec::with_capacity(estimate_elements(actors));
+    for a in actors {
+        build_actor_recursive(a, root, m, fonts, &mut out);
+    }
+    out
 }
 
 fn build_actor_recursive(
@@ -227,68 +227,64 @@ fn build_actor_recursive(
     parent: SmRect,
     m: &Metrics,
     fonts: &HashMap<&'static str, msdf::Font>,
-) -> Vec<UIElement> {
+    out: &mut Vec<UIElement>,
+) {
     match actor {
         Actor::Quad { anchor, offset, size, color } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
             let (center, size) = sm_rect_to_world(rect, m);
-            vec![UIElement::Quad(UiQuad { center, size, color: *color })]
+            out.push(UIElement::Quad(UiQuad { center, size, color: *color }));
         }
         Actor::Sprite { anchor, offset, size, texture } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
             let (center, size) = sm_rect_to_world(rect, m);
-            vec![UIElement::Sprite(UiSprite { center, size, texture_id: *texture })]
+            out.push(UIElement::Sprite(UiSprite { center, size, texture_id: *texture }));
         }
         Actor::Text { anchor, offset, size: _, px, color, font, content, align } => {
             if let Some(font_metrics) = fonts.get(font) {
                 let measured_width = font_metrics.measure_line_width(content, *px);
                 let origin = place_text_baseline(
-                    parent,
-                    *anchor,
-                    *offset,
-                    *align,
-                    measured_width,
-                    font_metrics,
-                    content,
-                    *px,
-                    m,
+                    parent, *anchor, *offset, *align, measured_width, font_metrics, content, *px, m,
                 );
-
-                vec![UIElement::Text(UiText {
+                out.push(UIElement::Text(UiText {
                     origin,
                     pixel_height: *px,
                     color: *color,
                     font_id: *font,
                     content: content.clone(),
-                })]
-            } else {
-                vec![]
+                }));
             }
         }
         Actor::Frame { anchor, offset, size, children, background } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
-            let mut elements = Vec::new();
 
             if let Some(bg) = background {
                 let (center, size) = sm_rect_to_world(rect, m);
                 match bg {
-                    Background::Color(color) => {
-                        elements.push(UIElement::Quad(UiQuad { center, size, color: *color }));
-                    }
-                    Background::Texture(texture_id) => {
-                        elements.push(UIElement::Sprite(UiSprite { center, size, texture_id }));
-                    }
+                    Background::Color(color) => out.push(UIElement::Quad(UiQuad { center, size, color: *color })),
+                    Background::Texture(texture_id) => out.push(UIElement::Sprite(UiSprite { center, size, texture_id })),
                 }
             }
 
-            elements.extend(
-                children
-                    .iter()
-                    .flat_map(|child| build_actor_recursive(child, rect, m, fonts)),
-            );
-            elements
+            for child in children {
+                build_actor_recursive(child, rect, m, fonts, out);
+            }
         }
     }
+}
+
+#[inline(always)]
+fn estimate_elements(actors: &[Actor]) -> usize {
+    fn count(a: &Actor) -> usize {
+        match a {
+            Actor::Quad { .. } | Actor::Sprite { .. } | Actor::Text { .. } => 1,
+            Actor::Frame { children, background, .. } => {
+                let bg = if background.is_some() { 1 } else { 0 };
+                bg + children.iter().map(count).sum::<usize>()
+            }
+        }
+    }
+    actors.iter().map(count).sum()
 }
 
 /* -------------------- DSL MACROS -------------------- */

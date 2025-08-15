@@ -64,7 +64,10 @@ pub fn expand_ui_to_objects(
     elements: &[api::UIElement],
     fonts: &HashMap<&'static str, msdf::Font>,
 ) -> Vec<renderer::ScreenObject> {
-    let mut objects = Vec::with_capacity(elements.len());
+    use cgmath::{Matrix4, Vector3};
+
+    let mut objects = Vec::with_capacity(estimate_object_count(elements, fonts));
+
     for e in elements {
         match e {
             api::UIElement::Quad(q) => {
@@ -105,4 +108,32 @@ pub fn expand_ui_to_objects(
         }
     }
     objects
+}
+
+#[inline(always)]
+fn estimate_object_count(
+    elements: &[api::UIElement],
+    fonts: &HashMap<&'static str, msdf::Font>,
+) -> usize {
+    let mut total = 0usize;
+    for e in elements {
+        match e {
+            api::UIElement::Quad(_) | api::UIElement::Sprite(_) => total += 1,
+            api::UIElement::Text(t) => {
+                if let Some(font) = fonts.get(t.font_id) {
+                    let mut n = 0usize;
+                    for ch in t.content.chars() {
+                        if ch == '\n' { continue; }
+                        if let Some(g) = font.glyphs.get(&ch) {
+                            if g.plane_w > 0.0 && g.plane_h > 0.0 {
+                                n += 1;
+                            }
+                        }
+                    }
+                    total += n;
+                }
+            }
+        }
+    }
+    total
 }
