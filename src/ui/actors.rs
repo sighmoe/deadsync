@@ -5,12 +5,14 @@ use crate::ui::primitives::{Quad as UiQuad, Sprite as UiSprite, Text as UiText, 
 use cgmath::Vector2;
 use std::collections::HashMap;
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Background {
     Color([f32; 4]),
     Texture(&'static str),
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Default)]
 pub enum TextAlign {
     #[default]
@@ -19,6 +21,7 @@ pub enum TextAlign {
     Right,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub enum Anchor {
     TopLeft, TopCenter, TopRight,
@@ -26,6 +29,7 @@ pub enum Anchor {
     BottomLeft, BottomCenter, BottomRight,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub enum SizeSpec {
     Px { w: f32, h: f32 },
@@ -39,7 +43,6 @@ pub enum Actor {
     Text {
         anchor: Anchor,
         offset: [f32; 2],
-        size: SizeSpec,
         px: f32,
         color: [f32; 4],
         font: &'static str,
@@ -240,11 +243,11 @@ fn build_actor_recursive(
             let (center, size) = sm_rect_to_world(rect, m);
             out.push(UIElement::Sprite(UiSprite { center, size, texture_id: *texture }));
         }
-        Actor::Text { anchor, offset, size: _, px, color, font, content, align } => {
+        Actor::Text { anchor, offset, px, color, font, content, align } => {
             if let Some(font_metrics) = fonts.get(font) {
-                let measured_width = font_metrics.measure_line_width(content, *px);
+                let measured = font_metrics.measure_line_width(content, *px);
                 let origin = place_text_baseline(
-                    parent, *anchor, *offset, *align, measured_width, font_metrics, content, *px, m,
+                    parent, *anchor, *offset, *align, measured, font_metrics, content, *px, m,
                 );
                 out.push(UIElement::Text(UiText {
                     origin,
@@ -287,20 +290,22 @@ fn estimate_elements(actors: &[Actor]) -> usize {
     actors.iter().map(count).sum()
 }
 
-/* -------------------- DSL MACROS -------------------- */
+// ---- DSL MACROS (warning-free, Option-based) ----
 
 #[macro_export]
 macro_rules! quad {
     ( $( $k:ident : $v:tt ),* $(,)? ) => {{
-        let mut anchor = $crate::ui::actors::Anchor::TopLeft;
-        let mut offset = [0.0_f32, 0.0_f32];
-        let mut size   = $crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 };
-        let mut color  = [1.0_f32, 1.0, 1.0, 1.0];
+        let mut anchor: Option<$crate::ui::actors::Anchor>     = None;
+        let mut offset: Option<[f32; 2]>                       = None;
+        let mut size:   Option<$crate::ui::actors::SizeSpec>   = None;
+        let mut color:  Option<[f32; 4]>                       = None;
 
-        $(
-            $crate::__assign_quad_kv!([anchor, offset, size, color] $k : $v);
-        )*
+        $( $crate::__assign_quad_kv_opt!([anchor, offset, size, color] $k : $v); )*
 
+        let anchor = anchor.unwrap_or($crate::ui::actors::Anchor::TopLeft);
+        let offset = offset.unwrap_or([0.0_f32, 0.0_f32]);
+        let size   = size  .unwrap_or($crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 });
+        let color  = color .unwrap_or([1.0_f32, 1.0, 1.0, 1.0]);
         $crate::ui::actors::Actor::Quad { anchor, offset, size, color }
     }};
 }
@@ -308,15 +313,17 @@ macro_rules! quad {
 #[macro_export]
 macro_rules! sprite {
     ( $( $k:ident : $v:tt ),* $(,)? ) => {{
-        let mut anchor  = $crate::ui::actors::Anchor::TopLeft;
-        let mut offset  = [0.0_f32, 0.0_f32];
-        let mut size    = $crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 };
-        let mut texture = "";
+        let mut anchor:  Option<$crate::ui::actors::Anchor>     = None;
+        let mut offset:  Option<[f32; 2]>                       = None;
+        let mut size:    Option<$crate::ui::actors::SizeSpec>   = None;
+        let mut texture: Option<&'static str>                   = None;
 
-        $(
-            $crate::__assign_sprite_kv!([anchor, offset, size, texture] $k : $v);
-        )*
+        $( $crate::__assign_sprite_kv_opt!([anchor, offset, size, texture] $k : $v); )*
 
+        let anchor  = anchor .unwrap_or($crate::ui::actors::Anchor::TopLeft);
+        let offset  = offset .unwrap_or([0.0_f32, 0.0_f32]);
+        let size    = size   .unwrap_or($crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 });
+        let texture = texture.unwrap_or("");
         $crate::ui::actors::Actor::Sprite { anchor, offset, size, texture }
     }};
 }
@@ -324,120 +331,120 @@ macro_rules! sprite {
 #[macro_export]
 macro_rules! text {
     ( $( $k:ident : $v:tt ),* $(,)? ) => {{
-        let mut anchor  = $crate::ui::actors::Anchor::TopLeft;
-        let mut offset  = [0.0_f32, 0.0_f32];
-        let mut size    = $crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 };
-        let mut px      = 32.0_f32;
-        let mut color   = [1.0_f32, 1.0, 1.0, 1.0];
-        let mut font    = "wendy";
-        let mut content = String::new();
-        let mut align   = $crate::ui::actors::TextAlign::default();
+        let mut anchor:  Option<$crate::ui::actors::Anchor>     = None;
+        let mut offset:  Option<[f32; 2]>                       = None;
+        let mut px:      Option<f32>                            = None;
+        let mut color:   Option<[f32; 4]>                       = None;
+        let mut font:    Option<&'static str>                   = None;
+        let mut content: Option<String>                         = None;
+        let mut align:   Option<$crate::ui::actors::TextAlign>  = None;
 
-        $(
-            $crate::__assign_text_kv!([anchor, offset, size, px, color, font, content, align] $k : $v);
-        )*
+        $( $crate::__assign_text_kv_opt!([anchor, offset, px, color, font, content, align] $k : $v); )*
 
-        $crate::ui::actors::Actor::Text { anchor, offset, size, px, color, font, content, align }
+        let anchor  = anchor .unwrap_or($crate::ui::actors::Anchor::TopLeft);
+        let offset  = offset .unwrap_or([0.0_f32, 0.0_f32]);
+        let px      = px     .unwrap_or(32.0);
+        let color   = color  .unwrap_or([1.0, 1.0, 1.0, 1.0]);
+        let font    = font   .unwrap_or("wendy");
+        let content = content.unwrap_or_else(String::new);
+        let align   = align  .unwrap_or_default();
+
+        // NOTE: no `size` here — Actor::Text doesn't have it.
+        $crate::ui::actors::Actor::Text { anchor, offset, px, color, font, content, align }
     }};
 }
 
 #[macro_export]
 macro_rules! frame {
     ( $( $k:ident : $v:tt ),* $(,)? ) => {{
-        let mut anchor   = $crate::ui::actors::Anchor::TopLeft;
-        let mut offset   = [0.0_f32, 0.0_f32];
-        let mut size     = $crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 };
-        let mut children: ::std::vec::Vec<$crate::ui::actors::Actor> = ::std::vec![];
-        let mut background: Option<$crate::ui::actors::Background> = None;
+        let mut anchor:     Option<$crate::ui::actors::Anchor>      = None;
+        let mut offset:     Option<[f32; 2]>                        = None;
+        let mut size:       Option<$crate::ui::actors::SizeSpec>    = None;
+        let mut children:   Option<::std::vec::Vec<$crate::ui::actors::Actor>> = None;
+        let mut background: Option<$crate::ui::actors::Background>  = None;
 
-        $(
-            $crate::__assign_frame_kv!([anchor, offset, size, children, background] $k : $v);
-        )*
+        $( $crate::__assign_frame_kv_opt!([anchor, offset, size, children, background] $k : $v); )*
 
+        let anchor     = anchor    .unwrap_or($crate::ui::actors::Anchor::TopLeft);
+        let offset     = offset    .unwrap_or([0.0_f32, 0.0_f32]);
+        let size       = size      .unwrap_or($crate::ui::actors::SizeSpec::Px { w: 0.0, h: 0.0 });
+        let children   = children  .unwrap_or_else(::std::vec::Vec::new);
+        let background = background;
         $crate::ui::actors::Actor::Frame { anchor, offset, size, children, background }
     }};
 }
 
-/* -------------------- KV helpers (exported) -------------------- */
+// ---- helpers for the Option-based macros ----
 
 #[macro_export]
-macro_rules! __assign_anchor {
-    ( $var:ident = $name:ident ) => {
-        $var = $crate::ui::actors::Anchor::$name;
+macro_rules! __actor_common_props_opt {
+    ( [ $a:ident, $o:ident, $s:ident ] anchor : $v:ident ) => {
+        $a = Some($crate::ui::actors::Anchor::$v);
+    };
+    ( [ $a:ident, $o:ident, $s:ident ] offset : [ $x:expr , $y:expr ] ) => {
+        $o = Some([ ($x) as f32, ($y) as f32 ]);
+    };
+    ( [ $a:ident, $o:ident, $s:ident ] size   : [ $w:expr , $h:expr ] ) => {
+        $s = Some($crate::ui::actors::SizeSpec::Px { w: ($w) as f32, h: ($h) as f32 });
+    };
+    ( [ $a:ident, $o:ident, $s:ident ] fill   : true ) => {
+        $s = Some($crate::ui::actors::SizeSpec::Fill);
     };
 }
 
 #[macro_export]
-macro_rules! __assign_size {
-    ( $var:ident = [ $w:expr , $h:expr ] ) => {
-        $var = $crate::ui::actors::SizeSpec::Px { w: ($w) as f32, h: ($h) as f32 };
+macro_rules! __assign_quad_kv_opt {
+    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] color : [ $r:expr , $g:expr , $b:expr , $a4:expr ] ) => {
+        $c = Some([ ($r) as f32, ($g) as f32, ($b) as f32, ($a4) as f32 ]);
     };
-}
-
-#[macro_export]
-macro_rules! __actor_common_props {
-    ( [ $a:ident, $o:ident, $s:ident ] anchor : $v:ident ) => { $crate::__assign_anchor!($a = $v); };
-    ( [ $a:ident, $o:ident, $s:ident ] offset : [ $x:expr , $y:expr ] ) => { $o = [ ($x) as f32, ($y) as f32 ]; };
-    ( [ $a:ident, $o:ident, $s:ident ] size   : [ $w:expr , $h:expr ] ) => { $crate::__assign_size!($s = [ $w , $h ]); };
-    ( [ $a:ident, $o:ident, $s:ident ] fill   : true ) => { $s = $crate::ui::actors::SizeSpec::Fill; };
-}
-
-#[macro_export]
-macro_rules! __assign_quad_kv {
-    // Quad-specific properties (MUST COME FIRST)
-    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] color  : [ $r:expr , $g:expr , $b:expr , $a4:expr ] ) => {
-        $c = [ ($r) as f32, ($g) as f32, ($b) as f32, ($a4) as f32 ];
+    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] color : $expr:expr ) => {
+        $c = Some($expr);
     };
-    ( [ $a:ident, $o:ident, $s:ident, $c:ident ] color  : $expr:expr ) => {
-        $c = $expr;
-    };
-    // Delegate common properties (catch-all MUST COME LAST)
     ( [ $a:ident, $o:ident, $s:ident, $c:ident ] $k:ident : $v:tt ) => {
-        $crate::__actor_common_props!([$a, $o, $s] $k: $v);
+        $crate::__actor_common_props_opt!([$a, $o, $s] $k: $v);
     };
 }
 
 #[macro_export]
-macro_rules! __assign_sprite_kv {
-    // Sprite-specific properties (MUST COME FIRST)
-    ( [ $a:ident, $o:ident, $s:ident, $t:ident ] texture : $tex:expr ) => { $t = $tex; };
-    // Delegate common properties (catch-all MUST COME LAST)
+macro_rules! __assign_sprite_kv_opt {
+    ( [ $a:ident, $o:ident, $s:ident, $t:ident ] texture : $tex:expr ) => { $t = Some($tex); };
     ( [ $a:ident, $o:ident, $s:ident, $t:ident ] $k:ident : $v:tt ) => {
-        $crate::__actor_common_props!([$a, $o, $s] $k: $v);
+        $crate::__actor_common_props_opt!([$a, $o, $s] $k: $v);
     };
 }
 
 #[macro_export]
-macro_rules! __assign_text_kv {
-    // Text-specific properties (MUST COME FIRST)
-    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] px     : $v:expr ) => { $px = ($v) as f32; };
-    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] color  : [ $r:expr , $g:expr , $b:expr , $a4:expr ] ) => {
-        $c = [ ($r) as f32, ($g) as f32, ($b) as f32, ($a4) as f32 ];
+macro_rules! __assign_text_kv_opt {
+    // text-specific
+    ( [ $a:ident, $o:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] px    : $v:expr ) => { $px = Some(($v) as f32); };
+    ( [ $a:ident, $o:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] color : [ $r:expr , $g:expr , $b:expr , $a4:expr ] ) => {
+        $c = Some([ ($r) as f32, ($g) as f32, ($b) as f32, ($a4) as f32 ]);
     };
-    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] color  : $expr:expr ) => { $c = $expr; };
-    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] font   : $name:expr ) => { $f = $name; };
-    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] text   : $val:expr ) => { $t = ($val).to_string(); };
-    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] align  : $v:ident ) => { $al = $crate::ui::actors::TextAlign::$v; };
-    // Delegate common properties (catch-all MUST COME LAST)
-    ( [ $a:ident, $o:ident, $s:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] $k:ident : $v:tt ) => {
-        $crate::__actor_common_props!([$a, $o, $s] $k: $v);
+    ( [ $a:ident, $o:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] color : $expr:expr ) => { $c = Some($expr); };
+    ( [ $a:ident, $o:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] font  : $name:expr ) => { $f = Some($name); };
+    ( [ $a:ident, $o:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] text  : $val:expr ) => { $t = Some(($val).to_string()); };
+    ( [ $a:ident, $o:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] align : $v:ident ) => { $al = Some($crate::ui::actors::TextAlign::$v); };
+    // anchor/offset (no size for text)
+    ( [ $a:ident, $o:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] anchor : $v:ident ) => { $a = Some($crate::ui::actors::Anchor::$v); };
+    ( [ $a:ident, $o:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] offset : [ $x:expr , $y:expr ] ) => { $o = Some([ ($x) as f32, ($y) as f32 ]); };
+    // catch-alls (helps spot typos)
+    ( [ $a:ident, $o:ident, $px:ident, $c:ident, $f:ident, $t:ident, $al:ident ] $k:ident : $v:tt ) => {
+        compile_error!(concat!("Unknown key for text!: ", stringify!($k)));
     };
 }
 
 #[macro_export]
-macro_rules! __assign_frame_kv {
-    // Frame-specific properties (MUST COME FIRST)
-    ( [ $a:ident, $o:ident, $s:ident, $ch:ident, $b:ident ] children : [ $( $child:expr ),* $(,)? ] ) => {
-        $ch = ::std::vec![ $( $child ),* ];
+macro_rules! __assign_frame_kv_opt {
+    ( [ $a:ident, $o:ident, $s:ident, $ch:ident, $b:ident ] children  : [ $( $child:expr ),* $(,)? ] ) => {
+        $ch = Some(::std::vec![ $( $child ),* ]);
     };
-    ( [ $a:ident, $o:ident, $s:ident, $ch:ident, $b:ident ] bg_color : $expr:expr ) => {
+    ( [ $a:ident, $o:ident, $s:ident, $ch:ident, $b:ident ] bg_color  : $expr:expr ) => {
         $b = Some($crate::ui::actors::Background::Color($expr));
     };
-    ( [ $a:ident, $o:ident, $s:ident, $ch:ident, $b:ident ] bg_texture : $tex:expr ) => {
+    ( [ $a:ident, $o:ident, $s:ident, $ch:ident, $b:ident ] bg_texture: $tex:expr ) => {
         $b = Some($crate::ui::actors::Background::Texture($tex));
     };
-    // Delegate common properties (catch-all MUST COME LAST)
     ( [ $a:ident, $o:ident, $s:ident, $ch:ident, $b:ident ] $k:ident : $v:tt ) => {
-        $crate::__actor_common_props!([$a, $o, $s] $k: $v);
+        $crate::__actor_common_props_opt!([$a, $o, $s] $k: $v);
     };
 }

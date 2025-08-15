@@ -23,15 +23,15 @@ pub fn wide_scale(v_4_3: f32, v_16_9: f32, m: &Metrics) -> f32 {
     v_4_3 + t * (v_16_9 - v_4_3)
 }
 
-#[inline(always)] pub fn screen_left(_m: &Metrics)   -> f32 { 0.0 }
-#[inline(always)] pub fn screen_top(_m: &Metrics)    -> f32 { 0.0 }
-#[inline(always)] pub fn screen_right(m: &Metrics)   -> f32 { screen_width(m) }
-#[inline(always)] pub fn screen_bottom(m: &Metrics)  -> f32 { screen_height(m) }
+#[allow(dead_code)]#[inline(always)] pub fn screen_left(_m: &Metrics)   -> f32 { 0.0 }
+#[allow(dead_code)]#[inline(always)] pub fn screen_top(_m: &Metrics)    -> f32 { 0.0 }
+#[allow(dead_code)]#[inline(always)] pub fn screen_right(m: &Metrics)   -> f32 { screen_width(m) }
+#[allow(dead_code)]#[inline(always)] pub fn screen_bottom(m: &Metrics)  -> f32 { screen_height(m) }
 
-#[inline(always)] pub fn from_left(px: f32, _m: &Metrics)  -> f32 { px }
-#[inline(always)] pub fn from_top(px: f32, _m: &Metrics)   -> f32 { px }
-#[inline(always)] pub fn from_right(px: f32, m: &Metrics)  -> f32 { screen_width(m)  - px }
-#[inline(always)] pub fn from_bottom(px: f32, m: &Metrics) -> f32 { screen_height(m) - px }
+#[allow(dead_code)]#[inline(always)] pub fn from_left(px: f32, _m: &Metrics)  -> f32 { px }
+#[allow(dead_code)]#[inline(always)] pub fn from_top(px: f32, _m: &Metrics)   -> f32 { px }
+#[allow(dead_code)]#[inline(always)] pub fn from_right(px: f32, m: &Metrics)  -> f32 { screen_width(m)  - px }
+#[allow(dead_code)]#[inline(always)] pub fn from_bottom(px: f32, m: &Metrics) -> f32 { screen_height(m) - px }
 
 #[inline(always)]
 pub fn sm_point_to_world(x_tl: f32, y_tl: f32, m: &Metrics) -> [f32; 2] {
@@ -64,7 +64,6 @@ pub fn expand_ui_to_objects(
     elements: &[api::UIElement],
     fonts: &HashMap<&'static str, msdf::Font>,
 ) -> Vec<renderer::ScreenObject> {
-    use cgmath::{Matrix4, Vector3};
 
     let mut objects = Vec::with_capacity(estimate_object_count(elements, fonts));
 
