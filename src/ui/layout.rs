@@ -57,69 +57,61 @@ fn build_actor_recursive(
     match actor {
         Actor::Quad { anchor, offset, size, color } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
-            let (center, size) = sm_rect_to_world_center_size(rect, m);
-            let t = Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0))
-                * Matrix4::from_nonuniform_scale(size.x, size.y, 1.0);
-            out.push(renderer::ScreenObject {
-                object_type: renderer::ObjectType::SolidColor { color: *color },
-                transform: t,
-            });
+            push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *color });
         }
+
         Actor::Sprite { anchor, offset, size, texture } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
-            let (center, size) = sm_rect_to_world_center_size(rect, m);
-            let t = Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0))
-                * Matrix4::from_nonuniform_scale(size.x, size.y, 1.0);
-            out.push(renderer::ScreenObject {
-                object_type: renderer::ObjectType::Textured { texture_id: *texture },
-                transform: t,
-            });
+            push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *texture });
         }
+
         Actor::Text { anchor, offset, px, color, font, content, align } => {
-            if let Some(font_metrics) = fonts.get(font) {
-                let measured = font_metrics.measure_line_width(content, *px);
+            if let Some(fm) = fonts.get(font) {
+                // Measure once for alignment, then layout.
+                let measured = fm.measure_line_width(content, *px);
                 let origin = place_text_baseline(
-                    parent, *anchor, *offset, *align, measured, font_metrics, content, *px, m,
+                    parent, *anchor, *offset, *align, measured, fm, content, *px, m,
                 );
 
-                let laid_glyphs = msdf::layout_line(font_metrics, content, *px, origin);
-                for g in laid_glyphs {
+                // Layout glyphs and emit quads (MSDF).
+                for g in msdf::layout_line(fm, content, *px, origin) {
                     let t = Matrix4::from_translation(Vector3::new(g.center.x, g.center.y, 0.0))
                         * Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
                     out.push(renderer::ScreenObject {
                         object_type: renderer::ObjectType::MsdfGlyph {
-                            texture_id: font_metrics.atlas_tex_key,
+                            texture_id: fm.atlas_tex_key,
                             uv_scale: g.uv_scale,
                             uv_offset: g.uv_offset,
                             color: *color,
-                            px_range: font_metrics.px_range,
+                            px_range: fm.px_range,
                         },
                         transform: t,
                     });
                 }
             }
         }
+
         Actor::Frame { anchor, offset, size, children, background } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
 
             if let Some(bg) = background {
-                let (center, size) = sm_rect_to_world_center_size(rect, m);
-                let t = Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0))
-                    * Matrix4::from_nonuniform_scale(size.x, size.y, 1.0);
-                let object_type = match bg {
-                    actors::Background::Color(color) => renderer::ObjectType::SolidColor { color: *color },
-                    actors::Background::Texture(texture_id) => renderer::ObjectType::Textured { texture_id },
-                };
-                out.push(renderer::ScreenObject { object_type, transform: t });
+                match bg {
+                    actors::Background::Color(c) => {
+                        push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *c });
+                    }
+                    actors::Background::Texture(tex) => {
+                        push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *tex });
+                    }
+                }
             }
 
+            // Recurse into children
             for child in children {
                 build_actor_recursive(child, rect, m, fonts, out);
             }
         }
     }
 }
-
 
 /* ======================= LAYOUT HELPERS ======================= */
 
@@ -143,6 +135,24 @@ fn place_rect(parent: SmRect, anchor: actors::Anchor, offset: [f32; 2], size: [S
         w,
         h,
     }
+}
+
+#[inline(always)]
+fn rect_transform(rect: SmRect, m: &Metrics) -> Matrix4<f32> {
+    // top-left "SM px" rect -> world center/size transform
+    let (center, size) = sm_rect_to_world_center_size(rect, m);
+    Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0))
+        * Matrix4::from_nonuniform_scale(size.x, size.y, 1.0)
+}
+
+#[inline(always)]
+fn push_rect(
+    out: &mut Vec<renderer::ScreenObject>,
+    rect: SmRect,
+    m: &Metrics,
+    object_type: renderer::ObjectType,
+) {
+    out.push(renderer::ScreenObject { object_type, transform: rect_transform(rect, m) });
 }
 
 #[inline(always)]
