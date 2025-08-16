@@ -4,7 +4,7 @@ use crate::core::input::InputState;
 use crate::core::gfx as renderer;
 use crate::core::gfx::{create_backend, BackendType};
 use crate::core::space::{self as space, Metrics};
-use crate::ui::primitives as api;
+use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::screens::{gameplay, menu, options, Screen as CurrentScreen, ScreenAction};
 
@@ -168,36 +168,35 @@ impl App {
         Ok(())
     }
 
-    fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
+    /// Helper to load a single MSDF font asset (JSON + atlas PNG).
+    fn load_font_asset(&mut self, name: &'static str) -> Result<(), Box<dyn Error>> {
         let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
+        let json_path = format!("assets/fonts/{}.json", name);
+        let png_path = format!("assets/fonts/{}.png", name);
+        let atlas_tex_key = Box::leak(png_path.clone().into_boxed_str());
 
-        // Read JSON + atlas for Wendy
-        let json_wendy = std::fs::read("assets/fonts/wendy.json")?;
-        // IMPORTANT: upload atlas as **linear** (no sRGB), and disable mipmaps if your API exposes it
-        let img_wendy = image::open("assets/fonts/wendy.png")?.to_rgba8();
-        let tex_wendy = renderer::create_texture_with_colorspace(
+        // Read JSON and atlas image from disk
+        let json_data = std::fs::read(&json_path)?;
+        let image_data = image::open(&png_path)?.to_rgba8();
+
+        // Upload atlas texture to GPU (must be linear color space for MSDF)
+        let texture = renderer::create_texture_with_colorspace(
             backend,
-            &img_wendy,
+            &image_data,
             renderer::TextureColorSpace::Linear,
         )?;
-        self.texture_manager.insert("wendy.png", tex_wendy);
+        self.texture_manager.insert(atlas_tex_key, texture);
 
-        // `px_range_hint` is only a fallback; real value comes from JSON distanceRange
-        let font_wendy = msdf::load_font(&json_wendy, "wendy.png", /* px_range_hint */ 4.0);
-        self.fonts.insert("wendy", font_wendy);
+        // Parse JSON and store font metrics
+        let font = msdf::load_font(&json_data, atlas_tex_key, 4.0);
+        self.fonts.insert(name, font);
+        info!("Loaded font '{}'", name);
+        Ok(())
+    }
 
-        // Read JSON + atlas for Miso
-        let json_miso = std::fs::read("assets/fonts/miso.json")?;
-        let img_miso = image::open("assets/fonts/miso.png")?.to_rgba8();
-        let tex_miso = renderer::create_texture_with_colorspace(
-            backend,
-            &img_miso,
-            renderer::TextureColorSpace::Linear,
-        )?;
-        self.texture_manager.insert("miso.png", tex_miso);
-        let font_miso = msdf::load_font(&json_miso, "miso.png", 4.0);
-        self.fonts.insert("miso", font_miso);
-
+    fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
+        self.load_font_asset("wendy")?;
+        self.load_font_asset("miso")?;
         Ok(())
     }
 
@@ -211,8 +210,11 @@ impl App {
                 info!("Navigating to screen: {:?}", screen);
                 self.current_screen = screen;
 
-                let (ui_elements, clear_color) = self.get_current_ui_elements();
-                let new_screen_data = create_screen_from_ui(&ui_elements, clear_color, &self.fonts);
+                // When navigating, we only need to rebuild the static screen data if the
+                // underlying renderer requires it (like Vulkan used to). In our new
+                // immediate-mode design, this is a no-op, but the hook remains.
+                let (actors, clear_color) = self.get_current_actors();
+                let new_screen_data = self.build_screen(&actors, clear_color);
                 if let Some(backend) = &mut self.backend {
                     renderer::load_screen(backend, &new_screen_data)?;
                 }
@@ -226,22 +228,22 @@ impl App {
         Ok(())
     }
 
-    fn build_screen(&self, elements: &[api::UIElement], clear_color: [f32;4]) -> renderer::Screen {
-        crate::ui::build::build_screen(elements, clear_color, &self.fonts)
+    fn build_screen(&self, actors: &[Actor], clear_color: [f32; 4]) -> renderer::Screen {
+        crate::ui::layout::build_screen(actors, clear_color, &self.metrics, &self.fonts)
     }
 
-    fn get_current_ui_elements(&self) -> (Vec<api::UIElement>, [f32; 4]) {
+    fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         match self.current_screen {
             CurrentScreen::Menu => (
-                menu::get_ui_elements(&self.menu_state, &self.metrics, &self.fonts),
+                menu::get_actors(&self.menu_state, &self.metrics),
                 [0.03, 0.03, 0.03, 1.0],
             ),
             CurrentScreen::Gameplay => (
-                gameplay::get_ui_elements(&self.gameplay_state, &self.metrics),
+                gameplay::get_actors(&self.gameplay_state),
                 [0.03, 0.03, 0.03, 1.0],
             ),
             CurrentScreen::Options => (
-                options::get_ui_elements(&self.options_state, &self.metrics, &self.fonts),
+                options::get_actors(&self.options_state),
                 [0.03, 0.03, 0.03, 1.0],
             ),
         }
@@ -283,8 +285,8 @@ impl ApplicationHandler for App {
                             }
 
                             // Now with fonts loaded, build the REAL initial screen.
-                            let (ui_elements, clear_color) = self.get_current_ui_elements();
-                            let initial_screen = self.build_screen(&ui_elements, clear_color);
+                            let (actors, clear_color) = self.get_current_actors();
+                            let initial_screen = self.build_screen(&actors, clear_color);
                             if let Some(b) = &mut self.backend {
                                 if let Err(e) = renderer::load_screen(b, &initial_screen) {
                                     error!("Failed to load initial screen data: {}", e);
@@ -354,8 +356,8 @@ impl ApplicationHandler for App {
                             gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
                         }
 
-                        let (ui_elements, clear_color) = self.get_current_ui_elements();
-                        let screen = self.build_screen(&ui_elements, clear_color);
+                        let (actors, clear_color) = self.get_current_actors();
+                        let screen = self.build_screen(&actors, clear_color);
 
                         self.frame_count += 1;
                         let elapsed = now.duration_since(self.last_title_update);
@@ -396,16 +398,6 @@ impl ApplicationHandler for App {
             renderer::cleanup(backend);
         }
     }
-}
-
-// ---- helpers ----
-#[inline(always)]
-fn create_screen_from_ui(
-    elements: &[api::UIElement],
-    clear_color: [f32; 4],
-    fonts: &HashMap<&'static str, msdf::Font>,
-) -> renderer::Screen {
-    crate::ui::build::build_screen(elements, clear_color, fonts)
 }
 
 // ---- public entry point ----

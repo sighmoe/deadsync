@@ -1,19 +1,15 @@
 // src/screens/menu.rs
 use crate::core::space::Metrics;
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::components::logo::build_logo_default;
-use crate::ui::msdf;
-use crate::ui::primitives::UIElement;
+use crate::ui::actors::Actor;
+use crate::ui::color;
+use crate::ui::components::logo::{self, LogoParams};
 use crate::text;
-use std::collections::HashMap;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 const OPTION_COUNT: usize = 3;
 const MENU_OPTIONS: [&str; OPTION_COUNT] = ["GAMEPLAY", "OPTIONS", "EXIT"];
-
-const MENU_SELECTED_COLOR: [f32; 4] = [1.0, 1.0, 0.5, 1.0];
-const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 
 const MENU_SELECTED_PX: f32 = 50.0;
 const MENU_NORMAL_PX: f32 = 42.0;
@@ -60,36 +56,34 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
-pub fn get_ui_elements(
-    state: &State,
-    m: &Metrics,
-    fonts: &HashMap<&'static str, msdf::Font>,
-) -> Vec<UIElement> {
-    let logo = build_logo_default(m, fonts);
+pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
+    let screen_width = m.right - m.left;
+    let logo_params = LogoParams::default();
+    let mut actors = logo::build_logo_default(screen_width);
 
-    let top_to_logo_bottom = m.top - logo.logo_bottom_y;
-    let mut actors = Vec::with_capacity(OPTION_COUNT);
+    // sRGB hex → linear RGBA
+    let selected = color::rgba_hex("#ff5d47");
+    let normal = color::rgba_hex("#888888");
+
+    // Calculate menu position relative to the logo's known geometry.
+    let logo_bottom_y_tl = logo_params.top_margin + logo_params.target_h;
 
     for i in 0..OPTION_COUNT {
         let is_selected = i == state.selected_index;
         let px = if is_selected { MENU_SELECTED_PX } else { MENU_NORMAL_PX };
-        let color = if is_selected { MENU_SELECTED_COLOR } else { MENU_NORMAL_COLOR };
-        let label = MENU_OPTIONS[i];
+        let color = if is_selected { selected } else { normal };
 
-        // y in SM top-left pixels
-        let y_tl = top_to_logo_bottom + MENU_BELOW_LOGO + (i as f32) * MENU_ROW_SPACING;
+        let y_tl = logo_bottom_y_tl + MENU_BELOW_LOGO + (i as f32) * MENU_ROW_SPACING;
 
         actors.push(text!(
             anchor: TopCenter,
-            offset: [0, y_tl], // Position baseline; alignment is separate
-            align: Center,     // <-- This does the real centering
-            px: px,
-            color: color,
-            text: label
+            offset: [0, y_tl],
+            align:  Center,
+            px:     px,
+            color:  color,
+            text:   (MENU_OPTIONS[i])
         ));
     }
 
-    let mut elements = logo.ui;
-    elements.extend(crate::ui::actors::build_actors(&actors, m, fonts));
-    elements
+    actors
 }

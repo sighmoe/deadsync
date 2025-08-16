@@ -1,10 +1,8 @@
 // src/screens/options.rs
-use crate::core::space::Metrics;
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::msdf;
-use crate::ui::primitives::UIElement;
-use crate::{frame, quad, text};
-use std::collections::HashMap;
+use crate::ui::actors::Actor;
+use crate::ui::components;
+use crate::{quad, text};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -22,39 +20,13 @@ pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
-pub fn get_ui_elements(
-    _state: &State,
-    m: &Metrics,
-    fonts: &HashMap<&'static str, msdf::Font>,
-) -> Vec<UIElement> {
+pub fn get_actors(_state: &State) -> Vec<Actor> {
     let mut actors = Vec::new();
 
-    // ——— Top bar config ———
-    const BAR_H: f32 = 50.0;
-    const TITLE_PX: f32 = 40.0;
-    const BG: [f32; 4] = [0.15, 0.15, 0.18, 1.0];
-    const FG: [f32; 4] = [0.90, 0.90, 1.00, 1.0];
-    let title = "OPTIONS";
+    // Use the reusable top_bar component.
+    actors.push(components::top_bar::build("OPTIONS"));
 
-    // Full-width top bar with centered title (no magic offsets needed)
-    actors.push(frame!(
-        anchor: TopLeft,
-        offset: [0, 0],
-        size:   [m.right - m.left, BAR_H],
-        bg_color: BG,
-        children: [
-            text!(
-                anchor: Center,
-                offset: [0, 0],
-                align:  Center,
-                px:     TITLE_PX,
-                color:  FG,
-                text:   title
-            )
-        ]
-    ));
-
-    // (Optional) corner markers you had before
+    // (Optional) corner markers
     actors.push(quad!(anchor: TopLeft,     offset: [ 12,  12], size: [10, 10], color: [1.0,0.9,0.2,1.0]));
     actors.push(quad!(anchor: TopRight,    offset: [-12,  12], size: [10, 10], color: [0.2,1.0,0.6,1.0]));
     actors.push(quad!(anchor: BottomLeft,  offset: [ 12, -12], size: [10, 10], color: [0.6,0.6,1.0,1.0]));
@@ -71,5 +43,5 @@ pub fn get_ui_elements(
         text: "This is miso font!"
     ));
 
-    crate::ui::actors::build_actors(&actors, m, fonts)
+    actors
 }
