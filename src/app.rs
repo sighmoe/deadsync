@@ -209,15 +209,6 @@ impl App {
             ScreenAction::Navigate(screen) => {
                 info!("Navigating to screen: {:?}", screen);
                 self.current_screen = screen;
-
-                // When navigating, we only need to rebuild the static screen data if the
-                // underlying renderer requires it (like Vulkan used to). In our new
-                // immediate-mode design, this is a no-op, but the hook remains.
-                let (actors, clear_color) = self.get_current_actors();
-                let new_screen_data = self.build_screen(&actors, clear_color);
-                if let Some(backend) = &mut self.backend {
-                    renderer::load_screen(backend, &new_screen_data)?;
-                }
             }
             ScreenAction::Exit => {
                 info!("Exit action received. Shutting down.");
