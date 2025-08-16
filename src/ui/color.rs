@@ -5,25 +5,6 @@ pub fn srgb8_to_linear(c: u8) -> f32 {
     if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
 }
 
-#[inline(always)]
-pub fn rgba_u32_rgba(hex: u32) -> [f32; 4] {
-    // 0xRRGGBBAA
-    let r = ((hex >> 24) & 0xFF) as u8;
-    let g = ((hex >> 16) & 0xFF) as u8;
-    let b = ((hex >>  8) & 0xFF) as u8;
-    let a = ( hex        & 0xFF) as u8;
-    [srgb8_to_linear(r), srgb8_to_linear(g), srgb8_to_linear(b), (a as f32) / 255.0]
-}
-
-#[inline(always)]
-pub fn rgba_u32_rgb(hex: u32) -> [f32; 4] {
-    // 0xRRGGBB (alpha = 1)
-    let r = ((hex >> 16) & 0xFF) as u8;
-    let g = ((hex >>  8) & 0xFF) as u8;
-    let b = ( hex        & 0xFF) as u8;
-    [srgb8_to_linear(r), srgb8_to_linear(g), srgb8_to_linear(b), 1.0]
-}
-
 /// Accepts "#rgb", "#rgba", "#rrggbb", "#rrggbbaa" (or without '#').
 /// Panics on invalid input; use only with trusted literals.
 pub fn rgba_hex(s: &str) -> [f32; 4] {

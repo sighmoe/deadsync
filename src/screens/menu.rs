@@ -7,6 +7,9 @@ use crate::ui::components::logo::{self, LogoParams};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
+const SELECTED_COLOR_HEX: &str = "#ff5d47";
+const NORMAL_COLOR_HEX: &str = "#888888";
+
 const OPTION_COUNT: usize = 3;
 const MENU_OPTIONS: [&str; OPTION_COUNT] = ["GAMEPLAY", "OPTIONS", "EXIT"];
 
@@ -61,8 +64,8 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
     let mut actors = logo::build_logo_default(screen_width);
 
     // sRGB hex → linear RGBA
-    let selected = color::rgba_hex("#ff5d47");
-    let normal = color::rgba_hex("#888888");
+    let selected = color::rgba_hex(SELECTED_COLOR_HEX);
+    let normal = color::rgba_hex(NORMAL_COLOR_HEX);
 
     // Calculate menu position relative to the logo's known geometry.
     let logo_bottom_y_tl = logo_params.top_margin + logo_params.target_h;
