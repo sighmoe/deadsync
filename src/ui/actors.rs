@@ -148,25 +148,20 @@ fn place_text_baseline(
         TextAlign::Center => -0.5 * measured_width,
         TextAlign::Right  => -measured_width,
     };
-
-    // Exact ascender/descender for THIS line (no heuristics)
-    let (asc, desc) = line_extents_px(font, content, pixel_height);
-    let line_h_px = asc + desc;
-
-    // Convert anchor edge/center back to a baseline y in SM top-left space.
-    let baseline_sm_y = match anchor {
-        // Top edge + ascender moves us down to baseline
-        Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => ry + offset[1] + asc,
-
-        // Center line + (asc - half line height) moves to baseline
-        Anchor::CenterLeft | Anchor::Center | Anchor::CenterRight => ry + offset[1] + asc - 0.5 * line_h_px,
-
-        // Bottom edge - descender moves up to baseline
-        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => ry + offset[1] - desc,
-    };
-
     let left_sm_x = rx + offset[0] + align_offset;
 
+    // Vertical alignment: unified formula
+    // 1. Get exact ascender/descender for THIS line.
+    let (asc, desc) = line_extents_px(font, content, pixel_height);
+    let line_h_px = asc + desc;
+    // 2. Get the vertical anchor factor (0=top, 0.5=center, 1=bottom).
+    let (_, ay) = anchor_factors(anchor);
+    // 3. Calculate the top of the text's bounding box based on the parent anchor.
+    let text_top_sm_y = ry + offset[1] - ay * line_h_px;
+    // 4. The baseline is the top of the box plus the ascender height.
+    let baseline_sm_y = text_top_sm_y + asc;
+
+    // Convert final SM top-left baseline point to world coordinates.
     let world_x = m.left + left_sm_x;
     let world_y = m.top  - baseline_sm_y;
     Vector2::new(world_x, world_y)
