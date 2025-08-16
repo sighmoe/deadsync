@@ -18,7 +18,7 @@ const MENU_NORMAL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 const MENU_SELECTED_PX: f32 = 50.0;
 const MENU_NORMAL_PX: f32 = 42.0;
 const MENU_BELOW_LOGO: f32 = 28.0;
-const MENU_ROW_SPACING: f32 = 70.0;
+const MENU_ROW_SPACING: f32 = 36.0;
 
 pub struct State {
     pub selected_index: usize,
