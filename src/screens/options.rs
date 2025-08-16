@@ -1,8 +1,7 @@
 // src/screens/options.rs
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::actors::Actor;
+use crate::ui::actors::{Actor, Anchor, SizeSpec, TextAlign};
 use crate::ui::components;
-use crate::{quad, text};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -27,21 +26,21 @@ pub fn get_actors(_state: &State) -> Vec<Actor> {
     actors.push(components::top_bar::build("OPTIONS"));
 
     // (Optional) corner markers
-    actors.push(quad!(anchor: TopLeft,     offset: [ 12,  12], size: [10, 10], color: [1.0,0.9,0.2,1.0]));
-    actors.push(quad!(anchor: TopRight,    offset: [-12,  12], size: [10, 10], color: [0.2,1.0,0.6,1.0]));
-    actors.push(quad!(anchor: BottomLeft,  offset: [ 12, -12], size: [10, 10], color: [0.6,0.6,1.0,1.0]));
-    actors.push(quad!(anchor: BottomRight, offset: [-12, -12], size: [10, 10], color: [1.0,0.6,0.2,1.0]));
+    actors.push(Actor::Quad { anchor: Anchor::TopLeft,     offset: [ 12.0,  12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [1.0,0.9,0.2,1.0]});
+    actors.push(Actor::Quad { anchor: Anchor::TopRight,    offset: [-12.0,  12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [0.2,1.0,0.6,1.0]});
+    actors.push(Actor::Quad { anchor: Anchor::BottomLeft,  offset: [ 12.0, -12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [0.6,0.6,1.0,1.0]});
+    actors.push(Actor::Quad { anchor: Anchor::BottomRight, offset: [-12.0, -12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [1.0,0.6,0.2,1.0]});
 
     // New text message using the "miso" font
-    actors.push(text!(
-        anchor: BottomCenter,
-        offset: [0, -100],
-        align: Center,
+    actors.push(Actor::Text {
+        anchor: Anchor::BottomCenter,
+        offset: [0.0, -100.0],
+        align: TextAlign::Center,
         px: 60.0,
         font: "miso",
         color: [0.8, 0.9, 0.7, 1.0],
-        text: "This is miso font!"
-    ));
+        content: "This is miso font!".to_string(),
+    });
 
     actors
 }

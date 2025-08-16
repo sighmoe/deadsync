@@ -1,10 +1,9 @@
 // src/screens/menu.rs
 use crate::core::space::Metrics;
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::actors::Actor;
+use crate::ui::actors::{Actor, Anchor, TextAlign};
 use crate::ui::color;
 use crate::ui::components::logo::{self, LogoParams};
-use crate::text;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -75,14 +74,15 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
 
         let y_tl = logo_bottom_y_tl + MENU_BELOW_LOGO + (i as f32) * MENU_ROW_SPACING;
 
-        actors.push(text!(
-            anchor: TopCenter,
-            offset: [0, y_tl],
-            align:  Center,
-            px:     px,
-            color:  color,
-            text:   (MENU_OPTIONS[i])
-        ));
+        actors.push(Actor::Text {
+            anchor: Anchor::TopCenter,
+            offset: [0.0, y_tl],
+            align:  TextAlign::Center,
+            px,
+            color,
+            font:   "wendy",
+            content: (MENU_OPTIONS[i]).to_string(),
+        });
     }
 
     actors
