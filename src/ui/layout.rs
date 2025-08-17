@@ -54,13 +54,18 @@ fn build_actor_recursive(
     out: &mut Vec<renderer::ScreenObject>,
 ) {
     match actor {
-        // Unified sprite path (solid or textured)
         Actor::Sprite {
-            anchor, offset, size, source, tint, cell, grid, uv_rect, visible, flip_x, flip_y
+            anchor, offset, size, source, tint, cell, grid, uv_rect,
+            visible, flip_x, flip_y,
+            cropleft, cropright, croptop, cropbottom,
         } => {
             if !*visible { return; }
             let rect = place_rect(parent, *anchor, *offset, *size);
-            push_sprite(out, rect, m, *source, *tint, *uv_rect, *cell, *grid, *flip_x, *flip_y);
+            push_sprite(
+                out, rect, m, *source, *tint, *uv_rect, *cell, *grid,
+                *flip_x, *flip_y,
+                *cropleft, *cropright, *croptop, *cropbottom,
+            );
         }
 
         Actor::Text { anchor, offset, px, color, font, content, align } => {
@@ -185,23 +190,28 @@ fn push_sprite(
     grid: Option<(u32, u32)>,      // (cols,rows)
     flip_x: bool,
     flip_y: bool,
+    cropleft: f32,
+    cropright: f32,
+    croptop: f32,
+    cropbottom: f32,
 ) {
-    // Solid-color path: ignore UVs; tint is the final color
+    // Solid path: crop geometry only
     if let actors::SpriteSource::Solid = source {
+        let r = apply_crop_to_rect(rect, cropleft, cropright, croptop, cropbottom);
+        if r.w <= 0.0 || r.h <= 0.0 { return; }
         out.push(renderer::ScreenObject {
             object_type: renderer::ObjectType::SolidColor { color: tint },
-            transform: rect_transform(rect, m),
+            transform: rect_transform(r, m),
         });
         return;
     }
 
-    // Textured path
+    // Textured path: compute base UV (uv_rect > cell+grid > full)
     let texture = match source {
         actors::SpriteSource::Texture(t) => t,
         actors::SpriteSource::Solid => unreachable!(),
     };
 
-    // Compute base uv_scale/uv_offset (priority: uv_rect > cell+grid > full)
     let (mut uv_scale, mut uv_offset) = if let Some([u0, v0, u1, v1]) = uv_rect {
         let du = (u1 - u0).abs().max(1e-6);
         let dv = (v1 - v0).abs().max(1e-6);
@@ -217,7 +227,19 @@ fn push_sprite(
         ([1.0, 1.0], [0.0, 0.0])
     };
 
-    // Apply flips: u' = (o + s) + (-s)*x, so offset += scale; scale = -scale
+    // Apply crop to geometry AND UVs (pre-flip)
+    let r = apply_crop_to_rect(rect, cropleft, cropright, croptop, cropbottom);
+    if r.w <= 0.0 || r.h <= 0.0 { return; }
+
+    let (l, rgt, t, btm) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
+    let vis_w = (1.0 - l - rgt).max(0.0);
+    let vis_h = (1.0 - t - btm).max(0.0);
+    uv_offset[0] += uv_scale[0] * l;
+    uv_offset[1] += uv_scale[1] * t;
+    uv_scale[0] *= vis_w;
+    uv_scale[1] *= vis_h;
+
+    // Apply flips after crop
     if flip_x { uv_offset[0] += uv_scale[0]; uv_scale[0] = -uv_scale[0]; }
     if flip_y { uv_offset[1] += uv_scale[1]; uv_scale[1] = -uv_scale[1]; }
 
@@ -228,8 +250,38 @@ fn push_sprite(
             uv_scale,
             uv_offset,
         },
-        transform: rect_transform(rect, m),
+        transform: rect_transform(r, m),
     });
+}
+
+#[inline(always)]
+fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) {
+    let l = l.clamp(0.0, 1.0);
+    let r = r.clamp(0.0, 1.0);
+    let t = t.clamp(0.0, 1.0);
+    let b = b.clamp(0.0, 1.0);
+    // If sums exceed 1, normalize proportionally to avoid negative sizes.
+    let sum_x = l + r;
+    let sum_y = t + b;
+    let (l, r) = if sum_x > 1.0 {
+        (l / sum_x, r / sum_x)
+    } else { (l, r) };
+    let (t, b) = if sum_y > 1.0 {
+        (t / sum_y, b / sum_y)
+    } else { (t, b) };
+    (l, r, t, b)
+}
+
+#[inline(always)]
+fn apply_crop_to_rect(mut rect: SmRect, l: f32, r: f32, t: f32, b: f32) -> SmRect {
+    let (l, r, t, b) = clamp_crop_fractions(l, r, t, b);
+    let dx = rect.w * l;
+    let dy = rect.h * t;
+    rect.x += dx;
+    rect.y += dy;
+    rect.w *= (1.0 - l - r).max(0.0);
+    rect.h *= (1.0 - t - b).max(0.0);
+    rect
 }
 
 #[inline(always)]

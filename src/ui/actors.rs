@@ -47,6 +47,9 @@ pub enum Actor {
     /// - `uv_rect`: optional normalized [u0, v0, u1, v1] (top-left origin). Highest priority when set.
     /// - `visible`: if false, the sprite is culled during layout
     /// - `flip_x` / `flip_y`: mirror the subrect horizontally/vertically
+    /// - texture or solid, optional uv_rect / grid+cell
+    /// - tint, flip flags, visibility
+    /// - per-side cropping (fractions in [0,1])
     Sprite {
         anchor: Anchor,
         offset: [f32; 2],
@@ -55,10 +58,15 @@ pub enum Actor {
         tint: [f32; 4],
         cell: Option<(u32, u32)>,
         grid: Option<(u32, u32)>,
-        uv_rect: Option<[f32; 4]>,
+        uv_rect: Option<[f32; 4]>,   // [u0,v0,u1,v1] top-left origin
         visible: bool,
         flip_x: bool,
         flip_y: bool,
+        // NEW:
+        cropleft: f32,
+        cropright: f32,
+        croptop: f32,
+        cropbottom: f32,
     },
 
     Text {
@@ -97,6 +105,10 @@ macro_rules! sprite {
         $(, visible: $visible:expr )?
         $(, flip_x: $flipx:expr )?
         $(, flip_y: $flipy:expr )?
+        $(, cropleft:  $cl:expr )?
+        $(, cropright: $cr:expr )?
+        $(, croptop:   $ct:expr )?
+        $(, cropbottom:$cb:expr )?
         $(,)?
     ) => {
         $crate::ui::actors::Actor::Sprite {
@@ -111,6 +123,10 @@ macro_rules! sprite {
             visible: sprite!(@vis  $( $visible )?),
             flip_x:  sprite!(@bool $( $flipx )?),
             flip_y:  sprite!(@bool $( $flipy )?),
+            cropleft:   sprite!(@f $( $cl )?),
+            cropright:  sprite!(@f $( $cr )?),
+            croptop:    sprite!(@f $( $ct )?),
+            cropbottom: sprite!(@f $( $cb )?),
         }
     };
 
@@ -125,6 +141,9 @@ macro_rules! sprite {
 
     (@bool $b:expr) => { $b };
     (@bool) => { false };
+
+    (@f $v:expr) => { $v };
+    (@f) => { 0.0 };
 }
 
 #[macro_export]
@@ -134,7 +153,13 @@ macro_rules! quad {
         offset: $offset:expr,
         size: $size:expr,
         color: $color:expr
-        $(, visible: $visible:expr )?
+        $(, visible: $visible:expr)?
+        $(, flip_x: $flipx:expr)?
+        $(, flip_y: $flipy:expr)?
+        $(, cropleft:  $cl:expr )?
+        $(, cropright: $cr:expr )?
+        $(, croptop:   $ct:expr )?
+        $(, cropbottom:$cb:expr )?
         $(,)?
     ) => {
         $crate::ui::actors::Actor::Sprite {
@@ -142,16 +167,30 @@ macro_rules! quad {
             offset: $offset,
             size:   $size,
             source: $crate::ui::actors::SpriteSource::Solid,
-            tint:   $color,
-            cell:   None,
-            grid:   None,
+            // For solids, `tint` is the fill color
+            tint: $color,
+            // No texture addressing for solids
+            cell: None,
+            grid: None,
             uv_rect: None,
+            // Optionals + defaults
             visible: quad!(@vis $( $visible )?),
-            flip_x: false,
-            flip_y: false,
+            flip_x:  quad!(@b $( $flipx )?),
+            flip_y:  quad!(@b $( $flipy )?),
+            cropleft:   quad!(@f $( $cl )?),
+            cropright:  quad!(@f $( $cr )?),
+            croptop:    quad!(@f $( $ct )?),
+            cropbottom: quad!(@f $( $cb )?),
         }
     };
 
+    // helpers
     (@vis $v:expr) => { $v };
     (@vis) => { true };
+
+    (@b $b:expr) => { $b };
+    (@b) => { false };
+
+    (@f $v:expr) => { $v };
+    (@f) => { 0.0 };
 }
