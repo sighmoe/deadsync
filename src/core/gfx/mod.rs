@@ -42,31 +42,16 @@ pub fn create_backend(
 pub fn create_texture(
     backend: &mut Backend,
     image: &RgbaImage,
-) -> Result<Texture, Box<dyn Error>> {
-    match backend {
-        Backend::Vulkan(state) => {
-            let texture = vulkan::create_texture(state, image)?;
-            Ok(Texture::Vulkan(texture))
-        }
-        Backend::OpenGL(state) => {
-            let texture = opengl::create_texture(&state.gl, image)?;
-            Ok(Texture::OpenGL(texture))
-        }
-    }
-}
-
-pub fn create_texture_with_colorspace(
-    backend: &mut Backend,
-    image: &RgbaImage,
     cs: TextureColorSpace,
 ) -> Result<Texture, Box<dyn Error>> {
+    let use_srgb = matches!(cs, TextureColorSpace::Srgb);
     match backend {
         Backend::Vulkan(state) => {
-            let tex = vulkan::create_texture_with_colorspace(state, image, matches!(cs, TextureColorSpace::Srgb))?;
+            let tex = vulkan::create_texture(state, image, use_srgb)?;
             Ok(Texture::Vulkan(tex))
         }
         Backend::OpenGL(state) => {
-            let tex = opengl::create_texture_with_colorspace(&state.gl, image, matches!(cs, TextureColorSpace::Srgb))?;
+            let tex = opengl::create_texture(&state.gl, image, use_srgb)?;
             Ok(Texture::OpenGL(tex))
         }
     }

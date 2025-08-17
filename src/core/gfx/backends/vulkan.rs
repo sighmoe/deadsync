@@ -653,55 +653,7 @@ fn create_msdf_pipeline(
     Ok((layout, pipe))
 }
 
-pub fn create_texture(state: &mut State, image: &RgbaImage) -> Result<Texture, Box<dyn Error>> {
-    let (width, height) = image.dimensions();
-    let image_size = (width * height * 4) as vk::DeviceSize;
-    let image_data = image.as_raw();
-
-    // 1. Create a staging buffer on the CPU that we can write to.
-    let staging_buffer = create_buffer_with_data_raw(
-        &state.instance, state.device.as_ref().unwrap(), state.pdevice, image_size, vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-    )?;
-    
-    // 2. Copy the pixel data into the staging buffer.
-    unsafe {
-        let mapped = state.device.as_ref().unwrap().map_memory(staging_buffer.memory, 0, image_size, vk::MemoryMapFlags::empty())?;
-        std::ptr::copy_nonoverlapping(image_data.as_ptr(), mapped as *mut u8, image_data.len());
-        state.device.as_ref().unwrap().unmap_memory(staging_buffer.memory);
-    }
-
-    // 3. Create the final image object on the GPU. It cannot be written to directly by the CPU.
-    let (texture_image, texture_memory) = create_image(
-        state, width, height, vk::Format::R8G8B8A8_SRGB, vk::ImageTiling::OPTIMAL,
-        vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED, vk::MemoryPropertyFlags::DEVICE_LOCAL,
-    )?;
-
-    // 4. Transition the image layout to be ready for the copy, then copy from the buffer.
-    transition_image_layout(state, texture_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL)?;
-    copy_buffer_to_image(state, staging_buffer.buffer, texture_image, width, height)?;
-    
-    // 5. Transition the image layout to be ready for being read by the shader.
-    transition_image_layout(state, texture_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)?;
-
-    // 6. Clean up the temporary staging buffer.
-    destroy_buffer(state.device.as_ref().unwrap(), &staging_buffer);
-
-    // 7. Create a view and descriptor set for the final image.
-    let view = create_image_view(state.device.as_ref().unwrap(), texture_image, vk::Format::R8G8B8A8_SRGB)?;
-    let descriptor_set = create_texture_descriptor_set(state, view, state.sampler)?;
-
-    Ok(Texture {
-        device: state.device.as_ref().unwrap().clone(), // Clone the Arc to share ownership
-        image: texture_image,
-        memory: texture_memory,
-        view,
-        descriptor_set,
-        pool: state.descriptor_pool, // Copy the pool for later freeing
-    })
-}
-
-pub fn create_texture_with_colorspace(
+pub fn create_texture(
     state: &mut State,
     image: &RgbaImage,
     srgb: bool,

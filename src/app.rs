@@ -152,16 +152,12 @@ impl App {
 
         // 2) Create GPU textures sequentially
         for (key, rgba) in decoded {
-            let texture = if key == "logo.png" {
-                // Explicitly exercise the Srgb variant (these UI sprites are authored in sRGB)
-                renderer::create_texture_with_colorspace(
-                    backend,
-                    &rgba,
-                    renderer::TextureColorSpace::Srgb,
-                )?
-            } else {
-                renderer::create_texture(backend, &rgba)?
-            };
+            // All UI sprites are authored in sRGB space.
+            let texture = renderer::create_texture(
+                backend,
+                &rgba,
+                renderer::TextureColorSpace::Srgb,
+            )?;
 
             self.texture_manager.insert(key, texture);
             info!("Loaded texture: assets/graphics/{}", key);
@@ -181,7 +177,7 @@ impl App {
         let image_data = image::open(&png_path)?.to_rgba8();
 
         // Upload atlas texture to GPU (must be linear color space for MSDF)
-        let texture = renderer::create_texture_with_colorspace(
+        let texture = renderer::create_texture(
             backend,
             &image_data,
             renderer::TextureColorSpace::Linear,

@@ -149,49 +149,7 @@ pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Resul
     Ok(state)
 }
 
-pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, String> {
-    unsafe {
-        let texture = gl.create_texture()?;
-        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-
-        // Make sure pixel store is in a known state for tightly-packed RGBA8.
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-        gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
-        gl.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
-        gl.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
-
-        // Clamp edges (good for atlas/UI), no wrapping beyond edges
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
-
-        // Keep LINEAR (as requested)
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
-
-        // No mip levels (we don't generate mipmaps)
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_BASE_LEVEL, 0);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
-
-        // sRGB-correct upload
-        let internal = glow::SRGB8_ALPHA8 as i32;
-        gl.tex_image_2d(
-            glow::TEXTURE_2D,
-            0,
-            internal,
-            image.width() as i32,
-            image.height() as i32,
-            0,
-            glow::RGBA,
-            glow::UNSIGNED_BYTE,
-            PixelUnpackData::Slice(Some(image.as_raw().as_slice())),
-        );
-
-        gl.bind_texture(glow::TEXTURE_2D, None);
-        Ok(Texture(texture))
-    }
-}
-
-pub fn create_texture_with_colorspace(gl: &glow::Context, image: &RgbaImage, srgb: bool) -> Result<Texture, String> {
+pub fn create_texture(gl: &glow::Context, image: &RgbaImage, srgb: bool) -> Result<Texture, String> {
     unsafe {
         let t = gl.create_texture()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(t));
