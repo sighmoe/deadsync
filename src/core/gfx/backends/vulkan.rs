@@ -225,10 +225,16 @@ pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error
         [-0.5,  0.5, 0.0, 0.0],
     ];
     let indices: [u16; 6] = [0, 1, 2, 2, 3, 0];
-
+    
     let device_arc = device.as_ref().unwrap();
-    state.vertex_buffer = Some(create_buffer_with_data_vec(&state.instance, device_arc, state.pdevice, state.command_pool, state.queue, &vertices, vk::BufferUsageFlags::VERTEX_BUFFER)?);
-    state.index_buffer = Some(create_buffer_with_data_vec(&state.instance, device_arc, state.pdevice, state.command_pool, state.queue, &indices, vk::BufferUsageFlags::INDEX_BUFFER)?);
+    state.vertex_buffer = Some(create_buffer(
+        &state.instance, device_arc, state.pdevice, state.command_pool, state.queue,
+        vk::BufferUsageFlags::VERTEX_BUFFER, vk::MemoryPropertyFlags::DEVICE_LOCAL, Some(&vertices)
+    )?);
+    state.index_buffer = Some(create_buffer(
+        &state.instance, device_arc, state.pdevice, state.command_pool, state.queue,
+        vk::BufferUsageFlags::INDEX_BUFFER, vk::MemoryPropertyFlags::DEVICE_LOCAL, Some(&indices)
+    )?);
 
     info!("Vulkan backend initialized successfully.");
     Ok(state)
@@ -659,21 +665,15 @@ pub fn create_texture(
     srgb: bool,
 ) -> Result<Texture, Box<dyn Error>> {
     let (width, height) = image.dimensions();
-    let image_size = (width * height * 4) as vk::DeviceSize;
     let image_data = image.as_raw();
 
     // staging buffer
-    let staging = create_buffer_with_data_raw(
-        &state.instance, state.device.as_ref().unwrap(), state.pdevice,
-        image_size, vk::BufferUsageFlags::TRANSFER_SRC,
+    let staging = create_buffer(
+        &state.instance, state.device.as_ref().unwrap(), state.pdevice, state.command_pool, state.queue,
+        vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        Some(image_data),
     )?;
-    unsafe {
-        let mapped = state.device.as_ref().unwrap()
-            .map_memory(staging.memory, 0, image_size, vk::MemoryMapFlags::empty())?;
-        std::ptr::copy_nonoverlapping(image_data.as_ptr(), mapped as *mut u8, image_data.len());
-        state.device.as_ref().unwrap().unmap_memory(staging.memory);
-    }
 
     let fmt = if srgb { vk::Format::R8G8B8A8_SRGB } else { vk::Format::R8G8B8A8_UNORM };
 
@@ -1140,36 +1140,52 @@ fn end_single_time_commands(device: &Device, pool: vk::CommandPool, queue: vk::Q
     Ok(())
 }
 
-fn create_buffer_with_data_raw(
-    instance: &Instance, device: &Device, pdevice: vk::PhysicalDevice, size: vk::DeviceSize,
-    usage: vk::BufferUsageFlags, properties: vk::MemoryPropertyFlags,
+fn create_buffer<T: Copy>(
+    instance: &Instance,
+    device: &Device,
+    pdevice: vk::PhysicalDevice,
+    pool: vk::CommandPool,
+    queue: vk::Queue,
+    usage: vk::BufferUsageFlags,
+    properties: vk::MemoryPropertyFlags,
+    data: Option<&[T]>,
 ) -> Result<BufferResource, Box<dyn Error>> {
-    let (buffer, memory) = create_gpu_buffer(instance, device, pdevice, size, usage, properties)?;
-    Ok(BufferResource { buffer, memory })
+    let buffer_size = (mem::size_of::<T>() * data.map_or(1, |d| d.len())) as vk::DeviceSize;
+
+    if let Some(slice) = data {
+        // Create a temporary staging buffer
+        let staging_usage = vk::BufferUsageFlags::TRANSFER_SRC;
+        let staging_props = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
+        let (staging_buffer, staging_memory) = create_gpu_buffer(instance, device, pdevice, buffer_size, staging_usage, staging_props)?;
+        
+        // Copy data into staging buffer
+        unsafe {
+            let mapped = device.map_memory(staging_memory, 0, buffer_size, vk::MemoryMapFlags::empty())?;
+            std::ptr::copy_nonoverlapping(slice.as_ptr(), mapped as *mut T, slice.len());
+            device.unmap_memory(staging_memory);
+        }
+
+        // Create the final device-local buffer
+        let final_usage = usage | vk::BufferUsageFlags::TRANSFER_DST;
+        let (device_buffer, device_memory) = create_gpu_buffer(instance, device, pdevice, buffer_size, final_usage, vk::MemoryPropertyFlags::DEVICE_LOCAL)?;
+        
+        // Copy from staging to device-local
+        copy_buffer(device, pool, queue, staging_buffer, device_buffer, buffer_size)?;
+
+        // Clean up staging resources
+        unsafe {
+            device.destroy_buffer(staging_buffer, None);
+            device.free_memory(staging_memory, None);
+        }
+        
+        Ok(BufferResource { buffer: device_buffer, memory: device_memory })
+    } else {
+        // No data provided, just create the buffer with specified properties
+        let (buffer, memory) = create_gpu_buffer(instance, device, pdevice, buffer_size, usage, properties)?;
+        Ok(BufferResource { buffer, memory })
+    }
 }
 
-fn create_buffer_with_data_vec<T: Copy>(
-    instance: &Instance, device: &Device, pdevice: vk::PhysicalDevice, pool: vk::CommandPool,
-    queue: vk::Queue, data: &[T], usage: vk::BufferUsageFlags,
-) -> Result<BufferResource, Box<dyn Error>> {
-    let buffer_size = (mem::size_of::<T>() * data.len()) as vk::DeviceSize;
-    let staging_buffer = create_buffer_with_data_raw(
-        instance, device, pdevice, buffer_size, vk::BufferUsageFlags::TRANSFER_SRC,
-        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-    )?;
-    unsafe {
-        let mapped = device.map_memory(staging_buffer.memory, 0, buffer_size, vk::MemoryMapFlags::empty())?;
-        std::ptr::copy_nonoverlapping(data.as_ptr(), mapped as *mut T, data.len());
-        device.unmap_memory(staging_buffer.memory);
-    }
-    let device_buffer = create_buffer_with_data_raw(
-        instance, device, pdevice, buffer_size, usage | vk::BufferUsageFlags::TRANSFER_DST,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-    )?;
-    copy_buffer(device, pool, queue, staging_buffer.buffer, device_buffer.buffer, buffer_size)?;
-    destroy_buffer(device, &staging_buffer);
-    Ok(device_buffer)
-}
 
 fn copy_buffer(
     device: &Device, pool: vk::CommandPool, queue: vk::Queue,
