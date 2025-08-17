@@ -117,11 +117,12 @@ impl App {
         }
 
         // Keep desired logical IDs -> filenames
-        let texture_paths: [&'static str; 4] = [
+        let texture_paths: [&'static str; 5] = [
             "logo.png",
             "dance.png",
             "meter_arrow.png",
             "fallback_banner.png",
+            "hearts_4x4.png",
         ];
 
         // 1) Decode images in parallel (CPU-only work)

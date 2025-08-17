@@ -20,7 +20,9 @@ void main() {
 
     // Regular sprites (sRGB texture) — just show the texel
     if (!u_is_msdf) {
-        FragColor = s;
+        // Multiply by u_color to apply tint. For untinted textured quads,
+        // u_color will be white (1,1,1,1).
+        FragColor = s * u_color;
         return;
     }
 

@@ -1,3 +1,4 @@
+// src/core/gfx/backends/opengl.rs
 use crate::core::gfx as renderer;
 use crate::core::gfx::{ObjectType, Screen};
 use crate::core::space::ortho_for_window;
@@ -297,6 +298,8 @@ pub fn draw(
                         state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
                         last_use_texture = Some(true);
                     }
+                    // For standard textures: no tint, full UV range
+                    state.gl.uniform_4_f32_slice(Some(&state.color_location), &[1.0, 1.0, 1.0, 1.0]);
                     state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
                     state.gl.uniform_2_f32(Some(&state.uv_scale_location), 1.0, 1.0);
                     state.gl.uniform_2_f32(Some(&state.uv_offset_location), 0.0, 0.0);
@@ -320,6 +323,23 @@ pub fn draw(
                         if last_color.map_or(true, |c| c != magenta) {
                             state.gl.uniform_4_f32_slice(Some(&state.color_location), &magenta);
                             last_color = Some(magenta);
+                        }
+                    }
+                }
+                ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
+                    if last_use_texture != Some(true) {
+                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
+                        last_use_texture = Some(true);
+                    }
+                    state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
+                    state.gl.uniform_2_f32(Some(&state.uv_scale_location),  uv_scale[0],  uv_scale[1]);
+                    state.gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
+                    state.gl.uniform_4_f32_slice(Some(&state.color_location), tint);
+
+                    if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
+                        if last_bound_tex != Some(gl_texture.0) {
+                            state.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
+                            last_bound_tex = Some(gl_texture.0);
                         }
                     }
                 }

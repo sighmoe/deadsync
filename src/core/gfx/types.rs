@@ -4,6 +4,12 @@ use cgmath::Matrix4;
 pub enum ObjectType {
     SolidColor { color: [f32; 4] },
     Textured { texture_id: &'static str },
+    Sprite {
+        texture_id: &'static str,
+        tint: [f32; 4],
+        uv_scale: [f32; 2],
+        uv_offset: [f32; 2],
+    },
     MsdfGlyph {
         texture_id: &'static str,
         uv_scale: [f32; 2],

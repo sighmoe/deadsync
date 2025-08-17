@@ -1,3 +1,4 @@
+// src/core/gfx/backends/vulkan.rs
 use crate::core::gfx as renderer;
 use crate::core::gfx::{ObjectType, Screen};
 use crate::core::space::ortho_for_window;
@@ -31,6 +32,14 @@ struct SolidPushConstants {
 #[repr(C)]
 struct TexturedPushConstants {
     mvp: Matrix4<f32>,
+}
+
+#[repr(C)]
+struct SpritePush {
+    mvp: Matrix4<f32>,
+    tint: [f32; 4],
+    uv_scale: [f32; 2],
+    uv_offset: [f32; 2],
 }
 
 // A handle to a Vulkan texture on the GPU.
@@ -99,6 +108,8 @@ pub struct State {
     solid_pipeline: vk::Pipeline,
     texture_pipeline_layout: vk::PipelineLayout,
     texture_pipeline: vk::Pipeline,
+    sprite_pipeline_layout: vk::PipelineLayout,
+    sprite_pipeline: vk::Pipeline,
     vertex_buffer: Option<BufferResource>,
     index_buffer: Option<BufferResource>,
     // This field is removed, as we now draw a single static quad per object.
@@ -156,6 +167,8 @@ pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<St
         create_solid_pipeline(device.as_ref().unwrap(), render_pass)?;
     let (texture_pipeline_layout, texture_pipeline) =
         create_texture_pipeline(device.as_ref().unwrap(), render_pass, descriptor_set_layout)?;
+    let (sprite_pipeline_layout, sprite_pipeline) =
+        create_sprite_pipeline(device.as_ref().unwrap(), render_pass, descriptor_set_layout)?;
     let (msdf_pipeline_layout, msdf_pipeline) =
         create_msdf_pipeline(device.as_ref().unwrap(), render_pass, descriptor_set_layout)?;
 
@@ -184,6 +197,8 @@ pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<St
         solid_pipeline,
         texture_pipeline_layout,
         texture_pipeline,
+        sprite_pipeline_layout,
+        sprite_pipeline,
         vertex_buffer: None,
         index_buffer: None,
         descriptor_set_layout,
@@ -422,6 +437,98 @@ fn create_texture_pipeline(
         .size(mem::size_of::<TexturedPushConstants>() as u32);
 
     // The key difference: This layout USES the descriptor set for textures.
+    let pipeline_layout_info = vk::PipelineLayoutCreateInfo::default()
+        .set_layouts(std::slice::from_ref(&set_layout))
+        .push_constant_ranges(std::slice::from_ref(&push_constant_range));
+
+    let pipeline_layout = unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
+
+    let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
+        .stages(&shader_stages)
+        .vertex_input_state(&vertex_input_info)
+        .input_assembly_state(&input_assembly)
+        .viewport_state(&viewport_state)
+        .rasterization_state(&rasterizer)
+        .multisample_state(&multisampling)
+        .color_blend_state(&color_blending)
+        .dynamic_state(&dynamic_state)
+        .layout(pipeline_layout)
+        .render_pass(render_pass)
+        .subpass(0);
+
+    let pipeline = unsafe {
+        device
+            .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+            .map_err(|e| e.1)?[0]
+    };
+
+    unsafe {
+        device.destroy_shader_module(vert_module, None);
+        device.destroy_shader_module(frag_module, None);
+    }
+
+    Ok((pipeline_layout, pipeline))
+}
+
+fn create_sprite_pipeline(
+    device: &Device,
+    render_pass: vk::RenderPass,
+    set_layout: vk::DescriptorSetLayout,
+) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
+    let vert_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_sprite.vert.spv"));
+    let frag_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_sprite.frag.spv"));
+    let vert_module = create_shader_module(device, vert_shader_code)?;
+    let frag_module = create_shader_module(device, frag_shader_code)?;
+    let main_name = ffi::CStr::from_bytes_with_nul(b"main\0")?;
+
+    let shader_stages = [
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::VERTEX)
+            .module(vert_module)
+            .name(main_name),
+        vk::PipelineShaderStageCreateInfo::default()
+            .stage(vk::ShaderStageFlags::FRAGMENT)
+            .module(frag_module)
+            .name(main_name),
+    ];
+
+    let (binding_descriptions, attribute_descriptions) = vertex_input_descriptions_textured();
+    let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_binding_descriptions(&binding_descriptions)
+        .vertex_attribute_descriptions(&attribute_descriptions);
+    let input_assembly =
+        vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+    let viewport_state =
+        vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
+    let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
+        .polygon_mode(vk::PolygonMode::FILL)
+        .line_width(1.0)
+        .cull_mode(vk::CullModeFlags::BACK)
+        .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
+    let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
+        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
+
+    let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default()
+        .color_write_mask(vk::ColorComponentFlags::RGBA)
+        .blend_enable(true)
+        .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+        .color_blend_op(vk::BlendOp::ADD)
+        .src_alpha_blend_factor(vk::BlendFactor::ONE)
+        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+        .alpha_blend_op(vk::BlendOp::ADD);
+
+    let color_blending = vk::PipelineColorBlendStateCreateInfo::default()
+        .attachments(std::slice::from_ref(&color_blend_attachment));
+    let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+    let dynamic_state =
+        vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+
+    let push_constant_range = vk::PushConstantRange::default()
+        .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
+        .offset(0)
+        .size(mem::size_of::<SpritePush>() as u32);
+
     let pipeline_layout_info = vk::PipelineLayoutCreateInfo::default()
         .set_layouts(std::slice::from_ref(&set_layout))
         .push_constant_ranges(std::slice::from_ref(&push_constant_range));
@@ -727,7 +834,7 @@ pub fn draw(
             device.cmd_bind_vertex_buffers(cmd, 0, &[vb.buffer], &[0]);
             device.cmd_bind_index_buffer(cmd, ib.buffer, 0, vk::IndexType::UINT16);
 
-            enum Active { None, Solid, Textured, Msdf }
+            enum Active { None, Solid, Textured, Sprite, Msdf }
             let mut active = Active::None;
             let mut last_set = vk::DescriptorSet::null();
             let proj = state.projection;
@@ -761,6 +868,35 @@ pub fn draw(
                         }
                         let pc = TexturedPushConstants { mvp: proj * o.transform };
                         device.cmd_push_constants(cmd, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+                        device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
+                    }
+                    ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
+                        if !matches!(active, Active::Sprite) {
+                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline);
+                            active = Active::Sprite;
+                            last_set = vk::DescriptorSet::null();
+                        }
+                        let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) else {
+                            warn!("Vulkan sprite texture ID '{}' not found!", texture_id);
+                            continue;
+                        };
+                        if tex.descriptor_set != last_set {
+                            device.cmd_bind_descriptor_sets(
+                                cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline_layout, 0, &[tex.descriptor_set], &[]
+                            );
+                            last_set = tex.descriptor_set;
+                        }
+                        let pc = SpritePush {
+                            mvp: proj * o.transform,
+                            tint: *tint,
+                            uv_scale: *uv_scale,
+                            uv_offset: *uv_offset,
+                        };
+                        device.cmd_push_constants(
+                            cmd, state.sprite_pipeline_layout,
+                            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                            0, bytes_of(&pc)
+                        );
                         device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                     }
                     ObjectType::MsdfGlyph { texture_id, uv_scale, uv_offset, color, px_range } => {
@@ -869,6 +1005,8 @@ pub fn cleanup(state: &mut State) {
         state.device.as_ref().unwrap().destroy_pipeline_layout(state.solid_pipeline_layout, None);
         state.device.as_ref().unwrap().destroy_pipeline(state.texture_pipeline, None);
         state.device.as_ref().unwrap().destroy_pipeline_layout(state.texture_pipeline_layout, None);
+        state.device.as_ref().unwrap().destroy_pipeline(state.sprite_pipeline, None);
+        state.device.as_ref().unwrap().destroy_pipeline_layout(state.sprite_pipeline_layout, None);
         state.device.as_ref().unwrap().destroy_pipeline(state.msdf_pipeline, None);
         state.device.as_ref().unwrap().destroy_pipeline_layout(state.msdf_pipeline_layout, None);
 

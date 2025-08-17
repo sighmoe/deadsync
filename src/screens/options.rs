@@ -1,13 +1,40 @@
 // src/screens/options.rs
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, Anchor, SizeSpec, TextAlign};
-use crate::ui::components;
+use crate::ui::{color, components};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use rand::prelude::*;
 
-pub struct State;
+const HEART_COLORS: [&str; 12] = [
+    "#FF5D47", "#FF577E", "#FF47B3", "#DD57FF", "#8885ff", "#3D94FF",
+    "#00B8CC", "#5CE087", "#AEFA44", "#FFFF00", "#FFBE00", "#FF7D00",
+];
+const NUM_HEARTS: usize = 75;
+const HEART_SIZE: f32 = 48.0;
+
+struct Heart {
+    pos: [f32; 2],
+    color: [f32; 4],
+    cell: (u32, u32),
+}
+
+pub struct State {
+    hearts: Vec<Heart>,
+}
+
 pub fn init() -> State {
-    State
+    let mut rng = rand::rng();
+    let hearts = (0..NUM_HEARTS).map(|_| {
+        let color_hex = HEART_COLORS[rng.random_range(0..HEART_COLORS.len())];
+        Heart {
+            pos: [rng.random_range(-400.0..400.0), rng.random_range(-200.0..200.0)],
+            color: color::rgba_hex(color_hex),
+            cell: (rng.random_range(0..4), rng.random_range(0..4)),
+        }
+    }).collect();
+
+    State { hearts }
 }
 
 pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
@@ -19,8 +46,20 @@ pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
-pub fn get_actors(_state: &State) -> Vec<Actor> {
+pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::new();
+
+    // Spawn heart actors from state
+    for heart in &state.hearts {
+        actors.push(Actor::SpriteCell {
+            anchor: Anchor::Center,
+            offset: heart.pos,
+            size: [SizeSpec::Px(HEART_SIZE), SizeSpec::Px(HEART_SIZE)],
+            texture: "hearts_4x4.png",
+            tint: heart.color,
+            cell: heart.cell,
+        });
+    }
 
     // Use the reusable top_bar component.
     actors.push(components::top_bar::build("OPTIONS"));

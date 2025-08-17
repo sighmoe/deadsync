@@ -30,7 +30,7 @@ pub fn build_screen(
 fn estimate_object_count(actors: &[Actor]) -> usize {
     fn count(a: &Actor) -> usize {
         match a {
-            Actor::Quad { .. } | Actor::Sprite { .. } => 1,
+            Actor::Quad { .. } | Actor::Sprite { .. } | Actor::SpriteCell { .. } => 1,
             Actor::Text { content, .. } => content.chars().filter(|&c| c != '\n').count(),
             Actor::Frame { children, background, .. } => {
                 let bg = if background.is_some() { 1 } else { 0 };
@@ -63,6 +63,29 @@ fn build_actor_recursive(
         Actor::Sprite { anchor, offset, size, texture } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
             push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *texture });
+        }
+
+        Actor::SpriteCell { anchor, offset, size, texture, tint, cell } => {
+            let rect = place_rect(parent, *anchor, *offset, *size);
+            let sheet_dims = parse_sheet_dims_from_filename(texture);
+
+            let (uv_scale, uv_offset) = if sheet_dims.0 > 0 && sheet_dims.1 > 0 {
+                let scale = [1.0 / sheet_dims.0 as f32, 1.0 / sheet_dims.1 as f32];
+                let offset = [cell.0 as f32 * scale[0], cell.1 as f32 * scale[1]];
+                (scale, offset)
+            } else {
+                ([1.0, 1.0], [0.0, 0.0]) // fallback for invalid sheet dims
+            };
+
+            out.push(renderer::ScreenObject {
+                object_type: renderer::ObjectType::Sprite {
+                    texture_id: *texture,
+                    tint: *tint,
+                    uv_scale,
+                    uv_offset,
+                },
+                transform: rect_transform(rect, m),
+            });
         }
 
         Actor::Text { anchor, offset, px, color, font, content, align } => {
@@ -114,6 +137,29 @@ fn build_actor_recursive(
 }
 
 /* ======================= LAYOUT HELPERS ======================= */
+
+/// Parses sheet dimensions from a filename like "name_4x4.png" -> (4, 4).
+/// Returns (1, 1) on failure to parse.
+#[inline(always)]
+fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
+    let Some(name_without_ext) = filename.rsplit_once('.').map(|(name, _)| name) else {
+        return (1, 1);
+    };
+
+    let Some(last_part) = name_without_ext.rsplit('_').next() else {
+        return (1, 1);
+    };
+
+    let Some((w_str, h_str)) = last_part.split_once('x') else {
+        return (1, 1);
+    };
+
+    let w = w_str.parse::<u32>().unwrap_or(1);
+    let h = h_str.parse::<u32>().unwrap_or(1);
+
+    (w.max(1), h.max(1)) // Ensure dims are at least 1x1
+}
+
 
 #[inline(always)]
 fn place_rect(parent: SmRect, anchor: actors::Anchor, offset: [f32; 2], size: [SizeSpec; 2]) -> SmRect {

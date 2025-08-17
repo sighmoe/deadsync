@@ -35,6 +35,14 @@ pub enum SizeSpec {
 pub enum Actor {
     Quad { anchor: Anchor, offset: [f32; 2], size: [SizeSpec; 2], color: [f32; 4] },
     Sprite { anchor: Anchor, offset: [f32; 2], size: [SizeSpec; 2], texture: &'static str },
+    SpriteCell {
+        anchor: Anchor,
+        offset: [f32; 2],
+        size: [SizeSpec; 2],
+        texture: &'static str,
+        tint: [f32; 4],
+        cell: (u32, u32),
+    },
     Text {
         anchor: Anchor,
         offset: [f32; 2],
