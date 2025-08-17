@@ -706,16 +706,18 @@ pub fn load_screen(_state: &mut State, _screen: &Screen) -> Result<(), Box<dyn E
     Ok(())
 }
 
+#[inline(always)]
+unsafe fn bytes_of<T>(v: &T) -> &[u8] {
+    unsafe {
+        std::slice::from_raw_parts((v as *const T) as *const u8, std::mem::size_of::<T>())
+    }
+}
+
 pub fn draw(
     state: &mut State,
     screen: &Screen,
     textures: &HashMap<&'static str, renderer::Texture>,
 ) -> Result<(), Box<dyn Error>> {
-    #[inline(always)]
-    fn bytes_of<T>(v: &T) -> &[u8] {
-        unsafe { std::slice::from_raw_parts((v as *const T) as *const u8, std::mem::size_of::<T>()) }
-    }
-
     if state.window_size.width == 0 || state.window_size.height == 0 {
         return Ok(());
     }
@@ -725,7 +727,6 @@ pub fn draw(
         let fence = state.in_flight_fences[state.current_frame];
         device.wait_for_fences(&[fence], true, u64::MAX)?;
 
-        // Acquire next image (capture "suboptimal" bit)
         let (image_index, acquired_suboptimal) =
             match state.swapchain_resources.swapchain_loader.acquire_next_image(
                 state.swapchain_resources.swapchain,
@@ -733,7 +734,7 @@ pub fn draw(
                 state.image_available_semaphores[state.current_frame],
                 vk::Fence::null(),
             ) {
-                Ok(pair) => pair, // (index, suboptimal)
+                Ok(pair) => pair,
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                     recreate_swapchain_and_dependents(state)?;
                     return Ok(());
@@ -761,28 +762,20 @@ pub fn draw(
         let rp_info = vk::RenderPassBeginInfo::default()
             .render_pass(state.render_pass)
             .framebuffer(state.swapchain_resources.framebuffers[image_index as usize])
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D::default(),
-                extent: state.swapchain_resources.extent,
-            })
+            .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent })
             .clear_values(std::slice::from_ref(&clear_value));
         device.cmd_begin_render_pass(cmd, &rp_info, vk::SubpassContents::INLINE);
 
         if let (Some(vb), Some(ib)) = (&state.vertex_buffer, &state.index_buffer) {
-            // Dynamic viewport/scissor
             let vp = vk::Viewport {
-                x: 0.0,
-                y: state.swapchain_resources.extent.height as f32,
+                x: 0.0, y: state.swapchain_resources.extent.height as f32,
                 width: state.swapchain_resources.extent.width as f32,
                 height: -(state.swapchain_resources.extent.height as f32),
-                min_depth: 0.0,
-                max_depth: 1.0,
+                min_depth: 0.0, max_depth: 1.0,
             };
             device.cmd_set_viewport(cmd, 0, &[vp]);
             let sc = vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent };
             device.cmd_set_scissor(cmd, 0, &[sc]);
-
-            // Static buffers
             device.cmd_bind_vertex_buffers(cmd, 0, &[vb.buffer], &[0]);
             device.cmd_bind_index_buffer(cmd, ib.buffer, 0, vk::IndexType::UINT16);
 
@@ -800,7 +793,6 @@ pub fn draw(
                         }
                         let pc = SolidPushConstants { mvp: proj * o.transform, color: *color };
                         device.cmd_push_constants(cmd, state.solid_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
-                        device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                     }
                     ObjectType::Textured { texture_id } => {
                         if !matches!(active, Active::Textured) {
@@ -808,19 +800,14 @@ pub fn draw(
                             active = Active::Textured;
                             last_set = vk::DescriptorSet::null();
                         }
-                        let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) else {
-                            warn!("Vulkan texture ID '{}' not found!", texture_id);
-                            continue;
-                        };
-                        if tex.descriptor_set != last_set {
-                            device.cmd_bind_descriptor_sets(
-                                cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline_layout, 0, &[tex.descriptor_set], &[]
-                            );
-                            last_set = tex.descriptor_set;
-                        }
-                        let pc = TexturedPushConstants { mvp: proj * o.transform };
-                        device.cmd_push_constants(cmd, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
-                        device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
+                        if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
+                            if tex.descriptor_set != last_set {
+                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline_layout, 0, &[tex.descriptor_set], &[]);
+                                last_set = tex.descriptor_set;
+                            }
+                            let pc = TexturedPushConstants { mvp: proj * o.transform };
+                            device.cmd_push_constants(cmd, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+                        } else { continue; }
                     }
                     ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
                         if !matches!(active, Active::Sprite) {
@@ -828,28 +815,14 @@ pub fn draw(
                             active = Active::Sprite;
                             last_set = vk::DescriptorSet::null();
                         }
-                        let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) else {
-                            warn!("Vulkan sprite texture ID '{}' not found!", texture_id);
-                            continue;
-                        };
-                        if tex.descriptor_set != last_set {
-                            device.cmd_bind_descriptor_sets(
-                                cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline_layout, 0, &[tex.descriptor_set], &[]
-                            );
-                            last_set = tex.descriptor_set;
-                        }
-                        let pc = SpritePush {
-                            mvp: proj * o.transform,
-                            tint: *tint,
-                            uv_scale: *uv_scale,
-                            uv_offset: *uv_offset,
-                        };
-                        device.cmd_push_constants(
-                            cmd, state.sprite_pipeline_layout,
-                            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                            0, bytes_of(&pc)
-                        );
-                        device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
+                        if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
+                            if tex.descriptor_set != last_set {
+                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline_layout, 0, &[tex.descriptor_set], &[]);
+                                last_set = tex.descriptor_set;
+                            }
+                            let pc = SpritePush { mvp: proj * o.transform, tint: *tint, uv_scale: *uv_scale, uv_offset: *uv_offset };
+                            device.cmd_push_constants(cmd, state.sprite_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
+                        } else { continue; }
                     }
                     ObjectType::MsdfGlyph { texture_id, uv_scale, uv_offset, color, px_range } => {
                         if !matches!(active, Active::Msdf) {
@@ -857,66 +830,35 @@ pub fn draw(
                             active = Active::Msdf;
                             last_set = vk::DescriptorSet::null();
                         }
-                        let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) else {
-                            warn!("Vulkan MSDF atlas '{}' not found!", texture_id);
-                            continue;
-                        };
-                        if tex.descriptor_set != last_set {
-                            device.cmd_bind_descriptor_sets(
-                                cmd, vk::PipelineBindPoint::GRAPHICS, state.msdf_pipeline_layout, 0, &[tex.descriptor_set], &[]
-                            );
-                            last_set = tex.descriptor_set;
-                        }
-
-                        let pc = MsdfPush {
-                            mvp: proj * o.transform,
-                            uv_scale: *uv_scale,
-                            uv_offset: *uv_offset,
-                            color: *color,
-                            px_range: *px_range,
-                            _pad: [0.0; 3],
-                        };
-                        device.cmd_push_constants(
-                            cmd,
-                            state.msdf_pipeline_layout,
-                            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                            0,
-                            bytes_of(&pc),
-                        );
-                        device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
+                        if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
+                            if tex.descriptor_set != last_set {
+                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.msdf_pipeline_layout, 0, &[tex.descriptor_set], &[]);
+                                last_set = tex.descriptor_set;
+                            }
+                            let pc = MsdfPush { mvp: proj * o.transform, uv_scale: *uv_scale, uv_offset: *uv_offset, color: *color, px_range: *px_range, _pad: [0.0; 3] };
+                            device.cmd_push_constants(cmd, state.msdf_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
+                        } else { continue; }
                     }
                 }
+                device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
             }
         }
 
         device.cmd_end_render_pass(cmd);
         device.end_command_buffer(cmd)?;
 
-        // Submit/present
         let wait_semaphores = [state.image_available_semaphores[state.current_frame]];
         let signal_semaphores = [state.render_finished_semaphores[state.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let submit = vk::SubmitInfo::default()
-            .wait_semaphores(&wait_semaphores)
-            .wait_dst_stage_mask(&wait_stages)
-            .command_buffers(std::slice::from_ref(&cmd))
-            .signal_semaphores(&signal_semaphores);
+        let submit = vk::SubmitInfo::default().wait_semaphores(&wait_semaphores).wait_dst_stage_mask(&wait_stages).command_buffers(std::slice::from_ref(&cmd)).signal_semaphores(&signal_semaphores);
         device.queue_submit(state.queue, &[submit], fence)?;
 
-        let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(&signal_semaphores)
-            .swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain))
-            .image_indices(std::slice::from_ref(&image_index));
+        let present_info = vk::PresentInfoKHR::default().wait_semaphores(&signal_semaphores).swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain)).image_indices(std::slice::from_ref(&image_index));
 
         match state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present_info) {
-            Ok(suboptimal_present) => {
-                if suboptimal_present || acquired_suboptimal {
-                    recreate_swapchain_and_dependents(state)?;
-                }
-            }
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
-                recreate_swapchain_and_dependents(state)?;
-            }
+            Ok(suboptimal) if suboptimal || acquired_suboptimal => recreate_swapchain_and_dependents(state)?,
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => recreate_swapchain_and_dependents(state)?,
+            Ok(_) => {},
             Err(e) => return Err(e.into()),
         }
 
