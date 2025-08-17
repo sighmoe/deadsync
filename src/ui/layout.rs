@@ -1,4 +1,3 @@
-// src/ui/layout.rs
 use std::collections::HashMap;
 use cgmath::{Matrix4, Vector2, Vector3};
 
@@ -6,6 +5,7 @@ use crate::core::space::Metrics;
 use crate::ui::actors::{self, Actor, SizeSpec};
 use crate::ui::msdf;
 use crate::core::gfx as renderer;
+use crate::core::gfx::types::BlendMode;
 
 /* ======================= RENDERER SCREEN BUILDER ======================= */
 
@@ -54,21 +54,21 @@ fn build_actor_recursive(
     out: &mut Vec<renderer::ScreenObject>,
 ) {
     match actor {
-        Actor::Sprite {
+        actors::Actor::Sprite {
             anchor, offset, size, source, tint, cell, grid, uv_rect,
             visible, flip_x, flip_y,
             cropleft, cropright, croptop, cropbottom,
+            blend,
         } => {
             if !*visible { return; }
             let rect = place_rect(parent, *anchor, *offset, *size);
             push_sprite(
                 out, rect, m, *source, *tint, *uv_rect, *cell, *grid,
-                *flip_x, *flip_y,
-                *cropleft, *cropright, *croptop, *cropbottom,
+                *flip_x, *flip_y, *cropleft, *cropright, *croptop, *cropbottom, *blend,
             );
         }
 
-        Actor::Text { anchor, offset, px, color, font, content, align } => {
+        actors::Actor::Text { anchor, offset, px, color, font, content, align } => {
             if let Some(fm) = fonts.get(font) {
                 let measured = fm.measure_line_width(content, *px);
                 let origin = place_text_baseline(
@@ -87,21 +87,22 @@ fn build_actor_recursive(
                             px_range: fm.px_range,
                         },
                         transform: t,
+                        blend: BlendMode::Alpha, // text uses standard alpha by default
                     });
                 }
             }
         }
 
-        Actor::Frame { anchor, offset, size, children, background } => {
+        actors::Actor::Frame { anchor, offset, size, children, background } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
 
             if let Some(bg) = background {
                 match bg {
                     actors::Background::Color(c) => {
-                        push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *c });
+                        push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *c }, BlendMode::Alpha);
                     }
                     actors::Background::Texture(tex) => {
-                        push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *tex });
+                        push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *tex }, BlendMode::Alpha);
                     }
                 }
             }
@@ -136,7 +137,6 @@ fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
 
     (w.max(1), h.max(1)) // Ensure dims are at least 1x1
 }
-
 
 #[inline(always)]
 fn place_rect(parent: SmRect, anchor: actors::Anchor, offset: [f32; 2], size: [SizeSpec; 2]) -> SmRect {
@@ -174,8 +174,9 @@ fn push_rect(
     rect: SmRect,
     m: &Metrics,
     object_type: renderer::ObjectType,
+    blend: BlendMode,
 ) {
-    out.push(renderer::ScreenObject { object_type, transform: rect_transform(rect, m) });
+    out.push(renderer::ScreenObject { object_type, transform: rect_transform(rect, m), blend });
 }
 
 #[inline(always)]
@@ -194,6 +195,7 @@ fn push_sprite(
     cropright: f32,
     croptop: f32,
     cropbottom: f32,
+    blend: BlendMode,
 ) {
     // Solid path: crop geometry only
     if let actors::SpriteSource::Solid = source {
@@ -202,6 +204,7 @@ fn push_sprite(
         out.push(renderer::ScreenObject {
             object_type: renderer::ObjectType::SolidColor { color: tint },
             transform: rect_transform(r, m),
+            blend,
         });
         return;
     }
@@ -251,6 +254,7 @@ fn push_sprite(
             uv_offset,
         },
         transform: rect_transform(r, m),
+        blend,
     });
 }
 
@@ -263,12 +267,8 @@ fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) 
     // If sums exceed 1, normalize proportionally to avoid negative sizes.
     let sum_x = l + r;
     let sum_y = t + b;
-    let (l, r) = if sum_x > 1.0 {
-        (l / sum_x, r / sum_x)
-    } else { (l, r) };
-    let (t, b) = if sum_y > 1.0 {
-        (t / sum_y, b / sum_y)
-    } else { (t, b) };
+    let (l, r) = if sum_x > 1.0 { (l / sum_x, r / sum_x) } else { (l, r) };
+    let (t, b) = if sum_y > 1.0 { (t / sum_y, b / sum_y) } else { (t, b) };
     (l, r, t, b)
 }
 
@@ -315,7 +315,6 @@ fn place_text_baseline(
     let world_y = m.top  - baseline_sm_y;
     Vector2::new(world_x, world_y)
 }
-
 
 #[inline(always)]
 fn anchor_ref(parent: SmRect, anchor: actors::Anchor) -> (f32, f32) {

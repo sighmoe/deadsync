@@ -1,5 +1,13 @@
 use cgmath::Matrix4;
 
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlendMode {
+    Alpha,
+    Add,
+    Multiply,
+}
+
 #[derive(Clone)]
 pub enum ObjectType {
     SolidColor { color: [f32; 4] },
@@ -19,7 +27,6 @@ pub enum ObjectType {
     },
 }
 
-
 #[derive(Clone)]
 pub struct Screen {
     pub clear_color: [f32; 4],
@@ -30,4 +37,5 @@ pub struct Screen {
 pub struct ScreenObject {
     pub object_type: ObjectType,
     pub transform: Matrix4<f32>,
+    pub blend: BlendMode,
 }

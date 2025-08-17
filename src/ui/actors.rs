@@ -1,3 +1,5 @@
+use crate::core::gfx::types::BlendMode;
+
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Background {
@@ -47,9 +49,8 @@ pub enum Actor {
     /// - `uv_rect`: optional normalized [u0, v0, u1, v1] (top-left origin). Highest priority when set.
     /// - `visible`: if false, the sprite is culled during layout
     /// - `flip_x` / `flip_y`: mirror the subrect horizontally/vertically
-    /// - texture or solid, optional uv_rect / grid+cell
-    /// - tint, flip flags, visibility
     /// - per-side cropping (fractions in [0,1])
+    /// - `blend`: Alpha/Add/Multiply
     Sprite {
         anchor: Anchor,
         offset: [f32; 2],
@@ -62,11 +63,11 @@ pub enum Actor {
         visible: bool,
         flip_x: bool,
         flip_y: bool,
-        // NEW:
         cropleft: f32,
         cropright: f32,
         croptop: f32,
         cropbottom: f32,
+        blend: BlendMode,
     },
 
     Text {
@@ -90,7 +91,7 @@ pub enum Actor {
 
 /// Convenience macro to build a textured Sprite with sensible defaults:
 /// Required keys: anchor, offset, size, texture
-/// Optional keys: tint, cell, grid, uv_rect
+/// Optional keys: tint, cell, grid, uv_rect, visible, flip_x, flip_y, crop*, blend
 #[macro_export]
 macro_rules! sprite {
     (
@@ -109,6 +110,7 @@ macro_rules! sprite {
         $(, cropright: $cr:expr )?
         $(, croptop:   $ct:expr )?
         $(, cropbottom:$cb:expr )?
+        $(, blend: $blend:expr )?
         $(,)?
     ) => {
         $crate::ui::actors::Actor::Sprite {
@@ -127,6 +129,7 @@ macro_rules! sprite {
             cropright:  sprite!(@f $( $cr )?),
             croptop:    sprite!(@f $( $ct )?),
             cropbottom: sprite!(@f $( $cb )?),
+            blend:  sprite!(@blend $( $blend )?),
         }
     };
 
@@ -144,6 +147,9 @@ macro_rules! sprite {
 
     (@f $v:expr) => { $v };
     (@f) => { 0.0 };
+
+    (@blend $b:expr) => { $b };
+    (@blend) => { $crate::core::gfx::types::BlendMode::Alpha };
 }
 
 #[macro_export]
@@ -160,6 +166,7 @@ macro_rules! quad {
         $(, cropright: $cr:expr )?
         $(, croptop:   $ct:expr )?
         $(, cropbottom:$cb:expr )?
+        $(, blend: $blend:expr )?
         $(,)?
     ) => {
         $crate::ui::actors::Actor::Sprite {
@@ -181,6 +188,7 @@ macro_rules! quad {
             cropright:  quad!(@f $( $cr )?),
             croptop:    quad!(@f $( $ct )?),
             cropbottom: quad!(@f $( $cb )?),
+            blend:  quad!(@blend $( $blend )?),
         }
     };
 
@@ -193,4 +201,7 @@ macro_rules! quad {
 
     (@f $v:expr) => { $v };
     (@f) => { 0.0 };
+
+    (@blend $b:expr) => { $b };
+    (@blend) => { $crate::core::gfx::types::BlendMode::Alpha };
 }
