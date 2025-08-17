@@ -40,9 +40,11 @@ pub enum Actor {
         color: [f32; 4],
     },
 
-    /// Unified sprite:
+    /// Unified Sprite:
     /// - `tint`: premultiplied in shader (use [1,1,1,1] for no tint)
-    /// - `cell`: optional (col,row) for grid atlases like "name_4x4.png"
+    /// - `cell`: optional (col,row) index into a grid atlas
+    /// - `grid`: optional (cols,rows) to declare atlas grid explicitly (overrides filename parsing)
+    /// - `uv_rect`: optional normalized [u0, v0, u1, v1] (top-left origin). Highest priority when set.
     Sprite {
         anchor: Anchor,
         offset: [f32; 2],
@@ -50,6 +52,8 @@ pub enum Actor {
         texture: &'static str,
         tint: [f32; 4],
         cell: Option<(u32, u32)>,
+        grid: Option<(u32, u32)>,
+        uv_rect: Option<[f32; 4]>,
     },
 
     Text {
@@ -69,4 +73,47 @@ pub enum Actor {
         children: Vec<Actor>,
         background: Option<Background>,
     },
+}
+
+/// Convenience macro to build a Sprite with sensible defaults:
+/// Required keys: anchor, offset, size, texture
+/// Optional keys: tint, cell, grid, uv_rect
+///
+/// Example:
+///   sprite!{
+///     anchor: Anchor::TopLeft,
+///     offset: [x, y],
+///     size: [SizeSpec::Px(w), SizeSpec::Px(h)],
+///     texture: "logo.png"
+///   }
+#[macro_export]
+macro_rules! sprite {
+    (
+        anchor: $anchor:expr,
+        offset: $offset:expr,
+        size: $size:expr,
+        texture: $texture:expr
+        $(, tint: $tint:expr )?
+        $(, cell: $cell:expr )?
+        $(, grid: $grid:expr )?
+        $(, uv_rect: $uv_rect:expr )?
+        $(,)?
+    ) => {
+        $crate::ui::actors::Actor::Sprite {
+            anchor: $anchor,
+            offset: $offset,
+            size:   $size,
+            texture: $texture,
+            tint:    sprite!(@tint $( $tint )?),
+            cell:    sprite!(@opt  $( $cell )?),
+            grid:    sprite!(@opt  $( $grid )?),
+            uv_rect: sprite!(@opt  $( $uv_rect )?),
+        }
+    };
+
+    (@tint $t:expr) => { $t };
+    (@tint) => { [1.0, 1.0, 1.0, 1.0] };
+
+    (@opt $x:expr) => { Some($x) };
+    (@opt) => { None };
 }

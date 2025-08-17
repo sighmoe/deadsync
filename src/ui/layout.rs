@@ -60,10 +60,10 @@ fn build_actor_recursive(
             push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *color });
         }
 
-        // Unified sprite path: supports tint + optional cell → UVs.
-        Actor::Sprite { anchor, offset, size, texture, tint, cell } => {
+        // Unified sprite path (tint + UVs)
+        Actor::Sprite { anchor, offset, size, texture, tint, cell, grid, uv_rect } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
-            push_sprite(out, rect, m, *texture, *tint, *cell);
+            push_sprite(out, rect, m, *texture, *tint, *uv_rect, *cell, *grid);
         }
 
         Actor::Text { anchor, offset, px, color, font, content, align } => {
@@ -99,7 +99,7 @@ fn build_actor_recursive(
                         push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *c });
                     }
                     actors::Background::Texture(tex) => {
-                        // Frames using a straight texture (full UVs, no tint) are fine to stay as Textured.
+                        // Full-coverage background: a simple textured quad is fine.
                         push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *tex });
                     }
                 }
@@ -184,28 +184,64 @@ fn push_sprite(
     m: &Metrics,
     texture: &'static str,
     tint: [f32; 4],
-    cell: Option<(u32, u32)>,
+    uv_rect: Option<[f32; 4]>,     // [u0,v0,u1,v1], normalized, top-left origin
+    cell: Option<(u32, u32)>,      // (col,row)
+    grid: Option<(u32, u32)>,      // (cols,rows)
 ) {
-    let (uv_scale, uv_offset) = match cell {
-        Some((cx, cy)) => {
-            let (cols, rows) = parse_sheet_dims_from_filename(texture);
-            if cols > 1 || rows > 1 {
-                let scale = [1.0 / cols.max(1) as f32, 1.0 / rows.max(1) as f32];
-                let offset = [cx as f32 * scale[0], cy as f32 * scale[1]];
-                (scale, offset)
-            } else {
-                ([1.0, 1.0], [0.0, 0.0])
-            }
-        }
-        None => ([1.0, 1.0], [0.0, 0.0]),
-    };
+    // 1) Highest priority: explicit uv_rect
+    if let Some([u0, v0, u1, v1]) = uv_rect {
+        let du = u1 - u0;
+        let dv = v1 - v0;
+        let valid = du > 0.0 && dv > 0.0;
+        let (uv_scale, uv_offset) = if valid {
+            ([du, dv], [u0, v0])
+        } else {
+            ([1.0, 1.0], [0.0, 0.0]) // fall back to full
+        };
 
+        out.push(renderer::ScreenObject {
+            object_type: renderer::ObjectType::Sprite {
+                texture_id: texture,
+                tint,
+                uv_scale,
+                uv_offset,
+            },
+            transform: rect_transform(rect, m),
+        });
+        return;
+    }
+
+    // 2) Next: cell + grid/filename
+    if let Some((cx, cy)) = cell {
+        let (cols, rows) = match grid {
+            Some(g) => g,
+            None => parse_sheet_dims_from_filename(texture),
+        };
+        let cols = cols.max(1);
+        let rows = rows.max(1);
+
+        let scale = [1.0 / cols as f32, 1.0 / rows as f32];
+        let offset = [cx.min(cols - 1) as f32 * scale[0], cy.min(rows - 1) as f32 * scale[1]];
+
+        out.push(renderer::ScreenObject {
+            object_type: renderer::ObjectType::Sprite {
+                texture_id: texture,
+                tint,
+                uv_scale: scale,
+                uv_offset: offset,
+            },
+            transform: rect_transform(rect, m),
+        });
+        return;
+    }
+
+    // 3) Default: full texture
     out.push(renderer::ScreenObject {
         object_type: renderer::ObjectType::Sprite {
             texture_id: texture,
             tint,
-            uv_scale,
-            uv_offset,
+            uv_scale: [1.0, 1.0],
+            uv_offset: [0.0, 0.0],
         },
         transform: rect_transform(rect, m),
     });
