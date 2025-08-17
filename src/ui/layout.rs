@@ -60,43 +60,26 @@ fn build_actor_recursive(
             push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *color });
         }
 
+        // CHANGE: Sprite now uses the Sprite pipeline (tint + UVs), with defaults:
+        // tint = white, UVs = full image. This keeps visuals the same but unifies logic.
         Actor::Sprite { anchor, offset, size, texture } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
-            push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *texture });
+            push_sprite(out, rect, m, *texture, [1.0, 1.0, 1.0, 1.0], None);
         }
 
+        // SpriteCell reuses the same helper, passing in a cell and its tint.
         Actor::SpriteCell { anchor, offset, size, texture, tint, cell } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
-            let sheet_dims = parse_sheet_dims_from_filename(texture);
-
-            let (uv_scale, uv_offset) = if sheet_dims.0 > 0 && sheet_dims.1 > 0 {
-                let scale = [1.0 / sheet_dims.0 as f32, 1.0 / sheet_dims.1 as f32];
-                let offset = [cell.0 as f32 * scale[0], cell.1 as f32 * scale[1]];
-                (scale, offset)
-            } else {
-                ([1.0, 1.0], [0.0, 0.0]) // fallback for invalid sheet dims
-            };
-
-            out.push(renderer::ScreenObject {
-                object_type: renderer::ObjectType::Sprite {
-                    texture_id: *texture,
-                    tint: *tint,
-                    uv_scale,
-                    uv_offset,
-                },
-                transform: rect_transform(rect, m),
-            });
+            push_sprite(out, rect, m, *texture, *tint, Some(*cell));
         }
 
         Actor::Text { anchor, offset, px, color, font, content, align } => {
             if let Some(fm) = fonts.get(font) {
-                // Measure once for alignment, then layout.
                 let measured = fm.measure_line_width(content, *px);
                 let origin = place_text_baseline(
                     parent, *anchor, *offset, *align, measured, fm, content, *px, m,
                 );
 
-                // Layout glyphs and emit quads (MSDF).
                 for g in msdf::layout_line(fm, content, *px, origin) {
                     let t = Matrix4::from_translation(Vector3::new(g.center.x, g.center.y, 0.0))
                         * Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
@@ -123,12 +106,12 @@ fn build_actor_recursive(
                         push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *c });
                     }
                     actors::Background::Texture(tex) => {
+                        // This can stay as a full textured rectangle.
                         push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *tex });
                     }
                 }
             }
 
-            // Recurse into children
             for child in children {
                 build_actor_recursive(child, rect, m, fonts, out);
             }
@@ -199,6 +182,41 @@ fn push_rect(
     object_type: renderer::ObjectType,
 ) {
     out.push(renderer::ScreenObject { object_type, transform: rect_transform(rect, m) });
+}
+
+#[inline(always)]
+fn push_sprite(
+    out: &mut Vec<renderer::ScreenObject>,
+    rect: SmRect,
+    m: &Metrics,
+    texture: &'static str,
+    tint: [f32; 4],
+    cell: Option<(u32, u32)>,
+) {
+    let (uv_scale, uv_offset) = match cell {
+        Some((cx, cy)) => {
+            let (cols, rows) = parse_sheet_dims_from_filename(texture);
+            if cols > 1 || rows > 1 {
+                let scale = [1.0 / cols.max(1) as f32, 1.0 / rows.max(1) as f32];
+                let offset = [cx as f32 * scale[0], cy as f32 * scale[1]];
+                (scale, offset)
+            } else {
+                // Filename didn't encode a grid; fall back to full texture.
+                ([1.0, 1.0], [0.0, 0.0])
+            }
+        }
+        None => ([1.0, 1.0], [0.0, 0.0]),
+    };
+
+    out.push(renderer::ScreenObject {
+        object_type: renderer::ObjectType::Sprite {
+            texture_id: texture,
+            tint,
+            uv_scale,
+            uv_offset,
+        },
+        transform: rect_transform(rect, m),
+    });
 }
 
 #[inline(always)]
