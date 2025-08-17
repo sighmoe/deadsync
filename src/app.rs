@@ -139,13 +139,16 @@ impl App {
             })
             .collect();
 
+        // Create the fallback image once to avoid redundant work in the loop.
+        let fallback_image = fallback_rgba();
         let mut decoded: Vec<(&'static str, image::RgbaImage)> = Vec::with_capacity(texture_paths.len());
         for h in handles {
             match h.join().expect("texture decode thread panicked") {
                 Ok((key, rgba)) => decoded.push((key, rgba)),
                 Err((key, msg)) => {
                     warn!("Failed to load 'assets/graphics/{}': {}. Using generated fallback.", key, msg);
-                    decoded.push((key, fallback_rgba()));
+                    // Clone the pre-made fallback image instead of regenerating it.
+                    decoded.push((key, fallback_image.clone()));
                 }
             }
         }
