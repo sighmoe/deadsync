@@ -30,7 +30,7 @@ pub fn build_screen(
 fn estimate_object_count(actors: &[Actor]) -> usize {
     fn count(a: &Actor) -> usize {
         match a {
-            Actor::Quad { .. } | Actor::Sprite { .. } | Actor::SpriteCell { .. } => 1,
+            Actor::Quad { .. } | Actor::Sprite { .. } => 1,
             Actor::Text { content, .. } => content.chars().filter(|&c| c != '\n').count(),
             Actor::Frame { children, background, .. } => {
                 let bg = if background.is_some() { 1 } else { 0 };
@@ -60,17 +60,10 @@ fn build_actor_recursive(
             push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *color });
         }
 
-        // CHANGE: Sprite now uses the Sprite pipeline (tint + UVs), with defaults:
-        // tint = white, UVs = full image. This keeps visuals the same but unifies logic.
-        Actor::Sprite { anchor, offset, size, texture } => {
+        // Unified sprite path: supports tint + optional cell → UVs.
+        Actor::Sprite { anchor, offset, size, texture, tint, cell } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
-            push_sprite(out, rect, m, *texture, [1.0, 1.0, 1.0, 1.0], None);
-        }
-
-        // SpriteCell reuses the same helper, passing in a cell and its tint.
-        Actor::SpriteCell { anchor, offset, size, texture, tint, cell } => {
-            let rect = place_rect(parent, *anchor, *offset, *size);
-            push_sprite(out, rect, m, *texture, *tint, Some(*cell));
+            push_sprite(out, rect, m, *texture, *tint, *cell);
         }
 
         Actor::Text { anchor, offset, px, color, font, content, align } => {
@@ -106,7 +99,7 @@ fn build_actor_recursive(
                         push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *c });
                     }
                     actors::Background::Texture(tex) => {
-                        // This can stay as a full textured rectangle.
+                        // Frames using a straight texture (full UVs, no tint) are fine to stay as Textured.
                         push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *tex });
                     }
                 }
@@ -201,7 +194,6 @@ fn push_sprite(
                 let offset = [cx as f32 * scale[0], cy as f32 * scale[1]];
                 (scale, offset)
             } else {
-                // Filename didn't encode a grid; fall back to full texture.
                 ([1.0, 1.0], [0.0, 0.0])
             }
         }

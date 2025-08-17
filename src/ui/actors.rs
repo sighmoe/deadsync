@@ -33,16 +33,25 @@ pub enum SizeSpec {
 
 #[derive(Clone, Debug)]
 pub enum Actor {
-    Quad { anchor: Anchor, offset: [f32; 2], size: [SizeSpec; 2], color: [f32; 4] },
-    Sprite { anchor: Anchor, offset: [f32; 2], size: [SizeSpec; 2], texture: &'static str },
-    SpriteCell {
+    Quad {
+        anchor: Anchor,
+        offset: [f32; 2],
+        size: [SizeSpec; 2],
+        color: [f32; 4],
+    },
+
+    /// Unified sprite:
+    /// - `tint`: premultiplied in shader (use [1,1,1,1] for no tint)
+    /// - `cell`: optional (col,row) for grid atlases like "name_4x4.png"
+    Sprite {
         anchor: Anchor,
         offset: [f32; 2],
         size: [SizeSpec; 2],
         texture: &'static str,
         tint: [f32; 4],
-        cell: (u32, u32),
+        cell: Option<(u32, u32)>,
     },
+
     Text {
         anchor: Anchor,
         offset: [f32; 2],
@@ -52,6 +61,7 @@ pub enum Actor {
         content: String,
         align: TextAlign,
     },
+
     Frame {
         anchor: Anchor,
         offset: [f32; 2],

@@ -41,22 +41,29 @@ pub fn build_logo(params: LogoParams, screen_width: f32) -> Vec<Actor> {
     let dance_x_tl = logo_x_tl;
     let dance_y_tl = logo_y_tl + 0.5 * (logo_h - dance_h) - params.banner_y_offset_inside;
 
-    // Declare with DSL: banner first (behind), logo second (on top)
+    // White tint, no cell selection (full UVs)
+    let white = [1.0, 1.0, 1.0, 1.0];
+
     vec![
         Actor::Sprite {
             anchor: Anchor::TopLeft,
             offset: [dance_x_tl, dance_y_tl],
             size: [SizeSpec::Px(dance_w), SizeSpec::Px(dance_h)],
             texture: "dance.png",
+            tint: white,
+            cell: None,
         },
         Actor::Sprite {
             anchor: Anchor::TopLeft,
             offset: [logo_x_tl,  logo_y_tl ],
             size: [SizeSpec::Px(logo_w), SizeSpec::Px(logo_h) ],
             texture: "logo.png",
+            tint: white,
+            cell: None,
         },
     ]
 }
+
 
 /// Convenience: build with default params.
 pub fn build_logo_default(screen_width: f32) -> Vec<Actor> {
