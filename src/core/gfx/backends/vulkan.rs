@@ -779,68 +779,65 @@ pub fn draw(
             device.cmd_bind_vertex_buffers(cmd, 0, &[vb.buffer], &[0]);
             device.cmd_bind_index_buffer(cmd, ib.buffer, 0, vk::IndexType::UINT16);
 
-            enum Active { None, Solid, Textured, Sprite, Msdf }
-            let mut active = Active::None;
+            #[derive(Clone, Copy, PartialEq, Eq)]
+            enum ActivePipeline { None, Solid, Textured, Sprite, Msdf }
+            let mut active_pipeline = ActivePipeline::None;
             let mut last_set = vk::DescriptorSet::null();
             let proj = state.projection;
 
             for o in &screen.objects {
                 match &o.object_type {
                     ObjectType::SolidColor { color } => {
-                        if !matches!(active, Active::Solid) {
+                        if active_pipeline != ActivePipeline::Solid {
                             device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.solid_pipeline);
-                            active = Active::Solid;
+                            active_pipeline = ActivePipeline::Solid;
                         }
                         let pc = SolidPushConstants { mvp: proj * o.transform, color: *color };
                         device.cmd_push_constants(cmd, state.solid_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+                        device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                     }
-                    ObjectType::Textured { texture_id } => {
-                        if !matches!(active, Active::Textured) {
-                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline);
-                            active = Active::Textured;
-                            last_set = vk::DescriptorSet::null();
-                        }
+
+                    // --- UNIFIED TEXTURED OBJECT HANDLING ---
+                    ObjectType::Textured { texture_id } |
+                    ObjectType::Sprite { texture_id, .. } |
+                    ObjectType::MsdfGlyph { texture_id, .. } => {
+                        let (target_pipeline, pipeline, layout, stages) = match &o.object_type {
+                            ObjectType::Textured  { .. } => (ActivePipeline::Textured, state.texture_pipeline, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX),
+                            ObjectType::Sprite    { .. } => (ActivePipeline::Sprite, state.sprite_pipeline, state.sprite_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT),
+                            ObjectType::MsdfGlyph { .. } => (ActivePipeline::Msdf, state.msdf_pipeline, state.msdf_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT),
+                            _ => continue, // Should be unreachable
+                        };
+
                         if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
+                            if active_pipeline != target_pipeline {
+                                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, pipeline);
+                                active_pipeline = target_pipeline;
+                                last_set = vk::DescriptorSet::null();
+                            }
                             if tex.descriptor_set != last_set {
-                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline_layout, 0, &[tex.descriptor_set], &[]);
+                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, layout, 0, &[tex.descriptor_set], &[]);
                                 last_set = tex.descriptor_set;
                             }
-                            let pc = TexturedPushConstants { mvp: proj * o.transform };
-                            device.cmd_push_constants(cmd, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
-                        } else { continue; }
-                    }
-                    ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
-                        if !matches!(active, Active::Sprite) {
-                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline);
-                            active = Active::Sprite;
-                            last_set = vk::DescriptorSet::null();
-                        }
-                        if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
-                            if tex.descriptor_set != last_set {
-                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline_layout, 0, &[tex.descriptor_set], &[]);
-                                last_set = tex.descriptor_set;
+
+                            match &o.object_type {
+                                ObjectType::Textured { .. } => {
+                                    let pc = TexturedPushConstants { mvp: proj * o.transform };
+                                    device.cmd_push_constants(cmd, layout, stages, 0, bytes_of(&pc));
+                                }
+                                ObjectType::Sprite { tint, uv_scale, uv_offset, .. } => {
+                                    let pc = SpritePush { mvp: proj * o.transform, tint: *tint, uv_scale: *uv_scale, uv_offset: *uv_offset };
+                                    device.cmd_push_constants(cmd, layout, stages, 0, bytes_of(&pc));
+                                }
+                                ObjectType::MsdfGlyph { uv_scale, uv_offset, color, px_range, .. } => {
+                                    let pc = MsdfPush { mvp: proj * o.transform, uv_scale: *uv_scale, uv_offset: *uv_offset, color: *color, px_range: *px_range, _pad: [0.0; 3] };
+                                    device.cmd_push_constants(cmd, layout, stages, 0, bytes_of(&pc));
+                                }
+                                _ => {}
                             }
-                            let pc = SpritePush { mvp: proj * o.transform, tint: *tint, uv_scale: *uv_scale, uv_offset: *uv_offset };
-                            device.cmd_push_constants(cmd, state.sprite_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
-                        } else { continue; }
-                    }
-                    ObjectType::MsdfGlyph { texture_id, uv_scale, uv_offset, color, px_range } => {
-                        if !matches!(active, Active::Msdf) {
-                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.msdf_pipeline);
-                            active = Active::Msdf;
-                            last_set = vk::DescriptorSet::null();
+                            device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                         }
-                        if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
-                            if tex.descriptor_set != last_set {
-                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.msdf_pipeline_layout, 0, &[tex.descriptor_set], &[]);
-                                last_set = tex.descriptor_set;
-                            }
-                            let pc = MsdfPush { mvp: proj * o.transform, uv_scale: *uv_scale, uv_offset: *uv_offset, color: *color, px_range: *px_range, _pad: [0.0; 3] };
-                            device.cmd_push_constants(cmd, state.msdf_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
-                        } else { continue; }
                     }
                 }
-                device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
             }
         }
 
