@@ -236,104 +236,77 @@ pub fn draw(
     }
 
     unsafe {
+        let gl = &state.gl;
         // Clear once
         let c = screen.clear_color;
-        state.gl.clear_color(c[0], c[1], c[2], c[3]);
-        state.gl.clear(glow::COLOR_BUFFER_BIT);
+        gl.clear_color(c[0], c[1], c[2], c[3]);
+        gl.clear(glow::COLOR_BUFFER_BIT);
 
         // Program + fixed state once
-        state.gl.use_program(Some(state.program));
-        state.gl.enable(glow::BLEND);
-        state.gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA); // default
-        state.gl.blend_equation(glow::FUNC_ADD);
-
-        // Texture unit 0 for all textured draws
-        state.gl.active_texture(glow::TEXTURE0);
-        state.gl.uniform_1_i32(Some(&state.texture_location), 0);
-
-        // Shared geometry
-        state.gl.bind_vertex_array(Some(state.shared_vao));
+        gl.use_program(Some(state.program));
+        gl.bind_vertex_array(Some(state.shared_vao));
+        
+        // Default blend mode
+        gl.enable(glow::BLEND);
+        gl.blend_equation(glow::FUNC_ADD);
+        gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+        
+        // Texture unit 0 is always active
+        gl.active_texture(glow::TEXTURE0);
+        gl.uniform_1_i32(Some(&state.texture_location), 0);
 
         // Track to avoid redundant GL calls
         let mut last_bound_tex: Option<glow::Texture> = None;
-        let mut last_use_texture: Option<bool> = None;
-        let mut last_color: Option<[f32; 4]> = None;
-        let mut last_blend: Option<crate::core::gfx::types::BlendMode> = None;
+        let mut last_blend_mode = Some(crate::core::gfx::types::BlendMode::Alpha);
 
         for object in &screen.objects {
-            // Per-object blend
-            apply_blend(&state.gl, object.blend, &mut last_blend);
+            apply_blend(gl, object.blend, &mut last_blend_mode);
 
-            // Per-object transform
             let mvp_array: [[f32; 4]; 4] = (state.projection * object.transform).into();
             let mvp_slice: &[f32] = bytemuck::cast_slice(&mvp_array);
-            state
-                .gl
-                .uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
+            gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
 
-            let draw_fallback = |last_color: &mut Option<[f32;4]>| {
-                let magenta = [1.0, 0.0, 1.0, 1.0];
-                if last_color.map_or(true, |c| c != magenta) {
-                    state.gl.uniform_4_f32_slice(Some(&state.color_location), &magenta);
-                    *last_color = Some(magenta);
-                }
-            };
+            let is_textured = !matches!(object.object_type, ObjectType::SolidColor { .. });
+            
+            // --- Set texture/solid mode ---
+            gl.uniform_1_i32(Some(&state.use_texture_location), is_textured as i32);
+            gl.uniform_1_i32(Some(&state.is_msdf_location), 0); // Default to non-MSDF
 
-            match &object.object_type {
-                ObjectType::SolidColor { color } => {
-                    if last_use_texture != Some(false) {
-                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
-                        last_use_texture = Some(false);
+            if is_textured {
+                let (texture_id, tint, uv_scale, uv_offset, is_msdf, px_range) = match &object.object_type {
+                    ObjectType::Textured { texture_id } => (texture_id, &[1.0; 4], [1.0, 1.0], [0.0, 0.0], false, 0.0),
+                    ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => (texture_id, tint, *uv_scale, *uv_offset, false, 0.0),
+                    ObjectType::MsdfGlyph { texture_id, color, uv_scale, uv_offset, px_range } => (texture_id, color, *uv_scale, *uv_offset, true, *px_range),
+                    _ => continue,
+                };
+                
+                if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
+                    if last_bound_tex != Some(gl_texture.0) {
+                        gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
+                        last_bound_tex = Some(gl_texture.0);
                     }
-                    state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
-                    if last_bound_tex.is_some() {
-                        state.gl.bind_texture(glow::TEXTURE_2D, None);
-                        last_bound_tex = None;
+                    gl.uniform_4_f32_slice(Some(&state.color_location), tint);
+                    gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
+                    gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
+                    if is_msdf {
+                        gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
+                        gl.uniform_1_f32(Some(&state.px_range_location), px_range);
                     }
-                    if last_color.map_or(true, |c| c != *color) {
-                        state.gl.uniform_4_f32_slice(Some(&state.color_location), color);
-                        last_color = Some(*color);
-                    }
+                } else {
+                    // Fallback for missing texture: draw magenta
+                    gl.uniform_1_i32(Some(&state.use_texture_location), 0);
+                    gl.uniform_4_f32_slice(Some(&state.color_location), &[1.0, 0.0, 1.0, 1.0]);
                 }
-                ObjectType::Textured { texture_id } => {
-                    if bind_texture_for_object(state, textures, texture_id, &mut last_bound_tex, &mut last_use_texture) {
-                        state.gl.uniform_4_f32_slice(Some(&state.color_location), &[1.0, 1.0, 1.0, 1.0]);
-                        state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
-                        state.gl.uniform_2_f32(Some(&state.uv_scale_location), 1.0, 1.0);
-                        state.gl.uniform_2_f32(Some(&state.uv_offset_location), 0.0, 0.0);
-                    } else {
-                        draw_fallback(&mut last_color);
-                    }
-                }
-                ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset, } => {
-                    if bind_texture_for_object(state, textures, texture_id, &mut last_bound_tex, &mut last_use_texture) {
-                        state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
-                        state.gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
-                        state.gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
-                        state.gl.uniform_4_f32_slice(Some(&state.color_location), tint);
-                    } else {
-                        draw_fallback(&mut last_color);
-                    }
-                }
-                ObjectType::MsdfGlyph { texture_id, uv_scale, uv_offset, color, px_range, } => {
-                    if bind_texture_for_object(state, textures, texture_id, &mut last_bound_tex, &mut last_use_texture) {
-                        state.gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
-                        state.gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
-                        state.gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
-                        state.gl.uniform_4_f32_slice(Some(&state.color_location), color);
-                        state.gl.uniform_1_f32(Some(&state.px_range_location), *px_range);
-                    } else {
-                        draw_fallback(&mut last_color);
-                    }
+            } else { // SolidColor
+                if let ObjectType::SolidColor{ color } = &object.object_type {
+                    gl.uniform_4_f32_slice(Some(&state.color_location), color);
                 }
             }
-
-            state
-                .gl
-                .draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
+            
+            gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
         }
 
-        state.gl.bind_vertex_array(None);
+        gl.bind_vertex_array(None);
     }
 
     state.gl_surface.swap_buffers(&state.gl_context)?;
@@ -496,43 +469,6 @@ fn create_graphics_program(
             is_msdf_location,
             px_range_location,
         ))
-    }
-}
-
-/// Helper to bind a texture if needed, managing state changes and fallbacks.
-/// Returns true if a valid texture was bound, false otherwise.
-unsafe fn bind_texture_for_object(
-    state: &State,
-    textures: &HashMap<&'static str, renderer::Texture>,
-    texture_id: &str,
-    last_bound_tex: &mut Option<glow::Texture>,
-    last_use_texture: &mut Option<bool>,
-) -> bool {
-    // This block is necessary because glow calls are unsafe.
-    unsafe {
-        if *last_use_texture != Some(true) {
-            state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
-            *last_use_texture = Some(true);
-        }
-
-        if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
-            if *last_bound_tex != Some(gl_texture.0) {
-                state.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
-                *last_bound_tex = Some(gl_texture.0);
-            }
-            true
-        } else {
-            // Fallback to no texture if the ID is invalid
-            if *last_use_texture != Some(false) {
-                state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
-                *last_use_texture = Some(false);
-            }
-            if last_bound_tex.is_some() {
-                state.gl.bind_texture(glow::TEXTURE_2D, None);
-                *last_bound_tex = None;
-            }
-            false
-        }
     }
 }
 
