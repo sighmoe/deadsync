@@ -131,7 +131,7 @@ pub struct State {
 }
 
 // --- Main Procedural Functions ---
-pub fn init(window: &Window, _screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
+pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
     info!("Initializing Vulkan backend...");
     let entry = Entry::linked();
     let instance = create_instance(&entry, window)?;

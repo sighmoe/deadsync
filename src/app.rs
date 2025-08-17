@@ -252,16 +252,13 @@ impl App {
         let sz = window.inner_size();
         self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
 
-        // Pre-load fonts before building the initial screen.
-        // This is a temporary move; ideally, backend creation doesn't need a screen.
-        // But first, we need the backend to load the font atlas texture.
-        let temp_screen = self.build_screen(&[], [0.0; 4]); // Dummy screen
-
+        // Backend creation no longer requires a temporary screen.
         let backend =
-            create_backend(self.backend_type, window.clone(), &temp_screen, self.vsync_enabled)?;
+            create_backend(self.backend_type, window.clone(), self.vsync_enabled)?;
         self.window = Some(window);
         self.backend = Some(backend);
 
+        // Assets can now be loaded directly.
         self.load_textures()?;
         self.load_fonts()?;
 

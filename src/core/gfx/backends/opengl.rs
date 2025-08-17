@@ -44,7 +44,7 @@ pub struct State {
 
 }
 
-pub fn init(window: Arc<Window>, _screen: &Screen, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
+pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
     info!("Initializing OpenGL backend...");
 
     let (gl_surface, gl_context, gl) = create_opengl_context(&window, vsync_enabled)?;
