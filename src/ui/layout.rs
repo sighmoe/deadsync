@@ -179,7 +179,6 @@ fn push_rect(
     out.push(renderer::ScreenObject { object_type, transform: rect_transform(rect, m), blend });
 }
 
-/// Pure function to calculate final UV scale and offset from sprite properties.
 #[inline(always)]
 fn calculate_uvs(
     texture: &'static str,
@@ -188,10 +187,8 @@ fn calculate_uvs(
     grid: Option<(u32, u32)>,
     flip_x: bool,
     flip_y: bool,
-    cropleft: f32,
-    cropright: f32,
-    croptop: f32,
-    cropbottom: f32,
+    // Expects pre-clamped fractions
+    cl: f32, cr: f32, ct: f32, cb: f32,
 ) -> ([f32; 2], [f32; 2]) {
     // 1. Determine base UV subrect (from explicit rect, cell, or full texture)
     let (mut uv_scale, mut uv_offset) = if let Some([u0, v0, u1, v1]) = uv_rect {
@@ -207,12 +204,11 @@ fn calculate_uvs(
         ([1.0, 1.0], [0.0, 0.0])
     };
 
-    // 2. Apply crop to the base UVs
-    let (l, r, t, b) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
-    uv_offset[0] += uv_scale[0] * l;
-    uv_offset[1] += uv_scale[1] * t;
-    uv_scale[0] *= (1.0 - l - r).max(0.0);
-    uv_scale[1] *= (1.0 - t - b).max(0.0);
+    // 2. Apply pre-clamped crop to the base UVs
+    uv_offset[0] += uv_scale[0] * cl;
+    uv_offset[1] += uv_scale[1] * ct;
+    uv_scale[0] *= (1.0 - cl - cr).max(0.0);
+    uv_scale[1] *= (1.0 - ct - cb).max(0.0);
 
     // 3. Apply flips
     if flip_x { uv_offset[0] += uv_scale[0]; uv_scale[0] = -uv_scale[0]; }
@@ -220,7 +216,6 @@ fn calculate_uvs(
 
     (uv_scale, uv_offset)
 }
-
 
 #[inline(always)]
 fn push_sprite(
@@ -240,8 +235,11 @@ fn push_sprite(
     cropbottom: f32,
     blend: BlendMode,
 ) {
+    // Clamp crop values ONCE here.
+    let (cl, cr, ct, cb) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
+
     // Apply crop to geometry first.
-    let cropped_rect = apply_crop_to_rect(rect, cropleft, cropright, croptop, cropbottom);
+    let cropped_rect = apply_crop_to_rect(rect, cl, cr, ct, cb);
     if cropped_rect.w <= 0.0 || cropped_rect.h <= 0.0 { return; }
 
     let object_type = match source {
@@ -251,7 +249,7 @@ fn push_sprite(
         actors::SpriteSource::Texture(texture) => {
             let (uv_scale, uv_offset) = calculate_uvs(
                 texture, uv_rect, cell, grid, flip_x, flip_y,
-                cropleft, cropright, croptop, cropbottom,
+                cl, cr, ct, cb, // Pass clamped values
             );
             renderer::ObjectType::Sprite {
                 texture_id: texture,
@@ -285,7 +283,7 @@ fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) 
 
 #[inline(always)]
 fn apply_crop_to_rect(mut rect: SmRect, l: f32, r: f32, t: f32, b: f32) -> SmRect {
-    let (l, r, t, b) = clamp_crop_fractions(l, r, t, b);
+    // Assumes l,r,t,b are already clamped and normalized.
     let dx = rect.w * l;
     let dy = rect.h * t;
     rect.x += dx;
