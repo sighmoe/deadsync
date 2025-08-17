@@ -30,7 +30,7 @@ pub fn build_screen(
 fn estimate_object_count(actors: &[Actor]) -> usize {
     fn count(a: &Actor) -> usize {
         match a {
-            Actor::Sprite { .. } => 1,
+            Actor::Sprite { visible, .. } => if *visible { 1 } else { 0 },
             Actor::Text { content, .. } => content.chars().filter(|&c| c != '\n').count(),
             Actor::Frame { children, background, .. } => {
                 let bg = if background.is_some() { 1 } else { 0 };
@@ -55,9 +55,12 @@ fn build_actor_recursive(
 ) {
     match actor {
         // Unified sprite path (solid or textured)
-        Actor::Sprite { anchor, offset, size, source, tint, cell, grid, uv_rect } => {
+        Actor::Sprite {
+            anchor, offset, size, source, tint, cell, grid, uv_rect, visible, flip_x, flip_y
+        } => {
+            if !*visible { return; }
             let rect = place_rect(parent, *anchor, *offset, *size);
-            push_sprite(out, rect, m, *source, *tint, *uv_rect, *cell, *grid);
+            push_sprite(out, rect, m, *source, *tint, *uv_rect, *cell, *grid, *flip_x, *flip_y);
         }
 
         Actor::Text { anchor, offset, px, color, font, content, align } => {
@@ -93,7 +96,6 @@ fn build_actor_recursive(
                         push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *c });
                     }
                     actors::Background::Texture(tex) => {
-                        // Full-coverage background: a simple textured quad is fine.
                         push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *tex });
                     }
                 }
@@ -181,6 +183,8 @@ fn push_sprite(
     uv_rect: Option<[f32; 4]>,     // [u0,v0,u1,v1], normalized, top-left origin
     cell: Option<(u32, u32)>,      // (col,row)
     grid: Option<(u32, u32)>,      // (cols,rows)
+    flip_x: bool,
+    flip_y: bool,
 ) {
     // Solid-color path: ignore UVs; tint is the final color
     if let actors::SpriteSource::Solid = source {
@@ -197,60 +201,32 @@ fn push_sprite(
         actors::SpriteSource::Solid => unreachable!(),
     };
 
-    // 1) Highest priority: explicit uv_rect
-    if let Some([u0, v0, u1, v1]) = uv_rect {
-        let du = u1 - u0;
-        let dv = v1 - v0;
-        let valid = du > 0.0 && dv > 0.0;
-        let (uv_scale, uv_offset) = if valid {
-            ([du, dv], [u0, v0])
-        } else {
-            ([1.0, 1.0], [0.0, 0.0]) // fall back to full
-        };
-
-        out.push(renderer::ScreenObject {
-            object_type: renderer::ObjectType::Sprite {
-                texture_id: texture,
-                tint,
-                uv_scale,
-                uv_offset,
-            },
-            transform: rect_transform(rect, m),
-        });
-        return;
-    }
-
-    // 2) Next: cell + grid/filename
-    if let Some((cx, cy)) = cell {
-        let (cols, rows) = match grid {
-            Some(g) => g,
-            None => parse_sheet_dims_from_filename(texture),
-        };
+    // Compute base uv_scale/uv_offset (priority: uv_rect > cell+grid > full)
+    let (mut uv_scale, mut uv_offset) = if let Some([u0, v0, u1, v1]) = uv_rect {
+        let du = (u1 - u0).abs().max(1e-6);
+        let dv = (v1 - v0).abs().max(1e-6);
+        ([du, dv], [u0.min(u1), v0.min(v1)])
+    } else if let Some((cx, cy)) = cell {
+        let (cols, rows) = match grid { Some(g) => g, None => parse_sheet_dims_from_filename(texture) };
         let cols = cols.max(1);
         let rows = rows.max(1);
+        let s = [1.0 / cols as f32, 1.0 / rows as f32];
+        let o = [cx.min(cols - 1) as f32 * s[0], cy.min(rows - 1) as f32 * s[1]];
+        (s, o)
+    } else {
+        ([1.0, 1.0], [0.0, 0.0])
+    };
 
-        let scale = [1.0 / cols as f32, 1.0 / rows as f32];
-        let offset = [cx.min(cols - 1) as f32 * scale[0], cy.min(rows - 1) as f32 * scale[1]];
+    // Apply flips: u' = (o + s) + (-s)*x, so offset += scale; scale = -scale
+    if flip_x { uv_offset[0] += uv_scale[0]; uv_scale[0] = -uv_scale[0]; }
+    if flip_y { uv_offset[1] += uv_scale[1]; uv_scale[1] = -uv_scale[1]; }
 
-        out.push(renderer::ScreenObject {
-            object_type: renderer::ObjectType::Sprite {
-                texture_id: texture,
-                tint,
-                uv_scale: scale,
-                uv_offset: offset,
-            },
-            transform: rect_transform(rect, m),
-        });
-        return;
-    }
-
-    // 3) Default: full texture
     out.push(renderer::ScreenObject {
         object_type: renderer::ObjectType::Sprite {
             texture_id: texture,
             tint,
-            uv_scale: [1.0, 1.0],
-            uv_offset: [0.0, 0.0],
+            uv_scale,
+            uv_offset,
         },
         transform: rect_transform(rect, m),
     });

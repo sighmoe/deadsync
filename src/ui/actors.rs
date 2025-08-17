@@ -1,5 +1,3 @@
-// src/ui/actors.rs
-
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Background {
@@ -47,6 +45,8 @@ pub enum Actor {
     /// - `cell`: optional (col,row) index into a grid atlas
     /// - `grid`: optional (cols,rows) to declare atlas grid explicitly (overrides filename parsing)
     /// - `uv_rect`: optional normalized [u0, v0, u1, v1] (top-left origin). Highest priority when set.
+    /// - `visible`: if false, the sprite is culled during layout
+    /// - `flip_x` / `flip_y`: mirror the subrect horizontally/vertically
     Sprite {
         anchor: Anchor,
         offset: [f32; 2],
@@ -56,6 +56,9 @@ pub enum Actor {
         cell: Option<(u32, u32)>,
         grid: Option<(u32, u32)>,
         uv_rect: Option<[f32; 4]>,
+        visible: bool,
+        flip_x: bool,
+        flip_y: bool,
     },
 
     Text {
@@ -91,6 +94,9 @@ macro_rules! sprite {
         $(, cell: $cell:expr )?
         $(, grid: $grid:expr )?
         $(, uv_rect: $uv_rect:expr )?
+        $(, visible: $visible:expr )?
+        $(, flip_x: $flipx:expr )?
+        $(, flip_y: $flipy:expr )?
         $(,)?
     ) => {
         $crate::ui::actors::Actor::Sprite {
@@ -102,6 +108,9 @@ macro_rules! sprite {
             cell:    sprite!(@opt  $( $cell )?),
             grid:    sprite!(@opt  $( $grid )?),
             uv_rect: sprite!(@opt  $( $uv_rect )?),
+            visible: sprite!(@vis  $( $visible )?),
+            flip_x:  sprite!(@bool $( $flipx )?),
+            flip_y:  sprite!(@bool $( $flipy )?),
         }
     };
 
@@ -110,10 +119,14 @@ macro_rules! sprite {
 
     (@opt $x:expr) => { Some($x) };
     (@opt) => { None };
+
+    (@vis $v:expr) => { $v };
+    (@vis) => { true };
+
+    (@bool $b:expr) => { $b };
+    (@bool) => { false };
 }
 
-/// Convenience macro to build a **solid color quad** as a Sprite.
-/// Required: anchor, offset, size, color
 #[macro_export]
 macro_rules! quad {
     (
@@ -121,6 +134,7 @@ macro_rules! quad {
         offset: $offset:expr,
         size: $size:expr,
         color: $color:expr
+        $(, visible: $visible:expr )?
         $(,)?
     ) => {
         $crate::ui::actors::Actor::Sprite {
@@ -132,6 +146,12 @@ macro_rules! quad {
             cell:   None,
             grid:   None,
             uv_rect: None,
+            visible: quad!(@vis $( $visible )?),
+            flip_x: false,
+            flip_y: false,
         }
     };
+
+    (@vis $v:expr) => { $v };
+    (@vis) => { true };
 }
