@@ -533,7 +533,6 @@ mod bytemuck {
     // For our use (f32 -> u8), this is always safe; the asserts keep us honest.
     #[inline(always)]
     pub fn cast_slice<T, U>(slice: &[T]) -> &[U] {
-        // FIX: The call to `align_to` must be in an `unsafe` block.
         // We are confident this is safe because we only cast from f32 to u8,
         // and any type's alignment is a multiple of u8's alignment (which is 1).
         let (prefix, mid, suffix) = unsafe { slice.align_to::<U>() };
