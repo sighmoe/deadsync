@@ -179,6 +179,49 @@ fn push_rect(
     out.push(renderer::ScreenObject { object_type, transform: rect_transform(rect, m), blend });
 }
 
+/// Pure function to calculate final UV scale and offset from sprite properties.
+#[inline(always)]
+fn calculate_uvs(
+    texture: &'static str,
+    uv_rect: Option<[f32; 4]>,
+    cell: Option<(u32, u32)>,
+    grid: Option<(u32, u32)>,
+    flip_x: bool,
+    flip_y: bool,
+    cropleft: f32,
+    cropright: f32,
+    croptop: f32,
+    cropbottom: f32,
+) -> ([f32; 2], [f32; 2]) {
+    // 1. Determine base UV subrect (from explicit rect, cell, or full texture)
+    let (mut uv_scale, mut uv_offset) = if let Some([u0, v0, u1, v1]) = uv_rect {
+        let du = (u1 - u0).abs().max(1e-6);
+        let dv = (v1 - v0).abs().max(1e-6);
+        ([du, dv], [u0.min(u1), v0.min(v1)])
+    } else if let Some((cx, cy)) = cell {
+        let (cols, rows) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(texture));
+        let s = [1.0 / cols.max(1) as f32, 1.0 / rows.max(1) as f32];
+        let o = [cx.min(cols - 1) as f32 * s[0], cy.min(rows - 1) as f32 * s[1]];
+        (s, o)
+    } else {
+        ([1.0, 1.0], [0.0, 0.0])
+    };
+
+    // 2. Apply crop to the base UVs
+    let (l, r, t, b) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
+    uv_offset[0] += uv_scale[0] * l;
+    uv_offset[1] += uv_scale[1] * t;
+    uv_scale[0] *= (1.0 - l - r).max(0.0);
+    uv_scale[1] *= (1.0 - t - b).max(0.0);
+
+    // 3. Apply flips
+    if flip_x { uv_offset[0] += uv_scale[0]; uv_scale[0] = -uv_scale[0]; }
+    if flip_y { uv_offset[1] += uv_scale[1]; uv_scale[1] = -uv_scale[1]; }
+
+    (uv_scale, uv_offset)
+}
+
+
 #[inline(always)]
 fn push_sprite(
     out: &mut Vec<renderer::ScreenObject>,
@@ -186,9 +229,9 @@ fn push_sprite(
     m: &Metrics,
     source: actors::SpriteSource,
     tint: [f32; 4],
-    uv_rect: Option<[f32; 4]>,     // [u0,v0,u1,v1], normalized, top-left origin
-    cell: Option<(u32, u32)>,      // (col,row)
-    grid: Option<(u32, u32)>,      // (cols,rows)
+    uv_rect: Option<[f32; 4]>,
+    cell: Option<(u32, u32)>,
+    grid: Option<(u32, u32)>,
     flip_x: bool,
     flip_y: bool,
     cropleft: f32,
@@ -197,63 +240,31 @@ fn push_sprite(
     cropbottom: f32,
     blend: BlendMode,
 ) {
-    // Solid path: crop geometry only
-    if let actors::SpriteSource::Solid = source {
-        let r = apply_crop_to_rect(rect, cropleft, cropright, croptop, cropbottom);
-        if r.w <= 0.0 || r.h <= 0.0 { return; }
-        out.push(renderer::ScreenObject {
-            object_type: renderer::ObjectType::SolidColor { color: tint },
-            transform: rect_transform(r, m),
-            blend,
-        });
-        return;
-    }
+    // Apply crop to geometry first.
+    let cropped_rect = apply_crop_to_rect(rect, cropleft, cropright, croptop, cropbottom);
+    if cropped_rect.w <= 0.0 || cropped_rect.h <= 0.0 { return; }
 
-    // Textured path: compute base UV (uv_rect > cell+grid > full)
-    let texture = match source {
-        actors::SpriteSource::Texture(t) => t,
-        actors::SpriteSource::Solid => unreachable!(),
+    let object_type = match source {
+        actors::SpriteSource::Solid => {
+            renderer::ObjectType::SolidColor { color: tint }
+        }
+        actors::SpriteSource::Texture(texture) => {
+            let (uv_scale, uv_offset) = calculate_uvs(
+                texture, uv_rect, cell, grid, flip_x, flip_y,
+                cropleft, cropright, croptop, cropbottom,
+            );
+            renderer::ObjectType::Sprite {
+                texture_id: texture,
+                tint,
+                uv_scale,
+                uv_offset,
+            }
+        }
     };
-
-    let (mut uv_scale, mut uv_offset) = if let Some([u0, v0, u1, v1]) = uv_rect {
-        let du = (u1 - u0).abs().max(1e-6);
-        let dv = (v1 - v0).abs().max(1e-6);
-        ([du, dv], [u0.min(u1), v0.min(v1)])
-    } else if let Some((cx, cy)) = cell {
-        let (cols, rows) = match grid { Some(g) => g, None => parse_sheet_dims_from_filename(texture) };
-        let cols = cols.max(1);
-        let rows = rows.max(1);
-        let s = [1.0 / cols as f32, 1.0 / rows as f32];
-        let o = [cx.min(cols - 1) as f32 * s[0], cy.min(rows - 1) as f32 * s[1]];
-        (s, o)
-    } else {
-        ([1.0, 1.0], [0.0, 0.0])
-    };
-
-    // Apply crop to geometry AND UVs (pre-flip)
-    let r = apply_crop_to_rect(rect, cropleft, cropright, croptop, cropbottom);
-    if r.w <= 0.0 || r.h <= 0.0 { return; }
-
-    let (l, rgt, t, btm) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
-    let vis_w = (1.0 - l - rgt).max(0.0);
-    let vis_h = (1.0 - t - btm).max(0.0);
-    uv_offset[0] += uv_scale[0] * l;
-    uv_offset[1] += uv_scale[1] * t;
-    uv_scale[0] *= vis_w;
-    uv_scale[1] *= vis_h;
-
-    // Apply flips after crop
-    if flip_x { uv_offset[0] += uv_scale[0]; uv_scale[0] = -uv_scale[0]; }
-    if flip_y { uv_offset[1] += uv_scale[1]; uv_scale[1] = -uv_scale[1]; }
 
     out.push(renderer::ScreenObject {
-        object_type: renderer::ObjectType::Sprite {
-            texture_id: texture,
-            tint,
-            uv_scale,
-            uv_offset,
-        },
-        transform: rect_transform(r, m),
+        object_type,
+        transform: rect_transform(cropped_rect, m),
         blend,
     });
 }
