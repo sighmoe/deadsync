@@ -1,7 +1,7 @@
 // src/screens/options.rs
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, Anchor, SizeSpec, TextAlign};
-use crate::ui::{color, components};
+use crate::ui::{color};
 use crate::sprite;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -52,26 +52,24 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     // Hearts (grid inferred from filename; only cell+tint specified)
     for heart in &state.hearts {
-        actors.push(sprite! {
+        actors.push(crate::sprite! {
             anchor: Anchor::Center,
             offset: heart.pos,
             size:   [SizeSpec::Px(HEART_SIZE), SizeSpec::Px(HEART_SIZE)],
             texture:"hearts_4x4.png",
             tint:   heart.color,
             cell:   heart.cell,
-            // grid: Some((4,4)),       // optional explicit override
-            // uv_rect: Some([..]),     // optional explicit UV override
         });
     }
 
-    // Reusable top bar
-    actors.push(components::top_bar::build("OPTIONS"));
+    // Top bar
+    actors.push(crate::ui::components::top_bar::build("OPTIONS"));
 
-    // Corner markers (unchanged)
-    actors.push(Actor::Quad { anchor: Anchor::TopLeft,     offset: [ 12.0,  12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [1.0,0.9,0.2,1.0]});
-    actors.push(Actor::Quad { anchor: Anchor::TopRight,    offset: [-12.0,  12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [0.2,1.0,0.6,1.0]});
-    actors.push(Actor::Quad { anchor: Anchor::BottomLeft,  offset: [ 12.0, -12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [0.6,0.6,1.0,1.0]});
-    actors.push(Actor::Quad { anchor: Anchor::BottomRight, offset: [-12.0, -12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [1.0,0.6,0.2,1.0]});
+    // Corner markers as solid-color sprites
+    actors.push(crate::quad! { anchor: Anchor::TopLeft,     offset: [ 12.0,  12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [1.0,0.9,0.2,1.0]});
+    actors.push(crate::quad! { anchor: Anchor::TopRight,    offset: [-12.0,  12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [0.2,1.0,0.6,1.0]});
+    actors.push(crate::quad! { anchor: Anchor::BottomLeft,  offset: [ 12.0, -12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [0.6,0.6,1.0,1.0]});
+    actors.push(crate::quad! { anchor: Anchor::BottomRight, offset: [-12.0, -12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [1.0,0.6,0.2,1.0]});
 
     // Text sample
     actors.push(Actor::Text {

@@ -31,17 +31,19 @@ pub enum SizeSpec {
     Fill,
 }
 
+/// A sprite can be sourced from either a texture or a solid color.
+/// For `Solid`, the final color is `tint` (no sampling).
+#[derive(Clone, Copy, Debug)]
+pub enum SpriteSource {
+    Texture(&'static str),
+    Solid,
+}
+
 #[derive(Clone, Debug)]
 pub enum Actor {
-    Quad {
-        anchor: Anchor,
-        offset: [f32; 2],
-        size: [SizeSpec; 2],
-        color: [f32; 4],
-    },
-
     /// Unified Sprite:
-    /// - `tint`: premultiplied in shader (use [1,1,1,1] for no tint)
+    /// - `source`: Texture(..) or Solid
+    /// - `tint`: multiplied in shader for textures; for Solid it's the final RGBA
     /// - `cell`: optional (col,row) index into a grid atlas
     /// - `grid`: optional (cols,rows) to declare atlas grid explicitly (overrides filename parsing)
     /// - `uv_rect`: optional normalized [u0, v0, u1, v1] (top-left origin). Highest priority when set.
@@ -49,7 +51,7 @@ pub enum Actor {
         anchor: Anchor,
         offset: [f32; 2],
         size: [SizeSpec; 2],
-        texture: &'static str,
+        source: SpriteSource,
         tint: [f32; 4],
         cell: Option<(u32, u32)>,
         grid: Option<(u32, u32)>,
@@ -75,17 +77,9 @@ pub enum Actor {
     },
 }
 
-/// Convenience macro to build a Sprite with sensible defaults:
+/// Convenience macro to build a textured Sprite with sensible defaults:
 /// Required keys: anchor, offset, size, texture
 /// Optional keys: tint, cell, grid, uv_rect
-///
-/// Example:
-///   sprite!{
-///     anchor: Anchor::TopLeft,
-///     offset: [x, y],
-///     size: [SizeSpec::Px(w), SizeSpec::Px(h)],
-///     texture: "logo.png"
-///   }
 #[macro_export]
 macro_rules! sprite {
     (
@@ -103,7 +97,7 @@ macro_rules! sprite {
             anchor: $anchor,
             offset: $offset,
             size:   $size,
-            texture: $texture,
+            source: $crate::ui::actors::SpriteSource::Texture($texture),
             tint:    sprite!(@tint $( $tint )?),
             cell:    sprite!(@opt  $( $cell )?),
             grid:    sprite!(@opt  $( $grid )?),
@@ -116,4 +110,28 @@ macro_rules! sprite {
 
     (@opt $x:expr) => { Some($x) };
     (@opt) => { None };
+}
+
+/// Convenience macro to build a **solid color quad** as a Sprite.
+/// Required: anchor, offset, size, color
+#[macro_export]
+macro_rules! quad {
+    (
+        anchor: $anchor:expr,
+        offset: $offset:expr,
+        size: $size:expr,
+        color: $color:expr
+        $(,)?
+    ) => {
+        $crate::ui::actors::Actor::Sprite {
+            anchor: $anchor,
+            offset: $offset,
+            size:   $size,
+            source: $crate::ui::actors::SpriteSource::Solid,
+            tint:   $color,
+            cell:   None,
+            grid:   None,
+            uv_rect: None,
+        }
+    };
 }

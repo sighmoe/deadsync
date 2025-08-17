@@ -30,7 +30,7 @@ pub fn build_screen(
 fn estimate_object_count(actors: &[Actor]) -> usize {
     fn count(a: &Actor) -> usize {
         match a {
-            Actor::Quad { .. } | Actor::Sprite { .. } => 1,
+            Actor::Sprite { .. } => 1,
             Actor::Text { content, .. } => content.chars().filter(|&c| c != '\n').count(),
             Actor::Frame { children, background, .. } => {
                 let bg = if background.is_some() { 1 } else { 0 };
@@ -40,7 +40,6 @@ fn estimate_object_count(actors: &[Actor]) -> usize {
     }
     actors.iter().map(count).sum()
 }
-
 
 /* ======================= ACTOR -> OBJECT CONVERSION ======================= */
 
@@ -55,15 +54,10 @@ fn build_actor_recursive(
     out: &mut Vec<renderer::ScreenObject>,
 ) {
     match actor {
-        Actor::Quad { anchor, offset, size, color } => {
+        // Unified sprite path (solid or textured)
+        Actor::Sprite { anchor, offset, size, source, tint, cell, grid, uv_rect } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
-            push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *color });
-        }
-
-        // Unified sprite path (tint + UVs)
-        Actor::Sprite { anchor, offset, size, texture, tint, cell, grid, uv_rect } => {
-            let rect = place_rect(parent, *anchor, *offset, *size);
-            push_sprite(out, rect, m, *texture, *tint, *uv_rect, *cell, *grid);
+            push_sprite(out, rect, m, *source, *tint, *uv_rect, *cell, *grid);
         }
 
         Actor::Text { anchor, offset, px, color, font, content, align } => {
@@ -182,12 +176,27 @@ fn push_sprite(
     out: &mut Vec<renderer::ScreenObject>,
     rect: SmRect,
     m: &Metrics,
-    texture: &'static str,
+    source: actors::SpriteSource,
     tint: [f32; 4],
     uv_rect: Option<[f32; 4]>,     // [u0,v0,u1,v1], normalized, top-left origin
     cell: Option<(u32, u32)>,      // (col,row)
     grid: Option<(u32, u32)>,      // (cols,rows)
 ) {
+    // Solid-color path: ignore UVs; tint is the final color
+    if let actors::SpriteSource::Solid = source {
+        out.push(renderer::ScreenObject {
+            object_type: renderer::ObjectType::SolidColor { color: tint },
+            transform: rect_transform(rect, m),
+        });
+        return;
+    }
+
+    // Textured path
+    let texture = match source {
+        actors::SpriteSource::Texture(t) => t,
+        actors::SpriteSource::Solid => unreachable!(),
+    };
+
     // 1) Highest priority: explicit uv_rect
     if let Some([u0, v0, u1, v1]) = uv_rect {
         let du = u1 - u0;
