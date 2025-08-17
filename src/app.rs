@@ -103,6 +103,7 @@ impl App {
 
     fn load_textures(&mut self) -> Result<(), Box<dyn Error>> {
         use log::{info, warn};
+        use std::sync::Arc;
 
         info!("Loading textures...");
         let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
@@ -139,26 +140,26 @@ impl App {
             })
             .collect();
 
-        // Create the fallback image once to avoid redundant work in the loop.
-        let fallback_image = fallback_rgba();
-        let mut decoded: Vec<(&'static str, image::RgbaImage)> = Vec::with_capacity(texture_paths.len());
+        // Create the fallback image once and wrap in an Arc for cheap cloning.
+        let fallback_image = Arc::new(fallback_rgba());
+        let mut decoded: Vec<(&'static str, Arc<image::RgbaImage>)> = Vec::with_capacity(texture_paths.len());
         for h in handles {
             match h.join().expect("texture decode thread panicked") {
-                Ok((key, rgba)) => decoded.push((key, rgba)),
+                Ok((key, rgba)) => decoded.push((key, Arc::new(rgba))),
                 Err((key, msg)) => {
                     warn!("Failed to load 'assets/graphics/{}': {}. Using generated fallback.", key, msg);
-                    // Clone the pre-made fallback image instead of regenerating it.
+                    // Clone the Arc (cheap) instead of the image buffer (expensive).
                     decoded.push((key, fallback_image.clone()));
                 }
             }
         }
 
         // 2) Create GPU textures sequentially
-        for (key, rgba) in decoded {
+        for (key, rgba_arc) in decoded {
             // All UI sprites are authored in sRGB space.
             let texture = renderer::create_texture(
                 backend,
-                &rgba,
+                &rgba_arc,
                 renderer::TextureColorSpace::Srgb,
             )?;
 
