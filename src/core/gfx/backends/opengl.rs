@@ -288,111 +288,34 @@ pub fn draw(
                     }
                 }
                 ObjectType::Textured { texture_id } => {
-                    if last_use_texture != Some(true) {
-                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
-                        last_use_texture = Some(true);
-                    }
-                    // For standard textures: no tint, full UV range
-                    state
-                        .gl
-                        .uniform_4_f32_slice(Some(&state.color_location), &[1.0, 1.0, 1.0, 1.0]);
-                    state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
-                    state.gl.uniform_2_f32(Some(&state.uv_scale_location), 1.0, 1.0);
-                    state.gl.uniform_2_f32(Some(&state.uv_offset_location), 0.0, 0.0);
-
-                    if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id)
-                    {
-                        if last_bound_tex != Some(gl_texture.0) {
-                            state
-                                .gl
-                                .bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
-                            last_bound_tex = Some(gl_texture.0);
-                        }
+                    if bind_texture_for_object(state, textures, texture_id, &mut last_bound_tex, &mut last_use_texture) {
+                        state.gl.uniform_4_f32_slice(Some(&state.color_location), &[1.0, 1.0, 1.0, 1.0]);
+                        state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
+                        state.gl.uniform_2_f32(Some(&state.uv_scale_location), 1.0, 1.0);
+                        state.gl.uniform_2_f32(Some(&state.uv_offset_location), 0.0, 0.0);
                     } else {
-                        // fallback to solid magenta
-                        if last_use_texture != Some(false) {
-                            state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
-                            last_use_texture = Some(false);
-                        }
-                        if last_bound_tex.is_some() {
-                            state.gl.bind_texture(glow::TEXTURE_2D, None);
-                            last_bound_tex = None;
-                        }
                         let magenta = [1.0, 0.0, 1.0, 1.0];
                         if last_color.map_or(true, |c| c != magenta) {
-                            state
-                                .gl
-                                .uniform_4_f32_slice(Some(&state.color_location), &magenta);
+                            state.gl.uniform_4_f32_slice(Some(&state.color_location), &magenta);
                             last_color = Some(magenta);
                         }
                     }
                 }
-                ObjectType::Sprite {
-                    texture_id,
-                    tint,
-                    uv_scale,
-                    uv_offset,
-                } => {
-                    if last_use_texture != Some(true) {
-                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
-                        last_use_texture = Some(true);
-                    }
-                    state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
-                    state.gl.uniform_2_f32(
-                        Some(&state.uv_scale_location),
-                        uv_scale[0],
-                        uv_scale[1],
-                    );
-                    state.gl.uniform_2_f32(
-                        Some(&state.uv_offset_location),
-                        uv_offset[0],
-                        uv_offset[1],
-                    );
-                    state.gl.uniform_4_f32_slice(Some(&state.color_location), tint);
-
-                    if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id)
-                    {
-                        if last_bound_tex != Some(gl_texture.0) {
-                            state
-                                .gl
-                                .bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
-                            last_bound_tex = Some(gl_texture.0);
-                        }
+                ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset, } => {
+                    if bind_texture_for_object(state, textures, texture_id, &mut last_bound_tex, &mut last_use_texture) {
+                        state.gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
+                        state.gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
+                        state.gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
+                        state.gl.uniform_4_f32_slice(Some(&state.color_location), tint);
                     }
                 }
-                ObjectType::MsdfGlyph {
-                    texture_id,
-                    uv_scale,
-                    uv_offset,
-                    color,
-                    px_range,
-                } => {
-                    if last_use_texture != Some(true) {
-                        state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
-                        last_use_texture = Some(true);
-                    }
-                    state.gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
-                    state.gl.uniform_2_f32(
-                        Some(&state.uv_scale_location),
-                        uv_scale[0],
-                        uv_scale[1],
-                    );
-                    state.gl.uniform_2_f32(
-                        Some(&state.uv_offset_location),
-                        uv_offset[0],
-                        uv_offset[1],
-                    );
-                    state.gl.uniform_4_f32_slice(Some(&state.color_location), color);
-                    state.gl.uniform_1_f32(Some(&state.px_range_location), *px_range);
-
-                    if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id)
-                    {
-                        if last_bound_tex != Some(gl_texture.0) {
-                            state
-                                .gl
-                                .bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
-                            last_bound_tex = Some(gl_texture.0);
-                        }
+                ObjectType::MsdfGlyph { texture_id, uv_scale, uv_offset, color, px_range, } => {
+                    if bind_texture_for_object(state, textures, texture_id, &mut last_bound_tex, &mut last_use_texture) {
+                        state.gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
+                        state.gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
+                        state.gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
+                        state.gl.uniform_4_f32_slice(Some(&state.color_location), color);
+                        state.gl.uniform_1_f32(Some(&state.px_range_location), *px_range);
                     }
                 }
             }
@@ -565,6 +488,43 @@ fn create_graphics_program(
             is_msdf_location,
             px_range_location,
         ))
+    }
+}
+
+/// Helper to bind a texture if needed, managing state changes and fallbacks.
+/// Returns true if a valid texture was bound, false otherwise.
+unsafe fn bind_texture_for_object(
+    state: &State,
+    textures: &HashMap<&'static str, renderer::Texture>,
+    texture_id: &str,
+    last_bound_tex: &mut Option<glow::Texture>,
+    last_use_texture: &mut Option<bool>,
+) -> bool {
+    // This block is necessary because glow calls are unsafe.
+    unsafe {
+        if *last_use_texture != Some(true) {
+            state.gl.uniform_1_i32(Some(&state.use_texture_location), 1);
+            *last_use_texture = Some(true);
+        }
+
+        if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
+            if *last_bound_tex != Some(gl_texture.0) {
+                state.gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
+                *last_bound_tex = Some(gl_texture.0);
+            }
+            true
+        } else {
+            // Fallback to no texture if the ID is invalid
+            if *last_use_texture != Some(false) {
+                state.gl.uniform_1_i32(Some(&state.use_texture_location), 0);
+                *last_use_texture = Some(false);
+            }
+            if last_bound_tex.is_some() {
+                state.gl.bind_texture(glow::TEXTURE_2D, None);
+                *last_bound_tex = None;
+            }
+            false
+        }
     }
 }
 
