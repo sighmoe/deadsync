@@ -240,65 +240,50 @@ impl App {
             ),
         }
     }
+
+    /// Creates the window, initializes the graphics backend, and loads all assets.
+    /// This function is designed to be called once when the app resumes.
+    fn init_graphics(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
+        let window_attributes = Window::default_attributes()
+            .with_title(format!("Simple Renderer - {:?}", self.backend_type))
+            .with_inner_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
+            .with_resizable(true);
+
+        let window = Arc::new(event_loop.create_window(window_attributes)?);
+        let sz = window.inner_size();
+        self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
+
+        // Pre-load fonts before building the initial screen.
+        // This is a temporary move; ideally, backend creation doesn't need a screen.
+        // But first, we need the backend to load the font atlas texture.
+        let temp_screen = self.build_screen(&[], [0.0; 4]); // Dummy screen
+
+        let backend =
+            create_backend(self.backend_type, window.clone(), &temp_screen, self.vsync_enabled)?;
+        self.window = Some(window);
+        self.backend = Some(backend);
+
+        self.load_textures()?;
+        self.load_fonts()?;
+
+        // Now with fonts loaded, build the REAL initial screen.
+        let (actors, clear_color) = self.get_current_actors();
+        let initial_screen = self.build_screen(&actors, clear_color);
+        if let Some(b) = &mut self.backend {
+            renderer::load_screen(b, &initial_screen)?;
+        }
+
+        info!("Starting event loop...");
+        Ok(())
+    }
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
-            let window_attributes = Window::default_attributes()
-                .with_title(format!("Simple Renderer - {:?}", self.backend_type))
-                .with_inner_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
-                .with_resizable(true);
-
-            match event_loop.create_window(window_attributes) {
-                Ok(window) => {
-                    let window = Arc::new(window);
-                    let sz = window.inner_size();
-                    self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
-
-                    // Pre-load fonts before building the initial screen.
-                    // This is a temporary move; ideally, backend creation doesn't need a screen.
-                    // But first, we need the backend to load the font atlas texture.
-                    let temp_screen = self.build_screen(&[], [0.0; 4]); // Dummy screen
-
-                    match create_backend(self.backend_type, window.clone(), &temp_screen, self.vsync_enabled) {
-                        Ok(backend) => {
-                            self.window = Some(window.clone());
-                            self.backend = Some(backend);
-                            if let Err(e) = self.load_textures() {
-                                error!("Failed to load textures: {}", e);
-                                event_loop.exit();
-                                return;
-                            }
-                            if let Err(e) = self.load_fonts() {
-                                error!("Failed to load fonts: {}", e);
-                                event_loop.exit();
-                                return;
-                            }
-
-                            // Now with fonts loaded, build the REAL initial screen.
-                            let (actors, clear_color) = self.get_current_actors();
-                            let initial_screen = self.build_screen(&actors, clear_color);
-                            if let Some(b) = &mut self.backend {
-                                if let Err(e) = renderer::load_screen(b, &initial_screen) {
-                                    error!("Failed to load initial screen data: {}", e);
-                                    event_loop.exit();
-                                    return;
-                                }
-                            }
-
-                            info!("Starting event loop...");
-                        }
-                        Err(e) => {
-                            error!("Failed to initialize graphics backend: {}", e);
-                            event_loop.exit();
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to create window: {}", e);
-                    event_loop.exit();
-                }
+            if let Err(e) = self.init_graphics(event_loop) {
+                error!("Failed to initialize graphics: {}", e);
+                event_loop.exit();
             }
         }
     }
