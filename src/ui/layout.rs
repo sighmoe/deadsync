@@ -10,16 +10,6 @@ use crate::core::gfx::types::BlendMode;
 /* ======================= RENDERER SCREEN BUILDER ======================= */
 
 #[inline(always)]
-fn object_sort_key(object: &renderer::ScreenObject) -> (u8, usize) {
-    match &object.object_type {
-        renderer::ObjectType::SolidColor { .. } => (0, 0),
-        renderer::ObjectType::Textured { texture_id } => (1, texture_id.as_ptr() as usize),
-        renderer::ObjectType::Sprite { texture_id, .. } => (2, texture_id.as_ptr() as usize),
-        renderer::ObjectType::MsdfGlyph { texture_id, .. } => (3, texture_id.as_ptr() as usize),
-    }
-}
-
-#[inline(always)]
 pub fn build_screen(
     actors: &[Actor],
     clear_color: [f32; 4],
@@ -32,9 +22,6 @@ pub fn build_screen(
     for actor in actors {
         build_actor_recursive(actor, root_rect, m, fonts, &mut objects);
     }
-
-    // Sort objects to group by pipeline and texture, minimizing state changes.
-    objects.sort_unstable_by_key(object_sort_key);
 
     renderer::Screen { clear_color, objects }
 }

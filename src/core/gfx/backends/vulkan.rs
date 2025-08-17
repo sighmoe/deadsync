@@ -659,40 +659,107 @@ fn create_msdf_pipeline(
     Ok((layout, pipe))
 }
 
+fn transition_image_layout_cmd(
+    device: &Device,
+    cmd: vk::CommandBuffer,
+    image: vk::Image,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+) {
+    let (src_access_mask, dst_access_mask, src_stage, dst_stage) = match (old_layout, new_layout) {
+        (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
+            vk::AccessFlags::empty(),
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+        ),
+        (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::AccessFlags::SHADER_READ,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::FRAGMENT_SHADER,
+        ),
+        _ => panic!("Unsupported layout transition!"), // Or return an error
+    };
+
+    let barrier = vk::ImageMemoryBarrier::default()
+        .old_layout(old_layout)
+        .new_layout(new_layout)
+        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .image(image)
+        .subresource_range(
+            vk::ImageSubresourceRange::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .base_mip_level(0)
+                .level_count(1)
+                .base_array_layer(0)
+                .layer_count(1),
+        )
+        .src_access_mask(src_access_mask)
+        .dst_access_mask(dst_access_mask);
+
+    unsafe {
+        device.cmd_pipeline_barrier(cmd, src_stage, dst_stage, vk::DependencyFlags::empty(), &[], &[], &[barrier]);
+    }
+}
+
 pub fn create_texture(
     state: &mut State,
     image: &RgbaImage,
     srgb: bool,
 ) -> Result<Texture, Box<dyn Error>> {
+    let device = state.device.as_ref().unwrap();
     let (width, height) = image.dimensions();
     let image_data = image.as_raw();
 
-    // staging buffer
     let staging = create_buffer(
-        &state.instance, state.device.as_ref().unwrap(), state.pdevice, state.command_pool, state.queue,
+        &state.instance, device, state.pdevice, state.command_pool, state.queue,
         vk::BufferUsageFlags::TRANSFER_SRC,
         vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         Some(image_data),
     )?;
 
     let fmt = if srgb { vk::Format::R8G8B8A8_SRGB } else { vk::Format::R8G8B8A8_UNORM };
-
     let (tex_image, tex_mem) = create_image(
         state, width, height, fmt, vk::ImageTiling::OPTIMAL,
         vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
 
-    transition_image_layout(state, tex_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL)?;
-    copy_buffer_to_image(state, staging.buffer, tex_image, width, height)?;
-    transition_image_layout(state, tex_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)?;
-    destroy_buffer(state.device.as_ref().unwrap(), &staging);
+    // --- BATCHED COMMANDS START ---
+    let cmd = begin_single_time_commands(device, state.command_pool)?;
 
-    let view = create_image_view(state.device.as_ref().unwrap(), tex_image, fmt)?;
+    // 1. Transition layout for writing
+    transition_image_layout_cmd(device, cmd, tex_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+
+    // 2. Copy buffer to image
+    let region = vk::BufferImageCopy::default()
+        .image_subresource(vk::ImageSubresourceLayers {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            mip_level: 0,
+            base_array_layer: 0,
+            layer_count: 1,
+        })
+        .image_extent(vk::Extent3D { width, height, depth: 1 });
+
+    unsafe {
+        device.cmd_copy_buffer_to_image(cmd, staging.buffer, tex_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &[region]);
+    }
+
+    // 3. Transition layout for shader reading
+    transition_image_layout_cmd(device, cmd, tex_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
+
+    // 4. Submit all at once
+    end_single_time_commands(device, state.command_pool, state.queue, cmd)?;
+    // --- BATCHED COMMANDS END ---
+
+    destroy_buffer(device, &staging);
+    let view = create_image_view(device, tex_image, fmt)?;
     let set  = create_texture_descriptor_set(state, view, state.sampler)?;
 
     Ok(Texture {
-        device: state.device.as_ref().unwrap().clone(),
+        device: device.clone(),
         image: tex_image,
         memory: tex_mem,
         view,
@@ -988,72 +1055,10 @@ fn create_image(
     }
 }
 
-fn transition_image_layout(
-    state: &State, image: vk::Image, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout,
-) -> Result<(), Box<dyn Error>> {
-    let cmd = begin_single_time_commands(state.device.as_ref().unwrap(), state.command_pool)?;
-    let (src_access_mask, dst_access_mask, src_stage, dst_stage) = match (old_layout, new_layout) {
-        (vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL) => (
-            vk::AccessFlags::empty(), vk::AccessFlags::TRANSFER_WRITE,
-            vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER,
-        ),
-        (vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL) => (
-            vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::SHADER_READ,
-            vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::FRAGMENT_SHADER,
-        ),
-        _ => return Err("Unsupported layout transition!".into()),
-    };
-
-    let barrier = vk::ImageMemoryBarrier::default()
-        .old_layout(old_layout)
-        .new_layout(new_layout)
-        .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-        .image(image)
-        .subresource_range(vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        })
-        .src_access_mask(src_access_mask)
-        .dst_access_mask(dst_access_mask);
-
-    unsafe {
-        state.device.as_ref().unwrap().cmd_pipeline_barrier(cmd, src_stage, dst_stage, vk::DependencyFlags::empty(), &[], &[], &[barrier]);
-    }
-
-    end_single_time_commands(state.device.as_ref().unwrap(), state.command_pool, state.queue, cmd)?;
-    Ok(())
-}
-
-fn copy_buffer_to_image(
-    state: &State, buffer: vk::Buffer, image: vk::Image, width: u32, height: u32,
-) -> Result<(), Box<dyn Error>> {
-    let cmd = begin_single_time_commands(state.device.as_ref().unwrap(), state.command_pool)?;
-    let region = vk::BufferImageCopy::default()
-        .buffer_offset(0)
-        .buffer_row_length(0)
-        .buffer_image_height(0)
-        .image_subresource(vk::ImageSubresourceLayers {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            mip_level: 0,
-            base_array_layer: 0,
-            layer_count: 1,
-        })
-        .image_offset(vk::Offset3D { x: 0, y: 0, z: 0 })
-        .image_extent(vk::Extent3D { width, height, depth: 1 });
-
-    unsafe {
-        state.device.as_ref().unwrap().cmd_copy_buffer_to_image(cmd, buffer, image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &[region]);
-    }
-    end_single_time_commands(state.device.as_ref().unwrap(), state.command_pool, state.queue, cmd)?;
-    Ok(())
-}
-
 fn create_texture_descriptor_set(
-    state: &mut State, texture_image_view: vk::ImageView, sampler: vk::Sampler,
+    state: &State, // <-- The fix: changed from &mut State
+    texture_image_view: vk::ImageView,
+    sampler: vk::Sampler,
 ) -> Result<vk::DescriptorSet, vk::Result> {
     let layouts = [state.descriptor_set_layout];
     let alloc_info = vk::DescriptorSetAllocateInfo::default()
