@@ -271,6 +271,14 @@ pub fn draw(
                 .gl
                 .uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
 
+            let draw_fallback = |last_color: &mut Option<[f32;4]>| {
+                let magenta = [1.0, 0.0, 1.0, 1.0];
+                if last_color.map_or(true, |c| c != magenta) {
+                    state.gl.uniform_4_f32_slice(Some(&state.color_location), &magenta);
+                    *last_color = Some(magenta);
+                }
+            };
+
             match &object.object_type {
                 ObjectType::SolidColor { color } => {
                     if last_use_texture != Some(false) {
@@ -294,11 +302,7 @@ pub fn draw(
                         state.gl.uniform_2_f32(Some(&state.uv_scale_location), 1.0, 1.0);
                         state.gl.uniform_2_f32(Some(&state.uv_offset_location), 0.0, 0.0);
                     } else {
-                        let magenta = [1.0, 0.0, 1.0, 1.0];
-                        if last_color.map_or(true, |c| c != magenta) {
-                            state.gl.uniform_4_f32_slice(Some(&state.color_location), &magenta);
-                            last_color = Some(magenta);
-                        }
+                        draw_fallback(&mut last_color);
                     }
                 }
                 ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset, } => {
@@ -307,6 +311,8 @@ pub fn draw(
                         state.gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
                         state.gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
                         state.gl.uniform_4_f32_slice(Some(&state.color_location), tint);
+                    } else {
+                        draw_fallback(&mut last_color);
                     }
                 }
                 ObjectType::MsdfGlyph { texture_id, uv_scale, uv_offset, color, px_range, } => {
@@ -316,6 +322,8 @@ pub fn draw(
                         state.gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
                         state.gl.uniform_4_f32_slice(Some(&state.color_location), color);
                         state.gl.uniform_1_f32(Some(&state.px_range_location), *px_range);
+                    } else {
+                        draw_fallback(&mut last_color);
                     }
                 }
             }
