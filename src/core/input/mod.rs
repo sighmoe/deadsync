@@ -14,14 +14,17 @@ pub fn init_state() -> InputState {
 }
 
 pub fn handle_keyboard_input(event: &KeyEvent, state: &mut InputState) {
-    if let PhysicalKey::Code(key_code) = event.physical_key {
+    if let PhysicalKey::Code(code) = event.physical_key {
         let is_pressed = event.state == ElementState::Pressed;
-        match key_code {
-            KeyCode::ArrowUp | KeyCode::KeyW => state.up = is_pressed,
-            KeyCode::ArrowDown | KeyCode::KeyS => state.down = is_pressed,
-            KeyCode::ArrowLeft | KeyCode::KeyA => state.left = is_pressed,
-            KeyCode::ArrowRight | KeyCode::KeyD => state.right = is_pressed,
-            _ => {}
+        let target = match code {
+            KeyCode::ArrowUp    | KeyCode::KeyW => Some(&mut state.up),
+            KeyCode::ArrowDown  | KeyCode::KeyS => Some(&mut state.down),
+            KeyCode::ArrowLeft  | KeyCode::KeyA => Some(&mut state.left),
+            KeyCode::ArrowRight | KeyCode::KeyD => Some(&mut state.right),
+            _ => None,
+        };
+        if let Some(slot) = target {
+            *slot = is_pressed;
         }
     }
 }
