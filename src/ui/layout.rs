@@ -28,17 +28,29 @@ pub fn build_screen(
 
 #[inline(always)]
 fn estimate_object_count(actors: &[Actor]) -> usize {
-    fn count(a: &Actor) -> usize {
+    // Iterative DFS: avoids recursion overhead and extra closures.
+    let mut stack: Vec<&Actor> = Vec::with_capacity(actors.len());
+    stack.extend(actors.iter());
+
+    let mut total = 0usize;
+    while let Some(a) = stack.pop() {
         match a {
-            Actor::Sprite { visible, .. } => if *visible { 1 } else { 0 },
-            Actor::Text { content, .. } => content.chars().filter(|&c| c != '\n').count(),
+            Actor::Sprite { visible, .. } => {
+                if *visible { total += 1; }
+            }
+            Actor::Text { content, .. } => {
+                // Fast byte scan; slightly overestimates for non-ASCII, which is fine for reserve().
+                let bytes = content.as_bytes();
+                let newlines = bytes.iter().filter(|&&b| b == b'\n').count();
+                total += bytes.len().saturating_sub(newlines);
+            }
             Actor::Frame { children, background, .. } => {
-                let bg = if background.is_some() { 1 } else { 0 };
-                bg + children.iter().map(count).sum::<usize>()
+                if background.is_some() { total += 1; }
+                stack.extend(children.iter());
             }
         }
     }
-    actors.iter().map(count).sum()
+    total
 }
 
 /* ======================= ACTOR -> OBJECT CONVERSION ======================= */
