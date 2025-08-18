@@ -23,7 +23,7 @@ const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 800;
 
 // ---- args ----
-fn parse_args(args: &[String]) -> (BackendType, bool) {
+fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
     #[inline(always)]
     fn parse_bool_token(s: &str) -> Option<bool> {
         match s {
@@ -33,8 +33,9 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
         }
     }
 
-    let mut backend = BackendType::Vulkan;
-    let mut vsync   = true;
+    let mut backend    = BackendType::Vulkan;
+    let mut vsync      = true;
+    let mut fullscreen = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -42,6 +43,7 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
         match a {
             "--opengl"        => backend = BackendType::OpenGL,
             "--vulkan"        => backend = BackendType::Vulkan,
+
             "--no-vsync"      => vsync = false,
             "--vsync"         => {
                 if i + 1 < args.len() {
@@ -59,11 +61,30 @@ fn parse_args(args: &[String]) -> (BackendType, bool) {
                 let v = &a["--vsync=".len()..];
                 vsync = parse_bool_token(v).unwrap_or(true);
             }
+
+            "--fullscreen" => {
+                if i + 1 < args.len() {
+                    if let Some(v) = parse_bool_token(args[i + 1].as_str()) {
+                        fullscreen = v;
+                        i += 1;
+                    } else {
+                        fullscreen = true; // plain `--fullscreen`
+                    }
+                } else {
+                    fullscreen = true;     // plain `--fullscreen`
+                }
+            }
+            "--windowed" => fullscreen = false,
+            _ if a.starts_with("--fullscreen=") => {
+                let v = &a["--fullscreen=".len()..];
+                fullscreen = parse_bool_token(v).unwrap_or(true);
+            }
+
             _ => {}
         }
         i += 1;
     }
-    (backend, vsync)
+    (backend, vsync, fullscreen)
 }
 
 // ---- app state ----
@@ -81,12 +102,13 @@ pub struct App {
     last_title_update: Instant,
     last_frame_time: Instant,
     vsync_enabled: bool,
+    fullscreen_enabled: bool,
     fonts: HashMap<&'static str, msdf::Font>,
     metrics: Metrics,
 }
 
 impl App {
-    fn new(backend_type: BackendType, vsync_enabled: bool) -> Self {
+    fn new(backend_type: BackendType, vsync_enabled: bool, fullscreen_enabled: bool) -> Self {
         Self {
             window: None,
             backend: None,
@@ -102,6 +124,7 @@ impl App {
             last_frame_time: Instant::now(),
             metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
             vsync_enabled,
+            fullscreen_enabled, // <--- NEW
             fonts: HashMap::new(),
         }
     }
@@ -250,21 +273,58 @@ impl App {
         }
     }
 
-    /// Creates the window, initializes the graphics backend, and loads all assets.
-    /// This function is designed to be called once when the app resumes.
     fn init_graphics(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
-        let window_attributes = Window::default_attributes()
+        // Build base attributes
+        let mut window_attributes = Window::default_attributes()
             .with_title(format!("Simple Renderer - {:?}", self.backend_type))
-            .with_inner_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
             .with_resizable(true);
+
+        // Fullscreen handling: prefer EXCLUSIVE at our predefined resolution; fall back to BORDERLESS.
+        if self.fullscreen_enabled {
+            // Try primary monitor; if unavailable, borderless on "whatever".
+            let fullscreen = if let Some(mon) = event_loop.primary_monitor() {
+                // Pick the best refresh-rate mode matching our constants.
+                let best_mode = mon
+                    .video_modes()
+                    .filter(|m| {
+                        let sz = m.size();
+                        sz.width == WINDOW_WIDTH && sz.height == WINDOW_HEIGHT
+                    })
+                    .max_by_key(|m| m.refresh_rate_millihertz());
+
+                if let Some(mode) = best_mode {
+                    log::info!(
+                        "Fullscreen: using EXCLUSIVE {}x{} @ {} mHz",
+                        WINDOW_WIDTH,
+                        WINDOW_HEIGHT,
+                        mode.refresh_rate_millihertz()
+                    );
+                    Some(winit::window::Fullscreen::Exclusive(mode))
+                } else {
+                    log::warn!(
+                        "No exact EXCLUSIVE mode {}x{}; using BORDERLESS on primary monitor.",
+                        WINDOW_WIDTH,
+                        WINDOW_HEIGHT
+                    );
+                    Some(winit::window::Fullscreen::Borderless(Some(mon)))
+                }
+            } else {
+                log::warn!("No primary monitor reported; using BORDERLESS fullscreen.");
+                Some(winit::window::Fullscreen::Borderless(None))
+            };
+
+            window_attributes = window_attributes.with_fullscreen(fullscreen);
+        } else {
+            // Windowed: use the predefined size.
+            window_attributes = window_attributes.with_inner_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
+        }
 
         let window = Arc::new(event_loop.create_window(window_attributes)?);
         let sz = window.inner_size();
         self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
 
         // Backend creation no longer requires a temporary screen.
-        let backend =
-            create_backend(self.backend_type, window.clone(), self.vsync_enabled)?;
+        let backend = create_backend(self.backend_type, window.clone(), self.vsync_enabled)?;
         self.window = Some(window);
         self.backend = Some(backend);
 
@@ -380,7 +440,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     use log::info;
 
     let args: Vec<String> = std::env::args().collect();
-    let (backend_type, vsync_enabled) = parse_args(&args);
+    let (backend_type, vsync_enabled, fullscreen_enabled) = parse_args(&args);
 
     // Only consider the legacy flags for detection
     let backend_specified = args.iter().any(|a| a == "--opengl" || a == "--vulkan");
@@ -389,8 +449,13 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         info!("Use '--opengl' or '--vulkan' to select a backend.");
     }
 
+    if fullscreen_enabled {
+        info!("Fullscreen enabled (try exclusive at {}x{}).", WINDOW_WIDTH, WINDOW_HEIGHT);
+        info!("Use '--windowed' or '--fullscreen=false' to disable.");
+    }
+
     let event_loop = EventLoop::new()?;
-    let mut app = App::new(backend_type, vsync_enabled);
+    let mut app = App::new(backend_type, vsync_enabled, fullscreen_enabled);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
