@@ -62,33 +62,29 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 
 pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
     let screen_width = m.right - m.left;
-    let logo_params = LogoParams::default();
+    let lp = LogoParams::default();
     let mut actors = logo::build_logo_default(screen_width);
+    actors.reserve(OPTION_COUNT);
 
-    // sRGB hex → linear RGBA
     let selected = color::rgba_hex(SELECTED_COLOR_HEX);
-    let normal = color::rgba_hex(NORMAL_COLOR_HEX);
+    let normal   = color::rgba_hex(NORMAL_COLOR_HEX);
+    let base_y   = lp.top_margin + lp.target_h + MENU_BELOW_LOGO;
 
-    // Calculate menu position relative to the logo's known geometry.
-    let logo_bottom_y_tl = logo_params.top_margin + logo_params.target_h;
-
-    for i in 0..OPTION_COUNT {
-        let is_selected = i == state.selected_index;
-        let px = if is_selected { MENU_SELECTED_PX } else { MENU_NORMAL_PX };
-        let color = if is_selected { selected } else { normal };
-
-        let y_tl = logo_bottom_y_tl + MENU_BELOW_LOGO + (i as f32) * MENU_ROW_SPACING;
+    for (i, label) in MENU_OPTIONS.iter().enumerate() {
+        let sel   = i == state.selected_index;
+        let px    = if sel { MENU_SELECTED_PX } else { MENU_NORMAL_PX };
+        let color = if sel { selected } else { normal };
+        let y_tl  = base_y + (i as f32) * MENU_ROW_SPACING;
 
         actors.push(Actor::Text {
-            anchor: Anchor::TopCenter,
-            offset: [0.0, y_tl],
-            align:  TextAlign::Center,
+            anchor:  Anchor::TopCenter,
+            offset:  [0.0, y_tl],
+            align:   TextAlign::Center,
             px,
             color,
-            font:   "wendy",
-            content: (MENU_OPTIONS[i]).to_string(),
+            font:    "wendy",
+            content: (*label).to_string(),
         });
     }
-
     actors
 }

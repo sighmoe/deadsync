@@ -64,37 +64,43 @@ pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
 }
 
 pub fn get_actors(state: &State) -> Vec<Actor> {
-    let mut actors = Vec::new();
+    let mut actors = Vec::with_capacity(NUM_HEARTS + 6);
 
-    // Hearts (grid inferred from filename; only cell+tint specified)
-    for heart in &state.hearts {
-        actors.push(crate::sprite! {
+    actors.extend(state.hearts.iter().map(|h| {
+        crate::sprite! {
             anchor: Anchor::Center,
-            offset: heart.pos,
+            offset: h.pos,
             size:   [SizeSpec::Px(HEART_SIZE), SizeSpec::Px(HEART_SIZE)],
             texture:"hearts_4x4.png",
-            tint:   heart.color,
-            cell:   heart.cell,
-        });
-    }
+            tint:   h.color,
+            cell:   h.cell,
+        }
+    }));
 
-    // Top bar
     actors.push(crate::ui::components::top_bar::build("OPTIONS"));
 
-    // Corner markers as solid-color sprites
-    actors.push(crate::quad! { anchor: Anchor::TopLeft,     offset: [ 12.0,  12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [1.0,0.9,0.2,1.0]});
-    actors.push(crate::quad! { anchor: Anchor::TopRight,    offset: [-12.0,  12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [0.2,1.0,0.6,1.0]});
-    actors.push(crate::quad! { anchor: Anchor::BottomLeft,  offset: [ 12.0, -12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [0.6,0.6,1.0,1.0]});
-    actors.push(crate::quad! { anchor: Anchor::BottomRight, offset: [-12.0, -12.0], size: [SizeSpec::Px(10.0), SizeSpec::Px(10.0)], color: [1.0,0.6,0.2,1.0]});
+    let corners = [
+        (Anchor::TopLeft,     [ 12.0,  12.0], [1.0, 0.9, 0.2, 1.0]),
+        (Anchor::TopRight,    [-12.0,  12.0], [0.2, 1.0, 0.6, 1.0]),
+        (Anchor::BottomLeft,  [ 12.0, -12.0], [0.6, 0.6, 1.0, 1.0]),
+        (Anchor::BottomRight, [-12.0, -12.0], [1.0, 0.6, 0.2, 1.0]),
+    ];
+    actors.extend(corners.into_iter().map(|(a, off, col)| {
+        crate::quad! {
+            anchor: a,
+            offset: off,
+            size:   [SizeSpec::Px(10.0), SizeSpec::Px(10.0)],
+            color:  col
+        }
+    }));
 
-    // Text sample
     actors.push(Actor::Text {
-        anchor: Anchor::BottomCenter,
-        offset: [0.0, -100.0],
-        align: TextAlign::Center,
-        px: 60.0,
-        font: "miso",
-        color: [0.8, 0.9, 0.7, 1.0],
+        anchor:  Anchor::BottomCenter,
+        offset:  [0.0, -100.0],
+        align:   TextAlign::Center,
+        px:      60.0,
+        font:    "miso",
+        color:   [0.8, 0.9, 0.7, 1.0],
         content: "This is miso font!".to_string(),
     });
 
