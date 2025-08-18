@@ -379,21 +379,19 @@ pub fn draw(
 }
 
 pub fn resize(state: &mut State, width: u32, height: u32) {
-    if width > 0 && height > 0 {
-        if let (Some(width_nz), Some(height_nz)) = (NonZeroU32::new(width), NonZeroU32::new(height))
-        {
-            state
-                .gl_surface
-                .resize(&state.gl_context, width_nz, height_nz);
-            unsafe {
-                state.gl.viewport(0, 0, width as i32, height as i32);
-            }
-            state.projection = ortho_for_window(width, height);
-            state.window_size = (width, height);
-        }
-    } else {
+    if width == 0 || height == 0 {
         warn!("Ignoring resize to zero dimensions.");
+        return;
     }
+    let w = NonZeroU32::new(width).unwrap();
+    let h = NonZeroU32::new(height).unwrap();
+
+    state.gl_surface.resize(&state.gl_context, w, h);
+    unsafe {
+        state.gl.viewport(0, 0, width as i32, height as i32);
+    }
+    state.projection = ortho_for_window(width, height);
+    state.window_size = (width, height);
 }
 
 pub fn cleanup(state: &mut State) {
