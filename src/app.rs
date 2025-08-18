@@ -174,27 +174,26 @@ impl App {
         Ok(())
     }
 
-    /// Helper to load a single MSDF font asset (JSON + atlas PNG).
     fn load_font_asset(&mut self, name: &'static str) -> Result<(), Box<dyn Error>> {
         let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
         let json_path = format!("assets/fonts/{}.json", name);
-        let png_path = format!("assets/fonts/{}.png", name);
-        let atlas_tex_key = Box::leak(png_path.clone().into_boxed_str());
+        let png_path  = format!("assets/fonts/{}.png",  name);
 
         // Read JSON and atlas image from disk
-        let json_data = std::fs::read(&json_path)?;
+        let json_data  = std::fs::read(&json_path)?;
         let image_data = image::open(&png_path)?.to_rgba8();
 
-        // Upload atlas texture to GPU (must be linear color space for MSDF)
+        // Upload atlas texture to GPU (MSDF wants linear color space)
         let texture = renderer::create_texture(
             backend,
             &image_data,
             renderer::TextureColorSpace::Linear,
         )?;
-        self.texture_manager.insert(atlas_tex_key, texture);
+        // Use the font NAME as the texture key; avoids leaking boxed strings.
+        self.texture_manager.insert(name, texture);
 
-        // Parse JSON and store font metrics
-        let font = msdf::load_font(&json_data, atlas_tex_key, 4.0);
+        // Parse JSON and store font metrics; refer to the texture by NAME
+        let font = msdf::load_font(&json_data, name, 4.0);
         self.fonts.insert(name, font);
         info!("Loaded font '{}'", name);
         Ok(())
