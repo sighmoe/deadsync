@@ -27,14 +27,29 @@ pub struct State {
 
 pub fn init() -> State {
     let mut rng = rand::rng();
-    let hearts = (0..NUM_HEARTS).map(|_| {
-        let color_hex = HEART_COLORS[rng.random_range(0..HEART_COLORS.len())];
-        Heart {
-            pos: [rng.random_range(-400.0..400.0), rng.random_range(-200.0..200.0)],
-            color: color::rgba_hex(color_hex),
-            cell: (rng.random_range(0..4), rng.random_range(0..4)),
-        }
-    }).collect();
+
+    // Parse the palette once; reuse sampled entries.
+    let palette: Vec<[f32; 4]> = HEART_COLORS
+        .iter()
+        .map(|&hex| color::rgba_hex(hex))
+        .collect();
+
+    let hearts: Vec<Heart> = (0..NUM_HEARTS)
+        .map(|_| {
+            let tint = {
+                let idx = rng.random_range(0..palette.len());
+                palette[idx]
+            };
+            Heart {
+                pos: [
+                    rng.random_range(-400.0..400.0),
+                    rng.random_range(-200.0..200.0),
+                ],
+                color: tint,
+                cell: (rng.random_range(0..4), rng.random_range(0..4)),
+            }
+        })
+        .collect();
 
     State { hearts }
 }
