@@ -230,20 +230,15 @@ impl App {
     }
 
     fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
-        match self.current_screen {
-            CurrentScreen::Menu => (
-                menu::get_actors(&self.menu_state, &self.metrics),
-                [0.03, 0.03, 0.03, 1.0],
-            ),
-            CurrentScreen::Gameplay => (
-                gameplay::get_actors(&self.gameplay_state),
-                [0.03, 0.03, 0.03, 1.0],
-            ),
-            CurrentScreen::Options => (
-                options::get_actors(&self.options_state),
-                [0.03, 0.03, 0.03, 1.0],
-            ),
-        }
+        const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
+
+        let actors = match self.current_screen {
+            CurrentScreen::Menu => menu::get_actors(&self.menu_state, &self.metrics),
+            CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state),
+            CurrentScreen::Options => options::get_actors(&self.options_state),
+        };
+
+        (actors, CLEAR)
     }
 
     /// Creates the window, initializes the graphics backend, and loads all assets.
