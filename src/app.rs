@@ -240,6 +240,22 @@ impl App {
         (actors, CLEAR)
     }
 
+    #[inline(always)]
+    fn update_fps_title(&mut self, window: &Window, now: Instant) {
+        self.frame_count += 1;
+        let elapsed = now.duration_since(self.last_title_update);
+        if elapsed.as_secs_f32() >= 1.0 {
+            let fps = self.frame_count as f32 / elapsed.as_secs_f32();
+            let screen_name = format!("{:?}", self.current_screen);
+            window.set_title(&format!(
+                "Simple Renderer - {:?} | {} | {:.2} FPS",
+                self.backend_type, screen_name, fps
+            ));
+            self.frame_count = 0;
+            self.last_title_update = now;
+        }
+    }
+
     /// Creates the window, initializes the graphics backend, and loads all assets.
     /// This function is designed to be called once when the app resumes.
     fn init_graphics(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
@@ -290,71 +306,63 @@ impl ApplicationHandler for App {
         window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        if let Some(window) = &self.window {
-            if window_id == window.id() {
-                match event {
-                    WindowEvent::CloseRequested => {
-                        info!("Close requested. Shutting down.");
-                        event_loop.exit();
+        // Clone the Arc to avoid holding an immutable borrow of `self` while mutating `self`.
+        let Some(window) = self.window.as_ref().cloned() else { return; };
+        if window_id != window.id() {
+            return;
+        }
+
+        match event {
+            WindowEvent::CloseRequested => {
+                info!("Close requested. Shutting down.");
+                event_loop.exit();
+            }
+            WindowEvent::Resized(new_size) => {
+                info!("Window resized to: {}x{}", new_size.width, new_size.height);
+                if new_size.width > 0 && new_size.height > 0 {
+                    // keep metrics in sync
+                    self.metrics = space::metrics_for_window(new_size.width, new_size.height);
+                    if let Some(backend) = &mut self.backend {
+                        renderer::resize(backend, new_size.width, new_size.height);
                     }
-                    WindowEvent::Resized(new_size) => {
-                        info!("Window resized to: {}x{}", new_size.width, new_size.height);
-                        if new_size.width > 0 && new_size.height > 0 {
-                            // +++ keep metrics in sync
-                            self.metrics = space::metrics_for_window(new_size.width, new_size.height);
-                            if let Some(backend) = &mut self.backend {
-                                renderer::resize(backend, new_size.width, new_size.height);
-                            }
-                        }
-                    }
-                    WindowEvent::KeyboardInput { event: key_event, .. } => {
-                        input::handle_keyboard_input(&key_event, &mut self.input_state);
-
-                        let action = match self.current_screen {
-                            CurrentScreen::Menu => menu::handle_key_press(&mut self.menu_state, &key_event),
-                            CurrentScreen::Gameplay => gameplay::handle_key_press(&mut self.gameplay_state, &key_event),
-                            CurrentScreen::Options => options::handle_key_press(&mut self.options_state, &key_event),
-                        };
-                        if let Err(e) = self.handle_action(action, event_loop) {
-                            error!("Failed to handle action: {}", e);
-                            event_loop.exit();
-                        }
-                    }
-                    WindowEvent::RedrawRequested => {
-                        let now = Instant::now();
-                        let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
-                        self.last_frame_time = now;
-
-                        if self.current_screen == CurrentScreen::Gameplay {
-                            gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
-                        }
-
-                        let (actors, clear_color) = self.get_current_actors();
-                        let screen = self.build_screen(&actors, clear_color);
-
-                        self.frame_count += 1;
-                        let elapsed = now.duration_since(self.last_title_update);
-                        if elapsed.as_secs_f32() >= 1.0 {
-                            let fps = self.frame_count as f32 / elapsed.as_secs_f32();
-                            let screen_name = format!("{:?}", self.current_screen);
-                            window.set_title(&format!(
-                                "Simple Renderer - {:?} | {} | {:.2} FPS",
-                                self.backend_type, screen_name, fps
-                            ));
-                            self.frame_count = 0;
-                            self.last_title_update = now;
-                        }
-
-                        if let Some(backend) = &mut self.backend {
-                            if let Err(e) = renderer::draw(backend, &screen, &self.texture_manager) {
-                                error!("Failed to draw frame: {}", e);
-                                event_loop.exit();
-                            }
-                        }
-                    }
-                    _ => (),
                 }
             }
+            WindowEvent::KeyboardInput { event: key_event, .. } => {
+                input::handle_keyboard_input(&key_event, &mut self.input_state);
+
+                let action = match self.current_screen {
+                    CurrentScreen::Menu     => menu::handle_key_press(&mut self.menu_state, &key_event),
+                    CurrentScreen::Gameplay => gameplay::handle_key_press(&mut self.gameplay_state, &key_event),
+                    CurrentScreen::Options  => options::handle_key_press(&mut self.options_state, &key_event),
+                };
+                if let Err(e) = self.handle_action(action, event_loop) {
+                    error!("Failed to handle action: {}", e);
+                    event_loop.exit();
+                }
+            }
+            WindowEvent::RedrawRequested => {
+                let now = Instant::now();
+                let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
+                self.last_frame_time = now;
+
+                if self.current_screen == CurrentScreen::Gameplay {
+                    gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
+                }
+
+                let (actors, clear_color) = self.get_current_actors();
+                let screen = self.build_screen(&actors, clear_color);
+
+                // Update title/FPS without conflicting borrows.
+                self.update_fps_title(&window, now);
+
+                if let Some(backend) = &mut self.backend {
+                    if let Err(e) = renderer::draw(backend, &screen, &self.texture_manager) {
+                        error!("Failed to draw frame: {}", e);
+                        event_loop.exit();
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
