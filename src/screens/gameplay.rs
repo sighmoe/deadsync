@@ -2,7 +2,7 @@ use crate::core::input::InputState;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, Anchor, SizeSpec};
 use crate::quad;
-use cgmath::{Vector2, InnerSpace};
+use cgmath::{Vector2};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -28,20 +28,23 @@ pub fn handle_key_press(_state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
-    // Compute axis as {-1, 0, 1} from booleans.
+    // Convert booleans to {-1.0, 0.0, 1.0} without branches.
     let dx = (input.right as u8 as f32) - (input.left as u8 as f32);
-    let dy = (input.down as u8 as f32) - (input.up as u8 as f32);
-
-    let move_vec = Vector2::new(dx, dy);
+    let dy = (input.down  as u8 as f32) - (input.up   as u8 as f32);
 
     // Early-out if idle.
-    if move_vec.x == 0.0 && move_vec.y == 0.0 {
+    if dx == 0.0 && dy == 0.0 {
         return;
     }
 
-    // Normalize to get a direction vector and scale by speed and delta time.
-    let displacement = move_vec.normalize() * PLAYER_SPEED * delta_time;
-    state.player_position += displacement;
+    // For axis-aligned/diagonal movement, speed normalization is trivial:
+    // length is 1.0 for cardinal, sqrt(2) for diagonal.
+    let len_sq = dx * dx + dy * dy;              // ∈ {1.0, 2.0}
+    let norm = if len_sq == 2.0 { 0.70710678 } else { 1.0 }; // 1/√2 for diagonals
+
+    let step = PLAYER_SPEED * delta_time * norm;
+    state.player_position.x += dx * step;
+    state.player_position.y += dy * step;
 }
 
 pub fn get_actors(state: &State) -> Vec<Actor> {
