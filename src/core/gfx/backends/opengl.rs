@@ -196,6 +196,7 @@ pub fn load_screen(_state: &mut State, _screen: &Screen) -> Result<(), Box<dyn E
     Ok(())
 }
 
+// src/core/gfx/backends/opengl.rs
 pub fn draw(
     state: &mut State,
     screen: &Screen,
@@ -237,73 +238,137 @@ pub fn draw(
 
     unsafe {
         let gl = &state.gl;
+
         // Clear once
         let c = screen.clear_color;
         gl.clear_color(c[0], c[1], c[2], c[3]);
         gl.clear(glow::COLOR_BUFFER_BIT);
 
-        // Program + fixed state once
+        // Bind program + shared VAO once
         gl.use_program(Some(state.program));
         gl.bind_vertex_array(Some(state.shared_vao));
-        
-        // Default blend mode
+
+        // Fixed blend baseline
         gl.enable(glow::BLEND);
         gl.blend_equation(glow::FUNC_ADD);
         gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-        
-        // Texture unit 0 is always active
+
+        // Texture unit 0 is active; sampler uniform set once
         gl.active_texture(glow::TEXTURE0);
         gl.uniform_1_i32(Some(&state.texture_location), 0);
 
-        // Track to avoid redundant GL calls
+        // Track to avoid redundant state
         let mut last_bound_tex: Option<glow::Texture> = None;
-        let mut last_blend_mode = Some(crate::core::gfx::types::BlendMode::Alpha);
+        let mut last_blend = Some(crate::core::gfx::types::BlendMode::Alpha);
+        let mut last_use_texture: Option<bool> = None;
+        let mut last_is_msdf: Option<bool> = None;
+        let mut last_uv_scale: Option<[f32; 2]> = None;
+        let mut last_uv_offset: Option<[f32; 2]> = None;
+        let mut last_px_range: Option<f32> = None;
 
         for object in &screen.objects {
-            apply_blend(gl, object.blend, &mut last_blend_mode);
+            apply_blend(gl, object.blend, &mut last_blend);
 
+            // MVP per object
             let mvp_array: [[f32; 4]; 4] = (state.projection * object.transform).into();
             let mvp_slice: &[f32] = bytemuck::cast_slice(&mvp_array);
             gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
 
+            // Determine textured vs solid
             let is_textured = !matches!(object.object_type, ObjectType::SolidColor { .. });
-            
-            // --- Set texture/solid mode ---
-            gl.uniform_1_i32(Some(&state.use_texture_location), is_textured as i32);
-            gl.uniform_1_i32(Some(&state.is_msdf_location), 0); // Default to non-MSDF
-
-            if is_textured {
-                let (texture_id, tint, uv_scale, uv_offset, is_msdf, px_range) = match &object.object_type {
-                    ObjectType::Textured { texture_id } => (texture_id, &[1.0; 4], [1.0, 1.0], [0.0, 0.0], false, 0.0),
-                    ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => (texture_id, tint, *uv_scale, *uv_offset, false, 0.0),
-                    ObjectType::MsdfGlyph { texture_id, color, uv_scale, uv_offset, px_range } => (texture_id, color, *uv_scale, *uv_offset, true, *px_range),
-                    _ => continue,
-                };
-                
-                if let Some(renderer::Texture::OpenGL(gl_texture)) = textures.get(texture_id) {
-                    if last_bound_tex != Some(gl_texture.0) {
-                        gl.bind_texture(glow::TEXTURE_2D, Some(gl_texture.0));
-                        last_bound_tex = Some(gl_texture.0);
-                    }
-                    gl.uniform_4_f32_slice(Some(&state.color_location), tint);
-                    gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
-                    gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
-                    if is_msdf {
-                        gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
-                        gl.uniform_1_f32(Some(&state.px_range_location), px_range);
-                    }
-                } else {
-                    // Fallback for missing texture: draw magenta
-                    gl.uniform_1_i32(Some(&state.use_texture_location), 0);
-                    gl.uniform_4_f32_slice(Some(&state.color_location), &[1.0, 0.0, 1.0, 1.0]);
-                }
-            } else { // SolidColor
-                if let ObjectType::SolidColor{ color } = &object.object_type {
-                    gl.uniform_4_f32_slice(Some(&state.color_location), color);
-                }
+            if last_use_texture != Some(is_textured) {
+                gl.uniform_1_i32(Some(&state.use_texture_location), is_textured as i32);
+                last_use_texture = Some(is_textured);
             }
-            
-            gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
+
+            if !is_textured {
+                if let ObjectType::SolidColor { color } = object.object_type {
+                    gl.uniform_4_f32_slice(Some(&state.color_location), &color);
+                }
+                // Ensure MSDF flag is off when drawing solids
+                if last_is_msdf != Some(false) {
+                    gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
+                    last_is_msdf = Some(false);
+                }
+                gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
+                continue;
+            }
+
+            match &object.object_type {
+                ObjectType::Textured { texture_id } => {
+                    if let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) {
+                        if last_bound_tex != Some(gl_tex.0) {
+                            gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0));
+                            last_bound_tex = Some(gl_tex.0);
+                        }
+                        if last_is_msdf != Some(false) {
+                            gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
+                            last_is_msdf = Some(false);
+                        }
+                        // Default UVs (1,1)/(0,0) only if changed
+                        if last_uv_scale != Some([1.0, 1.0]) {
+                            gl.uniform_2_f32(Some(&state.uv_scale_location), 1.0, 1.0);
+                            last_uv_scale = Some([1.0, 1.0]);
+                        }
+                        if last_uv_offset != Some([0.0, 0.0]) {
+                            gl.uniform_2_f32(Some(&state.uv_offset_location), 0.0, 0.0);
+                            last_uv_offset = Some([0.0, 0.0]);
+                        }
+                        // Solid white tint for plain textures
+                        gl.uniform_4_f32_slice(Some(&state.color_location), &[1.0, 1.0, 1.0, 1.0]);
+                        gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
+                    }
+                }
+                ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
+                    if let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) {
+                        if last_bound_tex != Some(gl_tex.0) {
+                            gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0));
+                            last_bound_tex = Some(gl_tex.0);
+                        }
+                        if last_is_msdf != Some(false) {
+                            gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
+                            last_is_msdf = Some(false);
+                        }
+                        if last_uv_scale != Some(*uv_scale) {
+                            gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
+                            last_uv_scale = Some(*uv_scale);
+                        }
+                        if last_uv_offset != Some(*uv_offset) {
+                            gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
+                            last_uv_offset = Some(*uv_offset);
+                        }
+                        gl.uniform_4_f32_slice(Some(&state.color_location), tint);
+                        gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
+                    }
+                }
+                ObjectType::MsdfGlyph { texture_id, color, uv_scale, uv_offset, px_range } => {
+                    if let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) {
+                        if last_bound_tex != Some(gl_tex.0) {
+                            gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0));
+                            last_bound_tex = Some(gl_tex.0);
+                        }
+                        if last_is_msdf != Some(true) {
+                            gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
+                            last_is_msdf = Some(true);
+                        }
+                        if last_uv_scale != Some(*uv_scale) {
+                            gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
+                            last_uv_scale = Some(*uv_scale);
+                        }
+                        if last_uv_offset != Some(*uv_offset) {
+                            gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
+                            last_uv_offset = Some(*uv_offset);
+                        }
+                        if last_px_range != Some(*px_range) {
+                            gl.uniform_1_f32(Some(&state.px_range_location), *px_range);
+                            last_px_range = Some(*px_range);
+                        }
+                        gl.uniform_4_f32_slice(Some(&state.color_location), color);
+                        gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
+                    }
+                }
+                ObjectType::SolidColor { .. } => { /* handled in the non-textured branch above */ }
+            }
         }
 
         gl.bind_vertex_array(None);
