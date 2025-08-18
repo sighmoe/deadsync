@@ -424,31 +424,6 @@ pub fn draw(
             }
 
             match &obj.object_type {
-                ObjectType::Textured { texture_id } => {
-                    if let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) {
-                        if last_bound_tex != Some(gl_tex.0) {
-                            gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0));
-                            last_bound_tex = Some(gl_tex.0);
-                        }
-                        if last_is_msdf != Some(false) {
-                            gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
-                            last_is_msdf = Some(false);
-                        }
-                        if last_uv_scale != Some([1.0, 1.0]) {
-                            gl.uniform_2_f32(Some(&state.uv_scale_location), 1.0, 1.0);
-                            last_uv_scale = Some([1.0, 1.0]);
-                        }
-                        if last_uv_offset != Some([0.0, 0.0]) {
-                            gl.uniform_2_f32(Some(&state.uv_offset_location), 0.0, 0.0);
-                            last_uv_offset = Some([0.0, 0.0]);
-                        }
-                        if last_color != Some([1.0, 1.0, 1.0, 1.0]) {
-                            gl.uniform_4_f32_slice(Some(&state.color_location), &[1.0, 1.0, 1.0, 1.0]);
-                            last_color = Some([1.0, 1.0, 1.0, 1.0]);
-                        }
-                        gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
-                    }
-                }
                 ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
                     if let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) {
                         if last_bound_tex != Some(gl_tex.0) {

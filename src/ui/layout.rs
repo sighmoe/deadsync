@@ -114,7 +114,17 @@ fn build_actor_recursive(
                         push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *c }, BlendMode::Alpha);
                     }
                     actors::Background::Texture(tex) => {
-                        push_rect(out, rect, m, renderer::ObjectType::Textured { texture_id: *tex }, BlendMode::Alpha);
+                        // unified textured path: Sprite with default uv + white tint
+                        push_rect(
+                            out, rect, m,
+                            renderer::ObjectType::Sprite {
+                                texture_id: *tex,
+                                tint:       [1.0, 1.0, 1.0, 1.0],
+                                uv_scale:   [1.0, 1.0],
+                                uv_offset:  [0.0, 0.0],
+                            },
+                            BlendMode::Alpha,
+                        );
                     }
                 }
             }
