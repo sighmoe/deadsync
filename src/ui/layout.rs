@@ -120,22 +120,35 @@ fn build_actor_recursive(
 /// Returns (1, 1) on failure to parse.
 #[inline(always)]
 fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
-    let Some(name_without_ext) = filename.rsplit_once('.').map(|(name, _)| name) else {
-        return (1, 1);
-    };
+    #[inline(always)]
+    fn parse_u32_digits(bs: &[u8]) -> Option<u32> {
+        if bs.is_empty() { return None; }
+        let mut acc: u32 = 0;
+        for &b in bs {
+            if !(b'0'..=b'9').contains(&b) { return None; }
+            let d = (b - b'0') as u32;
+            acc = acc.checked_mul(10)?.checked_add(d)?;
+        }
+        Some(acc)
+    }
 
-    let Some(last_part) = name_without_ext.rsplit('_').next() else {
-        return (1, 1);
-    };
+    let bytes = filename.as_bytes();
 
-    let Some((w_str, h_str)) = last_part.split_once('x') else {
-        return (1, 1);
-    };
+    // strip extension
+    let end = bytes.iter().rposition(|&b| b == b'.').map(|i| i).unwrap_or(bytes.len());
+    // find last '_' before extension
+    let us = bytes[..end].iter().rposition(|&b| b == b'_');
+    let Some(us_i) = us else { return (1, 1) };
 
-    let w = w_str.parse::<u32>().unwrap_or(1);
-    let h = h_str.parse::<u32>().unwrap_or(1);
+    let dims = &bytes[us_i + 1..end];
+    // expect "<cols>x<rows>"
+    let x_pos = dims.iter().position(|&b| b == b'x' || b == b'X');
+    let Some(xi) = x_pos else { return (1, 1) };
 
-    (w.max(1), h.max(1)) // Ensure dims are at least 1x1
+    let w = parse_u32_digits(&dims[..xi]).unwrap_or(1);
+    let h = parse_u32_digits(&dims[xi + 1..]).unwrap_or(1);
+
+    if w == 0 || h == 0 { (1, 1) } else { (w, h) }
 }
 
 #[inline(always)]
