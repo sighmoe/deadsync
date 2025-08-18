@@ -200,8 +200,9 @@ impl App {
     }
 
     fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
-        self.load_font_asset("wendy")?;
-        self.load_font_asset("miso")?;
+        for &name in &["wendy", "miso"] {
+            self.load_font_asset(name)?;
+        }
         Ok(())
     }
 
