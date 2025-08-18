@@ -32,16 +32,6 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     }
 
     match event.physical_key {
-        PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
-            state.selected_index = if state.selected_index == 0 {
-                OPTION_COUNT - 1
-            } else {
-                state.selected_index - 1
-            };
-        }
-        PhysicalKey::Code(KeyCode::ArrowDown) | PhysicalKey::Code(KeyCode::KeyS) => {
-            state.selected_index = (state.selected_index + 1) % OPTION_COUNT;
-        }
         PhysicalKey::Code(KeyCode::Enter) => {
             return match state.selected_index {
                 0 => ScreenAction::Navigate(Screen::Gameplay),
@@ -53,9 +43,21 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
         PhysicalKey::Code(KeyCode::Escape) => {
             return ScreenAction::Exit;
         }
-        _ => {}
+        _ => {
+            // Map key to {-1, 0, +1} delta and apply modulo without branches.
+            let delta: isize = match event.physical_key {
+                PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => -1,
+                PhysicalKey::Code(KeyCode::ArrowDown) | PhysicalKey::Code(KeyCode::KeyS) => 1,
+                _ => 0,
+            };
+            if delta != 0 {
+                let n = OPTION_COUNT as isize;
+                let cur = state.selected_index as isize;
+                state.selected_index = ((cur + delta + n) % n) as usize;
+            }
+            ScreenAction::None
+        }
     }
-    ScreenAction::None
 }
 
 pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
