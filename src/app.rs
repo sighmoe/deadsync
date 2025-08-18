@@ -8,7 +8,7 @@ use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::screens::{gameplay, menu, options, Screen as CurrentScreen, ScreenAction};
 
-use log::{error, info};
+use log::{error, info, warn};
 use image;
 use std::{collections::HashMap, error::Error, path::Path, sync::Arc, time::Instant};
 use winit::{
@@ -107,9 +107,6 @@ impl App {
     }
 
     fn load_textures(&mut self) -> Result<(), Box<dyn Error>> {
-        use log::{info, warn};
-        use std::sync::Arc;
-
         info!("Loading textures...");
         let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
 
@@ -122,7 +119,7 @@ impl App {
             image::RgbaImage::from_raw(2, 2, data.to_vec()).expect("fallback image")
         }
 
-        // Keep desired logical IDs -> filenames
+        // Logical IDs -> filenames
         let texture_paths: [&'static str; 5] = [
             "logo.png",
             "dance.png",
@@ -132,28 +129,26 @@ impl App {
         ];
 
         // 1) Decode images in parallel (CPU-only work)
-        let handles: Vec<_> = texture_paths
-            .iter()
-            .map(|&key| {
-                let p = Path::new("assets/graphics").join(key);
-                std::thread::spawn(move || {
-                    match image::open(&p) {
-                        Ok(img) => Ok::<(&'static str, image::RgbaImage), (&'static str, String)>((key, img.to_rgba8())),
-                        Err(e) => Err((key, e.to_string())),
-                    }
-                })
-            })
-            .collect();
+        let mut handles = Vec::with_capacity(texture_paths.len());
+        for &key in &texture_paths {
+            let path = Path::new("assets/graphics").join(key);
+            handles.push(std::thread::spawn(move || {
+                match image::open(&path) {
+                    Ok(img) => Ok::<(&'static str, image::RgbaImage), (&'static str, String)>((key, img.to_rgba8())),
+                    Err(e) => Err((key, e.to_string())),
+                }
+            }));
+        }
 
         // Create the fallback image once and wrap in an Arc for cheap cloning.
         let fallback_image = Arc::new(fallback_rgba());
         let mut decoded: Vec<(&'static str, Arc<image::RgbaImage>)> = Vec::with_capacity(texture_paths.len());
+
         for h in handles {
             match h.join().expect("texture decode thread panicked") {
                 Ok((key, rgba)) => decoded.push((key, Arc::new(rgba))),
                 Err((key, msg)) => {
                     warn!("Failed to load 'assets/graphics/{}': {}. Using generated fallback.", key, msg);
-                    // Clone the Arc (cheap) instead of the image buffer (expensive).
                     decoded.push((key, fallback_image.clone()));
                 }
             }
@@ -161,13 +156,11 @@ impl App {
 
         // 2) Create GPU textures sequentially
         for (key, rgba_arc) in decoded {
-            // All UI sprites are authored in sRGB space.
             let texture = renderer::create_texture(
                 backend,
                 &rgba_arc,
                 renderer::TextureColorSpace::Srgb,
             )?;
-
             self.texture_manager.insert(key, texture);
             info!("Loaded texture: assets/graphics/{}", key);
         }
