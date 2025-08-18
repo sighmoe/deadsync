@@ -780,8 +780,6 @@ unsafe fn bytes_of<T>(v: &T) -> &[u8] {
     }
 }
 
-// src/core/gfx/backends/vulkan.rs
-
 pub fn draw(
     state: &mut State,
     screen: &Screen,
@@ -836,11 +834,14 @@ pub fn draw(
         device.cmd_begin_render_pass(cmd, &rp_info, vk::SubpassContents::INLINE);
 
         if let (Some(vb), Some(ib)) = (&state.vertex_buffer, &state.index_buffer) {
+            // Static dynamic state
             let vp = vk::Viewport {
-                x: 0.0, y: state.swapchain_resources.extent.height as f32,
+                x: 0.0,
+                y: state.swapchain_resources.extent.height as f32,
                 width: state.swapchain_resources.extent.width as f32,
                 height: -(state.swapchain_resources.extent.height as f32),
-                min_depth: 0.0, max_depth: 1.0,
+                min_depth: 0.0,
+                max_depth: 1.0,
             };
             device.cmd_set_viewport(cmd, 0, &[vp]);
             let sc = vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent };
@@ -848,69 +849,105 @@ pub fn draw(
             device.cmd_bind_vertex_buffers(cmd, 0, &[vb.buffer], &[0]);
             device.cmd_bind_index_buffer(cmd, ib.buffer, 0, vk::IndexType::UINT16);
 
+            // Track pipeline + descriptor set to avoid redundant binds.
             let mut current_pipeline = vk::Pipeline::null();
             let mut last_set = vk::DescriptorSet::null();
             let proj = state.projection;
 
+            // Small inlined helpers via macros (no borrowing conflicts).
+            macro_rules! bind_pipeline {
+                ($pipe:expr) => {
+                    if current_pipeline != $pipe {
+                        device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, $pipe);
+                        current_pipeline = $pipe;
+                        last_set = vk::DescriptorSet::null();
+                    }
+                };
+            }
+            macro_rules! bind_set {
+                ($layout:expr, $set:expr) => {
+                    if last_set != $set {
+                        device.cmd_bind_descriptor_sets(
+                            cmd,
+                            vk::PipelineBindPoint::GRAPHICS,
+                            $layout,
+                            0,
+                            &[$set],
+                            &[],
+                        );
+                        last_set = $set;
+                    }
+                };
+            }
+
             for o in &screen.objects {
                 match &o.object_type {
                     ObjectType::SolidColor { color } => {
-                        if current_pipeline != state.solid_pipeline {
-                            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.solid_pipeline);
-                            current_pipeline = state.solid_pipeline;
-                        }
+                        bind_pipeline!(state.solid_pipeline);
                         let pc = SolidPushConstants { mvp: proj * o.transform, color: *color };
-                        device.cmd_push_constants(cmd, state.solid_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+                        device.cmd_push_constants(
+                            cmd,
+                            state.solid_pipeline_layout,
+                            vk::ShaderStageFlags::VERTEX,
+                            0,
+                            bytes_of(&pc),
+                        );
                         device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                     }
-
                     ObjectType::Textured { texture_id } => {
                         if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
-                            if current_pipeline != state.texture_pipeline {
-                                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline);
-                                current_pipeline = state.texture_pipeline;
-                                last_set = vk::DescriptorSet::null();
-                            }
-                            if tex.descriptor_set != last_set {
-                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.texture_pipeline_layout, 0, &[tex.descriptor_set], &[]);
-                                last_set = tex.descriptor_set;
-                            }
+                            bind_pipeline!(state.texture_pipeline);
+                            bind_set!(state.texture_pipeline_layout, tex.descriptor_set);
                             let pc = TexturedPushConstants { mvp: proj * o.transform };
-                            device.cmd_push_constants(cmd, state.texture_pipeline_layout, vk::ShaderStageFlags::VERTEX, 0, bytes_of(&pc));
+                            device.cmd_push_constants(
+                                cmd,
+                                state.texture_pipeline_layout,
+                                vk::ShaderStageFlags::VERTEX,
+                                0,
+                                bytes_of(&pc),
+                            );
                             device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                         }
                     }
-
                     ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
                         if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
-                             if current_pipeline != state.sprite_pipeline {
-                                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline);
-                                current_pipeline = state.sprite_pipeline;
-                                last_set = vk::DescriptorSet::null();
-                            }
-                            if tex.descriptor_set != last_set {
-                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline_layout, 0, &[tex.descriptor_set], &[]);
-                                last_set = tex.descriptor_set;
-                            }
-                            let pc = SpritePush { mvp: proj * o.transform, tint: *tint, uv_scale: *uv_scale, uv_offset: *uv_offset };
-                            device.cmd_push_constants(cmd, state.sprite_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
+                            bind_pipeline!(state.sprite_pipeline);
+                            bind_set!(state.sprite_pipeline_layout, tex.descriptor_set);
+                            let pc = SpritePush {
+                                mvp: proj * o.transform,
+                                tint: *tint,
+                                uv_scale: *uv_scale,
+                                uv_offset: *uv_offset,
+                            };
+                            device.cmd_push_constants(
+                                cmd,
+                                state.sprite_pipeline_layout,
+                                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                                0,
+                                bytes_of(&pc),
+                            );
                             device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                         }
                     }
-                    
                     ObjectType::MsdfGlyph { texture_id, uv_scale, uv_offset, color, px_range } => {
-                         if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
-                            if current_pipeline != state.msdf_pipeline {
-                                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.msdf_pipeline);
-                                current_pipeline = state.msdf_pipeline;
-                                last_set = vk::DescriptorSet::null();
-                            }
-                            if tex.descriptor_set != last_set {
-                                device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, state.msdf_pipeline_layout, 0, &[tex.descriptor_set], &[]);
-                                last_set = tex.descriptor_set;
-                            }
-                            let pc = MsdfPush { mvp: proj * o.transform, uv_scale: *uv_scale, uv_offset: *uv_offset, color: *color, px_range: *px_range, _pad: [0.0; 3] };
-                            device.cmd_push_constants(cmd, state.msdf_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
+                        if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
+                            bind_pipeline!(state.msdf_pipeline);
+                            bind_set!(state.msdf_pipeline_layout, tex.descriptor_set);
+                            let pc = MsdfPush {
+                                mvp: proj * o.transform,
+                                uv_scale: *uv_scale,
+                                uv_offset: *uv_offset,
+                                color: *color,
+                                px_range: *px_range,
+                                _pad: [0.0; 3],
+                            };
+                            device.cmd_push_constants(
+                                cmd,
+                                state.msdf_pipeline_layout,
+                                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                                0,
+                                bytes_of(&pc),
+                            );
                             device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                         }
                     }
@@ -924,10 +961,17 @@ pub fn draw(
         let wait_semaphores = [state.image_available_semaphores[state.current_frame]];
         let signal_semaphores = [state.render_finished_semaphores[state.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let submit = vk::SubmitInfo::default().wait_semaphores(&wait_semaphores).wait_dst_stage_mask(&wait_stages).command_buffers(std::slice::from_ref(&cmd)).signal_semaphores(&signal_semaphores);
+        let submit = vk::SubmitInfo::default()
+            .wait_semaphores(&wait_semaphores)
+            .wait_dst_stage_mask(&wait_stages)
+            .command_buffers(std::slice::from_ref(&cmd))
+            .signal_semaphores(&signal_semaphores);
         device.queue_submit(state.queue, &[submit], fence)?;
 
-        let present_info = vk::PresentInfoKHR::default().wait_semaphores(&signal_semaphores).swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain)).image_indices(std::slice::from_ref(&image_index));
+        let present_info = vk::PresentInfoKHR::default()
+            .wait_semaphores(&signal_semaphores)
+            .swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain))
+            .image_indices(std::slice::from_ref(&image_index));
 
         match state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present_info) {
             Ok(suboptimal) if suboptimal || acquired_suboptimal => recreate_swapchain_and_dependents(state)?,
