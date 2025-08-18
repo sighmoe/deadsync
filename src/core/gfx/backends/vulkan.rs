@@ -21,13 +21,6 @@ const MAX_FRAMES_IN_FLIGHT: usize = 3;
 
 // --- Structs ---
 
-// Push constants for drawing solid-colored objects.
-#[repr(C)]
-struct SolidPushConstants {
-    mvp: Matrix4<f32>,
-    color: [f32; 4],
-}
-
 #[repr(C)]
 struct SpritePush {
     mvp: Matrix4<f32>,
@@ -105,8 +98,6 @@ pub struct State {
     pub command_pool: vk::CommandPool,
     swapchain_resources: SwapchainResources,
     render_pass: vk::RenderPass,
-    solid_pipeline_layout: vk::PipelineLayout,
-    solid_pipeline: vk::Pipeline,
     sprite_pipeline_layout: vk::PipelineLayout,
     sprite_pipeline: vk::Pipeline,
     vertex_buffer: Option<BufferResource>,
@@ -164,8 +155,7 @@ pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error
     let descriptor_set_layout = create_descriptor_set_layout(device.as_ref().unwrap())?;
     let descriptor_pool = create_descriptor_pool(device.as_ref().unwrap())?;
 
-    let (solid_pipeline_layout, solid_pipeline) =
-        create_solid_pipeline(device.as_ref().unwrap(), render_pass)?;
+    // Only sprite + msdf pipelines
     let (sprite_pipeline_layout, sprite_pipeline) =
         create_sprite_pipeline(device.as_ref().unwrap(), render_pass, descriptor_set_layout)?;
     let (msdf_pipeline_layout, msdf_pipeline) =
@@ -192,9 +182,6 @@ pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error
         command_pool,
         swapchain_resources,
         render_pass,
-        solid_pipeline_layout,
-        solid_pipeline,
-        // REMOVED: texture_pipeline_layout, texture_pipeline
         sprite_pipeline_layout,
         sprite_pipeline,
         vertex_buffer: None,
@@ -290,98 +277,6 @@ fn create_descriptor_pool(device: &Device) -> Result<vk::DescriptorPool, vk::Res
 }
 
 // --- NEW PIPELINE CREATION FUNCTIONS ---
-
-// Creates the pipeline for drawing solid-colored objects.
-fn create_solid_pipeline(
-    device: &Device,
-    render_pass: vk::RenderPass,
-) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
-    let vert_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_solid.vert.spv"));
-    let frag_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_solid.frag.spv"));
-    let vert_module = create_shader_module(device, vert_shader_code)?;
-    let frag_module = create_shader_module(device, frag_shader_code)?;
-    let main_name = ffi::CStr::from_bytes_with_nul(b"main\0")?;
-
-    let shader_stages = [
-        vk::PipelineShaderStageCreateInfo::default()
-            .stage(vk::ShaderStageFlags::VERTEX)
-            .module(vert_module)
-            .name(main_name),
-        vk::PipelineShaderStageCreateInfo::default()
-            .stage(vk::ShaderStageFlags::FRAGMENT)
-            .module(frag_module)
-            .name(main_name),
-    ];
-
-    // Use the specific vertex description for the solid pipeline.
-    let (binding_descriptions, attribute_descriptions) = vertex_input_descriptions_solid();
-    let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
-        .vertex_binding_descriptions(&binding_descriptions)
-        .vertex_attribute_descriptions(&attribute_descriptions);
-    let input_assembly =
-        vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-    let viewport_state =
-        vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
-    let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
-        .polygon_mode(vk::PolygonMode::FILL)
-        .line_width(1.0)
-        .cull_mode(vk::CullModeFlags::BACK)
-        .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
-    let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
-        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-
-    // Enable alpha blending for solid quads (matches OpenGL)
-    let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default()
-        .color_write_mask(vk::ColorComponentFlags::RGBA)
-        .blend_enable(true)
-        .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        .color_blend_op(vk::BlendOp::ADD)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-        .alpha_blend_op(vk::BlendOp::ADD);
-
-    let color_blending = vk::PipelineColorBlendStateCreateInfo::default()
-        .attachments(std::slice::from_ref(&color_blend_attachment));
-    let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-    let dynamic_state =
-        vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
-
-    let push_constant_range = vk::PushConstantRange::default()
-        .stage_flags(vk::ShaderStageFlags::VERTEX)
-        .offset(0)
-        .size(mem::size_of::<SolidPushConstants>() as u32);
-
-    let pipeline_layout_info =
-        vk::PipelineLayoutCreateInfo::default().push_constant_ranges(std::slice::from_ref(&push_constant_range));
-    let pipeline_layout = unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
-
-    let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
-        .stages(&shader_stages)
-        .vertex_input_state(&vertex_input_info)
-        .input_assembly_state(&input_assembly)
-        .viewport_state(&viewport_state)
-        .rasterization_state(&rasterizer)
-        .multisample_state(&multisampling)
-        .color_blend_state(&color_blending)
-        .dynamic_state(&dynamic_state)
-        .layout(pipeline_layout)
-        .render_pass(render_pass)
-        .subpass(0);
-
-    let pipeline = unsafe {
-        device
-            .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
-            .map_err(|e| e.1)?[0]
-    };
-
-    unsafe {
-        device.destroy_shader_module(vert_module, None);
-        device.destroy_shader_module(frag_module, None);
-    }
-
-    Ok((pipeline_layout, pipeline))
-}
 
 fn create_sprite_pipeline(
     device: &Device,
@@ -814,7 +709,6 @@ pub fn draw(
             .clear_values(std::slice::from_ref(&clear_value));
         device.cmd_begin_render_pass(cmd, &rp_info, vk::SubpassContents::INLINE);
 
-        // Early out if buffers aren’t ready
         if state.vertex_buffer.is_some() && state.index_buffer.is_some() {
             let (vb_buf, ib_buf) = {
                 let vb_ref = state.vertex_buffer.as_ref().unwrap();
@@ -836,7 +730,6 @@ pub fn draw(
             device.cmd_bind_vertex_buffers(cmd, 0, &[vb_buf], &[0]);
             device.cmd_bind_index_buffer(cmd, ib_buf, 0, vk::IndexType::UINT16);
 
-            // State tracking
             let mut current_pipeline = vk::Pipeline::null();
             let mut last_set = vk::DescriptorSet::null();
             let proj = state.projection;
@@ -870,7 +763,6 @@ pub fn draw(
             let total_glyphs = screen.objects.iter().filter(|o| matches!(o.object_type, ObjectType::MsdfGlyph{..})).count();
             ensure_instance_buffer(state, state.current_frame, total_glyphs)?;
 
-            // Map once per frame
             let (instance_buf, instance_mem) = {
                 let b = state.instance_buffers[state.current_frame].as_ref().unwrap();
                 (b.buffer, b.memory)
@@ -883,19 +775,6 @@ pub fn draw(
             let mut i = 0;
             while i < screen.objects.len() {
                 match &screen.objects[i].object_type {
-                    ObjectType::SolidColor { color } => {
-                        bind_pipeline!(state.solid_pipeline);
-                        let pc = SolidPushConstants { mvp: proj * screen.objects[i].transform, color: *color };
-                        device.cmd_push_constants(
-                            cmd,
-                            state.solid_pipeline_layout,
-                            vk::ShaderStageFlags::VERTEX,
-                            0,
-                            bytes_of(&pc),
-                        );
-                        device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
-                        i += 1;
-                    }
                     ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
                         if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
                             bind_pipeline!(state.sprite_pipeline);
@@ -1013,7 +892,6 @@ pub fn cleanup(state: &mut State) {
         }
     }
 
-    // per-frame instance buffers
     for buf_opt in state.instance_buffers.iter_mut() {
         if let Some(buf) = buf_opt.take() {
             destroy_buffer(state.device.as_ref().unwrap(), &buf);
@@ -1041,11 +919,7 @@ pub fn cleanup(state: &mut State) {
         state.device.as_ref().unwrap().destroy_descriptor_pool(state.descriptor_pool, None);
         state.device.as_ref().unwrap().destroy_descriptor_set_layout(state.descriptor_set_layout, None);
 
-        state.device.as_ref().unwrap().destroy_pipeline(state.solid_pipeline, None);
-        state.device.as_ref().unwrap().destroy_pipeline_layout(state.solid_pipeline_layout, None);
-
-        // REMOVED: texture_pipeline + layout
-
+        // REMOVED: solid pipeline + layout
         state.device.as_ref().unwrap().destroy_pipeline(state.sprite_pipeline, None);
         state.device.as_ref().unwrap().destroy_pipeline_layout(state.sprite_pipeline_layout, None);
         state.device.as_ref().unwrap().destroy_pipeline(state.msdf_pipeline, None);
@@ -1155,25 +1029,6 @@ fn create_texture_descriptor_set(
         state.device.as_ref().unwrap().update_descriptor_sets(&[descriptor_write], &[]);
     }
     Ok(descriptor_set)
-}
-
-#[inline(always)]
-fn vertex_input_descriptions_solid() -> (
-    [vk::VertexInputBindingDescription; 1],
-    [vk::VertexInputAttributeDescription; 1],
-) {
-    let binding = vk::VertexInputBindingDescription::default()
-        .binding(0)
-        .stride(std::mem::size_of::<[f32; 4]>() as u32) // [x, y, u, v]
-        .input_rate(vk::VertexInputRate::VERTEX);
-
-    let position = vk::VertexInputAttributeDescription::default()
-        .binding(0)
-        .location(0)
-        .format(vk::Format::R32G32_SFLOAT)
-        .offset(0);
-
-    ([binding], [position])
 }
 
 #[inline(always)]

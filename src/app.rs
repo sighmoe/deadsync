@@ -142,6 +142,19 @@ impl App {
             image::RgbaImage::from_raw(2, 2, data.to_vec()).expect("fallback image")
         }
 
+        // ---- 0) built-in 1x1 white texture for "solid quads" ----
+        {
+            let white = image::RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255]).unwrap();
+            let white_tex = renderer::create_texture(
+                backend,
+                &white,
+                renderer::TextureColorSpace::Srgb,
+            )?;
+            // reserved key for solids:
+            self.texture_manager.insert("__white", white_tex);
+            info!("Loaded built-in texture: __white (1x1 white)");
+        }
+
         // Logical IDs -> filenames
         let texture_paths: [&'static str; 5] = [
             "logo.png",

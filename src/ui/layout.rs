@@ -99,7 +99,7 @@ fn build_actor_recursive(
                             px_range: fm.px_range,
                         },
                         transform: t,
-                        blend: BlendMode::Alpha, // text uses standard alpha by default
+                        blend: BlendMode::Alpha,
                     });
                 }
             }
@@ -110,19 +110,26 @@ fn build_actor_recursive(
 
             if let Some(bg) = background {
                 match bg {
+                    // CHANGE: use SpriteSource::Solid (becomes "__white" tinted)
                     actors::Background::Color(c) => {
-                        push_rect(out, rect, m, renderer::ObjectType::SolidColor { color: *c }, BlendMode::Alpha);
+                        push_sprite(
+                            out, rect, m,
+                            actors::SpriteSource::Solid,
+                            *c,
+                            None, None, None,
+                            false, false,
+                            0.0, 0.0, 0.0, 0.0,
+                            BlendMode::Alpha,
+                        );
                     }
                     actors::Background::Texture(tex) => {
-                        // unified textured path: Sprite with default uv + white tint
-                        push_rect(
+                        push_sprite(
                             out, rect, m,
-                            renderer::ObjectType::Sprite {
-                                texture_id: *tex,
-                                tint:       [1.0, 1.0, 1.0, 1.0],
-                                uv_scale:   [1.0, 1.0],
-                                uv_offset:  [0.0, 0.0],
-                            },
+                            actors::SpriteSource::Texture(*tex),
+                            [1.0, 1.0, 1.0, 1.0],
+                            None, None, None,
+                            false, false,
+                            0.0, 0.0, 0.0, 0.0,
                             BlendMode::Alpha,
                         );
                     }
@@ -204,17 +211,6 @@ fn rect_transform(rect: SmRect, m: &Metrics) -> Matrix4<f32> {
 }
 
 #[inline(always)]
-fn push_rect(
-    out: &mut Vec<renderer::ScreenObject>,
-    rect: SmRect,
-    m: &Metrics,
-    object_type: renderer::ObjectType,
-    blend: BlendMode,
-) {
-    out.push(renderer::ScreenObject { object_type, transform: rect_transform(rect, m), blend });
-}
-
-#[inline(always)]
 fn calculate_uvs(
     texture: &'static str,
     uv_rect: Option<[f32; 4]>,
@@ -277,26 +273,24 @@ fn push_sprite(
     let cropped_rect = apply_crop_to_rect(rect, cl, cr, ct, cb);
     if cropped_rect.w <= 0.0 || cropped_rect.h <= 0.0 { return; }
 
-    let object_type = match source {
-        actors::SpriteSource::Solid => {
-            renderer::ObjectType::SolidColor { color: tint }
-        }
+    // Unify: solids are just sprites using the built-in "__white" texture
+    let (texture_id, uv_scale, uv_offset) = match source {
+        actors::SpriteSource::Solid => ("__white", [1.0, 1.0], [0.0, 0.0]),
         actors::SpriteSource::Texture(texture) => {
             let (uv_scale, uv_offset) = calculate_uvs(
-                texture, uv_rect, cell, grid, flip_x, flip_y,
-                cl, cr, ct, cb, // Pass clamped values
+                texture, uv_rect, cell, grid, flip_x, flip_y, cl, cr, ct, cb
             );
-            renderer::ObjectType::Sprite {
-                texture_id: texture,
-                tint,
-                uv_scale,
-                uv_offset,
-            }
+            (texture, uv_scale, uv_offset)
         }
     };
 
     out.push(renderer::ScreenObject {
-        object_type,
+        object_type: renderer::ObjectType::Sprite {
+            texture_id,
+            tint,
+            uv_scale,
+            uv_offset,
+        },
         transform: rect_transform(cropped_rect, m),
         blend,
     });

@@ -10,7 +10,6 @@ pub enum BlendMode {
 
 #[derive(Clone)]
 pub enum ObjectType {
-    SolidColor { color: [f32; 4] },
     Sprite {
         texture_id: &'static str,
         tint: [f32; 4],
