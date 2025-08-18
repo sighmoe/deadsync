@@ -41,7 +41,8 @@ pub struct State {
     uv_offset_location: UniformLocation,
     is_msdf_location: UniformLocation,
     px_range_location: UniformLocation,
-
+    instance_vbo: glow::Buffer,
+    instanced_location: UniformLocation,
 }
 
 pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
@@ -58,10 +59,11 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
         uv_offset_location,
         is_msdf_location,
         px_range_location,
+        instanced_location,
     ) = create_graphics_program(&gl)?;
 
-    // Create one shared VAO/VBO/IBO for a unit quad, to be reused for all objects.
-    let (shared_vao, _shared_vbo, _shared_ibo, index_count) = unsafe {
+    // Create shared static unit quad + index + the instance VBO (and wire attributes to it)
+    let (shared_vao, _shared_vbo, _shared_ibo, index_count, instance_vbo) = unsafe {
         const UNIT_QUAD_VERTICES: [[f32; 4]; 4] = [
             [-0.5, -0.5, 0.0, 1.0],
             [ 0.5, -0.5, 1.0, 1.0],
@@ -90,37 +92,58 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
             glow::STATIC_DRAW,
         );
 
+        // Per-vertex: a_pos (0), a_tex_coord (1)
         let stride = (4 * mem::size_of::<f32>()) as i32;
         gl.enable_vertex_attrib_array(0);
         gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
         gl.enable_vertex_attrib_array(1);
         gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, stride, (2 * mem::size_of::<f32>()) as i32);
 
+        // NEW: per-instance attributes buffer (locations 2..5)
+        let instance_vbo = gl.create_buffer()?;
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_vbo));
+        let i_stride = (8 * mem::size_of::<f32>()) as i32; // center(2), size(2), uv_scale(2), uv_offset(2)
+
+        // location=2: center
+        gl.enable_vertex_attrib_array(2);
+        gl.vertex_attrib_pointer_f32(2, 2, glow::FLOAT, false, i_stride, 0);
+        gl.vertex_attrib_divisor(2, 1);
+
+        // location=3: size
+        gl.enable_vertex_attrib_array(3);
+        gl.vertex_attrib_pointer_f32(3, 2, glow::FLOAT, false, i_stride, (2 * mem::size_of::<f32>()) as i32);
+        gl.vertex_attrib_divisor(3, 1);
+
+        // location=4: uv_scale
+        gl.enable_vertex_attrib_array(4);
+        gl.vertex_attrib_pointer_f32(4, 2, glow::FLOAT, false, i_stride, (4 * mem::size_of::<f32>()) as i32);
+        gl.vertex_attrib_divisor(4, 1);
+
+        // location=5: uv_offset
+        gl.enable_vertex_attrib_array(5);
+        gl.vertex_attrib_pointer_f32(5, 2, glow::FLOAT, false, i_stride, (6 * mem::size_of::<f32>()) as i32);
+        gl.vertex_attrib_divisor(5, 1);
+
         gl.bind_vertex_array(None);
 
-        (vao, vbo, ibo, QUAD_INDICES.len() as i32)
+        (vao, vbo, ibo, QUAD_INDICES.len() as i32, instance_vbo)
     };
 
     let initial_size = window.inner_size();
     let projection = ortho_for_window(initial_size.width, initial_size.height);
 
-    // Set a valid viewport immediately so the very first frame renders correctly.
     unsafe {
         gl.viewport(0, 0, initial_size.width as i32, initial_size.height as i32);
-    }
-
-    // Set constant program state once
-    unsafe {
         gl.use_program(Some(program));
         gl.active_texture(glow::TEXTURE0);
         gl.uniform_1_i32(Some(&texture_location), 0);
 
-        // default UVs and MSDF off
+        // defaults
         gl.uniform_2_f32(Some(&uv_scale_location), 1.0, 1.0);
         gl.uniform_2_f32(Some(&uv_offset_location), 0.0, 0.0);
         gl.uniform_1_i32(Some(&is_msdf_location), 0);
         gl.uniform_1_f32(Some(&px_range_location), 4.0);
-
+        gl.uniform_1_i32(Some(&instanced_location), 0); // non-instanced by default
         gl.use_program(None);
     }
 
@@ -143,6 +166,9 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
         uv_offset_location,
         is_msdf_location,
         px_range_location,
+        // Use the real buffer we created above
+        instance_vbo,
+        instanced_location,
     };
 
     info!("OpenGL backend initialized successfully.");
@@ -194,12 +220,22 @@ pub fn load_screen(_state: &mut State, _screen: &Screen) -> Result<(), Box<dyn E
     Ok(())
 }
 
-// src/core/gfx/backends/opengl.rs
 pub fn draw(
     state: &mut State,
     screen: &Screen,
     textures: &HashMap<&'static str, renderer::Texture>,
 ) -> Result<(), Box<dyn Error>> {
+    use cgmath::{Matrix4, Vector4};
+    #[inline(always)]
+    fn extract_center_size(t: Matrix4<f32>) -> ([f32;2], [f32;2]) {
+        let c = t * Vector4::new(0.0, 0.0, 0.0, 1.0);
+        let dx = t * Vector4::new(0.5, 0.0, 0.0, 0.0);
+        let dy = t * Vector4::new(0.0, 0.5, 0.0, 0.0);
+        let sx = 2.0 * (dx.x*dx.x + dx.y*dx.y).sqrt();
+        let sy = 2.0 * (dy.x*dy.x + dy.y*dy.y).sqrt();
+        ([c.x, c.y], [sx, sy])
+    }
+
     let (width, height) = state.window_size;
     if width == 0 || height == 0 {
         return Ok(());
@@ -211,9 +247,7 @@ pub fn draw(
         want: crate::core::gfx::types::BlendMode,
         last: &mut Option<crate::core::gfx::types::BlendMode>,
     ) {
-        if *last == Some(want) {
-            return;
-        }
+        if *last == Some(want) { return; }
         unsafe {
             gl.enable(glow::BLEND);
             match want {
@@ -237,21 +271,21 @@ pub fn draw(
     unsafe {
         let gl = &state.gl;
 
-        // Clear once
+        // Clear
         let c = screen.clear_color;
         gl.clear_color(c[0], c[1], c[2], c[3]);
         gl.clear(glow::COLOR_BUFFER_BIT);
 
-        // Bind program + shared VAO once
+        // Bind program + VAO
         gl.use_program(Some(state.program));
         gl.bind_vertex_array(Some(state.shared_vao));
 
-        // Fixed blend baseline
+        // Baseline blend
         gl.enable(glow::BLEND);
         gl.blend_equation(glow::FUNC_ADD);
         gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
 
-        // Texture unit 0 is active; sampler uniform set once
+        // Texture unit 0 active; sampler uniform set once
         gl.active_texture(glow::TEXTURE0);
         gl.uniform_1_i32(Some(&state.texture_location), 0);
 
@@ -263,36 +297,133 @@ pub fn draw(
         let mut last_uv_scale: Option<[f32; 2]> = None;
         let mut last_uv_offset: Option<[f32; 2]> = None;
         let mut last_px_range: Option<f32> = None;
+        let mut last_color: Option<[f32; 4]> = None;
+        let mut instanced_on = false;
 
-        for object in &screen.objects {
-            apply_blend(gl, object.blend, &mut last_blend);
+        // Helper: set MVP to projection (used by instanced path)
+        let proj: [[f32;4];4] = state.projection.into();
+        let proj_slice: &[f32] = bytemuck::cast_slice(&proj);
+
+        let mut i = 0;
+        while i < screen.objects.len() {
+            let obj = &screen.objects[i];
+
+            match &obj.object_type {
+                ObjectType::MsdfGlyph { texture_id, uv_scale: _, uv_offset: _, color, px_range } => {
+                    // Batch a run of glyphs with same atlas + color + px_range
+                    let mut run_instances: Vec<f32> = Vec::new(); // 8 floats per instance
+                    run_instances.reserve(8 * 64);
+
+                    // resolve GL texture once
+                    let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) else {
+                        i += 1; continue;
+                    };
+
+                    let mut j = i;
+                    while j < screen.objects.len() {
+                        match &screen.objects[j].object_type {
+                            ObjectType::MsdfGlyph { texture_id: tid2, uv_scale: s2, uv_offset: o2, color: c2, px_range: pr2 }
+                                if tid2 == texture_id && c2 == color && pr2 == px_range =>
+                            {
+                                // extract center/size from transform
+                                let (center, size) = extract_center_size(screen.objects[j].transform);
+                                // push 8 floats: center.xy, size.xy, uv_scale.xy, uv_offset.xy
+                                run_instances.extend_from_slice(&[
+                                    center[0], center[1],
+                                    size[0],   size[1],
+                                    s2[0],     s2[1],
+                                    o2[0],     o2[1],
+                                ]);
+                                j += 1;
+                            }
+                            _ => break,
+                        }
+                    }
+
+                    // Bind texture if needed
+                    if last_bound_tex != Some(gl_tex.0) {
+                        gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0));
+                        last_bound_tex = Some(gl_tex.0);
+                    }
+
+                    // Switch to MSDF textured path, instanced ON
+                    if last_use_texture != Some(true) {
+                        gl.uniform_1_i32(Some(&state.use_texture_location), 1);
+                        last_use_texture = Some(true);
+                    }
+                    if last_is_msdf != Some(true) {
+                        gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
+                        last_is_msdf = Some(true);
+                    }
+                    if !instanced_on {
+                        gl.uniform_1_i32(Some(&state.instanced_location), 1);
+                        instanced_on = true;
+                    }
+
+                    // Set run uniforms (MVP, color, px_range)
+                    gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, proj_slice);
+
+                    if last_px_range != Some(*px_range) {
+                        gl.uniform_1_f32(Some(&state.px_range_location), *px_range);
+                        last_px_range = Some(*px_range);
+                    }
+                    if last_color != Some(*color) {
+                        gl.uniform_4_f32_slice(Some(&state.color_location), color);
+                        last_color = Some(*color);
+                    }
+
+                    // Upload instance data and draw instanced
+                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(state.instance_vbo));
+                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytemuck::cast_slice(&run_instances), glow::STREAM_DRAW);
+
+                    apply_blend(gl, obj.blend, &mut last_blend);
+                    gl.draw_elements_instanced(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0, (run_instances.len() / 8) as i32);
+
+                    i = j;
+                    continue;
+                }
+
+                _ => {
+                    // Ensure instanced flag is OFF for non-instanced paths
+                    if instanced_on {
+                        gl.uniform_1_i32(Some(&state.instanced_location), 0);
+                        instanced_on = false;
+                    }
+                }
+            }
+
+            // Non-MSDF (or solid/sprite/texture) — original paths
+            apply_blend(gl, obj.blend, &mut last_blend);
 
             // MVP per object
-            let mvp_array: [[f32; 4]; 4] = (state.projection * object.transform).into();
+            let mvp_array: [[f32; 4]; 4] = (state.projection * obj.transform).into();
             let mvp_slice: &[f32] = bytemuck::cast_slice(&mvp_array);
             gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
 
             // Determine textured vs solid
-            let is_textured = !matches!(object.object_type, ObjectType::SolidColor { .. });
+            let is_textured = !matches!(obj.object_type, ObjectType::SolidColor { .. });
             if last_use_texture != Some(is_textured) {
                 gl.uniform_1_i32(Some(&state.use_texture_location), is_textured as i32);
                 last_use_texture = Some(is_textured);
             }
 
             if !is_textured {
-                if let ObjectType::SolidColor { color } = object.object_type {
-                    gl.uniform_4_f32_slice(Some(&state.color_location), &color);
+                if let ObjectType::SolidColor { color } = obj.object_type {
+                    if last_color != Some(color) {
+                        gl.uniform_4_f32_slice(Some(&state.color_location), &color);
+                        last_color = Some(color);
+                    }
                 }
-                // Ensure MSDF flag is off when drawing solids
                 if last_is_msdf != Some(false) {
                     gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
                     last_is_msdf = Some(false);
                 }
                 gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
+                i += 1;
                 continue;
             }
 
-            match &object.object_type {
+            match &obj.object_type {
                 ObjectType::Textured { texture_id } => {
                     if let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) {
                         if last_bound_tex != Some(gl_tex.0) {
@@ -303,7 +434,6 @@ pub fn draw(
                             gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
                             last_is_msdf = Some(false);
                         }
-                        // Default UVs (1,1)/(0,0) only if changed
                         if last_uv_scale != Some([1.0, 1.0]) {
                             gl.uniform_2_f32(Some(&state.uv_scale_location), 1.0, 1.0);
                             last_uv_scale = Some([1.0, 1.0]);
@@ -312,8 +442,10 @@ pub fn draw(
                             gl.uniform_2_f32(Some(&state.uv_offset_location), 0.0, 0.0);
                             last_uv_offset = Some([0.0, 0.0]);
                         }
-                        // Solid white tint for plain textures
-                        gl.uniform_4_f32_slice(Some(&state.color_location), &[1.0, 1.0, 1.0, 1.0]);
+                        if last_color != Some([1.0, 1.0, 1.0, 1.0]) {
+                            gl.uniform_4_f32_slice(Some(&state.color_location), &[1.0, 1.0, 1.0, 1.0]);
+                            last_color = Some([1.0, 1.0, 1.0, 1.0]);
+                        }
                         gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
                     }
                 }
@@ -335,38 +467,23 @@ pub fn draw(
                             gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
                             last_uv_offset = Some(*uv_offset);
                         }
-                        gl.uniform_4_f32_slice(Some(&state.color_location), tint);
+                        if last_color != Some(*tint) {
+                            gl.uniform_4_f32_slice(Some(&state.color_location), tint);
+                            last_color = Some(*tint);
+                        }
                         gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
                     }
                 }
-                ObjectType::MsdfGlyph { texture_id, color, uv_scale, uv_offset, px_range } => {
-                    if let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) {
-                        if last_bound_tex != Some(gl_tex.0) {
-                            gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0));
-                            last_bound_tex = Some(gl_tex.0);
-                        }
-                        if last_is_msdf != Some(true) {
-                            gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
-                            last_is_msdf = Some(true);
-                        }
-                        if last_uv_scale != Some(*uv_scale) {
-                            gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
-                            last_uv_scale = Some(*uv_scale);
-                        }
-                        if last_uv_offset != Some(*uv_offset) {
-                            gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
-                            last_uv_offset = Some(*uv_offset);
-                        }
-                        if last_px_range != Some(*px_range) {
-                            gl.uniform_1_f32(Some(&state.px_range_location), *px_range);
-                            last_px_range = Some(*px_range);
-                        }
-                        gl.uniform_4_f32_slice(Some(&state.color_location), color);
-                        gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
-                    }
-                }
-                ObjectType::SolidColor { .. } => { /* handled in the non-textured branch above */ }
+                ObjectType::MsdfGlyph { .. } => unreachable!("handled in batched path"),
+                ObjectType::SolidColor { .. } => { /* handled above */ }
             }
+
+            i += 1;
+        }
+
+        // Leave instanced path clean
+        if instanced_on {
+            gl.uniform_1_i32(Some(&state.instanced_location), 0);
         }
 
         gl.bind_vertex_array(None);
@@ -471,14 +588,15 @@ fn create_graphics_program(
 ) -> Result<
     (
         glow::Program,
-        UniformLocation,
-        UniformLocation,
-        UniformLocation,
-        UniformLocation,
-        UniformLocation,
-        UniformLocation,
-        UniformLocation,
-        UniformLocation,
+        UniformLocation, // mvp
+        UniformLocation, // color
+        UniformLocation, // use_texture
+        UniformLocation, // texture
+        UniformLocation, // uv_scale
+        UniformLocation, // uv_offset
+        UniformLocation, // is_msdf
+        UniformLocation, // px_range
+        UniformLocation, // instanced
     ),
     String,
 > {
@@ -527,6 +645,7 @@ fn create_graphics_program(
         let uv_offset_location  = get("u_uv_offset")?;
         let is_msdf_location    = get("u_is_msdf")?;
         let px_range_location   = get("u_px_range")?;
+        let instanced_location  = get("u_instanced")?;
 
         Ok((
             program,
@@ -538,6 +657,7 @@ fn create_graphics_program(
             uv_offset_location,
             is_msdf_location,
             px_range_location,
+            instanced_location,
         ))
     }
 }
