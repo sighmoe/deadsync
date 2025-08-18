@@ -1603,13 +1603,10 @@ fn recreate_swapchain_and_dependents(state: &mut State) -> Result<(), Box<dyn Er
     // Ensure GPU is quiescent but keep old swapchain alive for `oldSwapchain` reuse.
     unsafe { device.device_wait_idle()?; }
 
-    // Keep handles to old resources
-    let old_swapchain_loader = state.swapchain_resources.swapchain_loader.clone();
+    // Keep handle for oldSwapchain hint.
     let old_swapchain = state.swapchain_resources.swapchain;
-    let old_image_views = state.swapchain_resources.image_views.clone();
-    let old_framebuffers = state.swapchain_resources.framebuffers.clone();
 
-    // Create the new swapchain referencing the old one (driver can recycle)
+    // Create the new swapchain referencing the old one (driver can recycle).
     let new_resources = create_swapchain(
         &state.instance,
         device,
@@ -1620,23 +1617,25 @@ fn recreate_swapchain_and_dependents(state: &mut State) -> Result<(), Box<dyn Er
         Some(old_swapchain),
         state.vsync_enabled,
     )?;
-    state.swapchain_resources = new_resources;
 
-    // Build new framebuffers for the new images
+    // Swap in the new resources and take ownership of the old without cloning.
+    let old = std::mem::replace(&mut state.swapchain_resources, new_resources);
+
+    // Build framebuffers for the new images.
     recreate_framebuffers(device, &mut state.swapchain_resources, state.render_pass)?;
 
-    // Now it is safe to tear down the old image views/framebuffers and the old swapchain
+    // Now it is safe to tear down the old resources.
     unsafe {
-        for &fb in &old_framebuffers {
+        for fb in old.framebuffers {
             device.destroy_framebuffer(fb, None);
         }
-        for &view in &old_image_views {
+        for view in old.image_views {
             device.destroy_image_view(view, None);
         }
-        old_swapchain_loader.destroy_swapchain(old_swapchain, None);
+        old.swapchain_loader.destroy_swapchain(old.swapchain, None);
     }
 
-    // Reset tracking for images-in-flight to the new swapchain length
+    // Reset tracking for images-in-flight to the new swapchain length.
     state.images_in_flight = vec![vk::Fence::null(); state.swapchain_resources._images.len()];
     debug!("Swapchain recreated.");
     Ok(())
