@@ -475,53 +475,62 @@ fn create_graphics_program(
 ) -> Result<
     (
         glow::Program,
-        UniformLocation, // u_model_view_proj
-        UniformLocation, // u_color
-        UniformLocation, // u_use_texture
-        UniformLocation, // u_texture
-        UniformLocation, // u_uv_scale
-        UniformLocation, // u_uv_offset
-        UniformLocation, // u_is_msdf
-        UniformLocation, // u_px_range
+        UniformLocation,
+        UniformLocation,
+        UniformLocation,
+        UniformLocation,
+        UniformLocation,
+        UniformLocation,
+        UniformLocation,
+        UniformLocation,
     ),
     String,
 > {
     unsafe {
         let program = gl.create_program()?;
-        let shader_sources = [
-            (glow::VERTEX_SHADER,   include_str!("../shaders/opengl_shader.vert")),
-            (glow::FRAGMENT_SHADER, include_str!("../shaders/opengl_shader.frag")),
-        ];
 
-        let mut shaders = Vec::with_capacity(shader_sources.len());
-        for (shader_type, shader_source) in shader_sources.iter() {
-            let shader = gl.create_shader(*shader_type)?;
-            gl.shader_source(shader, shader_source);
-            gl.compile_shader(shader);
-            if !gl.get_shader_compile_status(shader) {
-                return Err(gl.get_shader_info_log(shader));
+        let compile = |ty, src: &str| -> Result<glow::Shader, String> {
+            let sh = gl.create_shader(ty)?;
+            gl.shader_source(sh, src);
+            gl.compile_shader(sh);
+            if !gl.get_shader_compile_status(sh) {
+                let log = gl.get_shader_info_log(sh);
+                gl.delete_shader(sh);
+                return Err(log);
             }
-            gl.attach_shader(program, shader);
-            shaders.push(shader);
-        }
+            Ok(sh)
+        };
 
+        let vert = compile(glow::VERTEX_SHADER, include_str!("../shaders/opengl_shader.vert"))?;
+        let frag = compile(glow::FRAGMENT_SHADER, include_str!("../shaders/opengl_shader.frag"))?;
+
+        gl.attach_shader(program, vert);
+        gl.attach_shader(program, frag);
         gl.link_program(program);
         if !gl.get_program_link_status(program) {
-            return Err(gl.get_program_info_log(program));
+            let log = gl.get_program_info_log(program);
+            gl.detach_shader(program, vert);
+            gl.detach_shader(program, frag);
+            gl.delete_shader(vert);
+            gl.delete_shader(frag);
+            gl.delete_program(program);
+            return Err(log);
         }
-        for shader in shaders {
-            gl.detach_shader(program, shader);
-            gl.delete_shader(shader);
-        }
+        gl.detach_shader(program, vert);
+        gl.detach_shader(program, frag);
+        gl.delete_shader(vert);
+        gl.delete_shader(frag);
 
-        let mvp_location        = gl.get_uniform_location(program, "u_model_view_proj").ok_or("u_model_view_proj")?;
-        let color_location      = gl.get_uniform_location(program, "u_color").ok_or("u_color")?;
-        let use_texture_location= gl.get_uniform_location(program, "u_use_texture").ok_or("u_use_texture")?;
-        let texture_location    = gl.get_uniform_location(program, "u_texture").ok_or("u_texture")?;
-        let uv_scale_location   = gl.get_uniform_location(program, "u_uv_scale").ok_or("u_uv_scale")?;
-        let uv_offset_location  = gl.get_uniform_location(program, "u_uv_offset").ok_or("u_uv_offset")?;
-        let is_msdf_location    = gl.get_uniform_location(program, "u_is_msdf").ok_or("u_is_msdf")?;
-        let px_range_location   = gl.get_uniform_location(program, "u_px_range").ok_or("u_px_range")?;
+        let get = |name: &str| gl.get_uniform_location(program, name).ok_or_else(|| name.to_string());
+
+        let mvp_location        = get("u_model_view_proj")?;
+        let color_location      = get("u_color")?;
+        let use_texture_location= get("u_use_texture")?;
+        let texture_location    = get("u_texture")?;
+        let uv_scale_location   = get("u_uv_scale")?;
+        let uv_offset_location  = get("u_uv_offset")?;
+        let is_msdf_location    = get("u_is_msdf")?;
+        let px_range_location   = get("u_px_range")?;
 
         Ok((
             program,
