@@ -90,7 +90,7 @@ pub fn draw(
     backend: &mut Backend,
     screen: &Screen,
     textures: &HashMap<&'static str, Texture>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<u32, Box<dyn Error>> {
     match backend {
         Backend::Vulkan(state) => vulkan::draw(state, screen, textures),
         Backend::OpenGL(state) => opengl::draw(state, screen, textures),

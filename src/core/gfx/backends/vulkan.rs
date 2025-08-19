@@ -646,7 +646,7 @@ pub fn draw(
     state: &mut State,
     screen: &Screen,
     textures: &HashMap<&'static str, renderer::Texture>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<u32, Box<dyn Error>> {
     use cgmath::{Matrix4, Vector4};
 
     #[inline(always)]
@@ -660,8 +660,10 @@ pub fn draw(
     }
 
     if state.window_size.width == 0 || state.window_size.height == 0 {
-        return Ok(());
+        return Ok(0);
     }
+
+    let mut vertices: u32 = 0;
 
     unsafe {
         let device_arc = state.device.as_ref().unwrap().clone();
@@ -680,7 +682,7 @@ pub fn draw(
                 Ok(pair) => pair,
                 Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
                     recreate_swapchain_and_dependents(state)?;
-                    return Ok(());
+                    return Ok(0);
                 }
                 Err(e) => return Err(e.into()),
             };
@@ -793,6 +795,8 @@ pub fn draw(
                                 bytes_of(&pc),
                             );
                             device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
+
+                            vertices += 4;
                         }
                         i += 1;
                     }
@@ -839,6 +843,8 @@ pub fn draw(
                             );
                             device.cmd_draw_indexed(cmd, 6, count as u32, 0, 0, 0);
 
+                            vertices += 4 * (count as u32);
+
                             // Rebind static vertex buffer for subsequent non-instanced draws
                             device.cmd_bind_vertex_buffers(cmd, 0, &[vb_buf], &[0]);
                         }
@@ -881,7 +887,7 @@ pub fn draw(
         state.current_frame = (state.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
-    Ok(())
+    Ok(vertices)
 }
 
 pub fn cleanup(state: &mut State) {

@@ -9,13 +9,12 @@ fn backend_label(b: BackendType) -> &'static str {
     }
 }
 
-/// Two-line status (FPS + backend), top-right corner, miso font, white text.
-pub fn build(backend: BackendType, fps: f32) -> Vec<Actor> {
+/// Three-line stats: FPS, VPF, Backend — top-right, miso, white.
+pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
     const PX: f32 = 12.0;
-    const LINE_GAP: f32 = 4.0;
-    const MARGIN_X: f32 = -16.0; // inset from right (TopRight anchor)
+    const GAP: f32 = 4.0;
+    const MARGIN_X: f32 = -16.0; // inset from right for TopRight anchor
     const MARGIN_Y: f32 = 16.0;
-
     let color = [1.0, 1.0, 1.0, 1.0];
 
     vec![
@@ -30,7 +29,16 @@ pub fn build(backend: BackendType, fps: f32) -> Vec<Actor> {
         },
         Actor::Text {
             anchor:  Anchor::TopRight,
-            offset:  [MARGIN_X, MARGIN_Y + PX + LINE_GAP],
+            offset:  [MARGIN_X, MARGIN_Y + PX + GAP],
+            px:      PX,
+            color,
+            font:    "miso",
+            content: format!("{} VPF", vpf),
+            align:   TextAlign::Right,
+        },
+        Actor::Text {
+            anchor:  Anchor::TopRight,
+            offset:  [MARGIN_X, MARGIN_Y + 2.0 * PX + 2.0 * GAP],
             px:      PX,
             color,
             font:    "miso",

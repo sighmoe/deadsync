@@ -216,8 +216,9 @@ pub fn draw(
     state: &mut State,
     screen: &Screen,
     textures: &HashMap<&'static str, renderer::Texture>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<u32, Box<dyn Error>> {
     use cgmath::{Matrix4, Vector4};
+
     #[inline(always)]
     fn extract_center_size(t: Matrix4<f32>) -> ([f32;2], [f32;2]) {
         let c = t * Vector4::new(0.0, 0.0, 0.0, 1.0);
@@ -230,7 +231,7 @@ pub fn draw(
 
     let (width, height) = state.window_size;
     if width == 0 || height == 0 {
-        return Ok(());
+        return Ok(0);
     }
 
     #[inline(always)]
@@ -259,6 +260,8 @@ pub fn draw(
         }
         *last = Some(want);
     }
+
+    let mut vertices: u32 = 0;
 
     unsafe {
         let gl = &state.gl;
@@ -357,7 +360,11 @@ pub fn draw(
                 gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytemuck::cast_slice(&run_instances), glow::STREAM_DRAW);
 
                 apply_blend(gl, obj.blend, &mut last_blend);
-                gl.draw_elements_instanced(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0, (run_instances.len() / 8) as i32);
+                let inst_count = (run_instances.len() / 8) as i32;
+                gl.draw_elements_instanced(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0, inst_count);
+
+                // 4 vertices per quad instance
+                vertices += 4 * (inst_count as u32);
 
                 i = j;
                 continue;
@@ -400,6 +407,8 @@ pub fn draw(
                             last_color = Some(*tint);
                         }
                         gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
+
+                        vertices += 4;
                     }
                 }
                 ObjectType::MsdfGlyph { .. } => unreachable!("handled above"),
@@ -416,7 +425,7 @@ pub fn draw(
     }
 
     state.gl_surface.swap_buffers(&state.gl_context)?;
-    Ok(())
+    Ok(vertices)
 }
 
 pub fn resize(state: &mut State, width: u32, height: u32) {

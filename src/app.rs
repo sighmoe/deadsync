@@ -18,7 +18,6 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     window::Window,
 };
-use winit::keyboard::{KeyCode, PhysicalKey};
 
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 800;
@@ -107,6 +106,7 @@ pub struct App {
     fonts: HashMap<&'static str, msdf::Font>,
     metrics: Metrics,
     last_fps: f32,
+    last_vpf: u32,
     show_overlay: bool,
 }
 
@@ -129,8 +129,9 @@ impl App {
             vsync_enabled,
             fullscreen_enabled,
             fonts: HashMap::new(),
+            show_overlay: false,
             last_fps: 0.0,
-            show_overlay: false, // <- add
+            last_vpf: 0,
         }
     }
 
@@ -272,8 +273,13 @@ impl App {
             CurrentScreen::Options  => options::get_actors(&self.options_state),
         };
 
+        // Append overlay last so it renders on top
         if self.show_overlay {
-            let overlay = crate::ui::components::stats_overlay::build(self.backend_type, self.last_fps);
+            let overlay = crate::ui::components::stats_overlay::build(
+                self.backend_type,
+                self.last_fps,
+                self.last_vpf,
+            );
             actors.extend(overlay);
         }
 
@@ -286,7 +292,7 @@ impl App {
         let elapsed = now.duration_since(self.last_title_update);
         if elapsed.as_secs_f32() >= 1.0 {
             let fps = self.frame_count as f32 / elapsed.as_secs_f32();
-            self.last_fps = fps; // <- add
+            self.last_fps = fps; // cache for overlay
 
             let screen_name = format!("{:?}", self.current_screen);
             window.set_title(&format!(
@@ -407,18 +413,16 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
-                // Update input booleans used by gameplay movement
                 input::handle_keyboard_input(&key_event, &mut self.input_state);
 
-                // F3 toggle (on press only)
+                // F3 toggles overlay on key press
                 if key_event.state == winit::event::ElementState::Pressed {
-                    if let PhysicalKey::Code(KeyCode::F3) = key_event.physical_key {
+                    if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F3) = key_event.physical_key {
                         self.show_overlay = !self.show_overlay;
                         info!("Overlay {}", if self.show_overlay { "ON" } else { "OFF" });
                     }
                 }
 
-                // Let the active screen handle its own actions
                 let action = match self.current_screen {
                     CurrentScreen::Menu     => menu::handle_key_press(&mut self.menu_state, &key_event),
                     CurrentScreen::Gameplay => gameplay::handle_key_press(&mut self.gameplay_state, &key_event),
@@ -445,15 +449,18 @@ impl ApplicationHandler for App {
                 self.update_fps_title(&window, now);
 
                 if let Some(backend) = &mut self.backend {
-                    if let Err(e) = renderer::draw(backend, &screen, &self.texture_manager) {
-                        error!("Failed to draw frame: {}", e);
-                        event_loop.exit();
+                    match renderer::draw(backend, &screen, &self.texture_manager) {
+                        Ok(vpf) => self.last_vpf = vpf, // capture VPF for overlay
+                        Err(e) => {
+                            error!("Failed to draw frame: {}", e);
+                            event_loop.exit();
+                        }
                     }
                 }
             }
             _ => {}
         }
-    }
+}
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {
