@@ -4,6 +4,7 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, Anchor, TextAlign};
 use crate::ui::color;
 use crate::ui::components::logo::{self, LogoParams};
+use crate::ui::components::menu_list::{self, MenuParams}; // + add
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -97,21 +98,19 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
     let normal   = color::rgba_hex(NORMAL_COLOR_HEX);
     let base_y   = lp.top_margin + lp.target_h + MENU_BELOW_LOGO;
 
-    for (i, label) in MENU_OPTIONS.iter().enumerate() {
-        let sel   = i == state.selected_index;
-        let px    = if sel { MENU_SELECTED_PX } else { MENU_NORMAL_PX };
-        let color = if sel { selected } else { normal };
-        let y_tl  = base_y + (i as f32) * MENU_ROW_SPACING;
+    let params = MenuParams {
+        options: &MENU_OPTIONS,
+        selected_index: state.selected_index,
+        start_center_y: base_y + 0.5 * MENU_NORMAL_PX,
+        row_spacing:    MENU_ROW_SPACING,
+        selected_px:    MENU_SELECTED_PX,
+        normal_px:      MENU_NORMAL_PX,
+        selected_color: selected,
+        normal_color:   normal,
+        font:           "wendy",
+    };
+    actors.extend(menu_list::build_vertical_menu(params));
 
-        actors.push(Actor::Text {
-            anchor:  Anchor::TopCenter,
-            offset:  [0.0, y_tl],
-            align:   TextAlign::Center,
-            px,
-            color,
-            font:    "wendy",
-            content: (*label).to_string(),
-        });
-    }
+    // <-- return the vector
     actors
 }
