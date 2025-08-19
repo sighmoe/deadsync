@@ -13,10 +13,14 @@ const NORMAL_COLOR_HEX: &str = "#888888";
 const OPTION_COUNT: usize = 3;
 const MENU_OPTIONS: [&str; OPTION_COUNT] = ["GAMEPLAY", "OPTIONS", "EXIT"];
 
-const MENU_SELECTED_PX: f32 = 50.0;
-const MENU_NORMAL_PX: f32 = 42.0;
+const MENU_SELECTED_PX: f32 = 28.0;
+const MENU_NORMAL_PX: f32 = 23.0;
 const MENU_BELOW_LOGO: f32 = 28.0;
-const MENU_ROW_SPACING: f32 = 36.0;
+const MENU_ROW_SPACING: f32 = 23.0;
+
+const INFO_PX: f32 = 15.0;
+const INFO_GAP: f32 = 5.0;
+const INFO_MARGIN_ABOVE: f32 = 20.0;
 
 pub struct State {
     pub selected_index: usize,
@@ -64,7 +68,30 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
     let screen_width = m.right - m.left;
     let lp = LogoParams::default();
     let mut actors = logo::build_logo_default(screen_width);
-    actors.reserve(OPTION_COUNT);
+    actors.reserve(OPTION_COUNT + 2);
+
+    let info2_y_tl = lp.top_margin - INFO_MARGIN_ABOVE - INFO_PX;
+    let info1_y_tl = info2_y_tl - INFO_PX - INFO_GAP;
+    let white = [1.0, 1.0, 1.0, 1.0];
+
+    actors.push(Actor::Text {
+        anchor:  Anchor::TopCenter,
+        offset:  [0.0, info1_y_tl],
+        align:   TextAlign::Center,
+        px:      INFO_PX,
+        color:   white,
+        font:    "miso",
+        content: "DeadSync 0.2.0".to_string(),
+    });
+    actors.push(Actor::Text {
+        anchor:  Anchor::TopCenter,
+        offset:  [0.0, info2_y_tl],
+        align:   TextAlign::Center,
+        px:      INFO_PX,
+        color:   white,
+        font:    "miso",
+        content: "X songs in Y groups".to_string(),
+    });
 
     let selected = color::rgba_hex(SELECTED_COLOR_HEX);
     let normal   = color::rgba_hex(NORMAL_COLOR_HEX);
