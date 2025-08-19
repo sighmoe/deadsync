@@ -13,8 +13,8 @@ fn backend_label(b: BackendType) -> &'static str {
 pub fn build(backend: BackendType, fps: f32) -> Vec<Actor> {
     const PX: f32 = 12.0;
     const LINE_GAP: f32 = 4.0;
-    const MARGIN_X: f32 = -12.0; // inset from right (TopRight anchor)
-    const MARGIN_Y: f32 = 12.0;
+    const MARGIN_X: f32 = -16.0; // inset from right (TopRight anchor)
+    const MARGIN_Y: f32 = 16.0;
 
     let color = [1.0, 1.0, 1.0, 1.0];
 
