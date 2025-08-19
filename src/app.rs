@@ -18,6 +18,7 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     window::Window,
 };
+use winit::keyboard::{KeyCode, PhysicalKey};
 
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 800;
@@ -105,6 +106,8 @@ pub struct App {
     fullscreen_enabled: bool,
     fonts: HashMap<&'static str, msdf::Font>,
     metrics: Metrics,
+    last_fps: f32,
+    show_overlay: bool,
 }
 
 impl App {
@@ -124,8 +127,10 @@ impl App {
             last_frame_time: Instant::now(),
             metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
             vsync_enabled,
-            fullscreen_enabled, // <--- NEW
+            fullscreen_enabled,
             fonts: HashMap::new(),
+            last_fps: 0.0,
+            show_overlay: false, // <- add
         }
     }
 
@@ -261,11 +266,16 @@ impl App {
     fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
 
-        let actors = match self.current_screen {
-            CurrentScreen::Menu => menu::get_actors(&self.menu_state, &self.metrics),
+        let mut actors = match self.current_screen {
+            CurrentScreen::Menu     => menu::get_actors(&self.menu_state, &self.metrics),
             CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state),
-            CurrentScreen::Options => options::get_actors(&self.options_state),
+            CurrentScreen::Options  => options::get_actors(&self.options_state),
         };
+
+        if self.show_overlay {
+            let overlay = crate::ui::components::stats_overlay::build(self.backend_type, self.last_fps);
+            actors.extend(overlay);
+        }
 
         (actors, CLEAR)
     }
@@ -276,6 +286,8 @@ impl App {
         let elapsed = now.duration_since(self.last_title_update);
         if elapsed.as_secs_f32() >= 1.0 {
             let fps = self.frame_count as f32 / elapsed.as_secs_f32();
+            self.last_fps = fps; // <- add
+
             let screen_name = format!("{:?}", self.current_screen);
             window.set_title(&format!(
                 "Simple Renderer - {:?} | {} | {:.2} FPS",
@@ -395,8 +407,18 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
+                // Update input booleans used by gameplay movement
                 input::handle_keyboard_input(&key_event, &mut self.input_state);
 
+                // F3 toggle (on press only)
+                if key_event.state == winit::event::ElementState::Pressed {
+                    if let PhysicalKey::Code(KeyCode::F3) = key_event.physical_key {
+                        self.show_overlay = !self.show_overlay;
+                        info!("Overlay {}", if self.show_overlay { "ON" } else { "OFF" });
+                    }
+                }
+
+                // Let the active screen handle its own actions
                 let action = match self.current_screen {
                     CurrentScreen::Menu     => menu::handle_key_press(&mut self.menu_state, &key_event),
                     CurrentScreen::Gameplay => gameplay::handle_key_press(&mut self.gameplay_state, &key_event),
