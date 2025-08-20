@@ -1,7 +1,7 @@
 use crate::core::input::InputState;
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::actors::{Actor, Anchor, SizeSpec};
-use crate::quad;
+use crate::ui::actors::{Actor};
+use crate::act;
 use cgmath::{Vector2};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -48,13 +48,12 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
 }
 
 pub fn get_actors(state: &State) -> Vec<Actor> {
-    // Player as a solid-color quad (now a Sprite with Solid source)
-    let player = quad! {
-        anchor: Anchor::Center,
-        offset: [state.player_position.x, state.player_position.y],
-        size:   [SizeSpec::Px(100.0), SizeSpec::Px(100.0)],
-        color:  [0.0, 0.0, 1.0, 1.0], // Blue
-    };
+    let player = act!(quad:
+        align(0.5, 0.5):
+        xy(state.player_position.x, state.player_position.y):
+        zoomto(100.0, 100.0):
+        diffuse(0.0, 0.0, 1.0, 1.0)
+    );
 
     vec![player]
 }

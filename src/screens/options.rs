@@ -2,8 +2,8 @@
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, Anchor, SizeSpec, TextAlign};
 use crate::ui::{color};
-use crate::sprite;
 use crate::quad;
+use crate::act;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use rand::prelude::*;
@@ -67,14 +67,13 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(NUM_HEARTS + 6);
 
     actors.extend(state.hearts.iter().map(|h| {
-        crate::sprite! {
-            anchor: Anchor::Center,
-            offset: h.pos,
-            size:   [SizeSpec::Px(HEART_SIZE), SizeSpec::Px(HEART_SIZE)],
-            texture:"hearts_4x4.png",
-            tint:   h.color,
-            cell:   h.cell,
-        }
+        act!(sprite("hearts_4x4.png"):
+            align(0.5, 0.5):
+            xy(h.pos[0], h.pos[1]):
+            zoomto(HEART_SIZE, HEART_SIZE):
+            cell(h.cell.0, h.cell.1):
+            diffuse(h.color[0], h.color[1], h.color[2], h.color[3])
+        )
     }));
 
     actors.push(crate::ui::components::top_bar::build("OPTIONS"));

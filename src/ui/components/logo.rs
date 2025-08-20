@@ -1,6 +1,6 @@
 // src/ui/components/logo.rs
-use crate::ui::actors::{Actor, Anchor, SizeSpec};
-use crate::sprite;
+use crate::ui::actors::{Actor};
+use crate::act;
 
 /// Native image sizes (only used for aspect).
 const LOGO_NATIVE_W: f32 = 752.0;
@@ -43,18 +43,16 @@ pub fn build_logo(params: LogoParams, screen_width: f32) -> Vec<Actor> {
     let dance_y_tl = logo_y_tl + 0.5 * (logo_h - dance_h) - params.banner_y_offset_inside;
 
     vec![
-        sprite! {
-            anchor: Anchor::TopLeft,
-            offset: [dance_x_tl, dance_y_tl],
-            size:   [SizeSpec::Px(dance_w), SizeSpec::Px(dance_h)],
-            texture:"dance.png",
-        },
-        sprite! {
-            anchor: Anchor::TopLeft,
-            offset: [logo_x_tl,  logo_y_tl ],
-            size:   [SizeSpec::Px(logo_w), SizeSpec::Px(logo_h)],
-            texture:"logo.png",
-        },
+        act!(sprite("dance.png"):
+            align(0.0, 0.0): // TopLeft in our TL space
+            xy(dance_x_tl, dance_y_tl):
+            zoomto(dance_w, dance_h)
+        ),
+        act!(sprite("logo.png"):
+            align(0.0, 0.0):
+            xy(logo_x_tl, logo_y_tl):
+            zoomto(logo_w, logo_h)
+        ),
     ]
 }
 
