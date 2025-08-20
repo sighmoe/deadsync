@@ -22,7 +22,6 @@ pub fn build(title: &'static str) -> Actor {
             )
         ],
         background: Some(Background::Color(BG_COLOR)),
-        mul_color: [1.0, 1.0, 1.0, 1.0],
         z: 0i16,
     }
 

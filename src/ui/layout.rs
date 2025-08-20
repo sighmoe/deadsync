@@ -27,8 +27,7 @@ pub fn build_screen(
         h: m.top - m.bottom,
     };
 
-    // Start with identity group tint and z=0 at the root.
-    let parent_mul = [1.0, 1.0, 1.0, 1.0];
+    // Start at z=0 at the root (no parent tint inheritance in SM semantics).
     let parent_z: i16 = 0;
 
     for actor in actors {
@@ -37,7 +36,6 @@ pub fn build_screen(
             root_rect,
             m,
             fonts,
-            parent_mul,
             parent_z,
             &mut order_counter,
             &mut objects,
@@ -87,7 +85,6 @@ fn build_actor_recursive(
     parent: SmRect,
     m: &Metrics,
     fonts: &std::collections::HashMap<&'static str, msdf::Font>,
-    mul_color: [f32; 4],
     base_z: i16,
     order_counter: &mut u32,
     out: &mut Vec<renderer::ScreenObject>,
@@ -119,22 +116,14 @@ fn build_actor_recursive(
 
             let rect = place_rect(parent, *anchor, *offset, *size);
 
-            // Inherit parent group color (mul diffuse).
-            let eff_tint = [
-                tint[0] * mul_color[0],
-                tint[1] * mul_color[1],
-                tint[2] * mul_color[2],
-                tint[3] * mul_color[3],
-            ];
-
-            // Push via your existing helper, then annotate z/order on the newly added objects.
+            // Push as-is (no parent tint multiplication in SM semantics).
             let before = out.len();
             push_sprite(
                 out,
                 rect,
                 m,
                 *source,
-                eff_tint,
+                *tint,
                 *uv_rect,
                 *cell,
                 *grid,
@@ -173,14 +162,6 @@ fn build_actor_recursive(
                 let origin =
                     place_text_baseline(parent, *anchor, *offset, *align, measured, fm, content, *px, m);
 
-                // Inherit parent group color.
-                let col = [
-                    color[0] * mul_color[0],
-                    color[1] * mul_color[1],
-                    color[2] * mul_color[2],
-                    color[3] * mul_color[3],
-                ];
-
                 let layer = base_z.saturating_add(*z);
 
                 for g in msdf::layout_line(fm, content, *px, origin) {
@@ -195,7 +176,7 @@ fn build_actor_recursive(
                             texture_id: fm.atlas_tex_key,
                             uv_scale: g.uv_scale,
                             uv_offset: g.uv_offset,
-                            color: col,
+                            color: *color,       // no parent tint multiply
                             px_range: fm.px_range,
                         },
                         transform: t,
@@ -218,7 +199,6 @@ fn build_actor_recursive(
             size,
             children,
             background,
-            mul_color: frame_mul,
             z,
         } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
@@ -226,21 +206,15 @@ fn build_actor_recursive(
 
             if let Some(bg) = background {
                 match bg {
-                    // Solid color background: draw solid sprite tinted by (bg * parent mul).
+                    // Solid color background behind children.
                     actors::Background::Color(c) => {
-                        let eff = [
-                            c[0] * mul_color[0],
-                            c[1] * mul_color[1],
-                            c[2] * mul_color[2],
-                            c[3] * mul_color[3],
-                        ];
                         let before = out.len();
                         push_sprite(
                             out,
                             rect,
                             m,
                             actors::SpriteSource::Solid,
-                            eff,
+                            *c, // use specified bg color directly
                             None,
                             None,
                             None,
@@ -261,16 +235,15 @@ fn build_actor_recursive(
                             };
                         }
                     }
-                    // Textured background: treat the texture as white and tint by parent mul.
+                    // Textured background: draw texture “as-is”.
                     actors::Background::Texture(tex) => {
-                        let eff = mul_color;
                         let before = out.len();
                         push_sprite(
                             out,
                             rect,
                             m,
                             actors::SpriteSource::Texture(*tex),
-                            eff,
+                            [1.0, 1.0, 1.0, 1.0], // no tint
                             None,
                             None,
                             None,
@@ -294,17 +267,10 @@ fn build_actor_recursive(
                 }
             }
 
-            // Recurse with updated group tint and base z.
-            let next_mul = [
-                mul_color[0] * frame_mul[0],
-                mul_color[1] * frame_mul[1],
-                mul_color[2] * frame_mul[2],
-                mul_color[3] * frame_mul[3],
-            ];
+            // Recurse into children with the same color semantics (no inheritance), but higher base z.
             let next_z = layer;
-
             for child in children {
-                build_actor_recursive(child, rect, m, fonts, next_mul, next_z, order_counter, out);
+                build_actor_recursive(child, rect, m, fonts, next_z, order_counter, out);
             }
         }
     }

@@ -88,9 +88,6 @@ pub enum Actor {
         size: [SizeSpec; 2],
         children: Vec<Actor>,
         background: Option<Background>,
-        /// Multiplies all children’s RGBA (group diffuse). Default [1,1,1,1].
-        mul_color: [f32; 4],
-        /// Base layer for this frame (applies to its background and children).
         z: i16,
     },
 }
