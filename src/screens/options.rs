@@ -1,8 +1,7 @@
 // src/screens/options.rs
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::actors::{Actor, Anchor, SizeSpec, TextAlign};
+use crate::ui::actors::{Actor, Anchor, TextAlign};
 use crate::ui::{color};
-use crate::quad;
 use crate::act;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -79,18 +78,18 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     actors.push(crate::ui::components::top_bar::build("OPTIONS"));
 
     let corners = [
-        (Anchor::TopLeft,     [ 12.0,  12.0], [1.0, 0.9, 0.2, 1.0]),
-        (Anchor::TopRight,    [-12.0,  12.0], [0.2, 1.0, 0.6, 1.0]),
-        (Anchor::BottomLeft,  [ 12.0, -12.0], [0.6, 0.6, 1.0, 1.0]),
-        (Anchor::BottomRight, [-12.0, -12.0], [1.0, 0.6, 0.2, 1.0]),
+        ((0.0_f32, 0.0_f32), [ 12.0,  12.0], [1.0, 0.9, 0.2, 1.0]), // TopLeft
+        ((1.0_f32, 0.0_f32), [-12.0,  12.0], [0.2, 1.0, 0.6, 1.0]), // TopRight
+        ((0.0_f32, 1.0_f32), [ 12.0, -12.0], [0.6, 0.6, 1.0, 1.0]), // BottomLeft
+        ((1.0_f32, 1.0_f32), [-12.0, -12.0], [1.0, 0.6, 0.2, 1.0]), // BottomRight
     ];
-    actors.extend(corners.into_iter().map(|(a, off, col)| {
-        crate::quad! {
-            anchor: a,
-            offset: off,
-            size:   [SizeSpec::Px(10.0), SizeSpec::Px(10.0)],
-            color:  col
-        }
+    actors.extend(corners.into_iter().map(|((hx, vy), off, col)| {
+        act!(quad:
+            align(hx, vy):
+            xy(off[0], off[1]):
+            zoomto(10.0, 10.0):
+            diffuse(col[0], col[1], col[2], col[3])
+        )
     }));
 
     actors.push(Actor::Text {
