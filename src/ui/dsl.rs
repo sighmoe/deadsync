@@ -1,6 +1,6 @@
 // src/ui/dsl.rs
 use crate::core::gfx::types::BlendMode;
-use crate::ui::actors::{Actor, Anchor, SizeSpec, SpriteSource};
+use crate::ui::actors::{Actor, Anchor, SizeSpec, SpriteSource, TextAlign};
 
 #[inline(always)]
 fn snap_align(v: f32) -> f32 {
@@ -84,6 +84,27 @@ pub fn finish_quad(
     }
 }
 
+#[inline(always)]
+pub fn finish_text(
+    text: String,
+    x: f32, y: f32,
+    hx: f32, vy: f32,
+    px: f32,
+    color: [f32; 4],
+    font: &'static str,
+    align: TextAlign,
+) -> Actor {
+    Actor::Text {
+        anchor: anchor_from_factors(hx, vy),
+        offset: [x, y],
+        px,
+        color,
+        font,
+        content: text,
+        align,
+    }
+}
+
 /// Public macro: `act!(sprite("tex.png"): align(...): xy(...): zoomto(...): diffuse(...))`
 ///                `act!(quad: align(...): xy(...): zoomto(...): diffuse(...))`
 #[macro_export]
@@ -96,14 +117,14 @@ macro_rules! act {
         let mut cell: Option<(u32,u32)> = None;
         let grid: Option<(u32,u32)> = None;
         let uv_rect: Option<[f32;4]> = None;
-        let visible: bool = true;
-        let flip_x: bool = false;
-        let flip_y: bool = false;
-        let cropleft: f32 = 0.0;
-        let cropright: f32 = 0.0;
-        let croptop: f32 = 0.0;
-        let cropbottom: f32 = 0.0;
-        let blend: BlendMode = BlendMode::Alpha;
+        let mut visible: bool = true;
+        let mut flip_x: bool = false;
+        let mut flip_y: bool = false;
+        let mut cropleft: f32 = 0.0;
+        let mut cropright: f32 = 0.0;
+        let mut croptop: f32 = 0.0;
+        let mut cropbottom: f32 = 0.0;
+        let mut blend: BlendMode = BlendMode::Alpha;
 
         $crate::__ui_act_apply!( ($($tail)+)
             x y w h hx vy tint cell grid uv_rect visible flip_x flip_y
@@ -120,14 +141,14 @@ macro_rules! act {
         let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
         let (mut hx, mut vy) = (0.5f32, 0.5f32);
         let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
-        let visible: bool = true;
-        let flip_x: bool = false;
-        let flip_y: bool = false;
-        let cropleft: f32 = 0.0;
-        let cropright: f32 = 0.0;
-        let croptop: f32 = 0.0;
-        let cropbottom: f32 = 0.0;
-        let blend: BlendMode = BlendMode::Alpha;
+        let mut visible: bool = true;
+        let mut flip_x: bool = false;
+        let mut flip_y: bool = false;
+        let mut cropleft: f32 = 0.0;
+        let mut cropright: f32 = 0.0;
+        let mut croptop: f32 = 0.0;
+        let mut cropbottom: f32 = 0.0;
+        let mut blend: BlendMode = BlendMode::Alpha;
 
         // For quads we ignore cell/grid/uv_rect, but the parser still expects placeholders.
         $crate::__ui_act_apply!( ($($tail)+)
@@ -137,6 +158,29 @@ macro_rules! act {
 
         $crate::ui::dsl::finish_quad(
             x,y,w,h,hx,vy,tint,visible,flip_x,flip_y,cropleft,cropright,croptop,cropbottom,blend
+        )
+    }};
+
+    (text: $($tail:tt)+) => {{
+        use $crate::core::gfx::types::BlendMode;
+        let (mut x, mut y) = (0.0f32, 0.0f32);
+        let (mut hx, mut vy) = (0.5f32, 0.5f32);
+        let mut px: f32 = 16.0;
+        let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
+        let mut font: &'static str = "miso";
+        let mut content: String = String::new();
+        let mut talign = $crate::ui::actors::TextAlign::Left;
+
+        $crate::__ui_act_apply_text!( ($($tail)+)
+            x y hx vy px tint font content talign
+        );
+
+        $crate::ui::dsl::finish_text(
+            content,
+            x, y,
+            hx, vy,
+            px,
+            tint, font, talign
         )
     }};
 }
@@ -228,17 +272,23 @@ macro_rules! __ui_act_apply_one {
         $visible = ($v) as bool;
     }};
     (blend (alpha)
-        $($rest:tt)*
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $blend = $crate::core::gfx::types::BlendMode::Alpha;
     }};
     (blend (add)
-        $($rest:tt)*
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $blend = $crate::core::gfx::types::BlendMode::Add;
     }};
     (blend (multiply)
-        $($rest:tt)*
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $blend = $crate::core::gfx::types::BlendMode::Multiply;
     }};
@@ -247,5 +297,96 @@ macro_rules! __ui_act_apply_one {
         $($rest:tt)*
     ) => {
         compile_error!(concat!("act!: unknown command: ", stringify!($other)));
+    };
+}
+
+/// Internal muncher for `act!(text: …)` commands
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_act_apply_text {
+    ( () $($vars:ident)+ ) => { () };
+    ( ($cmd:ident $args:tt : $($rest:tt)* )
+      $x:ident $y:ident $hx:ident $vy:ident $px:ident
+      $tint:ident $font:ident $content:ident $talign:ident
+    ) => {{
+        $crate::__ui_act_apply_one_text!{
+            $cmd $args
+            $x $y $hx $vy $px $tint $font $content $talign
+        }
+        $crate::__ui_act_apply_text!( ($($rest)*) $x $y $hx $vy $px $tint $font $content $talign );
+    }};
+    ( ($cmd:ident $args:tt )
+      $x:ident $y:ident $hx:ident $vy:ident $px:ident
+      $tint:ident $font:ident $content:ident $talign:ident
+    ) => {{
+        $crate::__ui_act_apply_one_text!{
+            $cmd $args
+            $x $y $hx $vy $px $tint $font $content $talign
+        }
+        $crate::__ui_act_apply_text!( () $x $y $hx $vy $px $tint $font $content $talign );
+    }};
+}
+
+/// Single-command handlers for `act!(text: …)`
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_act_apply_one_text {
+    (xy ($xv:expr, $yv:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident
+    ) => {{
+        $x = ($xv) as f32; $y = ($yv) as f32;
+    }};
+    (align ($hv:expr, $vv:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident
+    ) => {{
+        $hx = ($hv) as f32; $vy = ($vv) as f32;
+    }};
+    (px ($s:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident
+    ) => {{
+        $px = ($s) as f32;
+    }};
+    (diffuse ($r:expr, $g:expr, $b:expr, $a:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident
+    ) => {{
+        $tint = [($r) as f32, ($g) as f32, ($b) as f32, ($a) as f32];
+    }};
+    (font ($name:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident
+    ) => {{
+        $font = $name;
+    }};
+    (text ($txt:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident
+    ) => {{
+        $content = ($txt).into();
+    }};
+    (talign ($dir:ident)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $align_mode:ident
+    ) => {{
+        $align_mode = $crate::__ui_textalign_from_ident!($dir);
+    }};
+    // Friendly error for unknown commands
+    ($other:ident $($anything:tt)* ) => {
+        compile_error!(concat!("act!(text): unknown command: ", stringify!($other)));
+    };
+}
+
+/// tiny helper so `talign(center)` etc. match as an ident and map to the enum
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __ui_textalign_from_ident {
+    (left)   => { $crate::ui::actors::TextAlign::Left };
+    (center) => { $crate::ui::actors::TextAlign::Center };
+    (right)  => { $crate::ui::actors::TextAlign::Right };
+    ($other:ident) => {
+        compile_error!(concat!("act!(text): talign expects left|center|right, got: ", stringify!($other)));
     };
 }

@@ -1,6 +1,6 @@
 // src/screens/options.rs
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::actors::{Actor, Anchor, TextAlign};
+use crate::ui::actors::Actor;
 use crate::ui::{color};
 use crate::act;
 use winit::event::{ElementState, KeyEvent};
@@ -92,15 +92,15 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         )
     }));
 
-    actors.push(Actor::Text {
-        anchor:  Anchor::BottomCenter,
-        offset:  [0.0, -100.0],
-        align:   TextAlign::Center,
-        px:      60.0,
-        font:    "miso",
-        color:   [0.8, 0.9, 0.7, 1.0],
-        content: "This is miso font!".to_string(),
-    });
+    actors.push(act!(text:
+        align(0.5, 1.0):        // BottomCenter
+        xy(0.0, -100.0):
+        px(60.0):
+        font("miso"):
+        diffuse(0.8, 0.9, 0.7, 1.0):
+        text("This is miso font!"):
+        talign(center)
+    ));
 
     actors
 }

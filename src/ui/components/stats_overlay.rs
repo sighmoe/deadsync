@@ -1,5 +1,6 @@
 use crate::core::gfx::BackendType;
-use crate::ui::actors::{Actor, Anchor, TextAlign};
+use crate::ui::actors::Actor;
+use crate::act;
 
 #[inline(always)]
 fn backend_label(b: BackendType) -> &'static str {
@@ -18,32 +19,32 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
     let color = [1.0, 1.0, 1.0, 1.0];
 
     vec![
-        Actor::Text {
-            anchor:  Anchor::TopRight,
-            offset:  [MARGIN_X, MARGIN_Y],
-            px:      PX,
-            color,
-            font:    "miso",
-            content: format!("{:.0} FPS", fps.max(0.0)),
-            align:   TextAlign::Right,
-        },
-        Actor::Text {
-            anchor:  Anchor::TopRight,
-            offset:  [MARGIN_X, MARGIN_Y + PX + GAP],
-            px:      PX,
-            color,
-            font:    "miso",
-            content: format!("{} VPF", vpf),
-            align:   TextAlign::Right,
-        },
-        Actor::Text {
-            anchor:  Anchor::TopRight,
-            offset:  [MARGIN_X, MARGIN_Y + 2.0 * PX + 2.0 * GAP],
-            px:      PX,
-            color,
-            font:    "miso",
-            content: backend_label(backend).to_string(),
-            align:   TextAlign::Right,
-        },
+        act!(text:
+            align(1.0, 0.0):
+            xy(MARGIN_X, MARGIN_Y):
+            px(PX):
+            diffuse(color[0], color[1], color[2], color[3]):
+            font("miso"):
+            text(format!("{:.0} FPS", fps.max(0.0))):
+            talign(right)
+        ),
+        act!(text:
+            align(1.0, 0.0):
+            xy(MARGIN_X, MARGIN_Y + PX + GAP):
+            px(PX):
+            diffuse(color[0], color[1], color[2], color[3]):
+            font("miso"):
+            text(format!("{} VPF", vpf)):
+            talign(right)
+        ),
+        act!(text:
+            align(1.0, 0.0):
+            xy(MARGIN_X, MARGIN_Y + 2.0 * PX + 2.0 * GAP):
+            px(PX):
+            diffuse(color[0], color[1], color[2], color[3]):
+            font("miso"):
+            text(backend_label(backend)):
+            talign(right)
+        ),
     ]
 }

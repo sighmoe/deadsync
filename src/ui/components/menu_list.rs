@@ -1,5 +1,5 @@
-// src/ui/components/menu_list.rs
-use crate::ui::actors::{Actor, Anchor, TextAlign};
+use crate::ui::actors::Actor;
+use crate::act;
 
 #[derive(Clone, Copy)]
 pub struct MenuParams<'a> {
@@ -32,15 +32,15 @@ pub fn build_vertical_menu(p: MenuParams) -> Vec<Actor> {
         let center_y = p.start_center_y + (i as f32) * p.row_spacing;
         let y_top    = center_y - 0.5 * px;
 
-        out.push(Actor::Text {
-            anchor:  Anchor::TopCenter,   // x centered, y is top
-            offset:  [0.0, y_top],        // compute top from desired center
-            px,
-            color,
-            font:    p.font,
-            content: (*label).to_string(),
-            align:   TextAlign::Center,
-        });
+        out.push(act!(text:
+            align(0.5, 0.0):    // TopCenter
+            xy(0.0, y_top):
+            px(px):
+            diffuse(color[0], color[1], color[2], color[3]):
+            font(p.font):
+            text(*label):
+            talign(center)
+        ));
     }
     out
 }

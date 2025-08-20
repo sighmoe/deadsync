@@ -1,10 +1,11 @@
 // src/screens/menu.rs
 use crate::core::space::Metrics;
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::actors::{Actor, Anchor, TextAlign};
+use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::logo::{self, LogoParams};
-use crate::ui::components::menu_list::{self, MenuParams}; // + add
+use crate::ui::components::menu_list::{self, MenuParams};
+use crate::act;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -73,26 +74,22 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
 
     let info2_y_tl = lp.top_margin - INFO_MARGIN_ABOVE - INFO_PX;
     let info1_y_tl = info2_y_tl - INFO_PX - INFO_GAP;
-    let white = [1.0, 1.0, 1.0, 1.0];
-
-    actors.push(Actor::Text {
-        anchor:  Anchor::TopCenter,
-        offset:  [0.0, info1_y_tl],
-        align:   TextAlign::Center,
-        px:      INFO_PX,
-        color:   white,
-        font:    "miso",
-        content: "DeadSync 0.2.0".to_string(),
-    });
-    actors.push(Actor::Text {
-        anchor:  Anchor::TopCenter,
-        offset:  [0.0, info2_y_tl],
-        align:   TextAlign::Center,
-        px:      INFO_PX,
-        color:   white,
-        font:    "miso",
-        content: "X songs in Y groups".to_string(),
-    });
+    actors.push(act!(text:
+        align(0.5, 0.0):
+        xy(0.0, info1_y_tl):
+        px(INFO_PX):
+        font("miso"):
+        text("DeadSync 0.2.0"):
+        talign(center)
+    ));
+    actors.push(act!(text:
+        align(0.5, 0.0):
+        xy(0.0, info2_y_tl):
+        px(INFO_PX):
+        font("miso"):
+        text("X songs in Y groups"):
+        talign(center)
+    ));
 
     let selected = color::rgba_hex(SELECTED_COLOR_HEX);
     let normal   = color::rgba_hex(NORMAL_COLOR_HEX);
