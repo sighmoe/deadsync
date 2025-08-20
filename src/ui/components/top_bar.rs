@@ -4,7 +4,6 @@ use crate::act;
 
 /// A full-width bar anchored to the top of the screen, with a centered title.
 pub fn build(title: &'static str) -> Actor {
-    // --- Style constants ---
     const BAR_H: f32 = 50.0;
     const TITLE_PX: f32 = 40.0;
     const BG_COLOR: [f32; 4] = [0.15, 0.15, 0.18, 1.0];
@@ -24,5 +23,4 @@ pub fn build(title: &'static str) -> Actor {
         background: Some(Background::Color(BG_COLOR)),
         z: 0i16,
     }
-
 }

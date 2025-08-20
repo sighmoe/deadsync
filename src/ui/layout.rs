@@ -19,7 +19,6 @@ pub fn build_screen(
     let mut objects = Vec::with_capacity(estimate_object_count(actors));
     let mut order_counter: u32 = 0;
 
-    // Root rect spans the whole screen logical area.
     let root_rect = SmRect {
         x: 0.0,
         y: 0.0,
@@ -27,7 +26,6 @@ pub fn build_screen(
         h: m.top - m.bottom,
     };
 
-    // Start at z=0 at the root (no parent tint inheritance in SM semantics).
     let parent_z: i16 = 0;
 
     for actor in actors {
@@ -42,9 +40,7 @@ pub fn build_screen(
         );
     }
 
-    // Stable sort by (z, insertion order).
     objects.sort_by_key(|o| (o.z, o.order));
-
     renderer::Screen { clear_color, objects }
 }
 
@@ -90,85 +86,39 @@ fn build_actor_recursive(
     out: &mut Vec<renderer::ScreenObject>,
 ) {
     match actor {
-        // --- SPRITE / QUAD ---------------------------------------------------
+        // --- SPRITE / QUAD ---
         actors::Actor::Sprite {
-            anchor,
-            offset,
-            size,
-            source,
-            tint,
-            z,
-            cell,
-            grid,
-            uv_rect,
-            visible,
-            flip_x,
-            flip_y,
-            cropleft,
-            cropright,
-            croptop,
-            cropbottom,
-            blend,
+            anchor, offset, size, source, tint, z,
+            cell, grid, uv_rect, visible, flip_x, flip_y,
+            cropleft, cropright, croptop, cropbottom, blend,
         } => {
-            if !*visible {
-                return;
-            }
-
+            if !*visible { return; }
             let rect = place_rect(parent, *anchor, *offset, *size);
 
-            // Push as-is (no parent tint multiplication in SM semantics).
             let before = out.len();
             push_sprite(
-                out,
-                rect,
-                m,
-                *source,
-                *tint,
-                *uv_rect,
-                *cell,
-                *grid,
-                *flip_x,
-                *flip_y,
-                *cropleft,
-                *cropright,
-                *croptop,
-                *cropbottom,
-                *blend,
+                out, rect, m, *source, *tint, *uv_rect, *cell, *grid,
+                *flip_x, *flip_y, *cropleft, *cropright, *croptop, *cropbottom, *blend,
             );
             let layer = base_z.saturating_add(*z);
             for i in before..out.len() {
                 out[i].z = layer;
-                out[i].order = {
-                    let o = *order_counter;
-                    *order_counter += 1;
-                    o
-                };
+                out[i].order = { let o = *order_counter; *order_counter += 1; o };
             }
         }
 
-        // --- TEXT ------------------------------------------------------------
+        // --- TEXT ---
         actors::Actor::Text {
-            anchor,
-            offset,
-            px,
-            color,
-            font,
-            content,
-            align,
-            z,
+            anchor, offset, px, color, font, content, align, z,
         } => {
             if let Some(fm) = fonts.get(font) {
                 let measured = fm.measure_line_width(content, *px);
-                let origin =
-                    place_text_baseline(parent, *anchor, *offset, *align, measured, fm, content, *px, m);
-
+                let origin = place_text_baseline(parent, *anchor, *offset, *align, measured, fm, content, *px, m);
                 let layer = base_z.saturating_add(*z);
 
                 for g in msdf::layout_line(fm, content, *px, origin) {
                     let t = cgmath::Matrix4::from_translation(cgmath::Vector3::new(
-                        g.center.x,
-                        g.center.y,
-                        0.0,
+                        g.center.x, g.center.y, 0.0,
                     )) * cgmath::Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
 
                     out.push(renderer::ScreenObject {
@@ -176,101 +126,54 @@ fn build_actor_recursive(
                             texture_id: fm.atlas_tex_key,
                             uv_scale: g.uv_scale,
                             uv_offset: g.uv_offset,
-                            color: *color,       // no parent tint multiply
+                            color: *color,
                             px_range: fm.px_range,
                         },
                         transform: t,
                         blend: BlendMode::Alpha,
                         z: layer,
-                        order: {
-                            let o = *order_counter;
-                            *order_counter += 1;
-                            o
-                        },
+                        order: { let o = *order_counter; *order_counter += 1; o },
                     });
                 }
             }
         }
 
-        // --- FRAME (group) ---------------------------------------------------
+        // --- FRAME (group) ---
         actors::Actor::Frame {
-            anchor,
-            offset,
-            size,
-            children,
-            background,
-            z,
+            anchor, offset, size, children, background, z,
         } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
             let layer = base_z.saturating_add(*z);
 
             if let Some(bg) = background {
                 match bg {
-                    // Solid color background behind children.
                     actors::Background::Color(c) => {
                         let before = out.len();
                         push_sprite(
-                            out,
-                            rect,
-                            m,
-                            actors::SpriteSource::Solid,
-                            *c, // use specified bg color directly
-                            None,
-                            None,
-                            None,
-                            false,
-                            false,
-                            0.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            BlendMode::Alpha,
+                            out, rect, m, actors::SpriteSource::Solid, *c,
+                            None, None, None, false, false, 0.0, 0.0, 0.0, 0.0, BlendMode::Alpha,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
-                            out[i].order = {
-                                let o = *order_counter;
-                                *order_counter += 1;
-                                o
-                            };
+                            out[i].order = { let o = *order_counter; *order_counter += 1; o };
                         }
                     }
-                    // Textured background: draw texture “as-is”.
                     actors::Background::Texture(tex) => {
                         let before = out.len();
                         push_sprite(
-                            out,
-                            rect,
-                            m,
-                            actors::SpriteSource::Texture(*tex),
-                            [1.0, 1.0, 1.0, 1.0], // no tint
-                            None,
-                            None,
-                            None,
-                            false,
-                            false,
-                            0.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            BlendMode::Alpha,
+                            out, rect, m, actors::SpriteSource::Texture(*tex), [1.0,1.0,1.0,1.0],
+                            None, None, None, false, false, 0.0, 0.0, 0.0, 0.0, BlendMode::Alpha,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
-                            out[i].order = {
-                                let o = *order_counter;
-                                *order_counter += 1;
-                                o
-                            };
+                            out[i].order = { let o = *order_counter; *order_counter += 1; o };
                         }
                     }
                 }
             }
 
-            // Recurse into children with the same color semantics (no inheritance), but higher base z.
-            let next_z = layer;
             for child in children {
-                build_actor_recursive(child, rect, m, fonts, next_z, order_counter, out);
+                build_actor_recursive(child, rect, m, fonts, layer, order_counter, out);
             }
         }
     }
@@ -354,27 +257,38 @@ fn calculate_uvs(
     // Expects pre-clamped fractions
     cl: f32, cr: f32, ct: f32, cb: f32,
 ) -> ([f32; 2], [f32; 2]) {
-    // 1. Determine base UV subrect (from explicit rect, cell, or full texture)
+    // 1) Determine base UV subrect (from explicit rect, cell, or full texture)
     let (mut uv_scale, mut uv_offset) = if let Some([u0, v0, u1, v1]) = uv_rect {
         let du = (u1 - u0).abs().max(1e-6);
         let dv = (v1 - v0).abs().max(1e-6);
         ([du, dv], [u0.min(u1), v0.min(v1)])
     } else if let Some((cx, cy)) = cell {
-        let (cols, rows) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(texture));
-        let s = [1.0 / cols.max(1) as f32, 1.0 / rows.max(1) as f32];
-        let o = [cx.min(cols - 1) as f32 * s[0], cy.min(rows - 1) as f32 * s[1]];
+        // support for setstate(linearIndex) via sentinel cy == u32::MAX
+        let (gc, gr) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(texture));
+        let cols = gc.max(1);
+        let rows = gr.max(1);
+
+        let (col, row) = if cy == u32::MAX {
+            let idx = cx;
+            (idx % cols, (idx / cols).min(rows.saturating_sub(1)))
+        } else {
+            (cx.min(cols.saturating_sub(1)), cy.min(rows.saturating_sub(1)))
+        };
+
+        let s = [1.0 / cols as f32, 1.0 / rows as f32];
+        let o = [col as f32 * s[0], row as f32 * s[1]];
         (s, o)
     } else {
         ([1.0, 1.0], [0.0, 0.0])
     };
 
-    // 2. Apply pre-clamped crop to the base UVs
+    // 2) Apply pre-clamped crop to the base UVs
     uv_offset[0] += uv_scale[0] * cl;
     uv_offset[1] += uv_scale[1] * ct;
     uv_scale[0] *= (1.0 - cl - cr).max(0.0);
     uv_scale[1] *= (1.0 - ct - cb).max(0.0);
 
-    // 3. Apply flips
+    // 3) Apply flips
     if flip_x { uv_offset[0] += uv_scale[0]; uv_scale[0] = -uv_scale[0]; }
     if flip_y { uv_offset[1] += uv_scale[1]; uv_scale[1] = -uv_scale[1]; }
 

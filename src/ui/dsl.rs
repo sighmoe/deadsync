@@ -242,6 +242,20 @@ macro_rules! __ui_act_apply_one {
     ) => {{
         $x = ($xv) as f32; $y = ($yv) as f32;
     }};
+    (x ($xv:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $x = ($xv) as f32;
+    }};
+    (y ($yv:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $y = ($yv) as f32;
+    }};
     (align ($hv:expr, $vv:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
@@ -256,6 +270,15 @@ macro_rules! __ui_act_apply_one {
     ) => {{
         $w = ($nw) as f32; $h = ($nh) as f32;
     }};
+    // alias for SM-like naming (absolute size)
+    (setsize ($nw:expr, $nh:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $w = ($nw) as f32; $h = ($nh) as f32;
+    }};
+
     (diffuse ($r:expr, $g:expr, $b:expr, $a:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
@@ -263,6 +286,14 @@ macro_rules! __ui_act_apply_one {
     ) => {{
         $tint = [($r) as f32, ($g) as f32, ($b) as f32, ($a) as f32];
     }};
+    (diffusealpha ($a:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $tint[3] = ($a) as f32;
+    }};
+
     (z ($v:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
@@ -270,6 +301,7 @@ macro_rules! __ui_act_apply_one {
     ) => {{
         $z = ($v) as i16;
     }};
+
     (cell ($c:expr, $r:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
@@ -277,6 +309,22 @@ macro_rules! __ui_act_apply_one {
     ) => {{
         $cell = Some((($c) as u32, ($r) as u32));
     }};
+    // linear index -> (col,row) is resolved later in layout using filename/grid
+    (setstate ($i:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $cell = Some((($i) as u32, u32::MAX));
+    }};
+    (grid ($c:expr, $r:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $grid = Some((($c) as u32, ($r) as u32));
+    }};
+
     (visible ($v:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
@@ -284,7 +332,47 @@ macro_rules! __ui_act_apply_one {
     ) => {{
         $visible = ($v) as bool;
     }};
+
+    // cropping (fractions 0..1)
+    (cropleft   ($v:expr) $($rest:tt)* ) => {{ $($rest)*; }};
+    (cropleft   ($v:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{ $cropleft = ($v) as f32; }};
+    (cropright  ($v:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{ $cropright = ($v) as f32; }};
+    (croptop    ($v:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{ $croptop = ($v) as f32; }};
+    (cropbottom ($v:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{ $cropbottom = ($v) as f32; }};
+
+    // explicit UV rect (normalized)
+    (texrect ($u0:expr, $v0:expr, $u1:expr, $v1:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $uv_rect = Some([($u0) as f32, ($v0) as f32, ($u1) as f32, ($v1) as f32]);
+    }};
+
     (blend (alpha)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $blend = $crate::core::gfx::types::BlendMode::Alpha;
+    }};
+    (blend (normal)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
@@ -298,6 +386,13 @@ macro_rules! __ui_act_apply_one {
     ) => {{
         $blend = $crate::core::gfx::types::BlendMode::Add;
     }};
+    (blend (additive)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $blend = $crate::core::gfx::types::BlendMode::Add;
+    }};
     (blend (multiply)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
@@ -305,6 +400,7 @@ macro_rules! __ui_act_apply_one {
     ) => {{
         $blend = $crate::core::gfx::types::BlendMode::Multiply;
     }};
+
     // Friendly error for unknown commands
     ($other:ident ( $($args:expr),* )
         $($rest:tt)*
@@ -350,6 +446,18 @@ macro_rules! __ui_act_apply_one_text {
     ) => {{
         $x = ($xv) as f32; $y = ($yv) as f32;
     }};
+    (x ($xv:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
+    ) => {{
+        $x = ($xv) as f32;
+    }};
+    (y ($yv:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
+    ) => {{
+        $y = ($yv) as f32;
+    }};
     (align ($hv:expr, $vv:expr)
         $x:ident $y:ident $hx:ident $vy:ident $px:ident
         $tint:ident $font:ident $content:ident $talign:ident $z:ident
@@ -367,6 +475,12 @@ macro_rules! __ui_act_apply_one_text {
         $tint:ident $font:ident $content:ident $talign:ident $z:ident
     ) => {{
         $tint = [($r) as f32, ($g) as f32, ($b) as f32, ($a) as f32];
+    }};
+    (diffusealpha ($a:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
+    ) => {{
+        $tint[3] = ($a) as f32;
     }};
     (font ($name:expr)
         $x:ident $y:ident $hx:ident $vy:ident $px:ident
