@@ -31,9 +31,11 @@ pub struct Screen {
     pub objects: Vec<ScreenObject>,
 }
 
-#[derive(Clone)]
-pub struct ScreenObject {
-    pub object_type: ObjectType,
-    pub transform: Matrix4<f32>,
-    pub blend: BlendMode,
+ #[derive(Clone)]
+ pub struct ScreenObject {
+     pub object_type: ObjectType,
+     pub transform: Matrix4<f32>,
+     pub blend: BlendMode,
+    pub z: i16,
+    pub order: u32, // stable insertion order
 }

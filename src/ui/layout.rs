@@ -1,27 +1,51 @@
-use std::collections::HashMap;
+//use std::collections::HashMap;
 use cgmath::{Matrix4, Vector2, Vector3};
 
 use crate::core::space::Metrics;
 use crate::ui::actors::{self, Actor, SizeSpec};
 use crate::ui::msdf;
 use crate::core::gfx as renderer;
-use crate::core::gfx::types::BlendMode;
+use renderer::types::BlendMode;
 
 /* ======================= RENDERER SCREEN BUILDER ======================= */
 
 #[inline(always)]
 pub fn build_screen(
-    actors: &[Actor],
+    actors: &[actors::Actor],
     clear_color: [f32; 4],
     m: &Metrics,
-    fonts: &HashMap<&'static str, msdf::Font>,
+    fonts: &std::collections::HashMap<&'static str, msdf::Font>,
 ) -> renderer::Screen {
     let mut objects = Vec::with_capacity(estimate_object_count(actors));
-    let root_rect = SmRect { x: 0.0, y: 0.0, w: m.right - m.left, h: m.top - m.bottom };
+    let mut order_counter: u32 = 0;
+
+    // Root rect spans the whole screen logical area.
+    let root_rect = SmRect {
+        x: 0.0,
+        y: 0.0,
+        w: m.right - m.left,
+        h: m.top - m.bottom,
+    };
+
+    // Start with identity group tint and z=0 at the root.
+    let parent_mul = [1.0, 1.0, 1.0, 1.0];
+    let parent_z: i16 = 0;
 
     for actor in actors {
-        build_actor_recursive(actor, root_rect, m, fonts, &mut objects);
+        build_actor_recursive(
+            actor,
+            root_rect,
+            m,
+            fonts,
+            parent_mul,
+            parent_z,
+            &mut order_counter,
+            &mut objects,
+        );
     }
+
+    // Stable sort by (z, insertion order).
+    objects.sort_by_key(|o| (o.z, o.order));
 
     renderer::Screen { clear_color, objects }
 }
@@ -59,85 +83,228 @@ fn estimate_object_count(actors: &[Actor]) -> usize {
 struct SmRect { x: f32, y: f32, w: f32, h: f32 } // top-left "SM px" space
 
 fn build_actor_recursive(
-    actor: &Actor,
+    actor: &actors::Actor,
     parent: SmRect,
     m: &Metrics,
-    fonts: &HashMap<&'static str, msdf::Font>,
+    fonts: &std::collections::HashMap<&'static str, msdf::Font>,
+    mul_color: [f32; 4],
+    base_z: i16,
+    order_counter: &mut u32,
     out: &mut Vec<renderer::ScreenObject>,
 ) {
     match actor {
+        // --- SPRITE / QUAD ---------------------------------------------------
         actors::Actor::Sprite {
-            anchor, offset, size, source, tint, cell, grid, uv_rect,
-            visible, flip_x, flip_y,
-            cropleft, cropright, croptop, cropbottom,
+            anchor,
+            offset,
+            size,
+            source,
+            tint,
+            z,
+            cell,
+            grid,
+            uv_rect,
+            visible,
+            flip_x,
+            flip_y,
+            cropleft,
+            cropright,
+            croptop,
+            cropbottom,
             blend,
         } => {
-            if !*visible { return; }
+            if !*visible {
+                return;
+            }
+
             let rect = place_rect(parent, *anchor, *offset, *size);
+
+            // Inherit parent group color (mul diffuse).
+            let eff_tint = [
+                tint[0] * mul_color[0],
+                tint[1] * mul_color[1],
+                tint[2] * mul_color[2],
+                tint[3] * mul_color[3],
+            ];
+
+            // Push via your existing helper, then annotate z/order on the newly added objects.
+            let before = out.len();
             push_sprite(
-                out, rect, m, *source, *tint, *uv_rect, *cell, *grid,
-                *flip_x, *flip_y, *cropleft, *cropright, *croptop, *cropbottom, *blend,
+                out,
+                rect,
+                m,
+                *source,
+                eff_tint,
+                *uv_rect,
+                *cell,
+                *grid,
+                *flip_x,
+                *flip_y,
+                *cropleft,
+                *cropright,
+                *croptop,
+                *cropbottom,
+                *blend,
             );
+            let layer = base_z.saturating_add(*z);
+            for i in before..out.len() {
+                out[i].z = layer;
+                out[i].order = {
+                    let o = *order_counter;
+                    *order_counter += 1;
+                    o
+                };
+            }
         }
 
-        actors::Actor::Text { anchor, offset, px, color, font, content, align } => {
+        // --- TEXT ------------------------------------------------------------
+        actors::Actor::Text {
+            anchor,
+            offset,
+            px,
+            color,
+            font,
+            content,
+            align,
+            z,
+        } => {
             if let Some(fm) = fonts.get(font) {
                 let measured = fm.measure_line_width(content, *px);
-                let origin = place_text_baseline(
-                    parent, *anchor, *offset, *align, measured, fm, content, *px, m,
-                );
+                let origin =
+                    place_text_baseline(parent, *anchor, *offset, *align, measured, fm, content, *px, m);
+
+                // Inherit parent group color.
+                let col = [
+                    color[0] * mul_color[0],
+                    color[1] * mul_color[1],
+                    color[2] * mul_color[2],
+                    color[3] * mul_color[3],
+                ];
+
+                let layer = base_z.saturating_add(*z);
 
                 for g in msdf::layout_line(fm, content, *px, origin) {
-                    let t = Matrix4::from_translation(Vector3::new(g.center.x, g.center.y, 0.0))
-                        * Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
+                    let t = cgmath::Matrix4::from_translation(cgmath::Vector3::new(
+                        g.center.x,
+                        g.center.y,
+                        0.0,
+                    )) * cgmath::Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
+
                     out.push(renderer::ScreenObject {
                         object_type: renderer::ObjectType::MsdfGlyph {
                             texture_id: fm.atlas_tex_key,
                             uv_scale: g.uv_scale,
                             uv_offset: g.uv_offset,
-                            color: *color,
+                            color: col,
                             px_range: fm.px_range,
                         },
                         transform: t,
                         blend: BlendMode::Alpha,
+                        z: layer,
+                        order: {
+                            let o = *order_counter;
+                            *order_counter += 1;
+                            o
+                        },
                     });
                 }
             }
         }
 
-        actors::Actor::Frame { anchor, offset, size, children, background } => {
+        // --- FRAME (group) ---------------------------------------------------
+        actors::Actor::Frame {
+            anchor,
+            offset,
+            size,
+            children,
+            background,
+            mul_color: frame_mul,
+            z,
+        } => {
             let rect = place_rect(parent, *anchor, *offset, *size);
+            let layer = base_z.saturating_add(*z);
 
             if let Some(bg) = background {
                 match bg {
-                    // CHANGE: use SpriteSource::Solid (becomes "__white" tinted)
+                    // Solid color background: draw solid sprite tinted by (bg * parent mul).
                     actors::Background::Color(c) => {
+                        let eff = [
+                            c[0] * mul_color[0],
+                            c[1] * mul_color[1],
+                            c[2] * mul_color[2],
+                            c[3] * mul_color[3],
+                        ];
+                        let before = out.len();
                         push_sprite(
-                            out, rect, m,
+                            out,
+                            rect,
+                            m,
                             actors::SpriteSource::Solid,
-                            *c,
-                            None, None, None,
-                            false, false,
-                            0.0, 0.0, 0.0, 0.0,
+                            eff,
+                            None,
+                            None,
+                            None,
+                            false,
+                            false,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
                             BlendMode::Alpha,
                         );
+                        for i in before..out.len() {
+                            out[i].z = layer;
+                            out[i].order = {
+                                let o = *order_counter;
+                                *order_counter += 1;
+                                o
+                            };
+                        }
                     }
+                    // Textured background: treat the texture as white and tint by parent mul.
                     actors::Background::Texture(tex) => {
+                        let eff = mul_color;
+                        let before = out.len();
                         push_sprite(
-                            out, rect, m,
+                            out,
+                            rect,
+                            m,
                             actors::SpriteSource::Texture(*tex),
-                            [1.0, 1.0, 1.0, 1.0],
-                            None, None, None,
-                            false, false,
-                            0.0, 0.0, 0.0, 0.0,
+                            eff,
+                            None,
+                            None,
+                            None,
+                            false,
+                            false,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
                             BlendMode::Alpha,
                         );
+                        for i in before..out.len() {
+                            out[i].z = layer;
+                            out[i].order = {
+                                let o = *order_counter;
+                                *order_counter += 1;
+                                o
+                            };
+                        }
                     }
                 }
             }
 
+            // Recurse with updated group tint and base z.
+            let next_mul = [
+                mul_color[0] * frame_mul[0],
+                mul_color[1] * frame_mul[1],
+                mul_color[2] * frame_mul[2],
+                mul_color[3] * frame_mul[3],
+            ];
+            let next_z = layer;
+
             for child in children {
-                build_actor_recursive(child, rect, m, fonts, out);
+                build_actor_recursive(child, rect, m, fonts, next_mul, next_z, order_counter, out);
             }
         }
     }
@@ -273,7 +440,7 @@ fn push_sprite(
     let cropped_rect = apply_crop_to_rect(rect, cl, cr, ct, cb);
     if cropped_rect.w <= 0.0 || cropped_rect.h <= 0.0 { return; }
 
-    // Unify: solids are just sprites using the built-in "__white" texture
+    // Unify: solids are sprites using the built-in "__white" texture.
     let (texture_id, uv_scale, uv_offset) = match source {
         actors::SpriteSource::Solid => ("__white", [1.0, 1.0], [0.0, 0.0]),
         actors::SpriteSource::Texture(texture) => {
@@ -293,6 +460,9 @@ fn push_sprite(
         },
         transform: rect_transform(cropped_rect, m),
         blend,
+        // Filled in by caller after push; need placeholders to satisfy struct init.
+        z: 0,
+        order: 0,
     });
 }
 

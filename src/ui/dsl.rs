@@ -28,6 +28,7 @@ pub fn finish_sprite(
     x: f32, y: f32, w: f32, h: f32,
     hx: f32, vy: f32,
     tint: [f32; 4],
+    z: i16,
     cell: Option<(u32, u32)>,
     grid: Option<(u32, u32)>,
     uv_rect: Option<[f32; 4]>,
@@ -41,6 +42,7 @@ pub fn finish_sprite(
         size:   [SizeSpec::Px(w), SizeSpec::Px(h)],
         source: SpriteSource::Texture(texture),
         tint,
+        z,
         cell,
         grid,
         uv_rect,
@@ -60,6 +62,7 @@ pub fn finish_quad(
     x: f32, y: f32, w: f32, h: f32,
     hx: f32, vy: f32,
     tint: [f32; 4],
+    z: i16,
     visible: bool, flip_x: bool, flip_y: bool,
     cropleft: f32, cropright: f32, croptop: f32, cropbottom: f32,
     blend: BlendMode,
@@ -70,6 +73,7 @@ pub fn finish_quad(
         size:   [SizeSpec::Px(w), SizeSpec::Px(h)],
         source: SpriteSource::Solid,
         tint,
+        z,
         cell: None,
         grid: None,
         uv_rect: None,
@@ -93,6 +97,7 @@ pub fn finish_text(
     color: [f32; 4],
     font: &'static str,
     align: TextAlign,
+    z: i16,
 ) -> Actor {
     Actor::Text {
         anchor: anchor_from_factors(hx, vy),
@@ -102,6 +107,7 @@ pub fn finish_text(
         font,
         content: text,
         align,
+        z,
     }
 }
 
@@ -114,6 +120,7 @@ macro_rules! act {
         let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
         let (mut hx, mut vy) = (0.5f32, 0.5f32);
         let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
+        let mut z: i16 = 0;
         let mut cell: Option<(u32,u32)> = None;
         let grid: Option<(u32,u32)> = None;
         let uv_rect: Option<[f32;4]> = None;
@@ -127,12 +134,12 @@ macro_rules! act {
         let mut blend: BlendMode = BlendMode::Alpha;
 
         $crate::__ui_act_apply!( ($($tail)+)
-            x y w h hx vy tint cell grid uv_rect visible flip_x flip_y
+            x y w h hx vy tint z cell grid uv_rect visible flip_x flip_y
             cropleft cropright croptop cropbottom blend
         );
 
         $crate::ui::dsl::finish_sprite(
-            $tex, x,y,w,h,hx,vy,tint,cell,grid,uv_rect,visible,flip_x,flip_y,
+            $tex, x,y,w,h,hx,vy,tint,z,cell,grid,uv_rect,visible,flip_x,flip_y,
             cropleft,cropright,croptop,cropbottom,blend
         )
     }};
@@ -141,6 +148,7 @@ macro_rules! act {
         let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
         let (mut hx, mut vy) = (0.5f32, 0.5f32);
         let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
+        let mut z: i16 = 0;
         let mut visible: bool = true;
         let mut flip_x: bool = false;
         let mut flip_y: bool = false;
@@ -152,12 +160,12 @@ macro_rules! act {
 
         // For quads we ignore cell/grid/uv_rect, but the parser still expects placeholders.
         $crate::__ui_act_apply!( ($($tail)+)
-            x y w h hx vy tint __skip_cell __skip_grid __skip_uv_rect visible flip_x flip_y
+            x y w h hx vy tint z __skip_cell __skip_grid __skip_uv_rect visible flip_x flip_y
             cropleft cropright croptop cropbottom blend
         );
 
         $crate::ui::dsl::finish_quad(
-            x,y,w,h,hx,vy,tint,visible,flip_x,flip_y,cropleft,cropright,croptop,cropbottom,blend
+            x,y,w,h,hx,vy,tint,z,visible,flip_x,flip_y,cropleft,cropright,croptop,cropbottom,blend
         )
     }};
 
@@ -170,17 +178,14 @@ macro_rules! act {
         let mut font: &'static str = "miso";
         let mut content: String = String::new();
         let mut talign = $crate::ui::actors::TextAlign::Left;
+        let mut z: i16 = 0;
 
         $crate::__ui_act_apply_text!( ($($tail)+)
-            x y hx vy px tint font content talign
+            x y hx vy px tint font content talign z
         );
 
         $crate::ui::dsl::finish_text(
-            content,
-            x, y,
-            hx, vy,
-            px,
-            tint, font, talign
+            content, x, y, hx, vy, px, tint, font, talign, z
         )
     }};
 }
@@ -195,32 +200,33 @@ macro_rules! __ui_act_apply {
     // consume one `cmd(args):` then recurse for more
     ( ($cmd:ident ( $($args:expr),* ) : $($rest:tt)* )
       $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-      $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+      $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
       $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $crate::__ui_act_apply_one!{
             $cmd ( $($args),* )
-            $x $y $w $h $hx $vy $tint $cell $grid $uv_rect $visible $flip_x $flip_y
+            $x $y $w $h $hx $vy $tint $z $cell $grid $uv_rect $visible $flip_x $flip_y
             $cropleft $cropright $croptop $cropbottom $blend
         }
         // ← make the recursive call a statement
-        $crate::__ui_act_apply!( ($($rest)*) $x $y $w $h $hx $vy $tint $cell $grid $uv_rect $visible $flip_x $flip_y
+        $crate::__ui_act_apply!( ($($rest)*) $x $y $w $h $hx $vy $tint 
+            $z $cell $grid $uv_rect $visible $flip_x $flip_y
             $cropleft $cropright $croptop $cropbottom $blend );
     }};
 
     // final `cmd(args)` with NO trailing colon
     ( ($cmd:ident ( $($args:expr),* ) )
       $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-      $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+      $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
       $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $crate::__ui_act_apply_one!{
             $cmd ( $($args),* )
-            $x $y $w $h $hx $vy $tint $cell $grid $uv_rect $visible $flip_x $flip_y
+            $x $y $w $h $hx $vy $tint $z $cell $grid $uv_rect $visible $flip_x $flip_y
             $cropleft $cropright $croptop $cropbottom $blend
         }
         // ← same here
-        $crate::__ui_act_apply!( () $x $y $w $h $hx $vy $tint $cell $grid $uv_rect $visible $flip_x $flip_y
+        $crate::__ui_act_apply!( () $x $y $w $h $hx $vy $tint $z $cell $grid $uv_rect $visible $flip_x $flip_y
             $cropleft $cropright $croptop $cropbottom $blend );
     }};
 }
@@ -231,63 +237,70 @@ macro_rules! __ui_act_apply {
 macro_rules! __ui_act_apply_one {
     (xy ($xv:expr, $yv:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $x = ($xv) as f32; $y = ($yv) as f32;
     }};
     (align ($hv:expr, $vv:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $hx = ($hv) as f32; $vy = ($vv) as f32;
     }};
     (zoomto ($nw:expr, $nh:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $w = ($nw) as f32; $h = ($nh) as f32;
     }};
     (diffuse ($r:expr, $g:expr, $b:expr, $a:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $tint = [($r) as f32, ($g) as f32, ($b) as f32, ($a) as f32];
     }};
+    (z ($v:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+    ) => {{
+        $z = ($v) as i16;
+    }};
     (cell ($c:expr, $r:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $cell = Some((($c) as u32, ($r) as u32));
     }};
     (visible ($v:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $visible = ($v) as bool;
     }};
     (blend (alpha)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $blend = $crate::core::gfx::types::BlendMode::Alpha;
     }};
     (blend (add)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $blend = $crate::core::gfx::types::BlendMode::Add;
     }};
     (blend (multiply)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
-        $tint:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
     ) => {{
         $blend = $crate::core::gfx::types::BlendMode::Multiply;
@@ -307,23 +320,23 @@ macro_rules! __ui_act_apply_text {
     ( () $($vars:ident)+ ) => { () };
     ( ($cmd:ident $args:tt : $($rest:tt)* )
       $x:ident $y:ident $hx:ident $vy:ident $px:ident
-      $tint:ident $font:ident $content:ident $talign:ident
+      $tint:ident $font:ident $content:ident $talign:ident $z:ident
     ) => {{
         $crate::__ui_act_apply_one_text!{
             $cmd $args
-            $x $y $hx $vy $px $tint $font $content $talign
+            $x $y $hx $vy $px $tint $font $content $talign $z
         }
-        $crate::__ui_act_apply_text!( ($($rest)*) $x $y $hx $vy $px $tint $font $content $talign );
+        $crate::__ui_act_apply_text!( ($($rest)*) $x $y $hx $vy $px $tint $font $content $talign $z );
     }};
     ( ($cmd:ident $args:tt )
       $x:ident $y:ident $hx:ident $vy:ident $px:ident
-      $tint:ident $font:ident $content:ident $talign:ident
+      $tint:ident $font:ident $content:ident $talign:ident $z:ident
     ) => {{
         $crate::__ui_act_apply_one_text!{
             $cmd $args
-            $x $y $hx $vy $px $tint $font $content $talign
+            $x $y $hx $vy $px $tint $font $content $talign $z
         }
-        $crate::__ui_act_apply_text!( () $x $y $hx $vy $px $tint $font $content $talign );
+        $crate::__ui_act_apply_text!( () $x $y $hx $vy $px $tint $font $content $talign $z );
     }};
 }
 
@@ -333,45 +346,51 @@ macro_rules! __ui_act_apply_text {
 macro_rules! __ui_act_apply_one_text {
     (xy ($xv:expr, $yv:expr)
         $x:ident $y:ident $hx:ident $vy:ident $px:ident
-        $tint:ident $font:ident $content:ident $talign:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
     ) => {{
         $x = ($xv) as f32; $y = ($yv) as f32;
     }};
     (align ($hv:expr, $vv:expr)
         $x:ident $y:ident $hx:ident $vy:ident $px:ident
-        $tint:ident $font:ident $content:ident $talign:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
     ) => {{
         $hx = ($hv) as f32; $vy = ($vv) as f32;
     }};
     (px ($s:expr)
         $x:ident $y:ident $hx:ident $vy:ident $px:ident
-        $tint:ident $font:ident $content:ident $talign:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
     ) => {{
         $px = ($s) as f32;
     }};
     (diffuse ($r:expr, $g:expr, $b:expr, $a:expr)
         $x:ident $y:ident $hx:ident $vy:ident $px:ident
-        $tint:ident $font:ident $content:ident $talign:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
     ) => {{
         $tint = [($r) as f32, ($g) as f32, ($b) as f32, ($a) as f32];
     }};
     (font ($name:expr)
         $x:ident $y:ident $hx:ident $vy:ident $px:ident
-        $tint:ident $font:ident $content:ident $talign:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
     ) => {{
         $font = $name;
     }};
     (text ($txt:expr)
         $x:ident $y:ident $hx:ident $vy:ident $px:ident
-        $tint:ident $font:ident $content:ident $talign:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
     ) => {{
         $content = ($txt).into();
     }};
     (talign ($dir:ident)
         $x:ident $y:ident $hx:ident $vy:ident $px:ident
-        $tint:ident $font:ident $content:ident $align_mode:ident
+        $tint:ident $font:ident $content:ident $align_mode:ident $z:ident
     ) => {{
         $align_mode = $crate::__ui_textalign_from_ident!($dir);
+    }};
+    (z ($v:expr)
+        $x:ident $y:ident $hx:ident $vy:ident $px:ident
+        $tint:ident $font:ident $content:ident $talign:ident $z:ident
+    ) => {{
+        $z = ($v) as i16;
     }};
     // Friendly error for unknown commands
     ($other:ident $($anything:tt)* ) => {

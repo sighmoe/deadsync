@@ -57,6 +57,7 @@ pub enum Actor {
         size: [SizeSpec; 2],
         source: SpriteSource,
         tint: [f32; 4],
+        z: i16,
         cell: Option<(u32, u32)>,
         grid: Option<(u32, u32)>,
         uv_rect: Option<[f32; 4]>,   // [u0,v0,u1,v1] top-left origin
@@ -78,6 +79,7 @@ pub enum Actor {
         font: &'static str,
         content: String,
         align: TextAlign,
+        z: i16,
     },
 
     Frame {
@@ -86,5 +88,9 @@ pub enum Actor {
         size: [SizeSpec; 2],
         children: Vec<Actor>,
         background: Option<Background>,
+        /// Multiplies all children’s RGBA (group diffuse). Default [1,1,1,1].
+        mul_color: [f32; 4],
+        /// Base layer for this frame (applies to its background and children).
+        z: i16,
     },
 }
