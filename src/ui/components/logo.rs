@@ -27,7 +27,7 @@ impl Default for LogoParams {
 /// Returns a `Vec<Actor>` to be included in a screen's actor list.
 pub fn build_logo(params: LogoParams) -> Vec<Actor> {
     // Pull from globals (no screen param needed).
-    let screen_width = SCREEN_WIDTH();
+    let screen_width = screen_width();
 
     // Logo size from target height
     let logo_aspect = LOGO_NATIVE_W / LOGO_NATIVE_H;

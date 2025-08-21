@@ -77,7 +77,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     let info1_y_tl = info2_y_tl - INFO_PX - INFO_GAP;
     actors.push(act!(text:
         align(0.5, 0.0):
-        xy(SCREEN_CENTER_X(), info1_y_tl):
+        xy(screen_center_x(), info1_y_tl):
         px(INFO_PX):
         font("miso"):
         text("DeadSync 0.2.0"):
@@ -85,7 +85,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     ));
     actors.push(act!(text:
         align(0.5, 0.0):
-        xy(SCREEN_CENTER_X(), info2_y_tl):
+        xy(screen_center_x(), info2_y_tl):
         px(INFO_PX):
         font("miso"):
         text("X songs in Y groups"):

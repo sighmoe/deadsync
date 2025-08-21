@@ -16,7 +16,7 @@ pub fn build(title: &'static str) -> Actor {
         children: vec![
             act!(text:
                 align(0.5, 0.5):
-                xy(SCREEN_CENTER_X(), 0.5 * BAR_H):
+                xy(screen_center_x(), 0.5 * BAR_H):
                 px(TITLE_PX):
                 diffuse(FG_COLOR[0], FG_COLOR[1], FG_COLOR[2], FG_COLOR[3]):
                 font("wendy"): text(title): talign(center)

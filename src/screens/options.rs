@@ -68,10 +68,10 @@ pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
 pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(NUM_HEARTS + 6);
 
-    let w  = SCREEN_WIDTH();      // ← was sm::width(m)
-    let h  = SCREEN_HEIGHT();     // ← was sm::height(m)
-    let cx = SCREEN_CENTER_X();   // ← was sm::center(m).0
-    let cy = SCREEN_CENTER_Y();   // ← was sm::center(m).1
+    let w  = screen_width();      // ← was sm::width(m)
+    let h  = screen_height();     // ← was sm::height(m)
+    let cx = screen_center_x();   // ← was sm::center(m).0
+    let cy = screen_center_y();   // ← was sm::center(m).1
 
     // Hearts: stored as offsets around center; convert to SM xy in parent TL space
     actors.extend(state.hearts.iter().map(|h| {

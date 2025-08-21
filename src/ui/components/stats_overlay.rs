@@ -19,7 +19,7 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
     const MARGIN_Y: f32 = 16.0;
     let color = [1.0, 1.0, 1.0, 1.0];
 
-    let w = SCREEN_WIDTH();
+    let w = screen_width();
 
     vec![
         act!(text:

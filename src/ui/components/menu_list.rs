@@ -22,7 +22,7 @@ pub struct MenuParams<'a> {
 /// Build a vertical, center-aligned menu whose visual center stays fixed.
 pub fn build_vertical_menu(p: MenuParams) -> Vec<Actor> {
     let mut out = Vec::with_capacity(p.options.len());
-    let center_x = SCREEN_CENTER_X();
+    let center_x = screen_center_x();
 
     for (i, label) in p.options.iter().enumerate() {
         let selected = i == p.selected_index;

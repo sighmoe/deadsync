@@ -51,8 +51,8 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
 
 // keep Metrics in the signature (unused), so call sites don't change
 pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
-    let cx = SCREEN_CENTER_X();
-    let cy = SCREEN_CENTER_Y();
+    let cx = screen_center_x();
+    let cy = screen_center_y();
 
     let player = act!(quad:
         align(0.5, 0.5):

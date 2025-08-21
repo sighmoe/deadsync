@@ -32,22 +32,22 @@ pub fn set_current_metrics(m: Metrics) {
 /// StepMania-style globals as zero-arg getters.
 /// Usage:
 ///   use crate::core::space::globals::*;
-///   let w = SCREEN_WIDTH();
-#[allow(non_snake_case)]
+///   let w = screen_width();
+
 #[allow(dead_code)]
 pub mod globals {
     use super::CURRENT_METRICS;
 
-    #[inline(always)] pub fn SCREEN_WIDTH()  -> f32 { CURRENT_METRICS.with(|c| { let m=c.get(); m.right - m.left }) }
-    #[inline(always)] pub fn SCREEN_HEIGHT() -> f32 { CURRENT_METRICS.with(|c| { let m=c.get(); m.top   - m.bottom }) }
+    #[inline(always)] pub fn screen_width()  -> f32 { CURRENT_METRICS.with(|c| { let m=c.get(); m.right - m.left }) }
+    #[inline(always)] pub fn screen_height() -> f32 { CURRENT_METRICS.with(|c| { let m=c.get(); m.top   - m.bottom }) }
 
-    #[inline(always)] pub fn SCREEN_LEFT()   -> f32 { 0.0 }
-    #[inline(always)] pub fn SCREEN_TOP()    -> f32 { 0.0 }
-    #[inline(always)] pub fn SCREEN_RIGHT()  -> f32 { SCREEN_WIDTH()  }
-    #[inline(always)] pub fn SCREEN_BOTTOM() -> f32 { SCREEN_HEIGHT() }
+    #[inline(always)] pub fn screen_left()   -> f32 { 0.0 }
+    #[inline(always)] pub fn screen_top()    -> f32 { 0.0 }
+    #[inline(always)] pub fn screen_right()  -> f32 { screen_width()  }
+    #[inline(always)] pub fn screen_bottom() -> f32 { screen_height() }
 
-    #[inline(always)] pub fn SCREEN_CENTER_X() -> f32 { 0.5 * SCREEN_WIDTH()  }
-    #[inline(always)] pub fn SCREEN_CENTER_Y() -> f32 { 0.5 * SCREEN_HEIGHT() }
+    #[inline(always)] pub fn screen_center_x() -> f32 { 0.5 * screen_width()  }
+    #[inline(always)] pub fn screen_center_y() -> f32 { 0.5 * screen_height() }
 }
 // ------------------------------------------------------------------------
 
