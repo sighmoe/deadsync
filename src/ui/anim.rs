@@ -251,17 +251,6 @@ impl Segment {
             }
         }
 
-        // instants should apply immediately at segment start (t=0)
-        for p in &self.prepared {
-            match p.kind {
-                PreparedKind::Visible(_) | PreparedKind::FlipX(_) | PreparedKind::FlipY(_) => {
-                    let s_mut = s.clone();
-                    let _ = &s_mut; // no-op (keeps pattern consistent); actual write happens in update where we have &mut state
-                }
-                _ => {}
-            }
-        }
-
         self.prepared_once = true;
     }
 
@@ -497,20 +486,18 @@ impl TweenSeq {
             };
 
             if finished_now {
-                // finalize segment (ensure we end on exact targets)
-                if let Some(Step::Segment(seg)) = self.current.take() {
-                    let seg = seg.clone();
-                    // apply final values explicitly
-                    for p in &seg.prepared {
-                        p.apply_final(&mut self.state);
+                // Take the finished step out of `current`.
+                if let Some(step) = self.current.take() {
+                    // If it was a segment, snap to exact targets.
+                    if let Step::Segment(seg) = step {
+                        for p in &seg.prepared {
+                            p.apply_final(&mut self.state);
+                        }
                     }
-                } else {
-                    self.current = None;
                 }
-                // next loop iteration may grab the next step and continue consuming dt
-                self.current = None;
+                // Loop continues to consume remaining dt on next steps.
             } else {
-                // current step still running; exit this update
+                // Current step still running; exit this update.
                 break;
             }
         }

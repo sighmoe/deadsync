@@ -442,6 +442,8 @@ impl ApplicationHandler for App {
                 let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
                 self.last_frame_time = now;
 
+                crate::ui::runtime::tick(delta_time);
+
                 if self.current_screen == CurrentScreen::Gameplay {
                     gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
                 }
