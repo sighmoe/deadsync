@@ -1,5 +1,5 @@
 // src/ui/components/top_bar.rs
-use crate::ui::actors::{Actor, Anchor, SizeSpec, Background, TextAlign};
+use crate::ui::actors::{Actor, SizeSpec, Background, TextAlign};
 use crate::act;
 
 /// A full-width bar anchored to the top of the screen, with a centered title.
@@ -10,7 +10,7 @@ pub fn build(title: &'static str) -> Actor {
     const FG_COLOR: [f32; 4] = [0.90, 0.90, 1.00, 1.0];
 
     Actor::Frame {
-        anchor: Anchor::TopLeft,
+        align: [0.0, 0.0],     // Top-left of parent
         offset: [0.0, 0.0],
         size:   [SizeSpec::Fill, SizeSpec::Px(BAR_H)],
         children: vec![

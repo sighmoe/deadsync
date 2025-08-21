@@ -1,26 +1,8 @@
-// src/ui/dsl.rs
 use crate::core::gfx::types::BlendMode;
-use crate::ui::actors::{Actor, Anchor, SizeSpec, SpriteSource, TextAlign};
-
-#[inline(always)]
-fn snap_align(v: f32) -> f32 {
-    if v <= 0.25 { 0.0 } else if v >= 0.75 { 1.0 } else { 0.5 }
-}
-
-#[inline(always)]
-fn anchor_from_factors(hx: f32, vy: f32) -> Anchor {
-    match (snap_align(hx), snap_align(vy)) {
-        (0.0, 0.0) => Anchor::TopLeft,
-        (0.5, 0.0) => Anchor::TopCenter,
-        (1.0, 0.0) => Anchor::TopRight,
-        (0.0, 0.5) => Anchor::CenterLeft,
-        (0.5, 0.5) => Anchor::Center,
-        (1.0, 0.5) => Anchor::CenterRight,
-        (0.0, 1.0) => Anchor::BottomLeft,
-        (0.5, 1.0) => Anchor::BottomCenter,
-        _          => Anchor::BottomRight,
-    }
-}
+use crate::ui::actors::SizeSpec;
+use crate::ui::actors::SpriteSource;
+use crate::ui::actors::Actor;
+use crate::ui::actors::TextAlign;
 
 #[inline(always)]
 pub fn finish_sprite(
@@ -37,7 +19,7 @@ pub fn finish_sprite(
     blend: BlendMode,
 ) -> Actor {
     Actor::Sprite {
-        anchor: anchor_from_factors(hx, vy),
+        align: [hx, vy],
         offset: [x, y],
         size:   [SizeSpec::Px(w), SizeSpec::Px(h)],
         source: SpriteSource::Texture(texture),
@@ -68,7 +50,7 @@ pub fn finish_quad(
     blend: BlendMode,
 ) -> Actor {
     Actor::Sprite {
-        anchor: anchor_from_factors(hx, vy),
+        align: [hx, vy],
         offset: [x, y],
         size:   [SizeSpec::Px(w), SizeSpec::Px(h)],
         source: SpriteSource::Solid,
@@ -100,13 +82,13 @@ pub fn finish_text(
     z: i16,
 ) -> Actor {
     Actor::Text {
-        anchor: anchor_from_factors(hx, vy),
+        align: [hx, vy],
         offset: [x, y],
         px,
         color,
         font,
         content: text,
-        align,
+        align_text: align,
         z,
     }
 }

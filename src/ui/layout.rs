@@ -88,12 +88,12 @@ fn build_actor_recursive(
     match actor {
         // --- SPRITE / QUAD ---
         actors::Actor::Sprite {
-            anchor, offset, size, source, tint, z,
+            align, offset, size, source, tint, z,
             cell, grid, uv_rect, visible, flip_x, flip_y,
             cropleft, cropright, croptop, cropbottom, blend,
         } => {
             if !*visible { return; }
-            let rect = place_rect(parent, *anchor, *offset, *size);
+            let rect = place_rect(parent, *align, *offset, *size);
 
             let before = out.len();
             push_sprite(
@@ -109,11 +109,11 @@ fn build_actor_recursive(
 
         // --- TEXT ---
         actors::Actor::Text {
-            anchor, offset, px, color, font, content, align, z,
+            align, offset, px, color, font, content, align_text, z,
         } => {
             if let Some(fm) = fonts.get(font) {
                 let measured = fm.measure_line_width(content, *px);
-                let origin = place_text_baseline(parent, *anchor, *offset, *align, measured, fm, content, *px, m);
+                let origin = place_text_baseline(parent, *align, *offset, *align_text, measured, fm, content, *px, m);
                 let layer = base_z.saturating_add(*z);
 
                 for g in msdf::layout_line(fm, content, *px, origin) {
@@ -140,9 +140,9 @@ fn build_actor_recursive(
 
         // --- FRAME (group) ---
         actors::Actor::Frame {
-            anchor, offset, size, children, background, z,
+            align, offset, size, children, background, z,
         } => {
-            let rect = place_rect(parent, *anchor, *offset, *size);
+            let rect = place_rect(parent, *align, *offset, *size);
             let layer = base_z.saturating_add(*z);
 
             if let Some(bg) = background {
@@ -217,7 +217,7 @@ fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
 }
 
 #[inline(always)]
-fn place_rect(parent: SmRect, anchor: actors::Anchor, offset: [f32; 2], size: [SizeSpec; 2]) -> SmRect {
+fn place_rect(parent: SmRect, align: [f32; 2], offset: [f32; 2], size: [SizeSpec; 2]) -> SmRect {
     let w = match size[0] {
         SizeSpec::Px(w) => w,
         SizeSpec::Fill => parent.w,
@@ -227,8 +227,9 @@ fn place_rect(parent: SmRect, anchor: actors::Anchor, offset: [f32; 2], size: [S
         SizeSpec::Fill => parent.h,
     };
 
-    let (rx, ry) = anchor_ref(parent, anchor);
-    let (ax, ay) = anchor_factors(anchor);
+    let (rx, ry) = anchor_ref(parent, align);
+    let ax = align[0];
+    let ay = align[1];
 
     SmRect {
         x: rx + offset[0] - ax * w,
@@ -375,27 +376,27 @@ fn apply_crop_to_rect(mut rect: SmRect, l: f32, r: f32, t: f32, b: f32) -> SmRec
 #[inline(always)]
 fn place_text_baseline(
     parent: SmRect,
-    anchor: actors::Anchor,
+    align: [f32; 2],
     offset: [f32; 2],
-    align: actors::TextAlign,
+    align_text: actors::TextAlign,
     measured_width: f32,
     font: &msdf::Font,
     content: &str,
     pixel_height: f32,
     m: &Metrics,
 ) -> Vector2<f32> {
-    let (rx, ry) = anchor_ref(parent, anchor);
+    let (rx, ry) = anchor_ref(parent, align);
 
-    let align_offset = match align {
+    let align_offset_x = match align_text {
         actors::TextAlign::Left   => 0.0,
         actors::TextAlign::Center => -0.5 * measured_width,
         actors::TextAlign::Right  => -measured_width,
     };
-    let left_sm_x = rx + offset[0] + align_offset;
+    let left_sm_x = rx + offset[0] + align_offset_x;
 
     let (asc, desc) = line_extents_px(font, content, pixel_height);
     let line_h_px = asc + desc;
-    let (_, ay) = anchor_factors(anchor);
+    let ay = align[1];
     let text_top_sm_y = ry + offset[1] - ay * line_h_px;
     let baseline_sm_y = text_top_sm_y + asc;
 
@@ -405,24 +406,8 @@ fn place_text_baseline(
 }
 
 #[inline(always)]
-fn anchor_ref(parent: SmRect, anchor: actors::Anchor) -> (f32, f32) {
-    let (fx, fy) = anchor_factors(anchor);
-    (parent.x + fx * parent.w, parent.y + fy * parent.h)
-}
-
-#[inline(always)]
-const fn anchor_factors(anchor: actors::Anchor) -> (f32, f32) {
-    match anchor {
-        actors::Anchor::TopLeft      => (0.0, 0.0),
-        actors::Anchor::TopCenter    => (0.5, 0.0),
-        actors::Anchor::TopRight     => (1.0, 0.0),
-        actors::Anchor::CenterLeft   => (0.0, 0.5),
-        actors::Anchor::Center       => (0.5, 0.5),
-        actors::Anchor::CenterRight  => (1.0, 0.5),
-        actors::Anchor::BottomLeft   => (0.0, 1.0),
-        actors::Anchor::BottomCenter => (0.5, 1.0),
-        actors::Anchor::BottomRight  => (1.0, 1.0),
-    }
+fn anchor_ref(parent: SmRect, align: [f32; 2]) -> (f32, f32) {
+    (parent.x + align[0] * parent.w, parent.y + align[1] * parent.h)
 }
 
 #[inline(always)]
