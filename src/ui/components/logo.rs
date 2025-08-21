@@ -1,6 +1,6 @@
-// src/ui/components/logo.rs
-use crate::ui::actors::{Actor};
+use crate::ui::actors::Actor;
 use crate::act;
+use crate::core::space::globals::*;
 
 /// Native image sizes (only used for aspect).
 const LOGO_NATIVE_W: f32 = 752.0;
@@ -25,7 +25,10 @@ impl Default for LogoParams {
 
 /// Build the “banner inside logo” stack with the actor DSL.
 /// Returns a `Vec<Actor>` to be included in a screen's actor list.
-pub fn build_logo(params: LogoParams, screen_width: f32) -> Vec<Actor> {
+pub fn build_logo(params: LogoParams) -> Vec<Actor> {
+    // Pull from globals (no screen param needed).
+    let screen_width = SCREEN_WIDTH();
+
     // Logo size from target height
     let logo_aspect = LOGO_NATIVE_W / LOGO_NATIVE_H;
     let logo_h = params.target_h;
@@ -44,7 +47,7 @@ pub fn build_logo(params: LogoParams, screen_width: f32) -> Vec<Actor> {
 
     vec![
         act!(sprite("dance.png"):
-            align(0.0, 0.0): // TopLeft in our TL space
+            align(0.0, 0.0):
             xy(dance_x_tl, dance_y_tl):
             zoomto(dance_w, dance_h)
         ),
@@ -57,6 +60,6 @@ pub fn build_logo(params: LogoParams, screen_width: f32) -> Vec<Actor> {
 }
 
 /// Convenience: build with default params.
-pub fn build_logo_default(screen_width: f32) -> Vec<Actor> {
-    build_logo(LogoParams::default(), screen_width)
+pub fn build_logo_default() -> Vec<Actor> {
+    build_logo(LogoParams::default())
 }

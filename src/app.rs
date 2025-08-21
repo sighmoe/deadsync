@@ -278,7 +278,6 @@ impl App {
                 self.backend_type,
                 self.last_fps,
                 self.last_vpf,
-                &self.metrics, // NEW
             );
             actors.extend(overlay);
         }
@@ -354,6 +353,8 @@ impl App {
         let sz = window.inner_size();
         self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
 
+        crate::core::space::set_current_metrics(self.metrics);
+
         // Backend creation no longer requires a temporary screen.
         let backend = create_backend(self.backend_type, window.clone(), self.vsync_enabled)?;
         self.window = Some(window);
@@ -407,6 +408,9 @@ impl ApplicationHandler for App {
                 if new_size.width > 0 && new_size.height > 0 {
                     // keep metrics in sync
                     self.metrics = space::metrics_for_window(new_size.width, new_size.height);
+
+                    space::set_current_metrics(self.metrics);
+
                     if let Some(backend) = &mut self.backend {
                         renderer::resize(backend, new_size.width, new_size.height);
                     }

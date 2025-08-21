@@ -1,7 +1,7 @@
 //use std::collections::HashMap;
 use cgmath::{Matrix4, Vector2, Vector3};
 
-use crate::core::space::{Metrics, sm};
+use crate::core::space::{Metrics};
 use crate::ui::actors::{self, Actor, SizeSpec};
 use crate::ui::msdf;
 use crate::core::gfx as renderer;

@@ -1,5 +1,3 @@
-// src/screens/menu.rs
-use crate::core::space::{Metrics, sm};
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
@@ -8,6 +6,9 @@ use crate::ui::components::menu_list::{self, MenuParams};
 use crate::act;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+
+// new: import the SCREEN_*() getters
+use crate::core::space::globals::*;
 
 const SELECTED_COLOR_HEX: &str = "#ff5d47";
 const NORMAL_COLOR_HEX: &str = "#888888";
@@ -66,17 +67,17 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     }
 }
 
-pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
-    let screen_width = sm::width(m);
+// keep the Metrics arg in the signature (unused), so call sites don't need to change yet
+pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
     let lp = LogoParams::default();
-    let mut actors = logo::build_logo_default(screen_width);
+    let mut actors = logo::build_logo_default();
     actors.reserve(OPTION_COUNT + 2);
 
     let info2_y_tl = lp.top_margin - INFO_MARGIN_ABOVE - INFO_PX;
     let info1_y_tl = info2_y_tl - INFO_PX - INFO_GAP;
     actors.push(act!(text:
         align(0.5, 0.0):
-        xy(0.5 * screen_width, info1_y_tl):
+        xy(SCREEN_CENTER_X(), info1_y_tl):
         px(INFO_PX):
         font("miso"):
         text("DeadSync 0.2.0"):
@@ -84,7 +85,7 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
     ));
     actors.push(act!(text:
         align(0.5, 0.0):
-        xy(0.5 * screen_width, info2_y_tl):
+        xy(SCREEN_CENTER_X(), info2_y_tl):
         px(INFO_PX):
         font("miso"):
         text("X songs in Y groups"):
@@ -105,7 +106,6 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
         selected_color: selected,
         normal_color:   normal,
         font:           "wendy",
-        screen_width, // NEW
     };
     actors.extend(menu_list::build_vertical_menu(params));
 

@@ -1,9 +1,7 @@
-// src/ui/components/stats_overlay.rs
-
-use crate::core::space::{Metrics, sm};
 use crate::core::gfx::BackendType;
 use crate::ui::actors::Actor;
 use crate::act;
+use crate::core::space::globals::*;
 
 #[inline(always)]
 fn backend_label(b: BackendType) -> &'static str {
@@ -14,19 +12,19 @@ fn backend_label(b: BackendType) -> &'static str {
 }
 
 /// Three-line stats: FPS, VPF, Backend — top-right, miso, white.
-pub fn build(backend: BackendType, fps: f32, vpf: u32, m: &Metrics) -> Vec<Actor> {
+pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
     const PX: f32 = 12.0;
     const GAP: f32 = 4.0;
     const MARGIN_X: f32 = -16.0; // inset from right; negative means leftwards from right edge
     const MARGIN_Y: f32 = 16.0;
     let color = [1.0, 1.0, 1.0, 1.0];
 
-    let w = sm::width(m);
+    let w = SCREEN_WIDTH();
 
     vec![
         act!(text:
-            align(1.0, 0.0):                   // pivot top-right
-            xy(w + MARGIN_X, MARGIN_Y):        // SM xy: from top-left, at right edge + margin
+            align(1.0, 0.0):
+            xy(w + MARGIN_X, MARGIN_Y):
             px(PX):
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):

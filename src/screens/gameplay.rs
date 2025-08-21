@@ -1,11 +1,13 @@
 use crate::core::input::InputState;
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::actors::{Actor};
+use crate::ui::actors::Actor;
 use crate::act;
-use cgmath::{Vector2};
+use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::core::space::{Metrics, sm};
+
+// new: import the globals getters
+use crate::core::space::globals::*;
 
 const PLAYER_SPEED: f32 = 250.0;
 
@@ -38,23 +40,24 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
         return;
     }
 
-    // For axis-aligned/diagonal movement, speed normalization is trivial:
-    // length is 1.0 for cardinal, sqrt(2) for diagonal.
-    let len_sq = dx * dx + dy * dy;              // ∈ {1.0, 2.0}
-    let norm = if len_sq == 2.0 { 0.70710678 } else { 1.0 }; // 1/√2 for diagonals
+    // Normalize diagonal speed (1/√2).
+    let len_sq = dx * dx + dy * dy;                    // ∈ {1.0, 2.0}
+    let norm = if (len_sq - 2.0).abs() < f32::EPSILON { 0.70710678 } else { 1.0 };
 
     let step = PLAYER_SPEED * delta_time * norm;
     state.player_position.x += dx * step;
     state.player_position.y += dy * step;
 }
 
-pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
-    let (cx, cy) = sm::center(m);
+// keep Metrics in the signature (unused), so call sites don't change
+pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
+    let cx = SCREEN_CENTER_X();
+    let cy = SCREEN_CENTER_Y();
 
     let player = act!(quad:
-        align(0.5, 0.5):                   // pivot at center (SM default)
+        align(0.5, 0.5):
         xy(cx + state.player_position.x,
-           cy + state.player_position.y):  // offsets relative to center
+           cy + state.player_position.y):
         zoomto(100.0, 100.0):
         diffuse(0.0, 0.0, 1.0, 1.0)
     );

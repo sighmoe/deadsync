@@ -1,12 +1,13 @@
-// src/screens/options.rs
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::{color};
 use crate::act;
-use crate::core::space::{Metrics, sm};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use rand::prelude::*;
+
+// new: import the SCREEN_*() getters
+use crate::core::space::globals::*;
 
 const HEART_COLORS: [&str; 12] = [
     "#FF5D47", "#FF577E", "#FF47B3", "#DD57FF", "#8885ff", "#3D94FF",
@@ -63,12 +64,14 @@ pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
-pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
+// keep the Metrics arg in the signature (unused), so call sites don't need to change yet
+pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(NUM_HEARTS + 6);
 
-    let w  = sm::width(m);
-    let h  = sm::height(m);
-    let (cx, cy) = sm::center(m);
+    let w  = SCREEN_WIDTH();      // ← was sm::width(m)
+    let h  = SCREEN_HEIGHT();     // ← was sm::height(m)
+    let cx = SCREEN_CENTER_X();   // ← was sm::center(m).0
+    let cy = SCREEN_CENTER_Y();   // ← was sm::center(m).1
 
     // Hearts: stored as offsets around center; convert to SM xy in parent TL space
     actors.extend(state.hearts.iter().map(|h| {
@@ -81,7 +84,7 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
         )
     }));
 
-    actors.push(crate::ui::components::top_bar::build("OPTIONS", w));
+    actors.push(crate::ui::components::top_bar::build("OPTIONS"));
 
     // Corners: compute positions in TL space using fractions (0, .5, 1) of the screen
     let corners = [

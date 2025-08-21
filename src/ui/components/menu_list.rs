@@ -1,6 +1,6 @@
-// src/ui/components/menu_list.rs
 use crate::ui::actors::Actor;
 use crate::act;
+use crate::core::space::globals::*;
 
 #[derive(Clone, Copy)]
 pub struct MenuParams<'a> {
@@ -17,15 +17,12 @@ pub struct MenuParams<'a> {
     pub selected_color: [f32; 4],
     pub normal_color: [f32; 4],
     pub font: &'static str,
-
-    // NEW: needed for SM-style xy (parent TL space)
-    pub screen_width: f32,
 }
 
 /// Build a vertical, center-aligned menu whose visual center stays fixed.
 pub fn build_vertical_menu(p: MenuParams) -> Vec<Actor> {
     let mut out = Vec::with_capacity(p.options.len());
-    let center_x = 0.5 * p.screen_width;
+    let center_x = SCREEN_CENTER_X();
 
     for (i, label) in p.options.iter().enumerate() {
         let selected = i == p.selected_index;
@@ -36,8 +33,8 @@ pub fn build_vertical_menu(p: MenuParams) -> Vec<Actor> {
         let y_top    = center_y - 0.5 * px;
 
         out.push(act!(text:
-            align(0.5, 0.0):    // pivot top-center (within actor)
-            xy(center_x, y_top): // SM xy: absolute in parent TL space
+            align(0.5, 0.0):
+            xy(center_x, y_top):
             px(px):
             diffuse(color[0], color[1], color[2], color[3]):
             font(p.font):
