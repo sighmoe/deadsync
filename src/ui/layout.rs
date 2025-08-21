@@ -422,11 +422,6 @@ fn place_text_baseline(
 }
 
 #[inline(always)]
-fn anchor_ref(parent: SmRect, align: [f32; 2]) -> (f32, f32) {
-    (parent.x + align[0] * parent.w, parent.y + align[1] * parent.h)
-}
-
-#[inline(always)]
 fn line_extents_px(font: &msdf::Font, text: &str, pixel_height: f32) -> (f32, f32) {
     if pixel_height <= 0.0 || font.line_h == 0.0 || text.is_empty() {
         return (0.0, 0.0);
