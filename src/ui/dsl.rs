@@ -110,7 +110,7 @@ macro_rules! act {
             let (mut hx, mut vy) = (0.5f32, 0.5f32);
             let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
             let _ = &mut tint;
-            let mut z: i16 = 0;
+            let z: i16 = 0;
             let mut cell: Option<(u32,u32)> = None;
             let _ = &mut cell;
             let grid: Option<(u32,u32)> = None;
@@ -123,7 +123,7 @@ macro_rules! act {
             let croptop: f32 = 0.0;
             let cropbottom: f32 = 0.0;
             let blend: BlendMode = BlendMode::Alpha;
-            let mut rot_z_deg: f32 = 0.0;
+            let rot_z_deg: f32 = 0.0;
 
             $crate::__ui_act_apply!( ($($tail)+)
                 x y w h hx vy tint z cell grid uv_rect visible flip_x flip_y
@@ -144,7 +144,7 @@ macro_rules! act {
             let (mut hx, mut vy) = (0.5f32, 0.5f32);
             let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
             let _ = &mut tint;
-            let mut z: i16 = 0;
+            let z: i16 = 0;
             let visible: bool = true;
             let flip_x: bool = false;
             let flip_y: bool = false;
@@ -154,6 +154,7 @@ macro_rules! act {
             let cropbottom: f32 = 0.0;
             let blend: BlendMode = BlendMode::Alpha;
             let mut rot_z_deg: f32 = 0.0;
+            let _ = &mut rot_z_deg;
 
             $crate::__ui_act_apply!( ($($tail)+)
                 x y w h hx vy tint z __skip_cell __skip_grid __skip_uv_rect visible flip_x flip_y
@@ -177,7 +178,7 @@ macro_rules! act {
             let mut font: &'static str = "miso";
             let mut content: String = String::new();
             let mut talign = $crate::ui::actors::TextAlign::Left;
-            let mut z: i16 = 0;
+            let z: i16 = 0;
 
             $crate::__ui_act_apply_text!( ($($tail)+)
                 x y hx vy px tint font content talign z
