@@ -95,82 +95,88 @@ pub fn finish_text(
 
 /// Public macro: `act!(sprite("tex.png"): align(...): xy(...): zoomto(...): diffuse(...))`
 ///                `act!(quad: align(...): xy(...): zoomto(...): diffuse(...))`
+
 #[macro_export]
 macro_rules! act {
     (sprite($tex:expr): $($tail:tt)+) => {{
-        use $crate::core::gfx::types::BlendMode;
-        let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        let (mut hx, mut vy) = (0.5f32, 0.5f32);
-        let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
-        let mut z: i16 = 0;
-        let mut cell: Option<(u32,u32)> = None;
-        let grid: Option<(u32,u32)> = None;
-        let uv_rect: Option<[f32;4]> = None;
-        let mut visible: bool = true;
-        let mut flip_x: bool = false;
-        let mut flip_y: bool = false;
-        let mut cropleft: f32 = 0.0;
-        let mut cropright: f32 = 0.0;
-        let mut croptop: f32 = 0.0;
-        let mut cropbottom: f32 = 0.0;
-        let mut blend: BlendMode = BlendMode::Alpha;
+        #[allow(unused_assignments)]
+        {
+            use $crate::core::gfx::types::BlendMode;
+            let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+            let (mut hx, mut vy) = (0.5f32, 0.5f32);
+            let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
+            let z: i16 = 0;
+            let mut cell: Option<(u32,u32)> = None;
+            let grid: Option<(u32,u32)> = None;
+            let uv_rect: Option<[f32;4]> = None;
+            let visible: bool = true;
+            let flip_x: bool = false;
+            let flip_y: bool = false;
+            let cropleft: f32 = 0.0;
+            let cropright: f32 = 0.0;
+            let croptop: f32 = 0.0;
+            let cropbottom: f32 = 0.0;
+            let blend: BlendMode = BlendMode::Alpha;
 
-        $crate::__ui_act_apply!( ($($tail)+)
-            x y w h hx vy tint z cell grid uv_rect visible flip_x flip_y
-            cropleft cropright croptop cropbottom blend
-        );
+            $crate::__ui_act_apply!( ($($tail)+)
+                x y w h hx vy tint z cell grid uv_rect visible flip_x flip_y
+                cropleft cropright croptop cropbottom blend
+            );
 
-        $crate::ui::dsl::finish_sprite(
-            $tex, x,y,w,h,hx,vy,tint,z,cell,grid,uv_rect,visible,flip_x,flip_y,
-            cropleft,cropright,croptop,cropbottom,blend
-        )
+            $crate::ui::dsl::finish_sprite(
+                $tex, x,y,w,h,hx,vy,tint,z,cell,grid,uv_rect,visible,flip_x,flip_y,
+                cropleft,cropright,croptop,cropbottom,blend
+            )
+        }
     }};
     (quad: $($tail:tt)+) => {{
-        use $crate::core::gfx::types::BlendMode;
-        let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
-        let (mut hx, mut vy) = (0.5f32, 0.5f32);
-        let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
-        let mut z: i16 = 0;
-        let mut visible: bool = true;
-        let mut flip_x: bool = false;
-        let mut flip_y: bool = false;
-        let mut cropleft: f32 = 0.0;
-        let mut cropright: f32 = 0.0;
-        let mut croptop: f32 = 0.0;
-        let mut cropbottom: f32 = 0.0;
-        let mut blend: BlendMode = BlendMode::Alpha;
+        #[allow(unused_assignments)]
+        {
+            use $crate::core::gfx::types::BlendMode;
+            let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+            let (mut hx, mut vy) = (0.5f32, 0.5f32);
+            let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
+            let z: i16 = 0;
+            let visible: bool = true;
+            let flip_x: bool = false;
+            let flip_y: bool = false;
+            let cropleft: f32 = 0.0;
+            let cropright: f32 = 0.0;
+            let croptop: f32 = 0.0;
+            let cropbottom: f32 = 0.0;
+            let blend: BlendMode = BlendMode::Alpha;
 
-        // For quads we ignore cell/grid/uv_rect, but the parser still expects placeholders.
-        $crate::__ui_act_apply!( ($($tail)+)
-            x y w h hx vy tint z __skip_cell __skip_grid __skip_uv_rect visible flip_x flip_y
-            cropleft cropright croptop cropbottom blend
-        );
+            $crate::__ui_act_apply!( ($($tail)+)
+                x y w h hx vy tint z __skip_cell __skip_grid __skip_uv_rect visible flip_x flip_y
+                cropleft cropright croptop cropbottom blend
+            );
 
-        $crate::ui::dsl::finish_quad(
-            x,y,w,h,hx,vy,tint,z,visible,flip_x,flip_y,cropleft,cropright,croptop,cropbottom,blend
-        )
+            $crate::ui::dsl::finish_quad(
+                x,y,w,h,hx,vy,tint,z,visible,flip_x,flip_y,cropleft,cropright,croptop,cropbottom,blend
+            )
+        }
     }};
-
     (text: $($tail:tt)+) => {{
-        use $crate::core::gfx::types::BlendMode;
-        let (mut x, mut y) = (0.0f32, 0.0f32);
-        let (mut hx, mut vy) = (0.5f32, 0.5f32);
-        let mut px: f32 = 16.0;
-        let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
-        let mut font: &'static str = "miso";
-        let mut content: String = String::new();
-        let mut talign = $crate::ui::actors::TextAlign::Left;
-        let mut z: i16 = 0;
+        #[allow(unused_assignments)]
+        {
+            let (mut x, mut y) = (0.0f32, 0.0f32);
+            let (mut hx, mut vy) = (0.5f32, 0.5f32);
+            let mut px: f32 = 16.0;
+            let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
+            let mut font: &'static str = "miso";
+            let mut content: String = String::new();
+            let mut talign = $crate::ui::actors::TextAlign::Left;
+            let z: i16 = 0;
 
-        $crate::__ui_act_apply_text!( ($($tail)+)
-            x y hx vy px tint font content talign z
-        );
+            $crate::__ui_act_apply_text!( ($($tail)+)
+                x y hx vy px tint font content talign z
+            );
 
-        $crate::ui::dsl::finish_text(
-            content, x, y, hx, vy, px, tint, font, talign, z
-        )
+            $crate::ui::dsl::finish_text(content, x, y, hx, vy, px, tint, font, talign, z)
+        }
     }};
 }
+
 
 /// Internal: command list muncher (`cmd(args): cmd2(...): ...`)
 #[doc(hidden)]

@@ -34,6 +34,7 @@ pub fn set_current_metrics(m: Metrics) {
 ///   use crate::core::space::globals::*;
 ///   let w = SCREEN_WIDTH();
 #[allow(non_snake_case)]
+#[allow(dead_code)]
 pub mod globals {
     use super::CURRENT_METRICS;
 

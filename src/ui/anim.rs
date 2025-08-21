@@ -24,7 +24,7 @@
 //!     diffuse(s.tint[0], s.tint[1], s.tint[2], s.tint[3])
 //! );
 //! ```
-
+#![allow(dead_code)]
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
