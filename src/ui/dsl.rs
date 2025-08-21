@@ -105,8 +105,10 @@ macro_rules! act {
             let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
             let (mut hx, mut vy) = (0.5f32, 0.5f32);
             let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
+            let _ = &mut tint;
             let z: i16 = 0;
             let mut cell: Option<(u32,u32)> = None;
+            let _ = &mut cell;
             let grid: Option<(u32,u32)> = None;
             let uv_rect: Option<[f32;4]> = None;
             let visible: bool = true;
@@ -136,6 +138,7 @@ macro_rules! act {
             let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
             let (mut hx, mut vy) = (0.5f32, 0.5f32);
             let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
+            let _ = &mut tint;
             let z: i16 = 0;
             let visible: bool = true;
             let flip_x: bool = false;
@@ -163,6 +166,7 @@ macro_rules! act {
             let (mut hx, mut vy) = (0.5f32, 0.5f32);
             let mut px: f32 = 16.0;
             let mut tint: [f32;4] = [1.0, 1.0, 1.0, 1.0];
+            let _ = &mut tint;
             let mut font: &'static str = "miso";
             let mut content: String = String::new();
             let mut talign = $crate::ui::actors::TextAlign::Left;

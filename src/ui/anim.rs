@@ -24,7 +24,7 @@
 //!     diffuse(s.tint[0], s.tint[1], s.tint[2], s.tint[3])
 //! );
 //! ```
-#![allow(dead_code)]
+#![allow(unused_assignments,dead_code)]
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -255,7 +255,7 @@ impl Segment {
         for p in &self.prepared {
             match p.kind {
                 PreparedKind::Visible(_) | PreparedKind::FlipX(_) | PreparedKind::FlipY(_) => {
-                    let mut s_mut = s.clone();
+                    let s_mut = s.clone();
                     let _ = &s_mut; // no-op (keeps pattern consistent); actual write happens in update where we have &mut state
                 }
                 _ => {}
@@ -499,7 +499,7 @@ impl TweenSeq {
             if finished_now {
                 // finalize segment (ensure we end on exact targets)
                 if let Some(Step::Segment(seg)) = self.current.take() {
-                    let mut seg = seg.clone();
+                    let seg = seg.clone();
                     // apply final values explicitly
                     for p in &seg.prepared {
                         p.apply_final(&mut self.state);
