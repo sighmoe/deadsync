@@ -3,7 +3,7 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::{color};
 use crate::act;
-use crate::core::space::Metrics;
+use crate::core::space::{Metrics, sm};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use rand::prelude::*;
@@ -66,10 +66,9 @@ pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
 pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(NUM_HEARTS + 6);
 
-    let w = m.right - m.left;
-    let h = m.top - m.bottom;
-    let cx = 0.5 * w;
-    let cy = 0.5 * h;
+    let w  = sm::width(m);
+    let h  = sm::height(m);
+    let (cx, cy) = sm::center(m);
 
     // Hearts: stored as offsets around center; convert to SM xy in parent TL space
     actors.extend(state.hearts.iter().map(|h| {
@@ -92,8 +91,7 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
         ((1.0_f32, 1.0_f32), [-12.0, -12.0], [1.0, 0.6, 0.2, 1.0]), // BottomRight
     ];
     actors.extend(corners.into_iter().map(|((hx, vy), off, col)| {
-        let x = hx * w + off[0];
-        let y = vy * h + off[1];
+        let (x, y) = (hx * w + off[0], vy * h + off[1]);
         act!(quad:
             align(hx, vy):      // pivot at the corner
             xy(x, y):           // absolute SM xy in parent TL space

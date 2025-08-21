@@ -1,5 +1,5 @@
 // src/screens/menu.rs
-use crate::core::space::Metrics;
+use crate::core::space::{Metrics, sm};
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
@@ -67,7 +67,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
-    let screen_width = m.right - m.left;
+    let screen_width = sm::width(m);
     let lp = LogoParams::default();
     let mut actors = logo::build_logo_default(screen_width);
     actors.reserve(OPTION_COUNT + 2);

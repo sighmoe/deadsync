@@ -1,6 +1,6 @@
 // src/ui/components/stats_overlay.rs
 
-use crate::core::space::Metrics;
+use crate::core::space::{Metrics, sm};
 use crate::core::gfx::BackendType;
 use crate::ui::actors::Actor;
 use crate::act;
@@ -21,7 +21,7 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32, m: &Metrics) -> Vec<Actor
     const MARGIN_Y: f32 = 16.0;
     let color = [1.0, 1.0, 1.0, 1.0];
 
-    let w = m.right - m.left;
+    let w = sm::width(m);
 
     vec![
         act!(text:
