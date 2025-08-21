@@ -99,7 +99,8 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
             align(hx, vy):      // pivot at the corner
             xy(x, y):           // absolute SM xy in parent TL space
             zoomto(10.0, 10.0):
-            diffuse(col[0], col[1], col[2], col[3])
+            diffuse(col[0], col[1], col[2], col[3]):
+            rotationz(30)
         )
     }));
 

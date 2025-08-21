@@ -59,6 +59,7 @@ pub enum Actor {
         croptop: f32,
         cropbottom: f32,
         blend: BlendMode,
+        rot_z_deg: f32,
     },
 
     /// Text actor:

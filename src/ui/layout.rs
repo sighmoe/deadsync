@@ -1,6 +1,4 @@
-//use std::collections::HashMap;
-use cgmath::{Matrix4, Vector2, Vector3};
-
+use cgmath::{Matrix4, Vector2, Vector3, Deg};
 use crate::core::space::{Metrics};
 use crate::ui::actors::{self, Actor, SizeSpec};
 use crate::ui::msdf;
@@ -91,6 +89,7 @@ fn build_actor_recursive(
             align, offset, size, source, tint, z,
             cell, grid, uv_rect, visible, flip_x, flip_y,
             cropleft, cropright, croptop, cropbottom, blend,
+            rot_z_deg,
         } => {
             if !*visible { return; }
             let rect = place_rect(parent, *align, *offset, *size);
@@ -99,6 +98,7 @@ fn build_actor_recursive(
             push_sprite(
                 out, rect, m, *source, *tint, *uv_rect, *cell, *grid,
                 *flip_x, *flip_y, *cropleft, *cropright, *croptop, *cropbottom, *blend,
+                *rot_z_deg,
             );
             let layer = base_z.saturating_add(*z);
             for i in before..out.len() {
@@ -113,7 +113,10 @@ fn build_actor_recursive(
         } => {
             if let Some(fm) = fonts.get(font) {
                 let measured = fm.measure_line_width(content, *px);
-                let origin = place_text_baseline(parent, *align, *offset, *align_text, measured, fm, content, *px, m);
+                let origin = place_text_baseline(
+                    parent, *align, *offset, *align_text,
+                    measured, fm, content, *px, m
+                );
                 let layer = base_z.saturating_add(*z);
 
                 for g in msdf::layout_line(fm, content, *px, origin) {
@@ -147,22 +150,26 @@ fn build_actor_recursive(
 
             if let Some(bg) = background {
                 match bg {
+                    // Color background -> solid quad tinted with that color
                     actors::Background::Color(c) => {
                         let before = out.len();
                         push_sprite(
                             out, rect, m, actors::SpriteSource::Solid, *c,
-                            None, None, None, false, false, 0.0, 0.0, 0.0, 0.0, BlendMode::Alpha,
+                            None, None, None, false, false,
+                            0.0, 0.0, 0.0, 0.0, BlendMode::Alpha, 0.0,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
                             out[i].order = { let o = *order_counter; *order_counter += 1; o };
                         }
                     }
+                    // Texture background -> textured quad with white tint
                     actors::Background::Texture(tex) => {
                         let before = out.len();
                         push_sprite(
-                            out, rect, m, actors::SpriteSource::Texture(*tex), [1.0,1.0,1.0,1.0],
-                            None, None, None, false, false, 0.0, 0.0, 0.0, 0.0, BlendMode::Alpha,
+                            out, rect, m, actors::SpriteSource::Texture(*tex), [1.0, 1.0, 1.0, 1.0],
+                            None, None, None, false, false,
+                            0.0, 0.0, 0.0, 0.0, BlendMode::Alpha, 0.0,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
@@ -256,6 +263,14 @@ fn rect_transform(rect: SmRect, m: &Metrics) -> Matrix4<f32> {
 }
 
 #[inline(always)]
+fn rect_transform_with_rot(rect: SmRect, m:&Metrics, rot_z_deg:f32) -> Matrix4<f32> {
+    let (center, size) = sm_rect_to_world_center_size(rect, m);
+    Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0))
+        * Matrix4::from_angle_z(Deg(rot_z_deg))
+        * Matrix4::from_nonuniform_scale(size.x, size.y, 1.0)
+}
+
+#[inline(always)]
 fn calculate_uvs(
     texture: &'static str,
     uv_rect: Option<[f32; 4]>,
@@ -321,6 +336,7 @@ fn push_sprite(
     croptop: f32,
     cropbottom: f32,
     blend: BlendMode,
+    rot_z_deg: f32,
 ) {
     // Clamp crop values ONCE here.
     let (cl, cr, ct, cb) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
@@ -340,16 +356,16 @@ fn push_sprite(
         }
     };
 
+    let transform = if rot_z_deg != 0.0 {
+        rect_transform_with_rot(cropped_rect, m, rot_z_deg)
+    } else {
+        rect_transform(cropped_rect, m)
+    };
+
     out.push(renderer::ScreenObject {
-        object_type: renderer::ObjectType::Sprite {
-            texture_id,
-            tint,
-            uv_scale,
-            uv_offset,
-        },
-        transform: rect_transform(cropped_rect, m),
+        object_type: renderer::ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset },
+        transform,
         blend,
-        // Filled in by caller after push; need placeholders to satisfy struct init.
         z: 0,
         order: 0,
     });
