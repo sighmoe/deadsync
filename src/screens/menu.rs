@@ -76,7 +76,7 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
     let info1_y_tl = info2_y_tl - INFO_PX - INFO_GAP;
     actors.push(act!(text:
         align(0.5, 0.0):
-        xy(0.0, info1_y_tl):
+        xy(0.5 * screen_width, info1_y_tl):
         px(INFO_PX):
         font("miso"):
         text("DeadSync 0.2.0"):
@@ -84,7 +84,7 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
     ));
     actors.push(act!(text:
         align(0.5, 0.0):
-        xy(0.0, info2_y_tl):
+        xy(0.5 * screen_width, info2_y_tl):
         px(INFO_PX):
         font("miso"):
         text("X songs in Y groups"):
@@ -105,9 +105,9 @@ pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
         selected_color: selected,
         normal_color:   normal,
         font:           "wendy",
+        screen_width, // NEW
     };
     actors.extend(menu_list::build_vertical_menu(params));
 
-    // <-- return the vector
     actors
 }

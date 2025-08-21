@@ -218,20 +218,28 @@ fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
 
 #[inline(always)]
 fn place_rect(parent: SmRect, align: [f32; 2], offset: [f32; 2], size: [SizeSpec; 2]) -> SmRect {
+    // StepMania semantics:
+    // - `offset` (xy) is in the parent's local top-left space.
+    // - `align` only affects the pivot inside *this* rect.
     let w = match size[0] {
         SizeSpec::Px(w) => w,
-        SizeSpec::Fill => parent.w,
+        SizeSpec::Fill  => parent.w,
     };
     let h = match size[1] {
         SizeSpec::Px(h) => h,
-        SizeSpec::Fill => parent.h,
+        SizeSpec::Fill  => parent.h,
     };
 
-    let (rx, ry) = anchor_ref(parent, align);
+    // Parent reference is ALWAYS its top-left.
+    let rx = parent.x;
+    let ry = parent.y;
+
+    // Actor's internal pivot from align (0..1 inside its own rect).
     let ax = align[0];
     let ay = align[1];
 
     SmRect {
+        // Put the actor's pivot at (rx + offset.x, ry + offset.y)
         x: rx + offset[0] - ax * w,
         y: ry + offset[1] - ay * h,
         w,
@@ -376,32 +384,40 @@ fn apply_crop_to_rect(mut rect: SmRect, l: f32, r: f32, t: f32, b: f32) -> SmRec
 #[inline(always)]
 fn place_text_baseline(
     parent: SmRect,
-    align: [f32; 2],
+    actor_align: [f32; 2],
     offset: [f32; 2],
-    align_text: actors::TextAlign,
+    align: actors::TextAlign,
     measured_width: f32,
     font: &msdf::Font,
     content: &str,
     pixel_height: f32,
     m: &Metrics,
 ) -> Vector2<f32> {
-    let (rx, ry) = anchor_ref(parent, align);
+    // Parent reference is ALWAYS its top-left in SM.
+    let rx = parent.x;
+    let ry = parent.y;
 
-    let align_offset_x = match align_text {
+    // Horizontal text layout relative to the baseline's x:
+    // talign(left)=0, center=-W/2, right=-W
+    let align_offset = match align {
         actors::TextAlign::Left   => 0.0,
         actors::TextAlign::Center => -0.5 * measured_width,
         actors::TextAlign::Right  => -measured_width,
     };
-    let left_sm_x = rx + offset[0] + align_offset_x;
 
+    // Vertical: use actor align's Y to position the *line box* (asc+desc).
     let (asc, desc) = line_extents_px(font, content, pixel_height);
-    let line_h_px = asc + desc;
-    let ay = align[1];
-    let text_top_sm_y = ry + offset[1] - ay * line_h_px;
-    let baseline_sm_y = text_top_sm_y + asc;
+    let line_h_px   = asc + desc;
+    let ay          = actor_align[1]; // only vertical matters for baseline
 
-    let world_x = m.left + left_sm_x;
+    // Top of the line box given xy ay
+    let text_top_sm_y   = ry + offset[1] - ay * line_h_px;
+    let baseline_sm_y   = text_top_sm_y + asc;
+
+    // Convert SM top-left "px" to world
+    let world_x = m.left + (rx + offset[0] + align_offset);
     let world_y = m.top  - baseline_sm_y;
+
     Vector2::new(world_x, world_y)
 }
 

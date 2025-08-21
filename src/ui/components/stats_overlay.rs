@@ -1,3 +1,6 @@
+// src/ui/components/stats_overlay.rs
+
+use crate::core::space::Metrics;
 use crate::core::gfx::BackendType;
 use crate::ui::actors::Actor;
 use crate::act;
@@ -11,17 +14,19 @@ fn backend_label(b: BackendType) -> &'static str {
 }
 
 /// Three-line stats: FPS, VPF, Backend — top-right, miso, white.
-pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
+pub fn build(backend: BackendType, fps: f32, vpf: u32, m: &Metrics) -> Vec<Actor> {
     const PX: f32 = 12.0;
     const GAP: f32 = 4.0;
-    const MARGIN_X: f32 = -16.0; // inset from right for TopRight anchor
+    const MARGIN_X: f32 = -16.0; // inset from right; negative means leftwards from right edge
     const MARGIN_Y: f32 = 16.0;
     let color = [1.0, 1.0, 1.0, 1.0];
 
+    let w = m.right - m.left;
+
     vec![
         act!(text:
-            align(1.0, 0.0):
-            xy(MARGIN_X, MARGIN_Y):
+            align(1.0, 0.0):                   // pivot top-right
+            xy(w + MARGIN_X, MARGIN_Y):        // SM xy: from top-left, at right edge + margin
             px(PX):
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):
@@ -30,7 +35,7 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
         ),
         act!(text:
             align(1.0, 0.0):
-            xy(MARGIN_X, MARGIN_Y + PX + GAP):
+            xy(w + MARGIN_X, MARGIN_Y + PX + GAP):
             px(PX):
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):
@@ -39,7 +44,7 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
         ),
         act!(text:
             align(1.0, 0.0):
-            xy(MARGIN_X, MARGIN_Y + 2.0 * PX + 2.0 * GAP):
+            xy(w + MARGIN_X, MARGIN_Y + 2.0 * PX + 2.0 * GAP):
             px(PX):
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):

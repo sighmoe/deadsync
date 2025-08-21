@@ -3,6 +3,7 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::{color};
 use crate::act;
+use crate::core::space::Metrics;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use rand::prelude::*;
@@ -62,21 +63,28 @@ pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
+pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(NUM_HEARTS + 6);
 
+    let w = m.right - m.left;
+    let h = m.top - m.bottom;
+    let cx = 0.5 * w;
+    let cy = 0.5 * h;
+
+    // Hearts: stored as offsets around center; convert to SM xy in parent TL space
     actors.extend(state.hearts.iter().map(|h| {
         act!(sprite("hearts_4x4.png"):
             align(0.5, 0.5):
-            xy(h.pos[0], h.pos[1]):
+            xy(cx + h.pos[0], cy + h.pos[1]):
             zoomto(HEART_SIZE, HEART_SIZE):
             cell(h.cell.0, h.cell.1):
             diffuse(h.color[0], h.color[1], h.color[2], h.color[3])
         )
     }));
 
-    actors.push(crate::ui::components::top_bar::build("OPTIONS"));
+    actors.push(crate::ui::components::top_bar::build("OPTIONS", w));
 
+    // Corners: compute positions in TL space using fractions (0, .5, 1) of the screen
     let corners = [
         ((0.0_f32, 0.0_f32), [ 12.0,  12.0], [1.0, 0.9, 0.2, 1.0]), // TopLeft
         ((1.0_f32, 0.0_f32), [-12.0,  12.0], [0.2, 1.0, 0.6, 1.0]), // TopRight
@@ -84,17 +92,19 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ((1.0_f32, 1.0_f32), [-12.0, -12.0], [1.0, 0.6, 0.2, 1.0]), // BottomRight
     ];
     actors.extend(corners.into_iter().map(|((hx, vy), off, col)| {
+        let x = hx * w + off[0];
+        let y = vy * h + off[1];
         act!(quad:
-            align(hx, vy):
-            xy(off[0], off[1]):
+            align(hx, vy):      // pivot at the corner
+            xy(x, y):           // absolute SM xy in parent TL space
             zoomto(10.0, 10.0):
             diffuse(col[0], col[1], col[2], col[3])
         )
     }));
 
     actors.push(act!(text:
-        align(0.5, 1.0):        // BottomCenter
-        xy(0.0, -100.0):
+        align(0.5, 1.0):                    // pivot bottom-center
+        xy(0.5 * w, h - 100.0):             // SM xy in TL space
         px(60.0):
         font("miso"):
         diffuse(0.8, 0.9, 0.7, 1.0):

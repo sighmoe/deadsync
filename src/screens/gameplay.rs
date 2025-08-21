@@ -5,6 +5,7 @@ use crate::act;
 use cgmath::{Vector2};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use crate::core::space::Metrics;
 
 const PLAYER_SPEED: f32 = 250.0;
 
@@ -47,10 +48,16 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
     state.player_position.y += dy * step;
 }
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
+pub fn get_actors(state: &State, m: &Metrics) -> Vec<Actor> {
+    let w = m.right - m.left;
+    let h = m.top - m.bottom;
+    let cx = 0.5 * w;
+    let cy = 0.5 * h;
+
     let player = act!(quad:
-        align(0.5, 0.5):
-        xy(state.player_position.x, state.player_position.y):
+        align(0.5, 0.5):                   // pivot at center (SM default)
+        xy(cx + state.player_position.x,
+           cy + state.player_position.y):  // offsets relative to center
         zoomto(100.0, 100.0):
         diffuse(0.0, 0.0, 1.0, 1.0)
     );

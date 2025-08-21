@@ -269,16 +269,16 @@ impl App {
 
         let mut actors = match self.current_screen {
             CurrentScreen::Menu     => menu::get_actors(&self.menu_state, &self.metrics),
-            CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state),
-            CurrentScreen::Options  => options::get_actors(&self.options_state),
+            CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state, &self.metrics),
+            CurrentScreen::Options  => options::get_actors(&self.options_state, &self.metrics),
         };
 
-        // Append overlay last so it renders on top
         if self.show_overlay {
             let overlay = crate::ui::components::stats_overlay::build(
                 self.backend_type,
                 self.last_fps,
                 self.last_vpf,
+                &self.metrics, // NEW
             );
             actors.extend(overlay);
         }
