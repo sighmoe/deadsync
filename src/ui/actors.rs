@@ -35,8 +35,8 @@ pub enum SpriteSource {
 pub enum Actor {
     /// Unified Sprite:
     /// - `align`: [halign, valign] in *child* space (0=left/top, 0.5=center, 1=right/bottom). Continuous.
-    /// - Parent reference is *the same fraction* inside parent (SM-like align).
-    /// - `offset`: (x,y) added at that parent reference point, before pivot offset.
+    /// - **Parent reference is the parent's top-left** (SM top-left space). `align` only affects the child's pivot.
+    /// - `offset`: (x,y) is applied in the parent’s top-left space at that reference point, then the pivot offset is applied.
     /// - `size`: [Px(..) or Fill] in parent “SM px”.
     /// - `source`: texture or solid
     /// - `cell`/`grid`/`uv_rect` as before
