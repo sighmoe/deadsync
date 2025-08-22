@@ -252,7 +252,7 @@ macro_rules! act {
 macro_rules! __ui_act_apply {
     ( () $($vars:ident)+ ) => { () };
 
-    ( ($cmd:ident ( $($args:expr),* ) : $($rest:tt)* )
+    ( ($cmd:ident ( $($args:tt)* ) : $($rest:tt)* )
       $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
       $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
       $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
@@ -260,7 +260,7 @@ macro_rules! __ui_act_apply {
       $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $crate::__ui_act_apply_one!{
-            $cmd ( $($args),* )
+            $cmd ( $($args)* )
             $x $y $w $h $hx $vy $tint $z $cell $grid $uv_rect $visible $flip_x $flip_y
             $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg $texcoordvelocity
             $__tw_steps $__tw_cur $__site_extra
@@ -272,7 +272,7 @@ macro_rules! __ui_act_apply {
         );
     }};
 
-    ( ($cmd:ident ( $($args:expr),* ) )
+    ( ($cmd:ident ( $($args:tt)* ) )
       $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
       $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
       $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
@@ -280,7 +280,7 @@ macro_rules! __ui_act_apply {
       $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $crate::__ui_act_apply_one!{
-            $cmd ( $($args),* )
+            $cmd ( $($args)* )
             $x $y $w $h $hx $vy $tint $z $cell $grid $uv_rect $visible $flip_x $flip_y
             $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg $texcoordvelocity
             $__tw_steps $__tw_cur $__site_extra

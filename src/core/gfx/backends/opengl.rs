@@ -251,7 +251,7 @@ pub fn draw(
                 }
                 crate::core::gfx::types::BlendMode::Add => {
                     gl.blend_equation(glow::FUNC_ADD);
-                    gl.blend_func(glow::ONE, glow::ONE);
+                    gl.blend_func(glow::SRC_ALPHA, glow::ONE);
                 }
                 crate::core::gfx::types::BlendMode::Multiply => {
                     gl.blend_equation(glow::FUNC_ADD);
