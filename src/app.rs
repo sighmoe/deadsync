@@ -87,7 +87,6 @@ fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
     (backend, vsync, fullscreen)
 }
 
-// ---- app state ----
 pub struct App {
     window: Option<Arc<Window>>,
     backend: Option<renderer::Backend>,
@@ -101,6 +100,7 @@ pub struct App {
     frame_count: u32,
     last_title_update: Instant,
     last_frame_time: Instant,
+    start_time: Instant, // NEW
     vsync_enabled: bool,
     fullscreen_enabled: bool,
     fonts: HashMap<&'static str, msdf::Font>,
@@ -125,6 +125,7 @@ impl App {
             frame_count: 0,
             last_title_update: Instant::now(),
             last_frame_time: Instant::now(),
+            start_time: Instant::now(), // NEW
             metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
             vsync_enabled,
             fullscreen_enabled,
@@ -260,8 +261,8 @@ impl App {
         Ok(())
     }
 
-    fn build_screen(&self, actors: &[Actor], clear_color: [f32; 4]) -> renderer::Screen {
-        crate::ui::layout::build_screen(actors, clear_color, &self.metrics, &self.fonts)
+    fn build_screen(&self, actors: &[Actor], clear_color: [f32; 4], total_elapsed: f32) -> renderer::Screen {
+        crate::ui::layout::build_screen(actors, clear_color, &self.metrics, &self.fonts, total_elapsed)
     }
 
     fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
@@ -366,7 +367,7 @@ impl App {
 
         // Now with fonts loaded, build the REAL initial screen.
         let (actors, clear_color) = self.get_current_actors();
-        let initial_screen = self.build_screen(&actors, clear_color);
+        let initial_screen = self.build_screen(&actors, clear_color, self.start_time.elapsed().as_secs_f32());
         if let Some(b) = &mut self.backend {
             renderer::load_screen(b, &initial_screen)?;
         }
@@ -441,6 +442,7 @@ impl ApplicationHandler for App {
                 let now = Instant::now();
                 let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
                 self.last_frame_time = now;
+                let total_elapsed = now.duration_since(self.start_time).as_secs_f32(); // NEW
 
                 crate::ui::runtime::tick(delta_time);
 
@@ -449,7 +451,7 @@ impl ApplicationHandler for App {
                 }
 
                 let (actors, clear_color) = self.get_current_actors();
-                let screen = self.build_screen(&actors, clear_color);
+                let screen = self.build_screen(&actors, clear_color, total_elapsed); // NEW
 
                 // Update title/FPS without conflicting borrows.
                 self.update_fps_title(&window, now);
@@ -466,7 +468,7 @@ impl ApplicationHandler for App {
             }
             _ => {}
         }
-}
+    }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {

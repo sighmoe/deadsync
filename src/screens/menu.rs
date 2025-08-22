@@ -6,6 +6,7 @@ use crate::ui::components::menu_list::{self, MenuParams};
 use crate::act;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use std::time::Instant;
 
 // new: import the SCREEN_*() getters
 use crate::core::space::globals::*;
@@ -27,10 +28,19 @@ const INFO_MARGIN_ABOVE: f32 = 20.0;
 
 pub struct State {
     pub selected_index: usize,
+    // For Simply Love background:
+    t0: Instant,
+    active_color_index: i32,
+    rainbow_mode: bool,
 }
 
 pub fn init() -> State {
-    State { selected_index: 0 }
+    State {
+        selected_index: 0,
+        t0: Instant::now(),
+        active_color_index: 0, // change this when you swap palettes
+        rainbow_mode: false,   // set true to get white backdrop (RainbowMode)
+    }
 }
 
 pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
@@ -70,7 +80,78 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 // keep the Metrics arg in the signature (unused), so call sites don't need to change yet
 pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
     let lp = LogoParams::default();
-    let mut actors = logo::build_logo_default();
+    let mut actors: Vec<Actor> = Vec::with_capacity(64);
+
+    // ---------- Simply Love title-screen background ----------
+    // Backdrop: solid black (or white if RainbowMode).
+    let w = screen_width();
+    let h = screen_height();
+    let backdrop = if state.rainbow_mode { [1.0, 1.0, 1.0, 1.0] } else { [0.0, 0.0, 0.0, 1.0] };
+    actors.push(act!(quad:
+        align(0.0, 0.0):
+        xy(0.0, 0.0):
+        zoomto(w, h):
+        diffuse(backdrop[0], backdrop[1], backdrop[2], backdrop[3]):
+        z(-200)
+    ));
+
+    // Heart sprites: SharedBackground.png
+    // Arrays copied from Simply Love:
+    const COLOR_ADD: [i32; 10]       = [-1, 0, 0, -1, -1, -1, 0, 0, 0, 0];
+    const DIFFUSE_ALPHA: [f32; 10]   = [0.05, 0.20, 0.10, 0.10, 0.10, 0.10, 0.10, 0.05, 0.10, 0.10];
+    const XY: [f32; 10]              = [0.0, 40.0, 80.0, 120.0, 200.0, 280.0, 360.0, 400.0, 480.0, 560.0];
+    const VEL: [[f32; 2]; 10] = [
+        [ 0.03,  0.01], [ 0.03,  0.02], [ 0.03,  0.01], [ 0.02,  0.02], [ 0.03,  0.03],
+        [ 0.02,  0.02], [ 0.03,  0.01], [-0.03,  0.01], [ 0.05,  0.03], [ 0.03,  0.04],
+    ];
+
+    // Simply Love main palette (12 colors). Used by GetHexColor(index).
+    // These match the common SL hues you’re already using elsewhere.
+    const THEME_COLORS: [&str; 12] = [
+        "#FF5D47", "#FF577E", "#FF47B3", "#DD57FF", "#8885FF", "#3D94FF",
+        "#00B8CC", "#5CE087", "#AEFA44", "#FFFF00", "#FFBE00", "#FF7D00",
+    ];
+
+    #[inline(always)]
+    fn theme_color_rgba(idx: i32) -> [f32; 4] {
+        use crate::ui::color::rgba_hex;
+        let n = THEME_COLORS.len() as i32;
+        let i = idx.rem_euclid(n) as usize;
+        rgba_hex(THEME_COLORS[i])
+    }
+
+    // Per-spec: zoom 1.3, position (xy[i], xy[i]), faint alpha, texcoordvelocity.
+    let t = state.t0.elapsed().as_secs_f32();
+    let heart_w = w * 1.3;
+    let heart_h = h * 1.3;
+
+    for i in 0..10 {
+        // palette index with offset
+        let rgba = {
+            let mut c = theme_color_rgba(state.active_color_index + COLOR_ADD[i]);
+            c[3] = DIFFUSE_ALPHA[i]; // faint alpha from array
+            c
+        };
+
+        // UV scroll: wrap via fractional part so it keeps moving forever.
+        let mut u = (VEL[i][0] * t).fract();
+        let mut v = (VEL[i][1] * t).fract();
+        if u < 0.0 { u += 1.0; }
+        if v < 0.0 { v += 1.0; }
+
+        actors.push(act!(sprite("hearts_4x4.png"):
+            align(0.0, 0.0):
+            xy(XY[i], XY[i]):
+            zoomto(heart_w, heart_h):
+            texrect(u, v, u + 1.0, v + 1.0): // StepMania: customtexturerect(0,0,1,1) + texcoordvelocity
+            diffuse(rgba[0], rgba[1], rgba[2], rgba[3]):
+            z(-100)
+        ));
+    }
+    // ---------- end Simply Love background ----------
+
+    // existing header/info + logo/menu sit above the background:
+    actors.extend(logo::build_logo_default());
     actors.reserve(OPTION_COUNT + 2);
 
     let info2_y_tl = lp.top_margin - INFO_MARGIN_ABOVE - INFO_PX;

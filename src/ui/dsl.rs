@@ -15,6 +15,7 @@ pub fn finish_sprite(
     cropleft: f32, cropright: f32, croptop: f32, cropbottom: f32,
     blend: BlendMode,
     rot_z_deg: f32,
+    texcoordvelocity: Option<[f32; 2]>, // NEW
 ) -> Actor {
     Actor::Sprite {
         align: [hx, vy],
@@ -35,6 +36,7 @@ pub fn finish_sprite(
         cropbottom,
         blend,
         rot_z_deg,
+        texcoordvelocity, // NEW
     }
 }
 
@@ -68,6 +70,7 @@ pub fn finish_quad(
         cropbottom,
         blend,
         rot_z_deg,
+        texcoordvelocity: None, // Quads can't have texture velocity
     }
 }
 
@@ -119,6 +122,7 @@ macro_rules! act {
             let mut cropbottom: f32 = 0.0;
             let mut blend: BlendMode = BlendMode::Alpha;
             let mut rot_z_deg: f32 = 0.0;
+            let mut texcoordvelocity: Option<[f32; 2]> = None; // NEW
 
             // Inline tween bookkeeping
             let mut __tw_steps: Vec<__anim::Step> = Vec::new();
@@ -128,6 +132,7 @@ macro_rules! act {
             $crate::__ui_act_apply!( ($($tail)+)
                 x y w h hx vy tint z cell grid uv_rect visible flip_x flip_y
                 cropleft cropright croptop cropbottom blend rot_z_deg
+                texcoordvelocity // NEW
                 __tw_steps __tw_cur __site_extra
             );
 
@@ -157,7 +162,8 @@ macro_rules! act {
 
             $crate::ui::dsl::finish_sprite(
                 $tex, x,y,w,h,hx,vy,tint,z,cell,grid,uv_rect,visible,flip_x,flip_y,
-                cropleft,cropright,croptop,cropbottom,blend,rot_z_deg
+                cropleft,cropright,croptop,cropbottom,blend,rot_z_deg,
+                texcoordvelocity // NEW
             )
         }
     }};
@@ -188,6 +194,7 @@ macro_rules! act {
             $crate::__ui_act_apply!( ($($tail)+)
                 x y w h hx vy tint z __skip_cell __skip_grid __skip_uv_rect visible flip_x flip_y
                 cropleft cropright croptop cropbottom blend rot_z_deg
+                __skip_texcoordvelocity // NEW
                 __tw_steps __tw_cur __site_extra
             );
 
@@ -249,18 +256,18 @@ macro_rules! __ui_act_apply {
       $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
       $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
       $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-      $rot_z_deg:ident
+      $rot_z_deg:ident $texcoordvelocity:ident
       $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $crate::__ui_act_apply_one!{
             $cmd ( $($args),* )
             $x $y $w $h $hx $vy $tint $z $cell $grid $uv_rect $visible $flip_x $flip_y
-            $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg
+            $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg $texcoordvelocity
             $__tw_steps $__tw_cur $__site_extra
         }
         $crate::__ui_act_apply!( ($($rest)*) $x $y $w $h $hx $vy $tint 
             $z $cell $grid $uv_rect $visible $flip_x $flip_y
-            $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg
+            $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg $texcoordvelocity
             $__tw_steps $__tw_cur $__site_extra
         );
     }};
@@ -269,17 +276,17 @@ macro_rules! __ui_act_apply {
       $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
       $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
       $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-      $rot_z_deg:ident
+      $rot_z_deg:ident $texcoordvelocity:ident
       $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $crate::__ui_act_apply_one!{
             $cmd ( $($args),* )
             $x $y $w $h $hx $vy $tint $z $cell $grid $uv_rect $visible $flip_x $flip_y
-            $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg
+            $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg $texcoordvelocity
             $__tw_steps $__tw_cur $__site_extra
         }
         $crate::__ui_act_apply!( () $x $y $w $h $hx $vy $tint $z $cell $grid $uv_rect $visible $flip_x $flip_y
-            $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg
+            $cropleft $cropright $croptop $cropbottom $blend $rot_z_deg $texcoordvelocity
             $__tw_steps $__tw_cur $__site_extra
         );
     }};
@@ -295,14 +302,14 @@ macro_rules! __ui_act_apply_one {
         let v: u64 = ($v) as u64;
         #[allow(unused_variables)] { let (_,$_, $___) = (&v, &v, &v); }
         // trailing idents
-        let (_x,_y,_w,_h,_hx,_vy,_tint,_z,_cell,_grid,_uv_rect,_visible,_flip_x,_flip_y,_cropleft,_cropright,_croptop,_cropbottom,_blend,_rot_z_deg,$__tw_steps,$__tw_cur,$__site_extra) = $($rest)*;
+        let (_x,_y,_w,_h,_hx,_vy,_tint,_z,_cell,_grid,_uv_rect,_visible,_flip_x,_flip_y,_cropleft,_cropright,_croptop,_cropbottom,_blend,_rot_z_deg,_texvel,$__tw_steps,$__tw_cur,$__site_extra) = $($rest)*;
         $__site_extra = v;
     }};
 
     // ---- time segment starts ----
     (linear ($d:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
-        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident $rot_z_deg:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(seg) = $__tw_cur.take() { $__tw_steps.push(seg.build()); }
@@ -310,7 +317,7 @@ macro_rules! __ui_act_apply_one {
     }};
     (accelerate ($d:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
-        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident $rot_z_deg:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(seg) = $__tw_cur.take() { $__tw_steps.push(seg.build()); }
@@ -318,7 +325,7 @@ macro_rules! __ui_act_apply_one {
     }};
     (decelerate ($d:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
-        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident $rot_z_deg:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(seg) = $__tw_cur.take() { $__tw_steps.push(seg.build()); }
@@ -326,7 +333,7 @@ macro_rules! __ui_act_apply_one {
     }};
     (sleep ($d:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
-        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident $rot_z_deg:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(seg) = $__tw_cur.take() { $__tw_steps.push(seg.build()); }
@@ -339,7 +346,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() {
@@ -354,7 +361,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.x(($xv) as f32); $__tw_cur = Some(seg); }
@@ -365,7 +372,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.y(($yv) as f32); $__tw_cur = Some(seg); }
@@ -376,7 +383,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.addx(($dx) as f32); $__tw_cur = Some(seg); }
@@ -387,18 +394,35 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.addy(($dy) as f32); $__tw_cur = Some(seg); }
         else { $y += ($dy) as f32; }
     }};
 
+    (zoom ($f:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
+        $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
+    ) => {{
+        let f_val = ($f) as f32;
+        if let Some(mut seg) = $__tw_cur.take() {
+            seg = seg.zoom(f_val, f_val);
+            $__tw_cur = Some(seg);
+        } else {
+            $w = f_val;
+            $h = f_val;
+        }
+    }};
+
     (zoomto ($nw:expr, $nh:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.zoom(($nw) as f32, ($nh) as f32); $__tw_cur = Some(seg); }
@@ -409,7 +433,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.zoom(($nw) as f32, ($nh) as f32); $__tw_cur = Some(seg); }
@@ -420,7 +444,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.zoomx(($nw) as f32); $__tw_cur = Some(seg); }
@@ -431,7 +455,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.zoomy(($nh) as f32); $__tw_cur = Some(seg); }
@@ -442,7 +466,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.addzoomx(($dw) as f32); $__tw_cur = Some(seg); }
@@ -453,7 +477,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.addzoomy(($dh) as f32); $__tw_cur = Some(seg); }
@@ -464,7 +488,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() {
@@ -479,7 +503,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.alpha(($a) as f32); $__tw_cur = Some(seg); }
@@ -490,7 +514,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.alpha(($a) as f32); $__tw_cur = Some(seg); }
@@ -501,7 +525,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.set_visible(($v) as bool); $__tw_cur = Some(seg); }
@@ -512,7 +536,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.flip_x(($v) as bool); $__tw_cur = Some(seg); }
@@ -523,7 +547,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         if let Some(mut seg) = $__tw_cur.take() { seg = seg.flip_y(($v) as bool); $__tw_cur = Some(seg); }
@@ -536,7 +560,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $hx = ($hv) as f32; $vy = ($vv) as f32;
@@ -546,7 +570,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $z = ($v) as i16;
@@ -556,7 +580,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $cell = Some((($c) as u32, ($r) as u32));
@@ -566,7 +590,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $cell = Some((($i) as u32, u32::MAX));
@@ -576,7 +600,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $grid = Some((($c) as u32, ($r) as u32));
@@ -586,17 +610,37 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $uv_rect = Some([($u0) as f32, ($v0) as f32, ($u1) as f32, ($v1) as f32]);
+    }};
+
+    (customtexturerect ($u0:expr, $v0:expr, $u1:expr, $v1:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
+        $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
+    ) => {{
+        $uv_rect = Some([($u0) as f32, ($v0) as f32, ($u1) as f32, ($v1) as f32]);
+    }};
+
+    (texcoordvelocity ($vel_x:expr, $vel_y:expr)
+        $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
+        $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
+        $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
+        $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
+    ) => {{
+        $texcoordvelocity = Some([($vel_x) as f32, ($vel_y) as f32]);
     }};
 
     (visible ($v:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{
         $visible = ($v) as bool;
@@ -606,7 +650,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $cropleft = ($v) as f32; }};
 
@@ -614,7 +658,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $cropright = ($v) as f32; }};
 
@@ -622,7 +666,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $croptop = ($v) as f32; }};
 
@@ -630,7 +674,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $cropbottom = ($v) as f32; }};
 
@@ -638,7 +682,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $blend = $crate::core::gfx::types::BlendMode::Alpha; }};
 
@@ -646,7 +690,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $blend = $crate::core::gfx::types::BlendMode::Alpha; }};
 
@@ -654,7 +698,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $blend = $crate::core::gfx::types::BlendMode::Add; }};
 
@@ -662,7 +706,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $blend = $crate::core::gfx::types::BlendMode::Add; }};
 
@@ -670,7 +714,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $blend = $crate::core::gfx::types::BlendMode::Multiply; }};
 
@@ -678,7 +722,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $rot_z_deg = ($zv) as f32; }};
 
@@ -686,7 +730,7 @@ macro_rules! __ui_act_apply_one {
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
         $tint:ident $z:ident $cell:ident $grid:ident $uv_rect:ident $visible:ident
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
-        $rot_z_deg:ident
+        $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
     ) => {{ $rot_z_deg = ($zv) as f32; }};
 

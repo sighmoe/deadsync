@@ -13,6 +13,7 @@ pub fn build_screen(
     clear_color: [f32; 4],
     m: &Metrics,
     fonts: &std::collections::HashMap<&'static str, msdf::Font>,
+    total_elapsed: f32, // NEW
 ) -> renderer::Screen {
     let mut objects = Vec::with_capacity(estimate_object_count(actors));
     let mut order_counter: u32 = 0;
@@ -35,6 +36,7 @@ pub fn build_screen(
             parent_z,
             &mut order_counter,
             &mut objects,
+            total_elapsed, // NEW
         );
     }
 
@@ -82,6 +84,7 @@ fn build_actor_recursive(
     base_z: i16,
     order_counter: &mut u32,
     out: &mut Vec<renderer::ScreenObject>,
+    total_elapsed: f32, // NEW
 ) {
     match actor {
         // --- SPRITE / QUAD ---
@@ -89,7 +92,7 @@ fn build_actor_recursive(
             align, offset, size, source, tint, z,
             cell, grid, uv_rect, visible, flip_x, flip_y,
             cropleft, cropright, croptop, cropbottom, blend,
-            rot_z_deg,
+            rot_z_deg, texcoordvelocity,
         } => {
             if !*visible { return; }
             let rect = place_rect(parent, *align, *offset, *size);
@@ -98,7 +101,7 @@ fn build_actor_recursive(
             push_sprite(
                 out, rect, m, *source, *tint, *uv_rect, *cell, *grid,
                 *flip_x, *flip_y, *cropleft, *cropright, *croptop, *cropbottom, *blend,
-                *rot_z_deg,
+                *rot_z_deg, *texcoordvelocity, total_elapsed,
             );
             let layer = base_z.saturating_add(*z);
             for i in before..out.len() {
@@ -157,6 +160,7 @@ fn build_actor_recursive(
                             out, rect, m, actors::SpriteSource::Solid, *c,
                             None, None, None, false, false,
                             0.0, 0.0, 0.0, 0.0, BlendMode::Alpha, 0.0,
+                            None, 0.0,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
@@ -170,6 +174,7 @@ fn build_actor_recursive(
                             out, rect, m, actors::SpriteSource::Texture(*tex), [1.0, 1.0, 1.0, 1.0],
                             None, None, None, false, false,
                             0.0, 0.0, 0.0, 0.0, BlendMode::Alpha, 0.0,
+                            None, 0.0,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
@@ -180,7 +185,7 @@ fn build_actor_recursive(
             }
 
             for child in children {
-                build_actor_recursive(child, rect, m, fonts, layer, order_counter, out);
+                build_actor_recursive(child, rect, m, fonts, layer, order_counter, out, total_elapsed);
             }
         }
     }
@@ -278,8 +283,9 @@ fn calculate_uvs(
     grid: Option<(u32, u32)>,
     flip_x: bool,
     flip_y: bool,
-    // Expects pre-clamped fractions
-    cl: f32, cr: f32, ct: f32, cb: f32,
+    cl: f32, cr: f32, ct: f32, cb: f32, // Expects pre-clamped fractions
+    texcoordvelocity: Option<[f32; 2]>,
+    total_elapsed: f32,
 ) -> ([f32; 2], [f32; 2]) {
     // 1) Determine base UV subrect (from explicit rect, cell, or full texture)
     let (mut uv_scale, mut uv_offset) = if let Some([u0, v0, u1, v1]) = uv_rect {
@@ -315,6 +321,12 @@ fn calculate_uvs(
     // 3) Apply flips
     if flip_x { uv_offset[0] += uv_scale[0]; uv_scale[0] = -uv_scale[0]; }
     if flip_y { uv_offset[1] += uv_scale[1]; uv_scale[1] = -uv_scale[1]; }
+    
+    // 4) Apply velocity (after all other calculations)
+    if let Some(vel) = texcoordvelocity {
+        uv_offset[0] += vel[0] * total_elapsed;
+        uv_offset[1] += vel[1] * total_elapsed;
+    }
 
     (uv_scale, uv_offset)
 }
@@ -337,6 +349,8 @@ fn push_sprite(
     cropbottom: f32,
     blend: BlendMode,
     rot_z_deg: f32,
+    texcoordvelocity: Option<[f32; 2]>,
+    total_elapsed: f32,
 ) {
     // Clamp crop values ONCE here.
     let (cl, cr, ct, cb) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
@@ -350,7 +364,8 @@ fn push_sprite(
         actors::SpriteSource::Solid => ("__white", [1.0, 1.0], [0.0, 0.0]),
         actors::SpriteSource::Texture(texture) => {
             let (uv_scale, uv_offset) = calculate_uvs(
-                texture, uv_rect, cell, grid, flip_x, flip_y, cl, cr, ct, cb
+                texture, uv_rect, cell, grid, flip_x, flip_y, cl, cr, ct, cb,
+                texcoordvelocity, total_elapsed
             );
             (texture, uv_scale, uv_offset)
         }
