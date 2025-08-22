@@ -109,8 +109,8 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     ];
 
     const THEME_COLORS: [&str; 12] = [
-        "#FF5D47", "#FF577E", "#FF47B3", "#DD57FF", "#8885FF", "#3D94FF",
-        "#00B8CC", "#5CE087", "#AEFA44", "#FFFF00", "#FFBE00", "#FF7D00",
+        "#C1006F", "#8200A1", "#413AD0", "#0073FF", "#00ADC0", "#5CE087",
+        "#AEFA44", "#FFFF00", "#FFBE00", "#FF7D00", "#FF3C23", "#FF003C",
     ];
 
     #[inline(always)]
