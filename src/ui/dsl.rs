@@ -99,7 +99,7 @@ pub fn finish_text(
 #[macro_export]
 macro_rules! act {
     (sprite($tex:expr): $($tail:tt)+) => {{
-        #[allow(unused_assignments)]
+        #[allow(unused_assignments, unused_mut)]
         {
             use $crate::core::gfx::types::BlendMode;
             use $crate::ui::anim as __anim;
@@ -162,7 +162,7 @@ macro_rules! act {
         }
     }};
     (quad: $($tail:tt)+) => {{
-        #[allow(unused_assignments)]
+        #[allow(unused_assignments, unused_mut)]
         {
             use $crate::core::gfx::types::BlendMode;
             use $crate::ui::anim as __anim;
@@ -218,7 +218,7 @@ macro_rules! act {
         }
     }};
     (text: $($tail:tt)+) => {{
-        #[allow(unused_assignments)]
+        #[allow(unused_assignments, unused_mut)]
         {
             let (mut x, mut y) = (0.0f32, 0.0f32);
             let (mut hx, mut vy) = (0.5f32, 0.5f32);
