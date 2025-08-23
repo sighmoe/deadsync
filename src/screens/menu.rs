@@ -87,11 +87,11 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     actors.extend(logo::build_logo_default());
     actors.push(act!(text:
         align(0.5, 0.0): xy(screen_center_x(), info1_y_tl):
-        px(INFO_PX): font("miso"): text("DeadSync 0.2.0"): talign(center)
+        px(INFO_PX): font("miso"): text("DeadSync 0.2.174"): talign(center)
     ));
     actors.push(act!(text:
         align(0.5, 0.0): xy(screen_center_x(), info2_y_tl):
-        px(INFO_PX): font("miso"): text("X songs in Y groups"): talign(center)
+        px(INFO_PX): font("miso"): text("2672 songs in 29 groups, 209 courses"): talign(center)
     ));
 
     // 3) menu list
@@ -117,6 +117,8 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         title: "EVENT MODE",
         position: screen_bar::ScreenBarPosition::Bottom,
         transparent: true,
+        left_text: Some("PRESS START"),
+        right_text: Some("PRESS START"),
     }));
 
     actors

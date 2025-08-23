@@ -61,6 +61,8 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         title: "OPTIONS",
         position: screen_bar::ScreenBarPosition::Top,
         transparent: false,
+        left_text: None,
+        right_text: None,
     }));
 
     // --- footer bar (demonstration) ---
@@ -68,6 +70,8 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         title: "FOOTER",
         position: screen_bar::ScreenBarPosition::Bottom,
         transparent: false,
+        left_text: None,
+        right_text: None,
     }));
 
     // --- corner spinning quads (testing) ---
