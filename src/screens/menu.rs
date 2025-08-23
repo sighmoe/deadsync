@@ -6,12 +6,13 @@ use crate::ui::components::logo::{self, LogoParams};
 use crate::ui::components::menu_list::{self, MenuParams};
 use crate::act;
 use rand::prelude::*;
+use rand::rng;
+use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use std::time::Instant;
-use rand::rng;
 
 use crate::core::space::globals::*;
+use image;
 
 const SELECTED_COLOR_HEX: &str = "#ff5d47";
 const NORMAL_COLOR_HEX: &str = "#888888";
@@ -28,19 +29,50 @@ const INFO_PX: f32 = 15.0;
 const INFO_GAP: f32 = 5.0;
 const INFO_MARGIN_ABOVE: f32 = 20.0;
 
+// ---- hearts params (match the theme) ----
+const COLOR_ADD: [i32; 10]     = [-1, 0, 0, -1, -1, -1, 0, 0, 0, 0];
+const DIFFUSE_ALPHA: [f32; 10] = [0.0125, 0.05, 0.025, 0.025, 0.025, 0.025, 0.025, 0.0125, 0.025, 0.025];
+const XY: [f32; 10]            = [0.0, 40.0, 80.0, 120.0, 200.0, 280.0, 360.0, 400.0, 480.0, 560.0];
+
+// UV velocities from the StepMania sheet; we map to screen px/sec via a scale
+const UV_VEL: [[f32; 2]; 10] = [
+    [ 0.03, 0.01], [ 0.03, 0.02], [ 0.03, 0.01], [ 0.02, 0.02],
+    [ 0.03, 0.03], [ 0.02, 0.02], [ 0.03, 0.01], [-0.03, 0.01],
+    [ 0.05, 0.03], [ 0.03, 0.04],
+];
+
+const THEME_COLORS: [&str; 12] = [
+    "#C1006F", "#8200A1", "#413AD0", "#0073FF", "#00ADC0", "#5CE087",
+    "#AEFA44", "#FFFF00", "#FFBE00", "#FF7D00", "#FF3C23", "#FF003C",
+];
+
+#[inline(always)]
+fn theme_color_rgba(idx: i32) -> [f32; 4] {
+    let n = THEME_COLORS.len() as i32;
+    let i = idx.rem_euclid(n) as usize;
+    color::rgba_hex(THEME_COLORS[i])
+}
+
 pub struct State {
     pub selected_index: usize,
     t0: Instant,
     pub active_color_index: i32,
     pub rainbow_mode: bool,
-    heart_cells: [[u32; 2]; 10],
+    heart_cells: [(u32, u32); 10], // stable cell per heart
+    cell_pixel_size: f32,          // (min(sheet_w, sheet_h)/4) * 1.3
 }
 
 pub fn init() -> State {
+    // compute per-cell size from actual texture dims
+    let (w_px, h_px) = image::image_dimensions("assets/graphics/hearts_4x4.png")
+        .unwrap_or((512, 512));
+    let tile_px = (w_px.min(h_px) as f32) / 4.0;
+    let cell_pixel_size = tile_px * 1.3;
+
     let mut rng = rng();
-    let mut heart_cells = [[0u32; 2]; 10];
-    for cell in heart_cells.iter_mut() {
-        *cell = [rng.random_range(0..4), rng.random_range(0..4)];
+    let mut cells = [(0u32, 0u32); 10];
+    for c in &mut cells {
+        *c = (rng.random_range(0..4), rng.random_range(0..4));
     }
 
     State {
@@ -48,7 +80,8 @@ pub fn init() -> State {
         t0: Instant::now(),
         active_color_index: 0,
         rainbow_mode: false,
-        heart_cells,
+        heart_cells: cells,
+        cell_pixel_size,
     }
 }
 
@@ -56,19 +89,14 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     if event.state != ElementState::Pressed {
         return ScreenAction::None;
     }
-
     match event.physical_key {
-        PhysicalKey::Code(KeyCode::Enter) => {
-            return match state.selected_index {
-                0 => ScreenAction::Navigate(Screen::Gameplay),
-                1 => ScreenAction::Navigate(Screen::Options),
-                2 => ScreenAction::Exit,
-                _ => ScreenAction::None,
-            };
-        }
-        PhysicalKey::Code(KeyCode::Escape) => {
-            return ScreenAction::Exit;
-        }
+        PhysicalKey::Code(KeyCode::Enter) => match state.selected_index {
+            0 => ScreenAction::Navigate(Screen::Gameplay),
+            1 => ScreenAction::Navigate(Screen::Options),
+            2 => ScreenAction::Exit,
+            _ => ScreenAction::None,
+        },
+        PhysicalKey::Code(KeyCode::Escape) => ScreenAction::Exit,
         _ => {
             let delta: isize = match event.physical_key {
                 PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => -1,
@@ -87,8 +115,9 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 
 pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
     let lp = LogoParams::default();
-    let mut actors: Vec<Actor> = Vec::with_capacity(64);
+    let mut actors: Vec<Actor> = Vec::with_capacity(96);
 
+    // --- backdrop ---
     let w = screen_width();
     let h = screen_height();
     let backdrop = if state.rainbow_mode { [1.0, 1.0, 1.0, 1.0] } else { [0.0, 0.0, 0.0, 1.0] };
@@ -100,60 +129,69 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         z(-200)
     ));
 
-    const COLOR_ADD: [i32; 10]     = [-1, 0, 0, -1, -1, -1, 0, 0, 0, 0];
-    const DIFFUSE_ALPHA: [f32; 10] = [0.05, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.1, 0.1];
-    const VEL: [[f32; 2]; 10]      = [
-        [0.03, 0.01], [0.03, 0.02], [0.03, 0.01], [0.02, 0.02],
-        [0.03, 0.03], [0.02, 0.02], [0.03, 0.01], [-0.03, 0.01],
-        [0.05, 0.03], [0.03, 0.04],
-    ];
+    // draw size (exact request): (sheet/4) * 1.3
+    let heart_size = state.cell_pixel_size;
+    let half = heart_size * 0.5;
 
-    const THEME_COLORS: [&str; 12] = [
-        "#C1006F", "#8200A1", "#413AD0", "#0073FF", "#00ADC0", "#5CE087",
-        "#AEFA44", "#FFFF00", "#FFBE00", "#FF7D00", "#FF3C23", "#FF003C",
-    ];
+    // motion scale (feel) – keep what you liked
+    let speed_scale_px = w.max(h) * 1.3;
 
-    #[inline(always)]
-    fn theme_color_rgba(idx: i32) -> [f32; 4] {
-        let n = THEME_COLORS.len() as i32;
-        let i = idx.rem_euclid(n) as usize;
-        color::rgba_hex(THEME_COLORS[i])
-    }
+    // elapsed seconds
+    let t = state.t0.elapsed().as_secs_f32();
 
-    // --- FIX FOR WIDESCREEN COVERAGE ---
-    // To ensure the background covers the entire screen while keeping the hearts square,
-    // we determine the largest logical dimension (width or height) and use that
-    // as the base for our square sprite's size. This is a "cover" scaling mode.
-    let cover_dimension = w.max(h);
-    let heart_size = cover_dimension * 1.3;
-    let heart_w = heart_size;
-    let heart_h = heart_size;
-    // --- END FIX ---
-
-    let cx = screen_center_x();
-    let cy = screen_center_y();
+    // golden-ratio spread to avoid clumping
+    const PHI: f32 = 0.618_033_988_75;
 
     for i in 0..10 {
-        let rgba = {
-            let mut c = theme_color_rgba(state.active_color_index + COLOR_ADD[i]);
-            c[3] = DIFFUSE_ALPHA[i];
-            c
-        };
+        let mut rgba = theme_color_rgba(state.active_color_index + COLOR_ADD[i]);
+        rgba[3] = DIFFUSE_ALPHA[i];
 
-        let cell_coords = state.heart_cells[i];
+        // left & up; doubled speed
+        let vx_px = -2.0 * UV_VEL[i][0] * speed_scale_px;
+        let vy_px = -2.0 * UV_VEL[i][1] * speed_scale_px;
 
-        actors.push(act!(sprite("hearts_4x4.png"):
-            align(0.5, 0.5):
-            xy(cx, cy):
-            zoomto(heart_w, heart_h):
-            cell(cell_coords[0], cell_coords[1]):
-            texcoordvelocity(VEL[i][0], VEL[i][1]):
-            blend(add):
-            diffuse(rgba[0], rgba[1], rgba[2], rgba[3]):
-            z(-100)
-        ));
+        // seed positions across the whole screen
+        let start_x = (XY[i] + (i as f32) * (w / 10.0)) % w;
+        let start_y = (XY[i] * 0.5 + (i as f32) * (h / 10.0) * PHI) % h;
+
+        let x_raw = start_x + vx_px * t;
+        let y_raw = start_y + vy_px * t;
+
+        // canonical center within [0,w) × [0,h)
+        let x0 = x_raw.rem_euclid(w);
+        let y0 = y_raw.rem_euclid(h);
+
+        // draw wrap-around copies near edges so hearts don't "blink" on wrap
+        let mut x_offsets = [0.0f32; 3];
+        let mut y_offsets = [0.0f32; 3];
+        let mut nx = 1usize;
+        let mut ny = 1usize;
+
+        if x0 < half { x_offsets[nx] =  w; nx += 1; }
+        if x0 > w - half { x_offsets[nx] = -w; nx += 1; }
+        if y0 < half { y_offsets[ny] =  h; ny += 1; }
+        if y0 > h - half { y_offsets[ny] = -h; ny += 1; }
+
+        let (cx, cy) = state.heart_cells[i];
+
+        for xi in 0..nx {
+            for yi in 0..ny {
+                let x = x0 + x_offsets[xi];
+                let y = y0 + y_offsets[yi];
+
+                actors.push(act!(sprite("hearts_4x4.png"):
+                    align(0.5, 0.5):
+                    xy(x, y):
+                    zoomto(heart_size, heart_size):
+                    cell(cx, cy): // atlas cell (renderer should CLAMP for atlases)
+                    diffuse(rgba[0], rgba[1], rgba[2], rgba[3]):
+                    z(-100)
+                ));
+            }
+        }
     }
 
+    // --- logo + menu ---
     actors.extend(logo::build_logo_default());
     actors.reserve(OPTION_COUNT + 2);
 
