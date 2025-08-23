@@ -57,7 +57,18 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     }));
 
     // --- top bar title ---
-    actors.push(top_bar::build("OPTIONS"));
+    actors.push(top_bar::build(top_bar::BarParams {
+        title: "OPTIONS",
+        position: top_bar::BarPosition::Top,
+        transparent: false,
+    }));
+    
+    // --- footer bar (demonstration) ---
+    actors.push(top_bar::build(top_bar::BarParams {
+        title: "FOOTER",
+        position: top_bar::BarPosition::Bottom,
+        transparent: false,
+    }));
 
     // --- corner spinning quads (testing) ---
     let w = screen_width();
@@ -66,10 +77,10 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
 
     // (h_align, v_align) in {0,1}, small offsets, and distinct colors
     let corners = [
-        ((0.0_f32, 0.0_f32), [ 12.0,  12.0], [1.0, 0.90, 0.20, 1.0]), // top-left
-        ((1.0_f32, 0.0_f32), [-12.0,  12.0], [0.20, 1.0, 0.60, 1.0]), // top-right
-        ((0.0_f32, 1.0_f32), [ 12.0, -12.0], [0.60, 0.60, 1.0, 1.0]), // bottom-left
-        ((1.0_f32, 1.0_f32), [-12.0, -12.0], [1.0, 0.60, 0.20, 1.0]), // bottom-right
+        ((0.0_f32, 0.0_f32), [ 12.0,  62.0], [1.0, 0.90, 0.20, 1.0]), // top-left
+        ((1.0_f32, 0.0_f32), [-12.0,  62.0], [0.20, 1.0, 0.60, 1.0]), // top-right
+        ((0.0_f32, 1.0_f32), [ 12.0, -62.0], [0.60, 0.60, 1.0, 1.0]), // bottom-left
+        ((1.0_f32, 1.0_f32), [-12.0, -62.0], [1.0, 0.60, 0.20, 1.0]), // bottom-right
     ];
 
     for (i, ((hx, vy), off, col)) in corners.into_iter().enumerate() {
