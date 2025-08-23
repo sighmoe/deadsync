@@ -56,6 +56,8 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         backdrop_rgba: backdrop,
     }));
 
+    const FG_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+
     // --- top bar title ---
     actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "OPTIONS",
@@ -63,6 +65,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         transparent: false,
         left_text: None,
         right_text: None,
+        fg_color: FG_COLOR,
     }));
 
     // --- footer bar (demonstration) ---
@@ -72,6 +75,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         transparent: false,
         left_text: None,
         right_text: None,
+        fg_color: FG_COLOR,
     }));
 
     // --- corner spinning quads (testing) ---

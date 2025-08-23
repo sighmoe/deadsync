@@ -442,23 +442,37 @@ impl ApplicationHandler for App {
                 let now = Instant::now();
                 let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
                 self.last_frame_time = now;
-                let total_elapsed = now.duration_since(self.start_time).as_secs_f32(); // NEW
+                let total_elapsed = now.duration_since(self.start_time).as_secs_f32();
 
                 crate::ui::runtime::tick(delta_time);
 
-                if self.current_screen == CurrentScreen::Gameplay {
-                    gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
+                // --- NEW: Screen Update Logic ---
+                let mut action = ScreenAction::None;
+                match self.current_screen {
+                    CurrentScreen::Menu => {
+                        action = menu::update(&mut self.menu_state, delta_time);
+                    }
+                    CurrentScreen::Gameplay => {
+                        gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
+                    }
+                    _ => {} // Other screens don't have an update loop yet
                 }
 
+                if let Err(e) = self.handle_action(action, event_loop) {
+                    error!("Failed to handle action from update: {}", e);
+                    event_loop.exit();
+                }
+                // --- END NEW ---
+
                 let (actors, clear_color) = self.get_current_actors();
-                let screen = self.build_screen(&actors, clear_color, total_elapsed); // NEW
+                let screen = self.build_screen(&actors, clear_color, total_elapsed);
 
                 // Update title/FPS without conflicting borrows.
                 self.update_fps_title(&window, now);
 
                 if let Some(backend) = &mut self.backend {
                     match renderer::draw(backend, &screen, &self.texture_manager) {
-                        Ok(vpf) => self.last_vpf = vpf, // capture VPF for overlay
+                        Ok(vpf) => self.last_vpf = vpf,
                         Err(e) => {
                             error!("Failed to draw frame: {}", e);
                             event_loop.exit();
