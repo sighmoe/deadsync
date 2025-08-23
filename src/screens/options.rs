@@ -3,7 +3,7 @@ use crate::act;
 use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
-use crate::ui::components::{heart_bg, top_bar};
+use crate::ui::components::{heart_bg, screen_bar};
 
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -57,16 +57,16 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     }));
 
     // --- top bar title ---
-    actors.push(top_bar::build(top_bar::BarParams {
+    actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "OPTIONS",
-        position: top_bar::BarPosition::Top,
+        position: screen_bar::ScreenBarPosition::Top,
         transparent: false,
     }));
-    
+
     // --- footer bar (demonstration) ---
-    actors.push(top_bar::build(top_bar::BarParams {
+    actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "FOOTER",
-        position: top_bar::BarPosition::Bottom,
+        position: screen_bar::ScreenBarPosition::Bottom,
         transparent: false,
     }));
 

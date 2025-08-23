@@ -5,7 +5,7 @@ use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::logo::{self, LogoParams};
 use crate::ui::components::menu_list::{self, MenuParams};
-use crate::ui::components::heart_bg;
+use crate::ui::components::{heart_bg, screen_bar};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -111,6 +111,13 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         font: "wendy",
     };
     actors.extend(menu_list::build_vertical_menu(params));
+
+    // --- footer bar (demonstration) ---
+    actors.push(screen_bar::build(screen_bar::ScreenBarParams {
+        title: "EVENT MODE",
+        position: screen_bar::ScreenBarPosition::Bottom,
+        transparent: true,
+    }));
 
     actors
 }
