@@ -168,7 +168,7 @@ impl App {
             "dance.png",
             "meter_arrow.png",
             "fallback_banner.png",
-            "hearts_4x4.png",
+            "heart.png",
         ];
 
         // 1) Decode images in parallel (CPU-only work)

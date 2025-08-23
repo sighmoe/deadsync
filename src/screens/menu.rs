@@ -1,18 +1,15 @@
 // src/screens/menu.rs
+use crate::act;
+use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::logo::{self, LogoParams};
 use crate::ui::components::menu_list::{self, MenuParams};
-use crate::act;
-use rand::prelude::*;
-use rand::rng;
+use image;
 use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-
-use crate::core::space::globals::*;
-use image;
 
 const SELECTED_COLOR_HEX: &str = "#ff5d47";
 const NORMAL_COLOR_HEX: &str = "#888888";
@@ -29,12 +26,12 @@ const INFO_PX: f32 = 15.0;
 const INFO_GAP: f32 = 5.0;
 const INFO_MARGIN_ABOVE: f32 = 20.0;
 
-// ---- hearts params (match the theme) ----
+// Tint/placement (from theme)
 const COLOR_ADD: [i32; 10]     = [-1, 0, 0, -1, -1, -1, 0, 0, 0, 0];
 const DIFFUSE_ALPHA: [f32; 10] = [0.0125, 0.05, 0.025, 0.025, 0.025, 0.025, 0.025, 0.0125, 0.025, 0.025];
 const XY: [f32; 10]            = [0.0, 40.0, 80.0, 120.0, 200.0, 280.0, 360.0, 400.0, 480.0, 560.0];
 
-// UV velocities from the StepMania sheet; we map to screen px/sec via a scale
+// “UV velocities” we reinterpret as screen px/sec scaling
 const UV_VEL: [[f32; 2]; 10] = [
     [ 0.03, 0.01], [ 0.03, 0.02], [ 0.03, 0.01], [ 0.02, 0.02],
     [ 0.03, 0.03], [ 0.02, 0.02], [ 0.03, 0.01], [-0.03, 0.01],
@@ -57,31 +54,33 @@ pub struct State {
     pub selected_index: usize,
     t0: Instant,
     pub active_color_index: i32,
-    pub rainbow_mode: bool,
-    heart_cells: [(u32, u32); 10], // stable cell per heart
-    cell_pixel_size: f32,          // (min(sheet_w, sheet_h)/4) * 1.3
+
+    // heart.png intrinsic size
+    base_w: f32,
+    base_h: f32,
+
+    // per-heart size variant: 0=normal, 1=big, 2=small
+    variants: [usize; 10],
 }
 
 pub fn init() -> State {
-    // compute per-cell size from actual texture dims
-    let (w_px, h_px) = image::image_dimensions("assets/graphics/hearts_4x4.png")
-        .unwrap_or((512, 512));
-    let tile_px = (w_px.min(h_px) as f32) / 4.0;
-    let cell_pixel_size = tile_px * 1.3;
+    // Read heart.png size
+    let (w_px, h_px) = image::image_dimensions("assets/graphics/heart.png")
+        .unwrap_or((320, 271)); // assume the “big” one if missing
+    let base_w = w_px as f32;
+    let base_h = h_px as f32;
 
-    let mut rng = rng();
-    let mut cells = [(0u32, 0u32); 10];
-    for c in &mut cells {
-        *c = (rng.random_range(0..4), rng.random_range(0..4));
-    }
+    // Deterministic spread of sizes across 10 hearts
+    // (normal, big, small, normal, big, normal, small, normal, big, small)
+    let variants = [0, 1, 2, 0, 1, 0, 2, 0, 1, 2];
 
     State {
         selected_index: 0,
         t0: Instant::now(),
         active_color_index: 0,
-        rainbow_mode: false,
-        heart_cells: cells,
-        cell_pixel_size,
+        base_w,
+        base_h,
+        variants,
     }
 }
 
@@ -120,70 +119,80 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     // --- backdrop ---
     let w = screen_width();
     let h = screen_height();
-    let backdrop = if state.rainbow_mode { [1.0, 1.0, 1.0, 1.0] } else { [0.0, 0.0, 0.0, 1.0] };
     actors.push(act!(quad:
         align(0.0, 0.0):
         xy(0.0, 0.0):
         zoomto(w, h):
-        diffuse(backdrop[0], backdrop[1], backdrop[2], backdrop[3]):
+        diffuse(0.0, 0.0, 0.0, 1.0):
         z(-200)
     ));
 
-    // draw size (exact request): (sheet/4) * 1.3
-    let heart_size = state.cell_pixel_size;
-    let half = heart_size * 0.5;
+    // Maintain aspect ratio of the source
+    let aspect = state.base_h / state.base_w; // height/width
 
-    // motion scale (feel) – keep what you liked
+    // We’ll scale to match your “zoom ~1.3” feel for the big heart,
+    // and deduce normal/small from the original pixel widths.
+    // Original widths you gave:
+    const BW_BIG: f32 = 320.0;
+    const BW_NORMAL: f32 = 256.0;
+    const BW_SMALL: f32 = 192.0;
+
+    // Make "big" ≈ base_w * 1.3; others follow the same relative ratios.
+    let scale_k = (state.base_w * 1.3) / BW_BIG;
+    let var_w = [BW_NORMAL * scale_k, BW_BIG * scale_k, BW_SMALL * scale_k]; // [normal, big, small]
+    let var_h = [var_w[0] * aspect, var_w[1] * aspect, var_w[2] * aspect];
+
+    // Motion speed scale (same feel you liked), and left/up movement (double speed)
     let speed_scale_px = w.max(h) * 1.3;
-
-    // elapsed seconds
     let t = state.t0.elapsed().as_secs_f32();
 
-    // golden-ratio spread to avoid clumping
-    const PHI: f32 = 0.618_033_988_75;
+    const PHI: f32 = 0.618_033_988_75; // spread
 
     for i in 0..10 {
+        let variant = state.variants[i]; // 0=normal,1=big,2=small
+        let heart_w = var_w[variant];
+        let heart_h = var_h[variant];
+        let half_w = heart_w * 0.5;
+        let half_h = heart_h * 0.5;
+
         let mut rgba = theme_color_rgba(state.active_color_index + COLOR_ADD[i]);
         rgba[3] = DIFFUSE_ALPHA[i];
 
-        // left & up; doubled speed
+        // left & up; doubled
         let vx_px = -2.0 * UV_VEL[i][0] * speed_scale_px;
         let vy_px = -2.0 * UV_VEL[i][1] * speed_scale_px;
 
-        // seed positions across the whole screen
+        // seed positions across the screen
         let start_x = (XY[i] + (i as f32) * (w / 10.0)) % w;
         let start_y = (XY[i] * 0.5 + (i as f32) * (h / 10.0) * PHI) % h;
 
         let x_raw = start_x + vx_px * t;
         let y_raw = start_y + vy_px * t;
 
-        // canonical center within [0,w) × [0,h)
+        // canonical position in [0,w)×[0,h)
         let x0 = x_raw.rem_euclid(w);
         let y0 = y_raw.rem_euclid(h);
 
-        // draw wrap-around copies near edges so hearts don't "blink" on wrap
+        // wrap-around copies by size so there’s no blinking when crossing edges
         let mut x_offsets = [0.0f32; 3];
         let mut y_offsets = [0.0f32; 3];
         let mut nx = 1usize;
         let mut ny = 1usize;
 
-        if x0 < half { x_offsets[nx] =  w; nx += 1; }
-        if x0 > w - half { x_offsets[nx] = -w; nx += 1; }
-        if y0 < half { y_offsets[ny] =  h; ny += 1; }
-        if y0 > h - half { y_offsets[ny] = -h; ny += 1; }
-
-        let (cx, cy) = state.heart_cells[i];
+        if x0 < half_w { x_offsets[nx] =  w; nx += 1; }
+        if x0 > w - half_w { x_offsets[nx] = -w; nx += 1; }
+        if y0 < half_h { y_offsets[ny] =  h; ny += 1; }
+        if y0 > h - half_h { y_offsets[ny] = -h; ny += 1; }
 
         for xi in 0..nx {
             for yi in 0..ny {
                 let x = x0 + x_offsets[xi];
                 let y = y0 + y_offsets[yi];
 
-                actors.push(act!(sprite("hearts_4x4.png"):
+                actors.push(act!(sprite("heart.png"):
                     align(0.5, 0.5):
                     xy(x, y):
-                    zoomto(heart_size, heart_size):
-                    cell(cx, cy): // atlas cell (renderer should CLAMP for atlases)
+                    zoomto(heart_w, heart_h): // preserve aspect
                     diffuse(rgba[0], rgba[1], rgba[2], rgba[3]):
                     z(-100)
                 ));
