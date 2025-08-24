@@ -1,9 +1,9 @@
-use cgmath::{Matrix4, Vector2, Vector3, Deg};
-use crate::core::space::{Metrics};
+use crate::core::gfx as renderer;
+use crate::core::gfx::{BlendMode, RenderList, RenderObject};
+use crate::core::space::Metrics;
 use crate::ui::actors::{self, Actor, SizeSpec};
 use crate::ui::msdf;
-use crate::core::gfx as renderer;
-use renderer::types::BlendMode;
+use cgmath::{Deg, Matrix4, Vector2, Vector3};
 
 /* ======================= RENDERER SCREEN BUILDER ======================= */
 
@@ -13,8 +13,8 @@ pub fn build_screen(
     clear_color: [f32; 4],
     m: &Metrics,
     fonts: &std::collections::HashMap<&'static str, msdf::Font>,
-    total_elapsed: f32, // NEW
-) -> renderer::Screen {
+    total_elapsed: f32,
+) -> RenderList {
     let mut objects = Vec::with_capacity(estimate_object_count(actors));
     let mut order_counter: u32 = 0;
 
@@ -36,17 +36,16 @@ pub fn build_screen(
             parent_z,
             &mut order_counter,
             &mut objects,
-            total_elapsed, // NEW
+            total_elapsed,
         );
     }
 
     objects.sort_by_key(|o| (o.z, o.order));
-    renderer::Screen { clear_color, objects }
+    RenderList { clear_color, objects }
 }
 
 #[inline(always)]
 fn estimate_object_count(actors: &[Actor]) -> usize {
-    // Iterative DFS: avoids recursion overhead and extra closures.
     let mut stack: Vec<&Actor> = Vec::with_capacity(actors.len());
     stack.extend(actors.iter());
 
@@ -54,16 +53,19 @@ fn estimate_object_count(actors: &[Actor]) -> usize {
     while let Some(a) = stack.pop() {
         match a {
             Actor::Sprite { visible, .. } => {
-                if *visible { total += 1; }
+                if *visible {
+                    total += 1;
+                }
             }
             Actor::Text { content, .. } => {
-                // Fast byte scan; slightly overestimates for non-ASCII, which is fine for reserve().
                 let bytes = content.as_bytes();
                 let newlines = bytes.iter().filter(|&&b| b == b'\n').count();
                 total += bytes.len().saturating_sub(newlines);
             }
             Actor::Frame { children, background, .. } => {
-                if background.is_some() { total += 1; }
+                if background.is_some() {
+                    total += 1;
+                }
                 stack.extend(children.iter());
             }
         }
@@ -74,7 +76,7 @@ fn estimate_object_count(actors: &[Actor]) -> usize {
 /* ======================= ACTOR -> OBJECT CONVERSION ======================= */
 
 #[derive(Clone, Copy)]
-struct SmRect { x: f32, y: f32, w: f32, h: f32 } // top-left "SM px" space
+struct SmRect { x: f32, y: f32, w: f32, h: f32 }
 
 fn build_actor_recursive(
     actor: &actors::Actor,
@@ -83,11 +85,10 @@ fn build_actor_recursive(
     fonts: &std::collections::HashMap<&'static str, msdf::Font>,
     base_z: i16,
     order_counter: &mut u32,
-    out: &mut Vec<renderer::ScreenObject>,
-    total_elapsed: f32, // NEW
+    out: &mut Vec<RenderObject>,
+    total_elapsed: f32,
 ) {
     match actor {
-        // --- SPRITE / QUAD ---
         actors::Actor::Sprite {
             align, offset, size, source, tint, z,
             cell, grid, uv_rect, visible, flip_x, flip_y,
@@ -96,7 +97,6 @@ fn build_actor_recursive(
         } => {
             if !*visible { return; }
             let rect = place_rect(parent, *align, *offset, *size);
-
             let before = out.len();
             push_sprite(
                 out, rect, m, *source, *tint, *uv_rect, *cell, *grid,
@@ -109,8 +109,6 @@ fn build_actor_recursive(
                 out[i].order = { let o = *order_counter; *order_counter += 1; o };
             }
         }
-
-        // --- TEXT ---
         actors::Actor::Text {
             align, offset, px, color, font, content, align_text, z,
         } => {
@@ -121,13 +119,10 @@ fn build_actor_recursive(
                     measured, fm, content, *px, m
                 );
                 let layer = base_z.saturating_add(*z);
-
                 for g in msdf::layout_line(fm, content, *px, origin) {
-                    let t = cgmath::Matrix4::from_translation(cgmath::Vector3::new(
-                        g.center.x, g.center.y, 0.0,
-                    )) * cgmath::Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
-
-                    out.push(renderer::ScreenObject {
+                    let t = Matrix4::from_translation(Vector3::new(g.center.x, g.center.y, 0.0))
+                          * Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
+                    out.push(RenderObject {
                         object_type: renderer::ObjectType::MsdfGlyph {
                             texture_id: fm.atlas_tex_key,
                             uv_scale: g.uv_scale,
@@ -143,17 +138,13 @@ fn build_actor_recursive(
                 }
             }
         }
-
-        // --- FRAME (group) ---
         actors::Actor::Frame {
             align, offset, size, children, background, z,
         } => {
             let rect = place_rect(parent, *align, *offset, *size);
             let layer = base_z.saturating_add(*z);
-
             if let Some(bg) = background {
                 match bg {
-                    // Color background -> solid quad tinted with that color
                     actors::Background::Color(c) => {
                         let before = out.len();
                         push_sprite(
@@ -167,11 +158,10 @@ fn build_actor_recursive(
                             out[i].order = { let o = *order_counter; *order_counter += 1; o };
                         }
                     }
-                    // Texture background -> textured quad with white tint
                     actors::Background::Texture(tex) => {
                         let before = out.len();
                         push_sprite(
-                            out, rect, m, actors::SpriteSource::Texture(*tex), [1.0, 1.0, 1.0, 1.0],
+                            out, rect, m, actors::SpriteSource::Texture(*tex), [1.0; 4],
                             None, None, None, false, false,
                             0.0, 0.0, 0.0, 0.0, BlendMode::Alpha, 0.0,
                             None, 0.0,
@@ -183,7 +173,6 @@ fn build_actor_recursive(
                     }
                 }
             }
-
             for child in children {
                 build_actor_recursive(child, rect, m, fonts, layer, order_counter, out, total_elapsed);
             }
@@ -333,7 +322,7 @@ fn calculate_uvs(
 
 #[inline(always)]
 fn push_sprite(
-    out: &mut Vec<renderer::ScreenObject>,
+    out: &mut Vec<renderer::RenderObject>,
     rect: SmRect,
     m: &Metrics,
     source: actors::SpriteSource,
@@ -377,7 +366,7 @@ fn push_sprite(
         rect_transform(cropped_rect, m)
     };
 
-    out.push(renderer::ScreenObject {
+    out.push(renderer::RenderObject {
         object_type: renderer::ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset },
         transform,
         blend,

@@ -1,6 +1,4 @@
-// src/core/gfx/backends/opengl.rs
-use crate::core::gfx as renderer;
-use crate::core::gfx::{ObjectType, Screen};
+use crate::core::gfx::{BlendMode, ObjectType, RenderList, Texture as RendererTexture};
 use crate::core::space::ortho_for_window;
 use cgmath::Matrix4;
 use glow::{HasContext, PixelUnpackData, UniformLocation};
@@ -207,16 +205,10 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage, srgb: bool) -> Resu
     }
 }
 
-// This function is now a no-op because the geometry buffers are static and shared.
-// It's kept to maintain a consistent interface with the Vulkan backend.
-pub fn load_screen(_state: &mut State, _screen: &Screen) -> Result<(), Box<dyn Error>> {
-    Ok(())
-}
-
 pub fn draw(
     state: &mut State,
-    screen: &Screen,
-    textures: &HashMap<&'static str, renderer::Texture>,
+    render_list: &RenderList,
+    textures: &HashMap<&'static str, RendererTexture>,
 ) -> Result<u32, Box<dyn Error>> {
     use cgmath::{Matrix4, Vector4};
 
@@ -238,22 +230,22 @@ pub fn draw(
     #[inline(always)]
     fn apply_blend(
         gl: &glow::Context,
-        want: crate::core::gfx::types::BlendMode,
-        last: &mut Option<crate::core::gfx::types::BlendMode>,
+        want: BlendMode,
+        last: &mut Option<BlendMode>,
     ) {
         if *last == Some(want) { return; }
         unsafe {
             gl.enable(glow::BLEND);
             match want {
-                crate::core::gfx::types::BlendMode::Alpha => {
+                BlendMode::Alpha => {
                     gl.blend_equation(glow::FUNC_ADD);
                     gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
                 }
-                crate::core::gfx::types::BlendMode::Add => {
+                BlendMode::Add => {
                     gl.blend_equation(glow::FUNC_ADD);
                     gl.blend_func(glow::SRC_ALPHA, glow::ONE);
                 }
-                crate::core::gfx::types::BlendMode::Multiply => {
+                BlendMode::Multiply => {
                     gl.blend_equation(glow::FUNC_ADD);
                     gl.blend_func(glow::DST_COLOR, glow::ZERO);
                 }
@@ -267,27 +259,22 @@ pub fn draw(
     unsafe {
         let gl = &state.gl;
 
-        // Clear
-        let c = screen.clear_color;
+        let c = render_list.clear_color;
         gl.clear_color(c[0], c[1], c[2], c[3]);
         gl.clear(glow::COLOR_BUFFER_BIT);
 
-        // Bind program + VAO
         gl.use_program(Some(state.program));
         gl.bind_vertex_array(Some(state.shared_vao));
 
-        // Baseline blend
         gl.enable(glow::BLEND);
         gl.blend_equation(glow::FUNC_ADD);
         gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
 
-        // Texture unit 0 active; sampler uniform set once
         gl.active_texture(glow::TEXTURE0);
         gl.uniform_1_i32(Some(&state.texture_location), 0);
 
-        // Track to avoid redundant state
         let mut last_bound_tex: Option<glow::Texture> = None;
-        let mut last_blend = Some(crate::core::gfx::types::BlendMode::Alpha);
+        let mut last_blend = Some(BlendMode::Alpha);
         let mut last_is_msdf: Option<bool> = None;
         let mut last_uv_scale: Option<[f32; 2]> = None;
         let mut last_uv_offset: Option<[f32; 2]> = None;
@@ -295,37 +282,29 @@ pub fn draw(
         let mut last_color: Option<[f32; 4]> = None;
         let mut instanced_on = false;
 
-        // Helper: set MVP to projection (used by instanced path)
         let proj: [[f32;4];4] = state.projection.into();
         let proj_slice: &[f32] = bytemuck::cast_slice(&proj);
 
         let mut i = 0;
-        while i < screen.objects.len() {
-            let obj = &screen.objects[i];
+        while i < render_list.objects.len() {
+            let obj = &render_list.objects[i];
 
-            // Batched MSDF glyphs
-            if let ObjectType::MsdfGlyph { texture_id, color, px_range, .. } = &obj.object_type {
-                // Batch a run of glyphs with same atlas + color + px_range
+            if let ObjectType::MsdfGlyph { texture_id, color, px_range, .. } = obj.object_type {
                 let mut run_instances: Vec<f32> = Vec::new();
                 run_instances.reserve(8 * 64);
 
-                let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) else {
+                let Some(RendererTexture::OpenGL(gl_tex)) = textures.get(texture_id) else {
                     i += 1; continue;
                 };
 
                 let mut j = i;
-                while j < screen.objects.len() {
-                    match &screen.objects[j].object_type {
+                while j < render_list.objects.len() {
+                    match &render_list.objects[j].object_type {
                         ObjectType::MsdfGlyph { texture_id: tid2, uv_scale: s2, uv_offset: o2, color: c2, px_range: pr2 }
-                            if tid2 == texture_id && c2 == color && pr2 == px_range =>
+                            if tid2 == &texture_id && c2 == &color && pr2 == &px_range =>
                         {
-                            let (center, size) = extract_center_size(screen.objects[j].transform);
-                            run_instances.extend_from_slice(&[
-                                center[0], center[1],
-                                size[0],   size[1],
-                                s2[0],     s2[1],
-                                o2[0],     o2[1],
-                            ]);
+                            let (center, size) = extract_center_size(render_list.objects[j].transform);
+                            run_instances.extend_from_slice(&[ center[0], center[1], size[0], size[1], s2[0], s2[1], o2[0], o2[1] ]);
                             j += 1;
                         }
                         _ => break,
@@ -337,24 +316,18 @@ pub fn draw(
                     last_bound_tex = Some(gl_tex.0);
                 }
 
-                if last_is_msdf != Some(true) {
-                    gl.uniform_1_i32(Some(&state.is_msdf_location), 1);
-                    last_is_msdf = Some(true);
-                }
-                if !instanced_on {
-                    gl.uniform_1_i32(Some(&state.instanced_location), 1);
-                    instanced_on = true;
-                }
+                if last_is_msdf != Some(true) { gl.uniform_1_i32(Some(&state.is_msdf_location), 1); last_is_msdf = Some(true); }
+                if !instanced_on { gl.uniform_1_i32(Some(&state.instanced_location), 1); instanced_on = true; }
 
                 gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, proj_slice);
 
-                if last_px_range != Some(*px_range) {
-                    gl.uniform_1_f32(Some(&state.px_range_location), *px_range);
-                    last_px_range = Some(*px_range);
+                if last_px_range != Some(px_range) {
+                    gl.uniform_1_f32(Some(&state.px_range_location), px_range);
+                    last_px_range = Some(px_range);
                 }
-                if last_color != Some(*color) {
-                    gl.uniform_4_f32_slice(Some(&state.color_location), color);
-                    last_color = Some(*color);
+                if last_color != Some(color) {
+                    gl.uniform_4_f32_slice(Some(&state.color_location), &color);
+                    last_color = Some(color);
                 }
 
                 gl.bind_buffer(glow::ARRAY_BUFFER, Some(state.instance_vbo));
@@ -364,64 +337,35 @@ pub fn draw(
                 let inst_count = (run_instances.len() / 8) as i32;
                 gl.draw_elements_instanced(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0, inst_count);
 
-                // 4 vertices per quad instance
                 vertices += 4 * (inst_count as u32);
-
                 i = j;
                 continue;
             }
 
-            // Non-MSDF: unified sprite path (includes former "SolidColor" as "__white")
-            if instanced_on {
-                gl.uniform_1_i32(Some(&state.instanced_location), 0);
-                instanced_on = false;
-            }
+            if instanced_on { gl.uniform_1_i32(Some(&state.instanced_location), 0); instanced_on = false; }
 
             apply_blend(gl, obj.blend, &mut last_blend);
 
-            // MVP per object
             let mvp_array: [[f32; 4]; 4] = (state.projection * obj.transform).into();
-            let mvp_slice: &[f32] = bytemuck::cast_slice(&mvp_array);
-            gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, mvp_slice);
+            gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, bytemuck::cast_slice(&mvp_array));
 
             match &obj.object_type {
                 ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
-                    if let Some(renderer::Texture::OpenGL(gl_tex)) = textures.get(texture_id) {
-                        if last_bound_tex != Some(gl_tex.0) {
-                            gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0));
-                            last_bound_tex = Some(gl_tex.0);
-                        }
-                        if last_is_msdf != Some(false) {
-                            gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
-                            last_is_msdf = Some(false);
-                        }
-                        if last_uv_scale != Some(*uv_scale) {
-                            gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
-                            last_uv_scale = Some(*uv_scale);
-                        }
-                        if last_uv_offset != Some(*uv_offset) {
-                            gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
-                            last_uv_offset = Some(*uv_offset);
-                        }
-                        if last_color != Some(*tint) {
-                            gl.uniform_4_f32_slice(Some(&state.color_location), tint);
-                            last_color = Some(*tint);
-                        }
+                    if let Some(RendererTexture::OpenGL(gl_tex)) = textures.get(texture_id) {
+                        if last_bound_tex != Some(gl_tex.0) { gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0)); last_bound_tex = Some(gl_tex.0); }
+                        if last_is_msdf != Some(false) { gl.uniform_1_i32(Some(&state.is_msdf_location), 0); last_is_msdf = Some(false); }
+                        if last_uv_scale != Some(*uv_scale) { gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]); last_uv_scale = Some(*uv_scale); }
+                        if last_uv_offset != Some(*uv_offset) { gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]); last_uv_offset = Some(*uv_offset); }
+                        if last_color != Some(*tint) { gl.uniform_4_f32_slice(Some(&state.color_location), tint); last_color = Some(*tint); }
                         gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
-
                         vertices += 4;
                     }
                 }
                 ObjectType::MsdfGlyph { .. } => unreachable!("handled above"),
             }
-
             i += 1;
         }
-
-        if instanced_on {
-            gl.uniform_1_i32(Some(&state.instanced_location), 0);
-        }
-
+        if instanced_on { gl.uniform_1_i32(Some(&state.instanced_location), 0); }
         gl.bind_vertex_array(None);
     }
 

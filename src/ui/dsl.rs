@@ -1,4 +1,4 @@
-use crate::core::gfx::types::BlendMode;
+use crate::core::gfx::BlendMode;
 use crate::ui::actors::{SizeSpec, SpriteSource, Actor, TextAlign};
 
 #[inline(always)]
@@ -104,7 +104,7 @@ macro_rules! act {
     (sprite($tex:expr): $($tail:tt)+) => {{
         #[allow(unused_assignments, unused_mut)]
         {
-            use $crate::core::gfx::types::BlendMode;
+            use $crate::core::gfx::BlendMode;
             use $crate::ui::anim as __anim;
             let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
             let (mut hx, mut vy) = (0.5f32, 0.5f32);
@@ -170,7 +170,7 @@ macro_rules! act {
     (quad: $($tail:tt)+) => {{
         #[allow(unused_assignments, unused_mut)]
         {
-            use $crate::core::gfx::types::BlendMode;
+            use $crate::core::gfx::BlendMode;
             use $crate::ui::anim as __anim;
             let (mut x, mut y, mut w, mut h) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
             let (mut hx, mut vy) = (0.5f32, 0.5f32);
@@ -684,7 +684,7 @@ macro_rules! __ui_act_apply_one {
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
         $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
-    ) => {{ $blend = $crate::core::gfx::types::BlendMode::Alpha; }};
+    ) => {{ $blend = $crate::core::gfx::BlendMode::Alpha; }};
 
     (blend (normal)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
@@ -692,7 +692,7 @@ macro_rules! __ui_act_apply_one {
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
         $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
-    ) => {{ $blend = $crate::core::gfx::types::BlendMode::Alpha; }};
+    ) => {{ $blend = $crate::core::gfx::BlendMode::Alpha; }};
 
     (blend (add)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
@@ -700,7 +700,7 @@ macro_rules! __ui_act_apply_one {
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
         $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
-    ) => {{ $blend = $crate::core::gfx::types::BlendMode::Add; }};
+    ) => {{ $blend = $crate::core::gfx::BlendMode::Add; }};
 
     (blend (additive)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
@@ -708,7 +708,7 @@ macro_rules! __ui_act_apply_one {
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
         $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
-    ) => {{ $blend = $crate::core::gfx::types::BlendMode::Add; }};
+    ) => {{ $blend = $crate::core::gfx::BlendMode::Add; }};
 
     (blend (multiply)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident
@@ -716,7 +716,7 @@ macro_rules! __ui_act_apply_one {
         $flip_x:ident $flip_y:ident $cropleft:ident $cropright:ident $croptop:ident $cropbottom:ident $blend:ident
         $rot_z_deg:ident $texcoordvelocity:ident
         $__tw_steps:ident $__tw_cur:ident $__site_extra:ident
-    ) => {{ $blend = $crate::core::gfx::types::BlendMode::Multiply; }};
+    ) => {{ $blend = $crate::core::gfx::BlendMode::Multiply; }};
 
     (rotation ($zv:expr)
         $x:ident $y:ident $w:ident $h:ident $hx:ident $vy:ident

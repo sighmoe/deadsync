@@ -1,4 +1,5 @@
-use crate::core::gfx::types::BlendMode;
+// src/ui/actors.rs
+use crate::core::gfx::BlendMode;
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -60,7 +61,7 @@ pub enum Actor {
         cropbottom: f32,
         blend: BlendMode,
         rot_z_deg: f32,
-        texcoordvelocity: Option<[f32; 2]>, // NEW
+        texcoordvelocity: Option<[f32; 2]>,
     },
 
     /// Text actor:
@@ -73,7 +74,7 @@ pub enum Actor {
         color: [f32; 4],
         font: &'static str,
         content: String,
-        align_text: TextAlign, // renamed local var in layout; external API name kept
+        align_text: TextAlign,
         z: i16,
     },
 

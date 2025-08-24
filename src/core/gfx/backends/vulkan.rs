@@ -1,6 +1,4 @@
-// src/core/gfx/backends/vulkan.rs
-use crate::core::gfx as renderer;
-use crate::core::gfx::{ObjectType, Screen};
+use crate::core::gfx::{ObjectType, RenderList, Texture as RendererTexture};
 use crate::core::space::ortho_for_window;
 use ash::{
     khr::{surface, swapchain},
@@ -631,11 +629,6 @@ pub fn create_texture(
     })
 }
 
-// --- NEW: `load_screen` full implementation ---
-pub fn load_screen(_state: &mut State, _screen: &Screen) -> Result<(), Box<dyn Error>> {
-    Ok(())
-}
-
 #[inline(always)]
 unsafe fn bytes_of<T>(v: &T) -> &[u8] {
     unsafe {
@@ -645,8 +638,8 @@ unsafe fn bytes_of<T>(v: &T) -> &[u8] {
 
 pub fn draw(
     state: &mut State,
-    screen: &Screen,
-    textures: &HashMap<&'static str, renderer::Texture>,
+    render_list: &RenderList,
+    textures: &HashMap<&'static str, RendererTexture>,
 ) -> Result<u32, Box<dyn Error>> {
     use cgmath::{Matrix4, Vector4};
 
@@ -699,11 +692,10 @@ pub fn draw(
         device.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
         device.begin_command_buffer(
             cmd,
-            &vk::CommandBufferBeginInfo::default()
-                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            &vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
         )?;
 
-        let c = screen.clear_color;
+        let c = render_list.clear_color;
         let clear_value = vk::ClearValue { color: vk::ClearColorValue { float32: [c[0], c[1], c[2], c[3]] } };
         let rp_info = vk::RenderPassBeginInfo::default()
             .render_pass(state.render_pass)
@@ -720,12 +712,10 @@ pub fn draw(
             };
 
             let vp = vk::Viewport {
-                x: 0.0,
-                y: state.swapchain_resources.extent.height as f32,
+                x: 0.0, y: state.swapchain_resources.extent.height as f32,
                 width: state.swapchain_resources.extent.width as f32,
                 height: -(state.swapchain_resources.extent.height as f32),
-                min_depth: 0.0,
-                max_depth: 1.0,
+                min_depth: 0.0, max_depth: 1.0,
             };
             device.cmd_set_viewport(cmd, 0, &[vp]);
             let sc = vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent };
@@ -762,8 +752,7 @@ pub fn draw(
                 };
             }
 
-            // Instance buffer for glyphs
-            let total_glyphs = screen.objects.iter().filter(|o| matches!(o.object_type, ObjectType::MsdfGlyph{..})).count();
+            let total_glyphs = render_list.objects.iter().filter(|o| matches!(o.object_type, ObjectType::MsdfGlyph{..})).count();
             ensure_instance_buffer(state, state.current_frame, total_glyphs)?;
 
             let (instance_buf, instance_mem) = {
@@ -776,88 +765,58 @@ pub fn draw(
             } else { std::ptr::null_mut() };
 
             let mut i = 0;
-            while i < screen.objects.len() {
-                match &screen.objects[i].object_type {
+            while i < render_list.objects.len() {
+                match &render_list.objects[i].object_type {
                     ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
-                        if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
+                        if let Some(RendererTexture::Vulkan(tex)) = textures.get(texture_id) {
                             bind_pipeline!(state.sprite_pipeline);
                             bind_set!(state.sprite_pipeline_layout, tex.descriptor_set);
                             let pc = SpritePush {
-                                mvp: proj * screen.objects[i].transform,
-                                tint: *tint,
-                                uv_scale: *uv_scale,
-                                uv_offset: *uv_offset,
+                                mvp: proj * render_list.objects[i].transform,
+                                tint: *tint, uv_scale: *uv_scale, uv_offset: *uv_offset,
                             };
-                            device.cmd_push_constants(
-                                cmd,
-                                state.sprite_pipeline_layout,
-                                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                                0,
-                                bytes_of(&pc),
-                            );
+                            device.cmd_push_constants(cmd, state.sprite_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
                             device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
-
                             vertices += 4;
                         }
                         i += 1;
                     }
-                    ObjectType::MsdfGlyph { texture_id, uv_scale: _, uv_offset: _, color, px_range } => {
-                        // Batch glyphs with same atlas + color + px_range
+                    ObjectType::MsdfGlyph { texture_id, color, px_range, .. } => {
                         let mut count = 0usize;
                         let start = write_cursor;
-
                         let mut j = i;
-                        while j < screen.objects.len() {
-                            match &screen.objects[j].object_type {
+                        while j < render_list.objects.len() {
+                            match &render_list.objects[j].object_type {
                                 ObjectType::MsdfGlyph { texture_id: tid2, uv_scale: s2, uv_offset: o2, color: c2, px_range: pr2 }
                                     if tid2 == texture_id && c2 == color && pr2 == px_range =>
                                 {
-                                    let (center, size) = extract_center_size(screen.objects[j].transform);
+                                    let (center, size) = extract_center_size(render_list.objects[j].transform);
                                     let inst = GlyphInstance { center, size, uv_scale: *s2, uv_offset: *o2 };
                                     let dst = (mapped as *mut GlyphInstance).add(write_cursor);
                                     std::ptr::copy_nonoverlapping(&inst as *const GlyphInstance, dst, 1);
-                                    write_cursor += 1;
-                                    count += 1;
-                                    j += 1;
+                                    write_cursor += 1; count += 1; j += 1;
                                 }
                                 _ => break,
                             }
                         }
 
-                        if let Some(renderer::Texture::Vulkan(tex)) = textures.get(texture_id) {
+                        if let Some(RendererTexture::Vulkan(tex)) = textures.get(texture_id) {
                             bind_pipeline!(state.msdf_pipeline);
                             bind_set!(state.msdf_pipeline_layout, tex.descriptor_set);
-
-                            // Bind vertex + instance buffers
                             let first_byte = (start * std::mem::size_of::<GlyphInstance>()) as vk::DeviceSize;
-                            let bufs = [vb_buf, instance_buf];
-                            let offs = [0u64, first_byte];
+                            let bufs = [vb_buf, instance_buf]; let offs = [0u64, first_byte];
                             device.cmd_bind_vertex_buffers(cmd, 0, &bufs, &offs);
-
                             let pc = MsdfPush { mvp: proj, color: *color, px_range: *px_range, _pad: [0.0;3] };
-                            device.cmd_push_constants(
-                                cmd,
-                                state.msdf_pipeline_layout,
-                                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                                0,
-                                bytes_of(&pc),
-                            );
+                            device.cmd_push_constants(cmd, state.msdf_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
                             device.cmd_draw_indexed(cmd, 6, count as u32, 0, 0, 0);
-
                             vertices += 4 * (count as u32);
-
-                            // Rebind static vertex buffer for subsequent non-instanced draws
                             device.cmd_bind_vertex_buffers(cmd, 0, &[vb_buf], &[0]);
                         }
-
                         i = j;
                     }
                 }
             }
-
-            if !mapped.is_null() {
-                device.unmap_memory(instance_mem);
-            }
+            if !mapped.is_null() { device.unmap_memory(instance_mem); }
         }
 
         device.cmd_end_render_pass(cmd);
@@ -867,10 +826,8 @@ pub fn draw(
         let signal_semaphores = [state.render_finished_semaphores[state.current_frame]];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let submit = vk::SubmitInfo::default()
-            .wait_semaphores(&wait_semaphores)
-            .wait_dst_stage_mask(&wait_stages)
-            .command_buffers(std::slice::from_ref(&cmd))
-            .signal_semaphores(&signal_semaphores);
+            .wait_semaphores(&wait_semaphores).wait_dst_stage_mask(&wait_stages)
+            .command_buffers(std::slice::from_ref(&cmd)).signal_semaphores(&signal_semaphores);
         device.queue_submit(state.queue, &[submit], fence)?;
 
         let present_info = vk::PresentInfoKHR::default()

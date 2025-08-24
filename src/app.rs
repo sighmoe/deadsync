@@ -1,8 +1,6 @@
-// src/app.rs
+use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList};
 use crate::core::input;
 use crate::core::input::InputState;
-use crate::core::gfx as renderer;
-use crate::core::gfx::{create_backend, BackendType};
 use crate::core::space::{self as space, Metrics};
 use crate::ui::actors::Actor;
 use crate::ui::msdf;
@@ -130,27 +128,12 @@ pub struct App {
 impl App {
     fn new(backend_type: BackendType, vsync_enabled: bool, fullscreen_enabled: bool) -> Self {
         Self {
-            window: None,
-            backend: None,
-            backend_type,
-            texture_manager: HashMap::new(),
-            current_screen: CurrentScreen::Menu,
-            menu_state: menu::init(),
-            gameplay_state: gameplay::init(),
-            options_state: options::init(),
-            input_state: input::init_state(),
-            frame_count: 0,
-            last_title_update: Instant::now(),
-            last_frame_time: Instant::now(),
-            start_time: Instant::now(), // NEW
-            metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
-            vsync_enabled,
-            fullscreen_enabled,
-            fonts: HashMap::new(),
-            show_overlay: false,
-            last_fps: 0.0,
-            last_vpf: 0,
-            transition: TransitionState::Idle, // Initialize as Idle
+            window: None, backend: None, backend_type, texture_manager: HashMap::new(),
+            current_screen: CurrentScreen::Menu, menu_state: menu::init(), gameplay_state: gameplay::init(), options_state: options::init(),
+            input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
+            start_time: Instant::now(), metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
+            vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay: false,
+            last_fps: 0.0, last_vpf: 0, transition: TransitionState::Idle,
         }
     }
 
@@ -282,7 +265,7 @@ impl App {
         Ok(())
     }
 
-    fn build_screen(&self, actors: &[Actor], clear_color: [f32; 4], total_elapsed: f32) -> renderer::Screen {
+    fn build_screen(&self, actors: &[Actor], clear_color: [f32; 4], total_elapsed: f32) -> RenderList {
         crate::ui::layout::build_screen(actors, clear_color, &self.metrics, &self.fonts, total_elapsed)
     }
 
@@ -357,74 +340,46 @@ impl App {
         }
     }
 
-    fn init_graphics(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
-        // Build base attributes
+        fn init_graphics(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
         let mut window_attributes = Window::default_attributes()
             .with_title(format!("Simple Renderer - {:?}", self.backend_type))
             .with_resizable(true);
 
-        // Fullscreen handling: prefer EXCLUSIVE at our predefined resolution; fall back to BORDERLESS.
         if self.fullscreen_enabled {
-            // Try primary monitor; if unavailable, borderless on "whatever".
             let fullscreen = if let Some(mon) = event_loop.primary_monitor() {
-                // Pick the best refresh-rate mode matching our constants.
-                let best_mode = mon
-                    .video_modes()
-                    .filter(|m| {
-                        let sz = m.size();
-                        sz.width == WINDOW_WIDTH && sz.height == WINDOW_HEIGHT
-                    })
+                let best_mode = mon.video_modes()
+                    .filter(|m| { let sz = m.size(); sz.width == WINDOW_WIDTH && sz.height == WINDOW_HEIGHT })
                     .max_by_key(|m| m.refresh_rate_millihertz());
-
                 if let Some(mode) = best_mode {
-                    log::info!(
-                        "Fullscreen: using EXCLUSIVE {}x{} @ {} mHz",
-                        WINDOW_WIDTH,
-                        WINDOW_HEIGHT,
-                        mode.refresh_rate_millihertz()
-                    );
+                    log::info!("Fullscreen: using EXCLUSIVE {}x{} @ {} mHz", WINDOW_WIDTH, WINDOW_HEIGHT, mode.refresh_rate_millihertz());
                     Some(winit::window::Fullscreen::Exclusive(mode))
                 } else {
-                    log::warn!(
-                        "No exact EXCLUSIVE mode {}x{}; using BORDERLESS on primary monitor.",
-                        WINDOW_WIDTH,
-                        WINDOW_HEIGHT
-                    );
+                    log::warn!("No exact EXCLUSIVE mode {}x{}; using BORDERLESS on primary monitor.", WINDOW_WIDTH, WINDOW_HEIGHT);
                     Some(winit::window::Fullscreen::Borderless(Some(mon)))
                 }
             } else {
                 log::warn!("No primary monitor reported; using BORDERLESS fullscreen.");
                 Some(winit::window::Fullscreen::Borderless(None))
             };
-
             window_attributes = window_attributes.with_fullscreen(fullscreen);
         } else {
-            // Windowed: use the predefined size.
             window_attributes = window_attributes.with_inner_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
         }
 
         let window = Arc::new(event_loop.create_window(window_attributes)?);
         let sz = window.inner_size();
         self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
-
         crate::core::space::set_current_metrics(self.metrics);
 
-        // Backend creation no longer requires a temporary screen.
         let backend = create_backend(self.backend_type, window.clone(), self.vsync_enabled)?;
         self.window = Some(window);
         self.backend = Some(backend);
 
-        // Assets can now be loaded directly.
         self.load_textures()?;
         self.load_fonts()?;
 
-        // Now with fonts loaded, build the REAL initial screen.
-        let (actors, clear_color) = self.get_current_actors();
-        let initial_screen = self.build_screen(&actors, clear_color, self.start_time.elapsed().as_secs_f32());
-        if let Some(b) = &mut self.backend {
-            renderer::load_screen(b, &initial_screen)?;
-        }
-
+        // The initial screen is drawn on the first RedrawRequested event,
+        // so no need to explicitly draw or load here.
         info!("Starting event loop...");
         Ok(())
     }
