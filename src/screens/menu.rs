@@ -1,4 +1,3 @@
-// src/screens/menu.rs
 use crate::act;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
@@ -26,19 +25,11 @@ const INFO_PX: f32 = 15.0;
 const INFO_GAP: f32 = 5.0;
 const INFO_MARGIN_ABOVE: f32 = 20.0;
 
-const FADE_OUT_SECONDS: f32 = 1.0;
-
-enum MenuMode {
-    Idle,
-    FadingOut { target: Screen, elapsed: f32 },
-}
-
 pub struct State {
     pub selected_index: usize,
     pub active_color_index: i32,
     pub rainbow_mode: bool,
     bg: heart_bg::State,
-    mode: MenuMode,
 }
 
 pub fn init() -> State {
@@ -47,42 +38,20 @@ pub fn init() -> State {
         active_color_index: 0,
         rainbow_mode: false,
         bg: heart_bg::State::new(),
-        mode: MenuMode::Idle,
     }
-}
-
-pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
-    if let MenuMode::FadingOut { target, elapsed } = &mut state.mode {
-        *elapsed += delta_time;
-        if *elapsed >= FADE_OUT_SECONDS {
-            let final_target = *target;
-            state.mode = MenuMode::Idle;
-            return ScreenAction::Navigate(final_target);
-        }
-    }
-    ScreenAction::None
 }
 
 pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     if event.state != ElementState::Pressed { return ScreenAction::None; }
-    if !matches!(state.mode, MenuMode::Idle) { return ScreenAction::None; }
 
     match event.physical_key {
-        PhysicalKey::Code(KeyCode::Enter) => {
-            let target = match state.selected_index {
-                0 => Some(Screen::Gameplay),
-                1 => Some(Screen::Options),
-                _ => None,
-            };
-            if let Some(screen) = target {
-                state.mode = MenuMode::FadingOut { target: screen, elapsed: 0.0 };
-                return ScreenAction::None;
-            }
-            if state.selected_index == 2 {
-                return ScreenAction::Exit;
-            }
-            ScreenAction::None
+        PhysicalKey::Code(KeyCode::Enter) => match state.selected_index {
+            0 => ScreenAction::Navigate(Screen::Gameplay),
+            1 => ScreenAction::Navigate(Screen::Options),
+            2 => ScreenAction::Exit,
+            _ => ScreenAction::None,
         },
+        // Escape is now handled globally in app.rs but we can leave this for clarity
         PhysicalKey::Code(KeyCode::Escape) => ScreenAction::Exit,
         _ => {
             let delta: isize = match event.physical_key {
@@ -100,7 +69,8 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     }
 }
 
-pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
+// Signature changed to accept the alpha_multiplier
+pub fn get_actors(state: &State, _: &crate::core::space::Metrics, alpha_multiplier: f32) -> Vec<Actor> {
     let lp = LogoParams::default();
     let mut actors: Vec<Actor> = Vec::with_capacity(96);
 
@@ -111,21 +81,17 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         backdrop_rgba: backdrop,
     }));
 
-    let alpha_multiplier = if let MenuMode::FadingOut { elapsed, .. } = state.mode {
-        (1.0 - (elapsed / FADE_OUT_SECONDS)).clamp(0.0, 1.0)
-    } else {
-        1.0
-    };
-
+    // If fully faded, don't create the other actors
     if alpha_multiplier <= 0.0 {
         return actors;
     }
+
+    // --- The rest of the function is the same, but uses the passed-in alpha_multiplier ---
 
     // 2) logo + info
     let info2_y_tl = lp.top_margin - INFO_MARGIN_ABOVE - INFO_PX;
     let info1_y_tl = info2_y_tl - INFO_PX - INFO_GAP;
 
-    // ---- FIX: Correctly iterate and modify logo actors ----
     let logo_actors = logo::build_logo_default();
     for mut actor in logo_actors {
         if let Actor::Sprite { tint, .. } = &mut actor {
@@ -149,9 +115,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     ));
 
     // 3) menu list
-    // ---- FIX: Define `base_y` before it is used ----
     let base_y = lp.top_margin + lp.target_h + MENU_BELOW_LOGO;
-
     let mut selected = color::rgba_hex(SELECTED_COLOR_HEX);
     let mut normal = color::rgba_hex(NORMAL_COLOR_HEX);
     selected[3] *= alpha_multiplier;
@@ -170,7 +134,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     };
     actors.extend(menu_list::build_vertical_menu(params));
 
-    // --- footer bar (demonstration) ---
+    // --- footer bar ---
     let mut footer_fg = [1.0, 1.0, 1.0, 1.0];
     footer_fg[3] *= alpha_multiplier;
 

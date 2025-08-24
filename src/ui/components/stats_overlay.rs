@@ -29,7 +29,8 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):
             text(format!("{:.0} FPS", fps.max(0.0))):
-            talign(right)
+            talign(right):
+            z(1100)
         ),
         act!(text:
             align(1.0, 0.0):
@@ -38,7 +39,8 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):
             text(format!("{} VPF", vpf)):
-            talign(right)
+            talign(right):
+            z(1100)
         ),
         act!(text:
             align(1.0, 0.0):
@@ -47,7 +49,8 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):
             text(backend_label(backend)):
-            talign(right)
+            talign(right):
+            z(1100)
         ),
     ]
 }

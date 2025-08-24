@@ -7,6 +7,7 @@ use crate::core::space::{self as space, Metrics};
 use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::screens::{gameplay, menu, options, Screen as CurrentScreen, ScreenAction};
+use crate::act;
 
 use log::{error, info, warn};
 use image;
@@ -21,6 +22,12 @@ use winit::{
 
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 800;
+
+// --- NEW: Transition timing constants ---
+const FADE_OUT_DELAY: f32 = 0.1;    // Time before the black overlay starts fading in
+const FADE_OUT_DURATION: f32 = 0.4; // Time for the black overlay to fade to full
+const FADE_IN_DURATION: f32 = 0.4;  // Time for the black overlay to fade out on the new screen
+const MENU_ACTORS_FADE_DURATION: f32 = 0.65; // Time for menu's own actors to fade
 
 // ---- args ----
 fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
@@ -87,6 +94,15 @@ fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
     (backend, vsync, fullscreen)
 }
 
+#[derive(Clone, Copy, Debug)]
+enum TransitionState {
+    Idle,
+    // Fading out the OLD screen
+    FadingOut { elapsed: f32, target: CurrentScreen },
+    // Fading in the NEW screen
+    FadingIn { elapsed: f32 },
+}
+
 pub struct App {
     window: Option<Arc<Window>>,
     backend: Option<renderer::Backend>,
@@ -108,6 +124,7 @@ pub struct App {
     last_fps: f32,
     last_vpf: u32,
     show_overlay: bool,
+    transition: TransitionState, // Add this new field
 }
 
 impl App {
@@ -133,6 +150,7 @@ impl App {
             show_overlay: false,
             last_fps: 0.0,
             last_vpf: 0,
+            transition: TransitionState::Idle, // Initialize as Idle
         }
     }
 
@@ -249,8 +267,11 @@ impl App {
     ) -> Result<(), Box<dyn Error>> {
         match action {
             ScreenAction::Navigate(screen) => {
-                info!("Navigating to screen: {:?}", screen);
-                self.current_screen = screen;
+                // Instead of navigating directly, start the fade-out process
+                if matches!(self.transition, TransitionState::Idle) {
+                    info!("Starting fade out to screen: {:?}", screen);
+                    self.transition = TransitionState::FadingOut { elapsed: 0.0, target: screen };
+                }
             }
             ScreenAction::Exit => {
                 info!("Exit action received. Shutting down.");
@@ -265,11 +286,20 @@ impl App {
         crate::ui::layout::build_screen(actors, clear_color, &self.metrics, &self.fonts, total_elapsed)
     }
 
+    // `get_current_actors` now calculates fade alphas and adds the global overlay
     fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
 
+        // Determine the alpha multiplier for the screen's own actors
+        let screen_alpha_multiplier = match self.transition {
+            TransitionState::FadingOut { elapsed, .. } => {
+                (1.0 - (elapsed / MENU_ACTORS_FADE_DURATION)).clamp(0.0, 1.0)
+            }
+            _ => 1.0,
+        };
+
         let mut actors = match self.current_screen {
-            CurrentScreen::Menu     => menu::get_actors(&self.menu_state, &self.metrics),
+            CurrentScreen::Menu => menu::get_actors(&self.menu_state, &self.metrics, screen_alpha_multiplier),
             CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state, &self.metrics),
             CurrentScreen::Options  => options::get_actors(&self.options_state, &self.metrics),
         };
@@ -281,6 +311,29 @@ impl App {
                 self.last_vpf,
             );
             actors.extend(overlay);
+        }
+
+        // Add the global black fade overlay if needed
+        let overlay_alpha = match self.transition {
+            TransitionState::FadingOut { elapsed, .. } => {
+                ((elapsed - FADE_OUT_DELAY) / FADE_OUT_DURATION).clamp(0.0, 1.0)
+            }
+            TransitionState::FadingIn { elapsed, .. } => {
+                1.0 - (elapsed / FADE_IN_DURATION).clamp(0.0, 1.0)
+            }
+            TransitionState::Idle => 0.0,
+        };
+
+        if overlay_alpha > 0.0 {
+            let w = self.metrics.right - self.metrics.left;
+            let h = self.metrics.top - self.metrics.bottom;
+            actors.push(act!(quad:
+                align(0.0, 0.0):
+                xy(0.0, 0.0):
+                zoomto(w, h):
+                diffuse(0.0, 0.0, 0.0, overlay_alpha):
+                z(500) // Ensure it's drawn on top of everything
+            ));
         }
 
         (actors, CLEAR)
@@ -399,6 +452,9 @@ impl ApplicationHandler for App {
             return;
         }
 
+        // Disable most input while transitioning
+        let is_transitioning = !matches!(self.transition, TransitionState::Idle);
+
         match event {
             WindowEvent::CloseRequested => {
                 info!("Close requested. Shutting down.");
@@ -419,14 +475,30 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
                 input::handle_keyboard_input(&key_event, &mut self.input_state);
-
-                // F3 toggles overlay on key press
+                
                 if key_event.state == winit::event::ElementState::Pressed {
                     if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F3) = key_event.physical_key {
                         self.show_overlay = !self.show_overlay;
                         info!("Overlay {}", if self.show_overlay { "ON" } else { "OFF" });
                     }
+                    
+                    // --- FIX: Make the global Escape handler context-aware ---
+                    if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) = key_event.physical_key {
+                        // Only exit directly from the menu. Other screens will handle this
+                        // key press locally to navigate back to the menu.
+                        if self.current_screen == CurrentScreen::Menu {
+                            if let Err(e) = self.handle_action(ScreenAction::Exit, event_loop) {
+                                error!("Failed to handle exit action: {}", e);
+                                event_loop.exit();
+                            }
+                            // Return early to avoid menu's own handler processing Exit again
+                            return;
+                        }
+                    }
                 }
+                
+                // Block other input while fading
+                if is_transitioning { return; }
 
                 let action = match self.current_screen {
                     CurrentScreen::Menu     => menu::handle_key_press(&mut self.menu_state, &key_event),
@@ -446,23 +518,31 @@ impl ApplicationHandler for App {
 
                 crate::ui::runtime::tick(delta_time);
 
-                // --- NEW: Screen Update Logic ---
-                let mut action = ScreenAction::None;
-                match self.current_screen {
-                    CurrentScreen::Menu => {
-                        action = menu::update(&mut self.menu_state, delta_time);
+                // Update transition state machine
+                match &mut self.transition {
+                    TransitionState::FadingOut { elapsed, target } => {
+                        *elapsed += delta_time;
+                        // Total fade out time is delay + duration
+                        if *elapsed >= FADE_OUT_DELAY + FADE_OUT_DURATION {
+                            self.current_screen = *target;
+                            self.transition = TransitionState::FadingIn { elapsed: 0.0 };
+                            // Clear tweens for the new screen
+                            crate::ui::runtime::clear_all(); 
+                        }
                     }
-                    CurrentScreen::Gameplay => {
+                    TransitionState::FadingIn { elapsed } => {
+                        *elapsed += delta_time;
+                        if *elapsed >= FADE_IN_DURATION {
+                            self.transition = TransitionState::Idle;
+                        }
+                    }
+                    TransitionState::Idle => {
+                        // Only run game logic when not transitioning
+                        if self.current_screen == CurrentScreen::Gameplay {
                         gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
+                        }
                     }
-                    _ => {} // Other screens don't have an update loop yet
                 }
-
-                if let Err(e) = self.handle_action(action, event_loop) {
-                    error!("Failed to handle action from update: {}", e);
-                    event_loop.exit();
-                }
-                // --- END NEW ---
 
                 let (actors, clear_color) = self.get_current_actors();
                 let screen = self.build_screen(&actors, clear_color, total_elapsed);
@@ -482,7 +562,7 @@ impl ApplicationHandler for App {
             }
             _ => {}
         }
-    }
+}
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {
