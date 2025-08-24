@@ -44,6 +44,7 @@ pub fn build_screen(
     RenderList { clear_color, objects }
 }
 
+// ===== REPLACE the whole function in src/ui/layout.rs =====
 #[inline(always)]
 fn estimate_object_count(actors: &[Actor]) -> usize {
     let mut stack: Vec<&Actor> = Vec::with_capacity(actors.len());
@@ -58,9 +59,9 @@ fn estimate_object_count(actors: &[Actor]) -> usize {
                 }
             }
             Actor::Text { content, .. } => {
-                let bytes = content.as_bytes();
-                let newlines = bytes.iter().filter(|&&b| b == b'\n').count();
-                total += bytes.len().saturating_sub(newlines);
+                // Count Unicode scalar values (skip newlines), not raw bytes.
+                // This better matches how we later emit MSDF glyphs.
+                total += content.chars().filter(|&ch| ch != '\n').count();
             }
             Actor::Frame { children, background, .. } => {
                 if background.is_some() {
