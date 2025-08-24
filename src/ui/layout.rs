@@ -112,24 +112,44 @@ fn build_actor_recursive(
         }
         actors::Actor::Text {
             align, offset, px, color, font, content, align_text, z, scale,
+            fit_width, fit_height,
         } => {
             if let Some(fm) = fonts.get(font) {
-                // Compute baseline origin WITHOUT scale (SM: zoom scales about pivot)
+                // Base unscaled line width at `px`
                 let measured = fm.measure_line_width(content, *px);
-                let origin = place_text_baseline(parent, *align, *offset, *align_text, measured, fm, content, *px, m);
 
-                // Pull scale (zoomx/zoomy)
-                let sx = scale[0].max(0.0);
-                let sy = scale[1].max(0.0);
+                // StepMania zoom factors (>= 0)
+                let sx0 = scale[0].max(0.0);
+                let sy0 = scale[1].max(0.0);
+
+                // Optional uniform "fit" scale derived from width/height targets
+                let fit_w = fit_width.map(|w| if measured > 0.0 { (w / measured).max(0.0) } else { 1.0 });
+                let fit_h = fit_height.map(|h| if *px > 0.0 { (h / *px).max(0.0) } else { 1.0 });
+                let fit = match (fit_w, fit_h) {
+                    (Some(a), Some(b)) => a.min(b),
+                    (Some(a), None)    => a,
+                    (None, Some(b))    => b,
+                    (None, None)       => 1.0,
+                };
+
+                // Final scales
+                let sx = sx0 * fit;
+                let sy = sy0 * fit;
+
+                // Place baseline using the *scaled* width/height so alignment stays correct
+                let measured_scaled = measured * sx;
+                let px_scaled       = *px * sy;
+                let origin = place_text_baseline(
+                    parent, *align, *offset, *align_text,
+                    measured_scaled, fm, content, px_scaled, m
+                );
 
                 let layer = base_z.saturating_add(*z);
 
+                // Layout at base px, then apply final scales around `origin`
                 for g in msdf::layout_line(fm, content, *px, origin) {
-                    // Scale glyph position around baseline origin (pivot)
                     let cx = origin.x + (g.center.x - origin.x) * sx;
                     let cy = origin.y + (g.center.y - origin.y) * sy;
-
-                    // Scale glyph size
                     let size_x = g.size.x * sx;
                     let size_y = g.size.y * sy;
 

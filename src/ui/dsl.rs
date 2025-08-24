@@ -3,8 +3,6 @@ use crate::ui::actors::{Actor, SizeSpec, SpriteSource, TextAlign};
 use crate::ui::{anim, runtime};
 use std::borrow::Cow;
 
-/* =============================== MOD =============================== */
-
 #[allow(dead_code)]
 #[derive(Clone)]
 pub enum Mod<'a> {
@@ -14,10 +12,9 @@ pub enum Mod<'a> {
     AddX(f32),
     AddY(f32),
 
-    // SM-style split align controls
+    Align(f32, f32),
     HAlign(f32),
     VAlign(f32),
-    Align(f32, f32),
 
     Z(i16),
     Tint([f32; 4]),
@@ -25,12 +22,19 @@ pub enum Mod<'a> {
     RotationZ(f32),
     Blend(BlendMode),
 
+    // Absolute size
     SizePx(f32, f32),
+
+    // StepMania zoom (scale factors)
     Zoom(f32),
     ZoomX(f32),
     ZoomY(f32),
     AddZoomX(f32),
     AddZoomY(f32),
+
+    // NEW: helpers that set one axis and preserve aspect (sprites immediate; text via layout)
+    ZoomToWidth(f32),
+    ZoomToHeight(f32),
 
     Visible(bool),
     FlipX(bool),
@@ -46,15 +50,13 @@ pub enum Mod<'a> {
     UvRect([f32; 4]),
     TexVel([f32; 2]),
 
+    // text
     Px(f32),
     Font(&'static str),
-
-    // Only StepMania-compatible content setter remains
     Content(Cow<'a, str>),
-
-    // Text layout alignment (left/center/right)
     TAlign(TextAlign),
 
+    // runtime/tween plumbing
     Tween(&'a [anim::Step]),
     SiteId(u64),
 }
@@ -84,10 +86,10 @@ fn build_sprite_like<'a>(
     let mut texv: Option<[f32; 2]> = None;
     let (mut tw, mut site_extra): (Option<&[anim::Step]>, u64) = (None, 0);
 
-    // NEW: StepMania zoom (scale) accumulators
+    // StepMania zoom (scale)
     let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
 
-    // fold mods IN ORDER
+    // fold mods in order
     for m in mods {
         match m {
             Mod::Xy(a, b) => { x = *a; y = *b; }
@@ -96,8 +98,8 @@ fn build_sprite_like<'a>(
             Mod::AddX(a) => { x += *a; }
             Mod::AddY(b) => { y += *b; }
 
-            Mod::HAlign(a) => { hx = *a; }
-            Mod::VAlign(b) => { vy = *b; }
+            Mod::HAlign(a)   => { hx = *a; }
+            Mod::VAlign(b)   => { vy = *b; }
             Mod::Align(a, b) => { hx = *a; vy = *b; }
 
             Mod::Z(v) => { z = *v; }
@@ -106,15 +108,36 @@ fn build_sprite_like<'a>(
             Mod::RotationZ(r) => { rot = *r; }
             Mod::Blend(bm) => { blend = *bm; }
 
-            // Absolute size (zoomto/setsize)
+            // absolute size (pre-scale)
             Mod::SizePx(a, b) => { w = *a; h = *b; }
 
-            // NEW: StepMania zoom semantics (scale)
+            // StepMania zoom (scale) — post-size
             Mod::Zoom(f) => { sx = *f; sy = *f; }
             Mod::ZoomX(a) => { sx = *a; }
             Mod::ZoomY(b) => { sy = *b; }
             Mod::AddZoomX(a) => { sx += *a; }
             Mod::AddZoomY(b) => { sy += *b; }
+
+            // NEW: keep aspect: change one axis of base size
+            Mod::ZoomToWidth(new_w) => {
+                if w > 0.0 && h > 0.0 {
+                    let aspect = h / w;
+                    w = *new_w;
+                    h = w * aspect;
+                } else {
+                    // unknown aspect: best effort
+                    w = *new_w;
+                }
+            }
+            Mod::ZoomToHeight(new_h) => {
+                if w > 0.0 && h > 0.0 {
+                    let aspect = w / h;
+                    h = *new_h;
+                    w = h * aspect;
+                } else {
+                    h = *new_h;
+                }
+            }
 
             Mod::Visible(v) => { vis = *v; }
             Mod::FlipX(v) => { fx = *v; }
@@ -152,7 +175,7 @@ fn build_sprite_like<'a>(
         tint = s.tint; vis = s.visible; fx = s.flip_x; fy = s.flip_y;
     }
 
-    // Apply zoom scaling last (SM semantics: scale around pivot after size)
+    // apply scale last
     if w != 0.0 || h != 0.0 {
         w *= sx;
         h *= sy;
@@ -195,7 +218,7 @@ pub fn quad<'a>(mods: &[Mod<'a>], f: &'static str, l: u32, c: u32) -> Actor {
 #[inline(always)]
 pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     let (mut x, mut y) = (0.0, 0.0);
-    let (mut hx, mut vy) = (0.5, 0.5);        // anchor of the line box
+    let (mut hx, mut vy) = (0.5, 0.5);
     let mut px = 16.0_f32;
     let mut color = [1.0, 1.0, 1.0, 1.0];
     let mut font: &'static str = "miso";
@@ -203,8 +226,9 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     let mut talign = TextAlign::Left;
     let mut z: i16 = 0;
 
-    // NEW: StepMania zoom (scale) for text
+    // zoom + optional fit targets
     let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
+    let (mut fit_w, mut fit_h): (Option<f32>, Option<f32>) = (None, None);
 
     for m in mods {
         match m {
@@ -226,12 +250,15 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
             Mod::TAlign(a)   => { talign = *a; }
             Mod::Z(v)        => { z = *v; }
 
-            // NEW: StepMania text zoom semantics
             Mod::Zoom(f)     => { sx = *f; sy = *f; }
             Mod::ZoomX(a)    => { sx = *a; }
             Mod::ZoomY(b)    => { sy = *b; }
             Mod::AddZoomX(a) => { sx += *a; }
             Mod::AddZoomY(b) => { sy += *b; }
+
+            // capture fit targets (applied at layout with actual text metrics)
+            Mod::ZoomToWidth(w)  => { fit_w = Some(*w); }
+            Mod::ZoomToHeight(h) => { fit_h = Some(*h); }
 
             _ => {}
         }
@@ -247,6 +274,8 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
         align_text: talign,
         z,
         scale: [sx, sy],
+        fit_width: fit_w,
+        fit_height: fit_h,
     }
 }
 
@@ -443,6 +472,14 @@ macro_rules! __dsl_apply_one {
     (flipy ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.flip_y(($v) as bool); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::FlipY(($v) as bool)); }
+    }};
+
+    // --- absolute size helpers that preserve aspect ---------------------
+    (zoomtowidth ($w:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::ZoomToWidth(($w) as f32));
+    }};
+    (zoomtoheight ($h:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::ZoomToHeight(($h) as f32));
     }};
 
     // static sprite bits / cropping / uv / blend / rotation ---------------

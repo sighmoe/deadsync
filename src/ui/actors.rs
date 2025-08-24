@@ -33,6 +33,7 @@ pub enum SpriteSource {
 
 #[derive(Clone, Debug)]
 pub enum Actor {
+    /// Unified Sprite
     Sprite {
         align: [f32; 2],
         offset: [f32; 2],
@@ -55,23 +56,24 @@ pub enum Actor {
         texcoordvelocity: Option<[f32; 2]>,
     },
 
-    /// Text actor:
-    /// - `align`: [halign, valign] applied to the text *line box* (top-left space).
-    /// - Horizontal text alignment (`talign`) still controls glyph layout (left/center/right).
+    /// Text actor (BitmapText-like)
     Text {
-        align: [f32; 2],
-        offset: [f32; 2],
-        px: f32,
+        align: [f32; 2],         // halign/valign pivot inside line box
+        offset: [f32; 2],        // parent top-left space
+        px: f32,                 // base pixel height (before zoom)
         color: [f32; 4],
         font: &'static str,
         content: String,
-        align_text: TextAlign,
+        align_text: TextAlign,   // talign: left/center/right
         z: i16,
-        // NEW: StepMania-style zoom (x/y)
+        // StepMania zoom semantics (scale factors)
         scale: [f32; 2],
+        // Optional “fit” targets (preserve aspect by scaling)
+        fit_width: Option<f32>,
+        fit_height: Option<f32>,
     },
 
-    /// Frame/group box in parent top-left space.
+    /// Frame/group box
     Frame {
         align: [f32; 2],
         offset: [f32; 2],
