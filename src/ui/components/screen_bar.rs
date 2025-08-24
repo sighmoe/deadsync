@@ -43,7 +43,7 @@ pub fn build(params: ScreenBarParams) -> Actor {
             xy(screen_center_x(), 0.5 * BAR_H):
             px(title_px):
             diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
-            font("wendy"): text(params.title): talign(center)
+            font("wendy"): settext(params.title): talign(center)
         )
     ];
 
@@ -53,7 +53,7 @@ pub fn build(params: ScreenBarParams) -> Actor {
             xy(SIDE_TEXT_MARGIN, 0.5 * BAR_H):
             px(SIDE_TEXT_PX):
             diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
-            font("miso"): text(text): talign(left)
+            font("miso"): settext(text): talign(left)
         ));
     }
 
@@ -63,7 +63,7 @@ pub fn build(params: ScreenBarParams) -> Actor {
             xy(screen_width() - SIDE_TEXT_MARGIN, 0.5 * BAR_H):
             px(SIDE_TEXT_PX):
             diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
-            font("miso"): text(text): talign(right)
+            font("miso"): settext(text): talign(right)
         ));
     }
 

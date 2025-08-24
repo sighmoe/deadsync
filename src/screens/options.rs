@@ -112,7 +112,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         px(60.0):
         font("miso"):
         diffuse(0.80, 0.90, 0.70, 1.0):
-        text("This is miso font!"):
+        settext("This is miso font!"):
         talign(center)
     ));
 
@@ -123,7 +123,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         px(20.0):
         font("miso"):
         diffuse(0.85, 0.90, 0.75, 0.9):
-        text("Press Esc to return"):
+        settext("Press Esc to return"):
         talign(center)
     ));
 

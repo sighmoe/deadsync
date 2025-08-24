@@ -13,33 +13,48 @@ pub enum Mod<'a> {
     SetY(f32),
     AddX(f32),
     AddY(f32),
+
+    // SM-style split align controls
+    HAlign(f32),
+    VAlign(f32),
     Align(f32, f32),
+
     Z(i16),
     Tint([f32; 4]),
     Alpha(f32),
     RotationZ(f32),
     Blend(BlendMode),
+
     SizePx(f32, f32),
     Zoom(f32),
     ZoomX(f32),
     ZoomY(f32),
     AddZoomX(f32),
     AddZoomY(f32),
+
     Visible(bool),
     FlipX(bool),
     FlipY(bool),
+
     CropLeft(f32),
     CropRight(f32),
     CropTop(f32),
     CropBottom(f32),
+
     Cell(u32, u32),
     Grid(u32, u32),
     UvRect([f32; 4]),
     TexVel([f32; 2]),
+
     Px(f32),
     Font(&'static str),
+
+    // Only StepMania-compatible content setter remains
     Content(Cow<'a, str>),
+
+    // Text layout alignment (left/center/right)
     TAlign(TextAlign),
+
     Tween(&'a [anim::Step]),
     SiteId(u64),
 }
@@ -72,129 +87,63 @@ fn build_sprite_like<'a>(
     // fold mods
     for m in mods {
         match m {
-            Mod::Xy(a, b) => {
-                x = *a;
-                y = *b;
-            }
-            Mod::SetX(a) => {
-                x = *a;
-            }
-            Mod::SetY(b) => {
-                y = *b;
-            }
-            Mod::AddX(a) => {
-                x += *a;
-            }
-            Mod::AddY(b) => {
-                y += *b;
-            }
-            Mod::Align(a, b) => {
-                hx = *a;
-                vy = *b;
-            }
-            Mod::Z(v) => {
-                z = *v;
-            }
-            Mod::Tint(r) => {
-                tint = *r;
-            }
-            Mod::Alpha(a) => {
-                tint[3] = *a;
-            }
-            Mod::RotationZ(r) => {
-                rot = *r;
-            }
-            Mod::Blend(bm) => {
-                blend = *bm;
-            }
-            Mod::SizePx(a, b) => {
-                w = *a;
-                h = *b;
-            }
-            Mod::Zoom(f) => {
-                w = *f;
-                h = *f;
-            }
-            Mod::ZoomX(a) => {
-                w = *a;
-            }
-            Mod::ZoomY(b) => {
-                h = *b;
-            }
-            Mod::AddZoomX(a) => {
-                w += *a;
-            }
-            Mod::AddZoomY(b) => {
-                h += *b;
-            }
-            Mod::Visible(v) => {
-                vis = *v;
-            }
-            Mod::FlipX(v) => {
-                fx = *v;
-            }
-            Mod::FlipY(v) => {
-                fy = *v;
-            }
-            Mod::CropLeft(v) => {
-                cl = *v;
-            }
-            Mod::CropRight(v) => {
-                cr = *v;
-            }
-            Mod::CropTop(v) => {
-                ct = *v;
-            }
-            Mod::CropBottom(v) => {
-                cb = *v;
-            }
-            Mod::Cell(c, r) => {
-                cell = Some((*c, *r));
-            }
-            Mod::Grid(c, r) => {
-                grid = Some((*c, *r));
-            }
-            Mod::UvRect(u) => {
-                uv = Some(*u);
-            }
-            Mod::TexVel(v) => {
-                texv = Some(*v);
-            }
+            Mod::Xy(a, b) => { x = *a; y = *b; }
+            Mod::SetX(a) => { x = *a; }
+            Mod::SetY(b) => { y = *b; }
+            Mod::AddX(a) => { x += *a; }
+            Mod::AddY(b) => { y += *b; }
+
+            Mod::HAlign(a) => { hx = *a; }
+            Mod::VAlign(b) => { vy = *b; }
+            Mod::Align(a, b) => { hx = *a; vy = *b; }
+
+            Mod::Z(v) => { z = *v; }
+            Mod::Tint(r) => { tint = *r; }
+            Mod::Alpha(a) => { tint[3] = *a; }
+            Mod::RotationZ(r) => { rot = *r; }
+            Mod::Blend(bm) => { blend = *bm; }
+
+            Mod::SizePx(a, b) => { w = *a; h = *b; }
+            Mod::Zoom(f) => { w = *f; h = *f; }
+            Mod::ZoomX(a) => { w = *a; }
+            Mod::ZoomY(b) => { h = *b; }
+            Mod::AddZoomX(a) => { w += *a; }
+            Mod::AddZoomY(b) => { h += *b; }
+
+            Mod::Visible(v) => { vis = *v; }
+            Mod::FlipX(v) => { fx = *v; }
+            Mod::FlipY(v) => { fy = *v; }
+
+            Mod::CropLeft(v) => { cl = *v; }
+            Mod::CropRight(v) => { cr = *v; }
+            Mod::CropTop(v) => { ct = *v; }
+            Mod::CropBottom(v) => { cb = *v; }
+
+            Mod::Cell(c, r) => { cell = Some((*c, *r)); }
+            Mod::Grid(c, r) => { grid = Some((*c, *r)); }
+            Mod::UvRect(u) => { uv = Some(*u); }
+            Mod::TexVel(v) => { texv = Some(*v); }
+
             Mod::Px(_) | Mod::Font(_) | Mod::Content(_) | Mod::TAlign(_) => {}
-            Mod::Tween(steps) => {
-                tw = Some(steps);
-            }
-            Mod::SiteId(id) => {
-                site_extra = *id;
-            }
+            Mod::Tween(steps) => { tw = Some(steps); }
+            Mod::SiteId(id) => { site_extra = *id; }
         }
     }
 
     // tween (optional)
     if let Some(steps) = tw {
         let mut init = anim::TweenState::default();
-        init.x = x;
-        init.y = y;
-        init.w = w;
-        init.h = h;
-        init.hx = hx;
-        init.vy = vy;
+        init.x = x; init.y = y; init.w = w; init.h = h;
+        init.hx = hx; init.vy = vy;
         init.tint = tint;
-        init.visible = vis;
-        init.flip_x = fx;
-        init.flip_y = fy;
+        init.visible = vis; init.flip_x = fx; init.flip_y = fy;
+
         let sid = runtime::site_id(file, line, col, site_extra);
         let s = runtime::materialize(sid, init, steps);
-        x = s.x;
-        y = s.y;
-        w = s.w;
-        h = s.h;
-        hx = s.hx;
-        vy = s.vy;
-        tint = s.tint;
-        vis = s.visible;
-        fx = s.flip_x;
-        fy = s.flip_y;
+
+        x = s.x; y = s.y; w = s.w; h = s.h;
+        hx = s.hx; vy = s.vy;
+        tint = s.tint; vis = s.visible; fx = s.flip_x; fy = s.flip_y;
     }
 
     Actor::Sprite {
@@ -244,47 +193,24 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
 
     for m in mods {
         match m {
-            Mod::Xy(a, b) => {
-                x = *a;
-                y = *b;
-            }
-            Mod::SetX(a) => {
-                x = *a;
-            }
-            Mod::SetY(b) => {
-                y = *b;
-            }
-            Mod::AddX(a) => {
-                x += *a;
-            }
-            Mod::AddY(b) => {
-                y += *b;
-            }
-            Mod::Align(a, b) => {
-                hx = *a;
-                vy = *b;
-            }
-            Mod::Px(p) => {
-                px = *p;
-            }
-            Mod::Tint(r) => {
-                color = *r;
-            }
-            Mod::Alpha(a) => {
-                color[3] = *a;
-            }
-            Mod::Font(f) => {
-                font = *f;
-            }
-            Mod::Content(s) => {
-                content = s.clone();
-            }
-            Mod::TAlign(a) => {
-                talign = *a;
-            }
-            Mod::Z(v) => {
-                z = *v;
-            }
+            Mod::Xy(a, b)    => { x = *a; y = *b; }
+            Mod::SetX(a)     => { x = *a; }
+            Mod::SetY(b)     => { y = *b; }
+            Mod::AddX(a)     => { x += *a; }
+            Mod::AddY(b)     => { y += *b; }
+
+            Mod::HAlign(a)   => { hx = *a; }
+            Mod::VAlign(b)   => { vy = *b; }
+            Mod::Align(a, b) => { hx = *a; vy = *b; }
+
+            Mod::Px(p)       => { px = *p; }
+            Mod::Tint(r)     => { color = *r; }
+            Mod::Alpha(a)    => { color[3] = *a; }
+            Mod::Font(f)     => { font = *f; }
+            Mod::Content(s)  => { content = s.clone(); }
+            Mod::TAlign(a)   => { talign = *a; }
+            Mod::Z(v)        => { z = *v; }
+
             _ => {}
         }
     }
@@ -319,6 +245,27 @@ macro_rules! __ui_textalign_from_ident {
             "talign expects left|center|right, got: ",
             stringify!($other)
         ));
+    };
+}
+
+#[macro_export]
+macro_rules! __ui_halign_from_ident {
+    (left) => { 0.0f32 };
+    (center) => { 0.5f32 };
+    (right) => { 1.0f32 };
+    ($other:ident) => {
+        compile_error!(concat!("halign expects left|center|right, got: ", stringify!($other)));
+    };
+}
+
+#[macro_export]
+macro_rules! __ui_valign_from_ident {
+    (top) => { 0.0f32 };
+    (middle) => { 0.5f32 };
+    (center) => { 0.5f32 };
+    (bottom) => { 1.0f32 };
+    ($other:ident) => {
+        compile_error!(concat!("valign expects top|middle|center|bottom, got: ", stringify!($other)));
     };
 }
 
@@ -414,6 +361,7 @@ macro_rules! __dsl_apply_one {
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.addy(($dy) as f32); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::AddY(($dy) as f32)); }
     }};
+
     (zoom ($f:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         let f=($f) as f32;
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.zoom(f,f); $cur=::core::option::Option::Some(seg); }
@@ -442,6 +390,7 @@ macro_rules! __dsl_apply_one {
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.addzoomy(($dh) as f32); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::AddZoomY(($dh) as f32)); }
     }};
+
     (diffuse ($r:expr,$g:expr,$b:expr,$a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.diffuse(($r) as f32,($g) as f32,($b) as f32,($a) as f32); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::Tint([($r) as f32,($g) as f32,($b) as f32,($a) as f32])); }
@@ -451,6 +400,7 @@ macro_rules! __dsl_apply_one {
         else { $mods.push($crate::ui::dsl::Mod::Alpha(($a) as f32)); }
     }};
     (diffusealpha ($a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $crate::__dsl_apply_one!(alpha(($a)) $mods $tw $cur $site) }};
+
     (set_visible ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.set_visible(($v) as bool); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::Visible(($v) as bool)); }
@@ -465,10 +415,23 @@ macro_rules! __dsl_apply_one {
         else { $mods.push($crate::ui::dsl::Mod::FlipY(($v) as bool)); }
     }};
 
-    // static sprite bits
+    // static sprite bits / cropping / uv / blend / rotation
     (align ($h:expr,$v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::Align(($h) as f32, ($v) as f32));
     }};
+    (halign ($dir:ident) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::HAlign($crate::__ui_halign_from_ident!($dir)));
+    }};
+    (halign ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::HAlign(($v) as f32));
+    }};
+    (valign ($dir:ident) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::VAlign($crate::__ui_valign_from_ident!($dir)));
+    }};
+    (valign ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::VAlign(($v) as f32));
+    }};
+
     (z ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Z(($v) as i16)); }};
     (cell ($c:expr,$r:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Cell(($c) as u32, ($r) as u32)); }};
     (setstate ($i:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Cell(($i) as u32, u32::MAX)); }};
@@ -494,11 +457,18 @@ macro_rules! __dsl_apply_one {
     (rotation ($z:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::RotationZ(($z) as f32)); }};
     (rotationz ($z:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $crate::__dsl_apply_one!(rotation(($z)) $mods $tw $cur $site) }};
 
-    // text
+    // Text properties (StepMania-compatible only)
     (px ($p:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Px(($p) as f32)); }};
     (font ($n:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Font($n)); }};
-    (text ($s:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Content(::std::borrow::Cow::from(($s)))); }};
-    (talign ($dir:ident) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::TAlign($crate::__ui_textalign_from_ident!($dir))); }};
+    (settext ($s:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::Content(::std::borrow::Cow::from(($s))));
+    }};
+    (talign ($dir:ident) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::TAlign($crate::__ui_textalign_from_ident!($dir)));
+    }};
+    (horizalign ($dir:ident) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::TAlign($crate::__ui_textalign_from_ident!($dir)));
+    }};
 
     ($other:ident ( $($args:expr),* ) $mods:ident $tw:ident $cur:ident $site:ident) => {
         compile_error!(concat!("act!: unknown command: ", stringify!($other)));

@@ -38,7 +38,7 @@ pub fn build_vertical_menu(p: MenuParams) -> Vec<Actor> {
             px(px):
             diffuse(color[0], color[1], color[2], color[3]):
             font(p.font):
-            text(*label):
+            settext(*label):
             talign(center)
         ));
     }
