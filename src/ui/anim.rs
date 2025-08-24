@@ -88,8 +88,16 @@ enum Target {
 enum BuildOp {
     X(Target),
     Y(Target),
+
+    // NEW: absolute size for zoomto/setsize during tweens
+    Width(Target),
+    Height(Target),
+
+    // NEW: StepMania zoom semantics (scale factors)
+    ZoomBoth(Target),   // uniform scale
     ZoomX(Target),
     ZoomY(Target),
+
     Tint(Target, Target, Target, Target), // r,g,b,a
     Visible(bool),
     FlipX(bool),
@@ -174,79 +182,54 @@ impl Segment {
         for op in &self.build_ops {
             match *op {
                 BuildOp::X(t) => {
-                    let to = match t {
-                        Target::Abs(v) => v,
-                        Target::Rel(dv) => s.x + dv,
-                    };
-                    self.prepared.push(OpPrepared {
-                        kind: PreparedKind::X { from: s.x, to },
-                    });
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.x + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::X { from: s.x, to } });
                 }
                 BuildOp::Y(t) => {
-                    let to = match t {
-                        Target::Abs(v) => v,
-                        Target::Rel(dv) => s.y + dv,
-                    };
-                    self.prepared.push(OpPrepared {
-                        kind: PreparedKind::Y { from: s.y, to },
-                    });
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.y + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::Y { from: s.y, to } });
+                }
+
+                // Absolute size (zoomto/setsize during tweens)
+                BuildOp::Width(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.w + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::WX { from: s.w, to } });
+                }
+                BuildOp::Height(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.h + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::HY { from: s.h, to } });
+                }
+
+                // StepMania zoom semantics: scale current size
+                BuildOp::ZoomBoth(t) => {
+                    let (fx, fy) = match t { Target::Abs(v) => (v, v), Target::Rel(dv) => (1.0 + dv, 1.0 + dv) };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::WX { from: s.w, to: s.w * fx } });
+                    self.prepared.push(OpPrepared { kind: PreparedKind::HY { from: s.h, to: s.h * fy } });
                 }
                 BuildOp::ZoomX(t) => {
-                    let to = match t {
-                        Target::Abs(v) => v,
-                        Target::Rel(dv) => s.w + dv,
-                    };
-                    self.prepared.push(OpPrepared {
-                        kind: PreparedKind::WX { from: s.w, to },
-                    });
+                    let f = match t { Target::Abs(v) => v, Target::Rel(dv) => 1.0 + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::WX { from: s.w, to: s.w * f } });
                 }
                 BuildOp::ZoomY(t) => {
-                    let to = match t {
-                        Target::Abs(v) => v,
-                        Target::Rel(dv) => s.h + dv,
-                    };
-                    self.prepared.push(OpPrepared {
-                        kind: PreparedKind::HY { from: s.h, to },
-                    });
+                    let f = match t { Target::Abs(v) => v, Target::Rel(dv) => 1.0 + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::HY { from: s.h, to: s.h * f } });
                 }
+
                 BuildOp::Tint(tr, tg, tb, ta) => {
-                    let to0 = match tr {
-                        Target::Abs(v) => v,
-                        Target::Rel(dv) => s.tint[0] + dv,
-                    };
-                    let to1 = match tg {
-                        Target::Abs(v) => v,
-                        Target::Rel(dv) => s.tint[1] + dv,
-                    };
-                    let to2 = match tb {
-                        Target::Abs(v) => v,
-                        Target::Rel(dv) => s.tint[2] + dv,
-                    };
-                    let to3 = match ta {
-                        Target::Abs(v) => v,
-                        Target::Rel(dv) => s.tint[3] + dv,
-                    };
-                    self.prepared.push(OpPrepared {
-                        kind: PreparedKind::Tint {
-                            from: s.tint,
-                            to: [to0, to1, to2, to3],
-                        },
-                    });
+                    let to0 = match tr { Target::Abs(v) => v, Target::Rel(dv) => s.tint[0] + dv };
+                    let to1 = match tg { Target::Abs(v) => v, Target::Rel(dv) => s.tint[1] + dv };
+                    let to2 = match tb { Target::Abs(v) => v, Target::Rel(dv) => s.tint[2] + dv };
+                    let to3 = match ta { Target::Abs(v) => v, Target::Rel(dv) => s.tint[3] + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::Tint { from: s.tint, to: [to0, to1, to2, to3] } });
                 }
                 BuildOp::Visible(v) => {
-                    self.prepared.push(OpPrepared {
-                        kind: PreparedKind::Visible(v),
-                    });
+                    self.prepared.push(OpPrepared { kind: PreparedKind::Visible(v) });
                 }
                 BuildOp::FlipX(v) => {
-                    self.prepared.push(OpPrepared {
-                        kind: PreparedKind::FlipX(v),
-                    });
+                    self.prepared.push(OpPrepared { kind: PreparedKind::FlipX(v) });
                 }
                 BuildOp::FlipY(v) => {
-                    self.prepared.push(OpPrepared {
-                        kind: PreparedKind::FlipY(v),
-                    });
+                    self.prepared.push(OpPrepared { kind: PreparedKind::FlipY(v) });
                 }
             }
         }
@@ -291,101 +274,63 @@ pub struct SegmentBuilder {
 
 impl SegmentBuilder {
     fn new(ease: Ease, dur: f32) -> Self {
-        Self {
-            ease,
-            dur: dur.max(0.0),
-            ops: Vec::new(),
-        }
+        Self { ease, dur: dur.max(0.0), ops: Vec::new() }
     }
 
     // --- position ---
-    pub fn x(mut self, v: f32) -> Self {
-        self.ops.push(BuildOp::X(Target::Abs(v)));
-        self
-    }
-    pub fn y(mut self, v: f32) -> Self {
-        self.ops.push(BuildOp::Y(Target::Abs(v)));
-        self
-    }
+    pub fn x(mut self, v: f32) -> Self { self.ops.push(BuildOp::X(Target::Abs(v))); self }
+    pub fn y(mut self, v: f32) -> Self { self.ops.push(BuildOp::Y(Target::Abs(v))); self }
     pub fn xy(mut self, x: f32, y: f32) -> Self {
         self.ops.push(BuildOp::X(Target::Abs(x)));
         self.ops.push(BuildOp::Y(Target::Abs(y)));
         self
     }
-    pub fn addx(mut self, dx: f32) -> Self {
-        self.ops.push(BuildOp::X(Target::Rel(dx)));
-        self
-    }
-    pub fn addy(mut self, dy: f32) -> Self {
-        self.ops.push(BuildOp::Y(Target::Rel(dy)));
+    pub fn addx(mut self, dx: f32) -> Self { self.ops.push(BuildOp::X(Target::Rel(dx))); self }
+    pub fn addy(mut self, dy: f32) -> Self { self.ops.push(BuildOp::Y(Target::Rel(dy))); self }
+
+    // --- absolute size (zoomto/setsize) ---
+    pub fn size(mut self, w: f32, h: f32) -> Self {
+        self.ops.push(BuildOp::Width(Target::Abs(w)));
+        self.ops.push(BuildOp::Height(Target::Abs(h)));
         self
     }
 
-    // --- size (zoom) ---
-    pub fn zoom(mut self, w: f32, h: f32) -> Self {
-        self.ops.push(BuildOp::ZoomX(Target::Abs(w)));
-        self.ops.push(BuildOp::ZoomY(Target::Abs(h)));
+    // --- StepMania zoom semantics (scale factors) ---
+    pub fn zoom(mut self, f: f32, g: f32) -> Self {
+        // uniform path if f==g; still uses both XY prepared updates
+        if (f - g).abs() < f32::EPSILON {
+            self.ops.push(BuildOp::ZoomBoth(Target::Abs(f)));
+        } else {
+            self.ops.push(BuildOp::ZoomX(Target::Abs(f)));
+            self.ops.push(BuildOp::ZoomY(Target::Abs(g)));
+        }
         self
     }
-    pub fn zoomx(mut self, w: f32) -> Self {
-        self.ops.push(BuildOp::ZoomX(Target::Abs(w)));
-        self
-    }
-    pub fn zoomy(mut self, h: f32) -> Self {
-        self.ops.push(BuildOp::ZoomY(Target::Abs(h)));
-        self
-    }
-    pub fn addzoomx(mut self, dw: f32) -> Self {
-        self.ops.push(BuildOp::ZoomX(Target::Rel(dw)));
-        self
-    }
-    pub fn addzoomy(mut self, dh: f32) -> Self {
-        self.ops.push(BuildOp::ZoomY(Target::Rel(dh)));
-        self
-    }
+    pub fn zoomx(mut self, f: f32) -> Self { self.ops.push(BuildOp::ZoomX(Target::Abs(f))); self }
+    pub fn zoomy(mut self, f: f32) -> Self { self.ops.push(BuildOp::ZoomY(Target::Abs(f))); self }
+    pub fn addzoomx(mut self, df: f32) -> Self { self.ops.push(BuildOp::ZoomX(Target::Rel(df))); self }
+    pub fn addzoomy(mut self, df: f32) -> Self { self.ops.push(BuildOp::ZoomY(Target::Rel(df))); self }
 
-    // --- tint ---
+    // --- tint / alpha ---
     pub fn diffuse(mut self, r: f32, g: f32, b: f32, a: f32) -> Self {
-        self.ops
-            .push(BuildOp::Tint(Target::Abs(r), Target::Abs(g), Target::Abs(b), Target::Abs(a)));
+        self.ops.push(BuildOp::Tint(Target::Abs(r), Target::Abs(g), Target::Abs(b), Target::Abs(a)));
         self
     }
     pub fn diffuse_rgb(mut self, r: f32, g: f32, b: f32) -> Self {
-        self.ops.push(BuildOp::Tint(
-            Target::Abs(r),
-            Target::Abs(g),
-            Target::Abs(b),
-            Target::Rel(0.0),
-        ));
+        self.ops.push(BuildOp::Tint(Target::Abs(r), Target::Abs(g), Target::Abs(b), Target::Rel(0.0)));
         self
     }
     pub fn alpha(mut self, a: f32) -> Self {
-        self.ops.push(BuildOp::Tint(
-            Target::Rel(0.0),
-            Target::Rel(0.0),
-            Target::Rel(0.0),
-            Target::Abs(a),
-        ));
+        self.ops.push(BuildOp::Tint(Target::Rel(0.0), Target::Rel(0.0), Target::Rel(0.0), Target::Abs(a)));
         self
     }
 
-    // --- instants (apply at segment start) ---
-    pub fn set_visible(mut self, v: bool) -> Self {
-        self.ops.push(BuildOp::Visible(v));
-        self
-    }
-    pub fn flip_x(mut self, v: bool) -> Self {
-        self.ops.push(BuildOp::FlipX(v));
-        self
-    }
-    pub fn flip_y(mut self, v: bool) -> Self {
-        self.ops.push(BuildOp::FlipY(v));
-        self
-    }
+    // --- instants ---
+    pub fn set_visible(mut self, v: bool) -> Self { self.ops.push(BuildOp::Visible(v)); self }
+    pub fn flip_x(mut self, v: bool) -> Self { self.ops.push(BuildOp::FlipX(v)); self }
+    pub fn flip_y(mut self, v: bool) -> Self { self.ops.push(BuildOp::FlipY(v)); self }
 
-    pub fn build(self) -> Step {
-        Step::Segment(Segment::new(self.ease, self.dur, self.ops))
-    }
+    pub fn build(self) -> Step { Step::Segment(Segment::new(self.ease, self.dur, self.ops)) }
 }
 
 /// Construct a `linear(t)` segment builder.

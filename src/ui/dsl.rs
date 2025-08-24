@@ -84,7 +84,10 @@ fn build_sprite_like<'a>(
     let mut texv: Option<[f32; 2]> = None;
     let (mut tw, mut site_extra): (Option<&[anim::Step]>, u64) = (None, 0);
 
-    // fold mods
+    // NEW: StepMania zoom (scale) accumulators
+    let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
+
+    // fold mods IN ORDER
     for m in mods {
         match m {
             Mod::Xy(a, b) => { x = *a; y = *b; }
@@ -103,12 +106,15 @@ fn build_sprite_like<'a>(
             Mod::RotationZ(r) => { rot = *r; }
             Mod::Blend(bm) => { blend = *bm; }
 
+            // Absolute size (zoomto/setsize)
             Mod::SizePx(a, b) => { w = *a; h = *b; }
-            Mod::Zoom(f) => { w = *f; h = *f; }
-            Mod::ZoomX(a) => { w = *a; }
-            Mod::ZoomY(b) => { h = *b; }
-            Mod::AddZoomX(a) => { w += *a; }
-            Mod::AddZoomY(b) => { h += *b; }
+
+            // NEW: StepMania zoom semantics (scale)
+            Mod::Zoom(f) => { sx = *f; sy = *f; }
+            Mod::ZoomX(a) => { sx = *a; }
+            Mod::ZoomY(b) => { sy = *b; }
+            Mod::AddZoomX(a) => { sx += *a; }
+            Mod::AddZoomY(b) => { sy += *b; }
 
             Mod::Visible(v) => { vis = *v; }
             Mod::FlipX(v) => { fx = *v; }
@@ -144,6 +150,12 @@ fn build_sprite_like<'a>(
         x = s.x; y = s.y; w = s.w; h = s.h;
         hx = s.hx; vy = s.vy;
         tint = s.tint; vis = s.visible; fx = s.flip_x; fy = s.flip_y;
+    }
+
+    // Apply zoom scaling last (SM semantics: scale around pivot after size)
+    if w != 0.0 || h != 0.0 {
+        w *= sx;
+        h *= sy;
     }
 
     Actor::Sprite {
@@ -183,13 +195,16 @@ pub fn quad<'a>(mods: &[Mod<'a>], f: &'static str, l: u32, c: u32) -> Actor {
 #[inline(always)]
 pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     let (mut x, mut y) = (0.0, 0.0);
-    let (mut hx, mut vy) = (0.5, 0.5);
+    let (mut hx, mut vy) = (0.5, 0.5);        // anchor of the line box
     let mut px = 16.0_f32;
     let mut color = [1.0, 1.0, 1.0, 1.0];
     let mut font: &'static str = "miso";
     let mut content: Cow<'a, str> = Cow::Borrowed("");
     let mut talign = TextAlign::Left;
     let mut z: i16 = 0;
+
+    // NEW: StepMania zoom (scale) for text
+    let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
 
     for m in mods {
         match m {
@@ -211,6 +226,13 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
             Mod::TAlign(a)   => { talign = *a; }
             Mod::Z(v)        => { z = *v; }
 
+            // NEW: StepMania text zoom semantics
+            Mod::Zoom(f)     => { sx = *f; sy = *f; }
+            Mod::ZoomX(a)    => { sx = *a; }
+            Mod::ZoomY(b)    => { sy = *b; }
+            Mod::AddZoomX(a) => { sx += *a; }
+            Mod::AddZoomY(b) => { sy += *b; }
+
             _ => {}
         }
     }
@@ -224,6 +246,7 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
         content: content.into_owned(),
         align_text: talign,
         z,
+        scale: [sx, sy],
     }
 }
 
@@ -342,7 +365,7 @@ macro_rules! __dsl_apply_one {
 
     // tweenable props
     (xy ($x:expr, $y:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.xy(($x) as f32, ($y) as f32); $cur=::core::option::Option::Some(seg); }
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.x(($x) as f32).y(($y) as f32); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::Xy(($x) as f32, ($y) as f32)); }
     }};
     (x ($x:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
@@ -362,33 +385,40 @@ macro_rules! __dsl_apply_one {
         else { $mods.push($crate::ui::dsl::Mod::AddY(($dy) as f32)); }
     }};
 
+    // --- StepMania zoom semantics (scale) ---
     (zoom ($f:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         let f=($f) as f32;
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.zoom(f,f); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::Zoom(f)); }
     }};
+    (zoomx ($f:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let f=($f) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.zoomx(f); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::ZoomX(f)); }
+    }};
+    (zoomy ($f:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let f=($f) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.zoomy(f); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::ZoomY(f)); }
+    }};
+    (addzoomx ($df:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let df=($df) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.addzoomx(df); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::AddZoomX(df)); }
+    }};
+    (addzoomy ($df:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let df=($df) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.addzoomy(df); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::AddZoomY(df)); }
+    }};
+
+    // Absolute size (zoomto/setsize) — uses dedicated tween op now
     (zoomto ($w:expr, $h:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.zoom(($w) as f32, ($h) as f32); $cur=::core::option::Option::Some(seg); }
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.size(($w) as f32, ($h) as f32); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::SizePx(($w) as f32, ($h) as f32)); }
     }};
     (setsize ($w:expr, $h:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $crate::__dsl_apply_one!(zoomto(($w), ($h)) $mods $tw $cur $site)
-    }};
-    (zoomx ($w:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.zoomx(($w) as f32); $cur=::core::option::Option::Some(seg); }
-        else { $mods.push($crate::ui::dsl::Mod::ZoomX(($w) as f32)); }
-    }};
-    (zoomy ($h:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.zoomy(($h) as f32); $cur=::core::option::Option::Some(seg); }
-        else { $mods.push($crate::ui::dsl::Mod::ZoomY(($h) as f32)); }
-    }};
-    (addzoomx ($dw:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.addzoomx(($dw) as f32); $cur=::core::option::Option::Some(seg); }
-        else { $mods.push($crate::ui::dsl::Mod::AddZoomX(($dw) as f32)); }
-    }};
-    (addzoomy ($dh:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.addzoomy(($dh) as f32); $cur=::core::option::Option::Some(seg); }
-        else { $mods.push($crate::ui::dsl::Mod::AddZoomY(($dh) as f32)); }
     }};
 
     (diffuse ($r:expr,$g:expr,$b:expr,$a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
@@ -415,7 +445,7 @@ macro_rules! __dsl_apply_one {
         else { $mods.push($crate::ui::dsl::Mod::FlipY(($v) as bool)); }
     }};
 
-    // static sprite bits / cropping / uv / blend / rotation
+    // static sprite bits / cropping / uv / blend / rotation ---------------
     (align ($h:expr,$v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::Align(($h) as f32, ($v) as f32));
     }};
@@ -457,7 +487,7 @@ macro_rules! __dsl_apply_one {
     (rotation ($z:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::RotationZ(($z) as f32)); }};
     (rotationz ($z:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $crate::__dsl_apply_one!(rotation(($z)) $mods $tw $cur $site) }};
 
-    // Text properties (StepMania-compatible only)
+    // Text properties (SM-compatible only)
     (px ($p:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Px(($p) as f32)); }};
     (font ($n:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Font($n)); }};
     (settext ($s:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{

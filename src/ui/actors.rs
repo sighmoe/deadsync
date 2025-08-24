@@ -1,4 +1,3 @@
-// src/ui/actors.rs
 use crate::core::gfx::BlendMode;
 
 #[allow(dead_code)]
@@ -34,14 +33,6 @@ pub enum SpriteSource {
 
 #[derive(Clone, Debug)]
 pub enum Actor {
-    /// Unified Sprite:
-    /// - `align`: [halign, valign] in *child* space (0=left/top, 0.5=center, 1=right/bottom). Continuous.
-    /// - **Parent reference is the parent's top-left** (SM top-left space). `align` only affects the child's pivot.
-    /// - `offset`: (x,y) is applied in the parent’s top-left space at that reference point, then the pivot offset is applied.
-    /// - `size`: [Px(..) or Fill] in parent “SM px”.
-    /// - `source`: texture or solid
-    /// - `cell`/`grid`/`uv_rect` as before
-    /// - cropping in fractions, flip flags, blend
     Sprite {
         align: [f32; 2],
         offset: [f32; 2],
@@ -76,13 +67,11 @@ pub enum Actor {
         content: String,
         align_text: TextAlign,
         z: i16,
+        // NEW: StepMania-style zoom (x/y)
+        scale: [f32; 2],
     },
 
     /// Frame/group box in parent top-left space.
-    /// - `align`: [halign, valign] continuous
-    /// - `size`: [Px(..) or Fill]
-    /// - `background`: optional color/texture quad filling this frame
-    /// - `children`: laid out within this rect using the same top-left coordinate space
     Frame {
         align: [f32; 2],
         offset: [f32; 2],

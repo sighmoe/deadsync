@@ -111,18 +111,31 @@ fn build_actor_recursive(
             }
         }
         actors::Actor::Text {
-            align, offset, px, color, font, content, align_text, z,
+            align, offset, px, color, font, content, align_text, z, scale,
         } => {
             if let Some(fm) = fonts.get(font) {
+                // Compute baseline origin WITHOUT scale (SM: zoom scales about pivot)
                 let measured = fm.measure_line_width(content, *px);
-                let origin = place_text_baseline(
-                    parent, *align, *offset, *align_text,
-                    measured, fm, content, *px, m
-                );
+                let origin = place_text_baseline(parent, *align, *offset, *align_text, measured, fm, content, *px, m);
+
+                // Pull scale (zoomx/zoomy)
+                let sx = scale[0].max(0.0);
+                let sy = scale[1].max(0.0);
+
                 let layer = base_z.saturating_add(*z);
+
                 for g in msdf::layout_line(fm, content, *px, origin) {
-                    let t = Matrix4::from_translation(Vector3::new(g.center.x, g.center.y, 0.0))
-                          * Matrix4::from_nonuniform_scale(g.size.x, g.size.y, 1.0);
+                    // Scale glyph position around baseline origin (pivot)
+                    let cx = origin.x + (g.center.x - origin.x) * sx;
+                    let cy = origin.y + (g.center.y - origin.y) * sy;
+
+                    // Scale glyph size
+                    let size_x = g.size.x * sx;
+                    let size_y = g.size.y * sy;
+
+                    let t = Matrix4::from_translation(Vector3::new(cx, cy, 0.0))
+                          * Matrix4::from_nonuniform_scale(size_x, size_y, 1.0);
+
                     out.push(RenderObject {
                         object_type: renderer::ObjectType::MsdfGlyph {
                             texture_id: fm.atlas_tex_key,
