@@ -77,10 +77,10 @@ fn build_sprite_like<'a>(
     let (mut vis, mut fx, mut fy) = (true, false, false);
     let (mut cl, mut cr, mut ct, mut cb) = (0.0, 0.0, 0.0, 0.0);
     let mut blend = BlendMode::Alpha;
-    let mut rot = 0.0_f32; // still exists on Actor; DSL no longer exposes rotation
-    let mut uv: Option<[f32; 4]> = None; // not set via DSL anymore
-    let mut cell: Option<(u32, u32)> = None; // not set via DSL anymore
-    let mut grid: Option<(u32, u32)> = None; // not set via DSL anymore
+    let rot = 0.0_f32; // still exists on Actor; DSL no longer exposes rotation
+    let uv: Option<[f32; 4]> = None; // not set via DSL anymore
+    let cell: Option<(u32, u32)> = None; // not set via DSL anymore
+    let grid: Option<(u32, u32)> = None; // not set via DSL anymore
     let mut texv: Option<[f32; 2]> = None;
     let (mut tw, _site_ignored): (Option<&[anim::Step]>, u64) = (None, 0);
 
@@ -211,7 +211,7 @@ pub fn quad<'a>(mods: &[Mod<'a>], f: &'static str, l: u32, c: u32) -> Actor {
 pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     let (mut x, mut y) = (0.0, 0.0);
     let (mut hx, mut vy) = (0.5, 0.5);
-    let mut px = 16.0_f32; // internal base pixel height (no public `px` command)
+    let px = 16.0_f32; // internal base pixel height (no public `px` command)
     let mut color = [1.0, 1.0, 1.0, 1.0];
     let mut font: &'static str = "miso";
     let mut content: Cow<'a, str> = Cow::Borrowed("");
