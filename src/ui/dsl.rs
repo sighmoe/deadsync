@@ -90,15 +90,15 @@ fn build_sprite_like<'a>(
     let mut blend = BlendMode::Alpha;
     let mut rot = 0.0_f32;
     let mut uv: Option<[f32; 4]> = None;
-    let mut cell: Option<(u32, u32)> = None; // (col,row) OR (linearIndex, u32::MAX) sentinel
-    let grid: Option<(u32, u32)> = None; // still inferred from filename unless set elsewhere
+    let mut cell: Option<(u32, u32)> = None;
+    let mut grid: Option<(u32, u32)> = None;
     let mut texv: Option<[f32; 2]> = None;
     let (mut tw, _site_ignored): (Option<&[anim::Step]>, u64) = (None, 0);
 
-    // StepMania zoom (scale factors)
+    // StepMania zoom (scale factors) — allow negatives (we’ll fold to flips)
     let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
 
-    // fold mods in order (last writer wins like SM's cmd() chain)
+    // fold mods in order
     for m in mods {
         match m {
             Mod::Xy(a, b) => { x = *a; y = *b; }
@@ -118,12 +118,14 @@ fn build_sprite_like<'a>(
 
             Mod::SizePx(a, b) => { w = *a; h = *b; }
 
-            Mod::Zoom(f) => { sx = *f; sy = *f; }
-            Mod::ZoomX(a) => { sx = *a; }
-            Mod::ZoomY(b) => { sy = *b; }
+            // StepMania zoom semantics (scale factors). Keep signs for now.
+            Mod::Zoom(f)     => { sx = *f; sy = *f; }
+            Mod::ZoomX(a)    => { sx = *a; }
+            Mod::ZoomY(b)    => { sy = *b; }
             Mod::AddZoomX(a) => { sx += *a; }
             Mod::AddZoomY(b) => { sy += *b; }
 
+            // aspect-preserving absolute sizes
             Mod::ZoomToWidth(new_w) => {
                 if w > 0.0 && h > 0.0 {
                     let aspect = h / w;
@@ -144,24 +146,30 @@ fn build_sprite_like<'a>(
             }
 
             Mod::Flip(v) => { fx = *v; }
-            Mod::CropLeft(v) => { cl = *v; }
-            Mod::CropRight(v) => { cr = *v; }
-            Mod::CropTop(v) => { ct = *v; }
+            Mod::CropLeft(v)   => { cl = *v; }
+            Mod::CropRight(v)  => { cr = *v; }
+            Mod::CropTop(v)    => { ct = *v; }
             Mod::CropBottom(v) => { cb = *v; }
-            Mod::TexVel(v) => { texv = Some(*v); }
+            Mod::TexVel(v)     => { texv = Some(*v); }
 
             Mod::Visible(v) => { vis = *v; }
             Mod::RotZ(d)    => { rot = *d; }
             Mod::AddRotZ(dd)=> { rot += *dd; }
 
-            // NEW: precise SM/ITG semantics
-            Mod::State(i)      => { cell = Some((*i, u32::MAX)); }         // linear index; grid inferred from filename `_CxR`
-            Mod::UvRect(r)     => { uv = Some(*r); }                        // canonical name + ordering
-
-            // text-only mods ignored
+            // text-only mods ignored here
             Mod::Font(_) | Mod::Content(_) | Mod::TAlign(_) => {}
-
             Mod::Tween(steps) => { tw = Some(steps); }
+            Mod::State(i) => {
+                // sentinel (i, u32::MAX) = linear frame index; grid inferred from file name (_CxR)
+                cell = Some((*i, u32::MAX));
+                grid = None; // let filename inference choose cols/rows
+                uv   = None; // state selection overrides any custom UV rect
+            }
+            Mod::UvRect(r) => {
+                uv   = Some(*r); // normalized TL-origin [u0,v0,u1,v1]
+                cell = None;     // explicit rect overrides grid/cell
+                grid = None;
+            }
         }
     }
 
@@ -183,6 +191,11 @@ fn build_sprite_like<'a>(
         rot = s.rot_z;
     }
 
+    // --- SM/ITG semantics: negative zoom flips, not negative geometry ---
+    // Convert sign of zoom into flip flags, keep positive magnitudes.
+    if sx < 0.0 { fx = !fx; sx = -sx; }
+    if sy < 0.0 { fy = !fy; sy = -sy; }
+
     // apply zoom last
     if w != 0.0 || h != 0.0 {
         w *= sx;
@@ -197,7 +210,7 @@ fn build_sprite_like<'a>(
         tint,
         z,
         cell,
-        grid,               // still inferred from filename unless a future helper sets it
+        grid,
         uv_rect: uv,
         visible: vis,
         flip_x: fx,
