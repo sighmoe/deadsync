@@ -111,6 +111,7 @@ fn build_actor_recursive(
                 out[i].order = { let o = *order_counter; *order_counter += 1; o };
             }
         }
+
         actors::Actor::Text {
             align, offset, px, color, font, content, align_text, z, scale,
             fit_width, fit_height, blend,
@@ -130,26 +131,28 @@ fn build_actor_recursive(
                     1.0
                 };
 
-                // Final per-axis scale = fit * zoomx/zoomy
-                let sx = (scale[0].max(0.0)) * fit_s;
-                let sy = (scale[1].max(0.0)) * fit_s;
+                // === StepMania semantics for BitmapText negative zoom ===
+                // Keep raw signed scale for rendering (so it flips); use abs for alignment math.
+                let sx_raw = scale[0] * fit_s;
+                let sy_raw = scale[1] * fit_s;
+                let sx_abs = sx_raw.abs();
+                let sy_abs = sy_raw.abs();
 
-                // Compute baseline origin using scaled box (SM semantics)
+                // Compute baseline origin using ABS scales so pivot stays fixed under flips.
                 let origin = place_text_baseline(
                     parent, *align, *offset, *align_text,
-                    measured_w, asc, desc, sx, sy, m
+                    measured_w, asc, desc, sx_abs, sy_abs, m
                 );
 
                 let layer = base_z.saturating_add(*z);
 
+                // Layout at unscaled px, then apply signed scaling about the origin.
                 for g in msdf::layout_line(fm, content, *px, origin) {
-                    // Scale glyph position about the origin (baseline pivot)
-                    let cx = origin.x + (g.center.x - origin.x) * sx;
-                    let cy = origin.y + (g.center.y - origin.y) * sy;
+                    let cx = origin.x + (g.center.x - origin.x) * sx_raw;
+                    let cy = origin.y + (g.center.y - origin.y) * sy_raw;
 
-                    // Scale glyph size
-                    let size_x = g.size.x * sx;
-                    let size_y = g.size.y * sy;
+                    let size_x = g.size.x * sx_raw;
+                    let size_y = g.size.y * sy_raw;
 
                     let t = Matrix4::from_translation(Vector3::new(cx, cy, 0.0))
                           * Matrix4::from_nonuniform_scale(size_x, size_y, 1.0);
@@ -163,7 +166,6 @@ fn build_actor_recursive(
                             px_range: fm.px_range,
                         },
                         transform: t,
-                        // NEW: use text actor's blend (matches SM)
                         blend: *blend,
                         z: layer,
                         order: { let o = *order_counter; *order_counter += 1; o },
@@ -171,6 +173,7 @@ fn build_actor_recursive(
                 }
             }
         }
+
         actors::Actor::Frame {
             align, offset, size, children, background, z,
         } => {
