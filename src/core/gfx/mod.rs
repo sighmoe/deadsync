@@ -54,6 +54,7 @@ pub enum BlendMode {
     Alpha,
     Add,
     Multiply,
+    Subtract,
 }
 
 // --- Public API Facade ---

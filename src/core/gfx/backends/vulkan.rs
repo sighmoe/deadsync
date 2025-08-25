@@ -1,4 +1,4 @@
-use crate::core::gfx::{ObjectType, RenderList, Texture as RendererTexture};
+use crate::core::gfx::{ObjectType, RenderList, Texture as RendererTexture, BlendMode};
 use crate::core::space::ortho_for_window;
 use ash::{
     khr::{surface, swapchain},
@@ -34,6 +34,11 @@ struct GlyphInstance {
     size:     [f32; 2],
     uv_scale: [f32; 2],
     uv_offset:[f32; 2],
+}
+
+struct PipelinePair {
+    layout: vk::PipelineLayout,
+    pipe: vk::Pipeline,
 }
 
 // A handle to a Vulkan texture on the GPU.
@@ -154,10 +159,21 @@ pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error
     let descriptor_pool = create_descriptor_pool(device.as_ref().unwrap())?;
 
     // Only sprite + msdf pipelines
-    let (sprite_pipeline_layout, sprite_pipeline) =
-        create_sprite_pipeline(device.as_ref().unwrap(), render_pass, descriptor_set_layout)?;
-    let (msdf_pipeline_layout, msdf_pipeline) =
-        create_msdf_pipeline(device.as_ref().unwrap(), render_pass, descriptor_set_layout)?;
+    let PipelinePair { layout: sprite_pipeline_layout, pipe: sprite_pipeline } =
+        create_sprite_pipeline(
+            device.as_ref().unwrap(),
+            render_pass,
+            descriptor_set_layout,
+            BlendMode::Alpha,
+        )?;
+
+    let PipelinePair { layout: msdf_pipeline_layout, pipe: msdf_pipeline } =
+        create_msdf_pipeline(
+            device.as_ref().unwrap(),
+            render_pass,
+            descriptor_set_layout,
+            BlendMode::Alpha,
+        )?;
 
     let command_buffers =
         create_command_buffers(device.as_ref().unwrap(), command_pool, MAX_FRAMES_IN_FLIGHT)?;
@@ -281,7 +297,8 @@ fn create_sprite_pipeline(
     device: &Device,
     render_pass: vk::RenderPass,
     set_layout: vk::DescriptorSetLayout,
-) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
+    mode: BlendMode,
+) -> Result<PipelinePair, Box<dyn Error>> {
     let vert_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_sprite.vert.spv"));
     let frag_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_sprite.frag.spv"));
     let vert_module = create_shader_module(device, vert_shader_code)?;
@@ -303,44 +320,41 @@ fn create_sprite_pipeline(
     let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&binding_descriptions)
         .vertex_attribute_descriptions(&attribute_descriptions);
+
     let input_assembly =
         vk::PipelineInputAssemblyStateCreateInfo::default().topology(vk::PrimitiveTopology::TRIANGLE_LIST);
+
     let viewport_state =
         vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
+
     let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
         .polygon_mode(vk::PolygonMode::FILL)
         .line_width(1.0)
         .cull_mode(vk::CullModeFlags::BACK)
         .front_face(vk::FrontFace::COUNTER_CLOCKWISE);
+
     let multisampling = vk::PipelineMultisampleStateCreateInfo::default()
         .rasterization_samples(vk::SampleCountFlags::TYPE_1);
 
-    let color_blend_attachment = vk::PipelineColorBlendAttachmentState::default()
-        .color_write_mask(vk::ColorComponentFlags::RGBA)
-        .blend_enable(true)
-        .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        .color_blend_op(vk::BlendOp::ADD)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-        .alpha_blend_op(vk::BlendOp::ADD);
-
+    let color_blend_attachment = color_blend_for(mode);
     let color_blending = vk::PipelineColorBlendStateCreateInfo::default()
         .attachments(std::slice::from_ref(&color_blend_attachment));
+
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
     let dynamic_state =
         vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
+    // Must match SpritePush (mvp, tint, uv_scale, uv_offset)
     let push_constant_range = vk::PushConstantRange::default()
         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
         .offset(0)
-        .size(mem::size_of::<SpritePush>() as u32);
+        .size(std::mem::size_of::<SpritePush>() as u32);
 
     let pipeline_layout_info = vk::PipelineLayoutCreateInfo::default()
         .set_layouts(std::slice::from_ref(&set_layout))
         .push_constant_ranges(std::slice::from_ref(&push_constant_range));
 
-    let pipeline_layout = unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
+    let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
 
     let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
         .stages(&shader_stages)
@@ -351,11 +365,11 @@ fn create_sprite_pipeline(
         .multisample_state(&multisampling)
         .color_blend_state(&color_blending)
         .dynamic_state(&dynamic_state)
-        .layout(pipeline_layout)
+        .layout(layout)
         .render_pass(render_pass)
         .subpass(0);
 
-    let pipeline = unsafe {
+    let pipe = unsafe {
         device
             .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
             .map_err(|e| e.1)?[0]
@@ -366,14 +380,15 @@ fn create_sprite_pipeline(
         device.destroy_shader_module(frag_module, None);
     }
 
-    Ok((pipeline_layout, pipeline))
+    Ok(PipelinePair { layout, pipe })
 }
 
 fn create_msdf_pipeline(
     device: &Device,
     render_pass: vk::RenderPass,
     set_layout: vk::DescriptorSetLayout,
-) -> Result<(vk::PipelineLayout, vk::Pipeline), Box<dyn Error>> {
+    mode: BlendMode,
+) -> Result<PipelinePair, Box<dyn Error>> {
     let vert = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_msdf.vert.spv"));
     let frag = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_msdf.frag.spv"));
     let vert_module = create_shader_module(device, vert)?;
@@ -435,16 +450,7 @@ fn create_msdf_pipeline(
     let ms = vk::PipelineMultisampleStateCreateInfo::default()
         .rasterization_samples(vk::SampleCountFlags::TYPE_1);
 
-    let blend_att = vk::PipelineColorBlendAttachmentState::default()
-        .color_write_mask(vk::ColorComponentFlags::RGBA)
-        .blend_enable(true)
-        .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
-        .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
-        .color_blend_op(vk::BlendOp::ADD)
-        .src_alpha_blend_factor(vk::BlendFactor::ONE)
-        .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
-        .alpha_blend_op(vk::BlendOp::ADD);
-
+    let blend_att = color_blend_for(mode);
     let blend = vk::PipelineColorBlendStateCreateInfo::default()
         .attachments(std::slice::from_ref(&blend_att));
 
@@ -486,7 +492,7 @@ fn create_msdf_pipeline(
         device.destroy_shader_module(vert_module, None);
         device.destroy_shader_module(frag_module, None);
     }
-    Ok((layout, pipe))
+    Ok(PipelinePair { layout, pipe })
 }
 
 fn ensure_instance_buffer(state: &mut State, frame: usize, needed_instances: usize) -> Result<(), Box<dyn Error>> {
@@ -963,6 +969,51 @@ fn create_image(
         let memory = state.device.as_ref().unwrap().allocate_memory(&alloc_info, None)?;
         state.device.as_ref().unwrap().bind_image_memory(image, memory, 0)?;
         Ok((image, memory))
+    }
+}
+
+fn color_blend_for(mode: BlendMode) -> vk::PipelineColorBlendAttachmentState {
+    match mode {
+        BlendMode::Alpha => vk::PipelineColorBlendAttachmentState::default()
+            .color_write_mask(vk::ColorComponentFlags::RGBA)
+            .blend_enable(true)
+            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+            .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+            .color_blend_op(vk::BlendOp::ADD)
+            .src_alpha_blend_factor(vk::BlendFactor::ONE)
+            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+            .alpha_blend_op(vk::BlendOp::ADD),
+
+        BlendMode::Add => vk::PipelineColorBlendAttachmentState::default()
+            .color_write_mask(vk::ColorComponentFlags::RGBA)
+            .blend_enable(true)
+            .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+            .dst_color_blend_factor(vk::BlendFactor::ONE)
+            .color_blend_op(vk::BlendOp::ADD)
+            .src_alpha_blend_factor(vk::BlendFactor::ONE)
+            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+            .alpha_blend_op(vk::BlendOp::ADD),
+
+        BlendMode::Multiply => vk::PipelineColorBlendAttachmentState::default()
+            .color_write_mask(vk::ColorComponentFlags::RGBA)
+            .blend_enable(true)
+            .src_color_blend_factor(vk::BlendFactor::DST_COLOR)
+            .dst_color_blend_factor(vk::BlendFactor::ZERO)
+            .color_blend_op(vk::BlendOp::ADD)
+            .src_alpha_blend_factor(vk::BlendFactor::ONE)
+            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+            .alpha_blend_op(vk::BlendOp::ADD),
+
+        BlendMode::Subtract => vk::PipelineColorBlendAttachmentState::default()
+            .color_write_mask(vk::ColorComponentFlags::RGBA)
+            .blend_enable(true)
+            // REVERSE_SUBTRACT with (ONE, ONE) = D - S
+            .src_color_blend_factor(vk::BlendFactor::ONE)
+            .dst_color_blend_factor(vk::BlendFactor::ONE)
+            .color_blend_op(vk::BlendOp::REVERSE_SUBTRACT)
+            .src_alpha_blend_factor(vk::BlendFactor::ONE)
+            .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+            .alpha_blend_op(vk::BlendOp::ADD),
     }
 }
 

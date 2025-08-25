@@ -228,11 +228,7 @@ pub fn draw(
     }
 
     #[inline(always)]
-    fn apply_blend(
-        gl: &glow::Context,
-        want: BlendMode,
-        last: &mut Option<BlendMode>,
-    ) {
+    fn apply_blend(gl: &glow::Context, want: BlendMode, last: &mut Option<BlendMode>) {
         if *last == Some(want) { return; }
         unsafe {
             gl.enable(glow::BLEND);
@@ -248,6 +244,11 @@ pub fn draw(
                 BlendMode::Multiply => {
                     gl.blend_equation(glow::FUNC_ADD);
                     gl.blend_func(glow::DST_COLOR, glow::ZERO);
+                }
+                BlendMode::Subtract => {
+                    // Result = D - S (clamped)
+                    gl.blend_equation(glow::FUNC_REVERSE_SUBTRACT);
+                    gl.blend_func(glow::ONE, glow::ONE);
                 }
             }
         }

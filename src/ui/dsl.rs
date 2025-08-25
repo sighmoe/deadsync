@@ -509,16 +509,18 @@ macro_rules! __dsl_apply_one {
         else { $mods.push($crate::ui::dsl::Mod::AddRotZ(dd)); }
     }};
 
-    // blends: normal, add, subtract only
+    // blends: normal, add, multiply, subtract
     (blend (normal) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Alpha));
     }};
     (blend (add) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Add));
     }};
-    // TODO: implement Subtract in backends; currently mapped to Add to keep compiling.
+    (blend (multiply) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Multiply));
+    }};
     (blend (subtract) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Add));
+        $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Subtract));
     }};
 
     // Text properties (SM-compatible)
