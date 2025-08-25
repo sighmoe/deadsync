@@ -63,6 +63,10 @@ pub enum Mod<'a> {
     // ---- NEW: SM/ITG-compatible sprite controls ----
     /// `setstate(i)` — linear state index (row-major); grid inferred from filename `_CxR`.
     State(u32),
+    /// `SetAllStateDelays(seconds)` — uniform delay for each state while animating.
+    StateDelay(f32),
+    /// `animate(true/false)` — toggles auto state advance.
+    Animate(bool),
     /// `customtexturerect(u0,v0,u1,v1)` — normalized UVs, top-left origin.
     UvRect([f32; 4]),
 
@@ -93,6 +97,9 @@ fn build_sprite_like<'a>(
     let mut cell: Option<(u32, u32)> = None;
     let mut grid: Option<(u32, u32)> = None;
     let mut texv: Option<[f32; 2]> = None;
+    // animation
+    let mut anim_enable = false;
+    let mut state_delay = 0.1_f32;
     let (mut tw, _site_ignored): (Option<&[anim::Step]>, u64) = (None, 0);
 
     // StepMania zoom (scale factors) — allow negatives (we’ll fold to flips)
@@ -170,6 +177,8 @@ fn build_sprite_like<'a>(
                 cell = None;     // explicit rect overrides grid/cell
                 grid = None;
             }
+            Mod::Animate(v) => { anim_enable = *v; }
+            Mod::StateDelay(s) => { state_delay = (*s).max(0.0); }
         }
     }
 
@@ -224,6 +233,8 @@ fn build_sprite_like<'a>(
         blend,
         rot_z_deg: rot,
         texcoordvelocity: texv,
+        animate: anim_enable,
+        state_delay,
     }
 }
 
@@ -543,7 +554,13 @@ macro_rules! __dsl_apply_one {
     (setstate ($i:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::State(($i) as u32));
     }};
-
+    // animation control
+    (animate ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::Animate(($v) as bool));
+    }};
+    (setallstatedelays ($s:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::StateDelay(($s) as f32));
+    }};
     // --- SM/ITG Sprite: explicit UVs (normalized, top-left origin) ---
     (customtexturerect ($u0:expr, $v0:expr, $u1:expr, $v1:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::UvRect([($u0) as f32, ($v0) as f32, ($u1) as f32, ($v1) as f32]));

@@ -54,6 +54,8 @@ pub enum Actor {
         blend: BlendMode,
         rot_z_deg: f32,
         texcoordvelocity: Option<[f32; 2]>,
+        animate: bool,       // if true, advance states by time
+        state_delay: f32,    // seconds per state when animating (uniform)
     },
 
     /// Text actor (BitmapText-like)

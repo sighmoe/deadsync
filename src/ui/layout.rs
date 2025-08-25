@@ -95,13 +95,49 @@ fn build_actor_recursive(
             align, offset, size, source, tint, z,
             cell, grid, uv_rect, visible, flip_x, flip_y,
             cropleft, cropright, croptop, cropbottom, blend,
-            rot_z_deg, texcoordvelocity,
+            rot_z_deg, texcoordvelocity, animate, state_delay,
         } => {
             if !*visible { return; }
             let rect = place_rect(parent, *align, *offset, *size);
+
+            // --- Decide which cell to use (static or animated) ---
+            let mut chosen_cell = *cell;
+            let mut chosen_grid = *grid;
+
+            if uv_rect.is_none() {
+                if let actors::SpriteSource::Texture(tex) = source {
+                    // Prefer explicit grid; otherwise infer from filename suffix "_CxR"
+                    let (cols, rows) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(tex));
+                    let total = cols.saturating_mul(rows).max(1);
+
+                    // Convert a 2D cell to linear if needed (row-major)
+                    let start_linear: u32 = match *cell {
+                        Some((cx, cy)) if cy != u32::MAX => {
+                            let cx = cx.min(cols.saturating_sub(1));
+                            let cy = cy.min(rows.saturating_sub(1));
+                            cy.saturating_mul(cols).saturating_add(cx)
+                        }
+                        Some((i, _)) => i, // cy == u32::MAX => already linear
+                        None => 0,
+                    };
+
+                    if *animate && *state_delay > 0.0 && total > 1 {
+                        // Loop frames: (start + floor(t / delay)) % total
+                        let steps = (total_elapsed / *state_delay).floor().max(0.0) as u32;
+                        let idx = (start_linear + (steps % total)) % total;
+                        chosen_cell = Some((idx, u32::MAX)); // linear index sentinel
+                        chosen_grid = Some((cols, rows));
+                    } else if chosen_cell.is_none() && total > 1 {
+                        // Multiple states available, default to frame 0
+                        chosen_cell = Some((0, u32::MAX));
+                        chosen_grid = Some((cols, rows));
+                    }
+                }
+            }
+
             let before = out.len();
             push_sprite(
-                out, rect, m, *source, *tint, *uv_rect, *cell, *grid,
+                out, rect, m, *source, *tint, *uv_rect, chosen_cell, chosen_grid,
                 *flip_x, *flip_y, *cropleft, *cropright, *croptop, *cropbottom, *blend,
                 *rot_z_deg, *texcoordvelocity, total_elapsed,
             );
@@ -131,8 +167,7 @@ fn build_actor_recursive(
                     1.0
                 };
 
-                // === StepMania semantics for BitmapText negative zoom ===
-                // Keep raw signed scale for rendering (so it flips); use abs for alignment math.
+                // SM semantics for negative zoom: keep sign for rendering, abs for alignment math.
                 let sx_raw = scale[0] * fit_s;
                 let sy_raw = scale[1] * fit_s;
                 let sx_abs = sx_raw.abs();
