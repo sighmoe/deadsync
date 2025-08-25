@@ -222,35 +222,31 @@ fn build_actor_recursive(
 /// Returns (1, 1) on failure to parse.
 #[inline(always)]
 fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
-    #[inline(always)]
-    fn parse_u32_digits(bs: &[u8]) -> Option<u32> {
+    #[inline(always)] fn to_u32(bs: &[u8]) -> Option<u32> {
         if bs.is_empty() { return None; }
         let mut acc: u32 = 0;
-        for &b in bs {
-            if !(b'0'..=b'9').contains(&b) { return None; }
-            let d = (b - b'0') as u32;
-            acc = acc.checked_mul(10)?.checked_add(d)?;
-        }
+        for &b in bs { if !b.is_ascii_digit() { return None; } acc = acc.checked_mul(10)?.checked_add((b - b'0') as u32)?; }
         Some(acc)
     }
 
-    let bytes = filename.as_bytes();
+    let name = filename.rsplit_once('.').map(|(n, _)| n).unwrap_or(filename);
+    let bytes = name.as_bytes();
 
-    // strip extension
-    let end = bytes.iter().rposition(|&b| b == b'.').map(|i| i).unwrap_or(bytes.len());
-    // find last '_' before extension
-    let us = bytes[..end].iter().rposition(|&b| b == b'_');
-    let Some(us_i) = us else { return (1, 1) };
-
-    let dims = &bytes[us_i + 1..end];
-    // expect "<cols>x<rows>"
-    let x_pos = dims.iter().position(|&b| b == b'x' || b == b'X');
-    let Some(xi) = x_pos else { return (1, 1) };
-
-    let w = parse_u32_digits(&dims[..xi]).unwrap_or(1);
-    let h = parse_u32_digits(&dims[xi + 1..]).unwrap_or(1);
-
-    if w == 0 || h == 0 { (1, 1) } else { (w, h) }
+    // Search from the end for "...<digits>[xX]<digits>..."
+    for i in (0..bytes.len()).rev() {
+        let b = bytes[i];
+        if b == b'x' || b == b'X' {
+            // expand left/right
+            let mut l = i; while l > 0 && bytes[l - 1].is_ascii_digit() { l -= 1; }
+            let mut r = i + 1; while r < bytes.len() && bytes[r].is_ascii_digit() { r += 1; }
+            if l < i && r > i + 1 {
+                let cols = to_u32(&bytes[l..i]).unwrap_or(1).max(1);
+                let rows = to_u32(&bytes[i + 1..r]).unwrap_or(1).max(1);
+                if cols > 0 && rows > 0 { return (cols, rows); }
+            }
+        }
+    }
+    (1, 1)
 }
 
 #[inline(always)]
@@ -357,6 +353,14 @@ fn calculate_uvs(
 }
 
 #[inline(always)]
+fn rotate2(vx: f32, vy: f32, deg: f32) -> (f32, f32) {
+    if deg == 0.0 { return (vx, vy); }
+    let r = deg.to_radians();
+    let (s, c) = r.sin_cos();
+    (vx * c - vy * s, vx * s + vy * c)
+}
+
+#[inline(always)]
 fn push_sprite(
     out: &mut Vec<renderer::RenderObject>,
     rect: SmRect,
@@ -377,33 +381,51 @@ fn push_sprite(
     texcoordvelocity: Option<[f32; 2]>,
     total_elapsed: f32,
 ) {
-    // Clamp crop values ONCE here.
+    // 1) Clamp crop once (SM behavior).
     let (cl, cr, ct, cb) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
 
-    // Apply crop to geometry first.
-    let cropped_rect = apply_crop_to_rect(rect, cl, cr, ct, cb);
-    if cropped_rect.w <= 0.0 || cropped_rect.h <= 0.0 { return; }
+    // 2) Base world center/size from the *uncropped* rect (pivot already applied by place_rect).
+    let (base_center, base_size) = sm_rect_to_world_center_size(rect, m);
 
-    // Unify: solids are sprites using the built-in "__white" texture.
-    let (texture_id, uv_scale, uv_offset) = match source {
-        actors::SpriteSource::Solid => ("__white", [1.0, 1.0], [0.0, 0.0]),
-        actors::SpriteSource::Texture(texture) => {
-            let (uv_scale, uv_offset) = calculate_uvs(
-                texture, uv_rect, cell, grid, flip_x, flip_y, cl, cr, ct, cb,
-                texcoordvelocity, total_elapsed
-            );
-            (texture, uv_scale, uv_offset)
-        }
+    // 3) Compute crop scale and local offset (in pre-rot, world units).
+    let sx_crop = (1.0 - cl - cr).max(0.0);
+    let sy_crop = (1.0 - ct - cb).max(0.0);
+    if sx_crop <= 0.0 || sy_crop <= 0.0 { return; }
+
+    // local offset of the cropped sub-rect center, relative to the original center
+    let off_local_x = 0.5 * (cl - cr) * base_size.x;
+    let off_local_y = 0.5 * (ct - cb) * base_size.y;
+    let (off_world_x, off_world_y) = rotate2(off_local_x, off_local_y, rot_z_deg);
+
+    // final world center and size
+    let center_x = base_center.x + off_world_x;
+    let center_y = base_center.y + off_world_y;
+    let size_x = base_size.x * sx_crop;
+    let size_y = base_size.y * sy_crop;
+
+    // 4) UVs: crop in UV space as well so the remaining area is not stretched.
+    let (uv_scale, uv_offset) = match source {
+        actors::SpriteSource::Solid => ([1.0, 1.0], [0.0, 0.0]), // solids ignore UVs
+        actors::SpriteSource::Texture(texture) => calculate_uvs(
+            texture, uv_rect, cell, grid, flip_x, flip_y, cl, cr, ct, cb, texcoordvelocity, total_elapsed
+        ),
     };
 
-    let transform = if rot_z_deg != 0.0 {
-        rect_transform_with_rot(cropped_rect, m, rot_z_deg)
-    } else {
-        rect_transform(cropped_rect, m)
+    // 5) Compose transform: pivot preserved (translate by *original* center + rotated local offset).
+    let transform =
+        Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0)) *
+        Matrix4::from_angle_z(Deg(rot_z_deg)) *
+        Matrix4::from_nonuniform_scale(size_x, size_y, 1.0);
+
+    let (texture_id, uv_s, uv_o) = match source {
+        actors::SpriteSource::Solid => ("__white", [1.0, 1.0], [0.0, 0.0]),
+        actors::SpriteSource::Texture(texture) => (texture, uv_scale, uv_offset),
     };
 
     out.push(renderer::RenderObject {
-        object_type: renderer::ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset },
+        object_type: renderer::ObjectType::Sprite {
+            texture_id, tint, uv_scale: uv_s, uv_offset: uv_o
+        },
         transform,
         blend,
         z: 0,

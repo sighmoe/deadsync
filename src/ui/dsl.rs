@@ -437,11 +437,20 @@ macro_rules! __dsl_apply_one {
 
     // --- color (present both for sprite & text) ---
     (diffuse ($r:expr,$g:expr,$b:expr,$a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        // tweenable in segments later if desired; currently immediate
-        $mods.push($crate::ui::dsl::Mod::Tint([($r) as f32,($g) as f32,($b) as f32,($a) as f32]));
+        if let ::core::option::Option::Some(mut seg) = $cur.take() {
+            seg = seg.diffuse(($r) as f32, ($g) as f32, ($b) as f32, ($a) as f32);
+            $cur = ::core::option::Option::Some(seg);
+        } else {
+            $mods.push($crate::ui::dsl::Mod::Tint([($r) as f32,($g) as f32,($b) as f32,($a) as f32]));
+        }
     }};
     (alpha ($a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        $mods.push($crate::ui::dsl::Mod::Alpha(($a) as f32));
+        if let ::core::option::Option::Some(mut seg) = $cur.take() {
+            seg = seg.alpha(($a) as f32);
+            $cur = ::core::option::Option::Some(seg);
+        } else {
+            $mods.push($crate::ui::dsl::Mod::Alpha(($a) as f32));
+        }
     }};
     (diffusealpha ($a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::Alpha(($a) as f32));
