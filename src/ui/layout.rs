@@ -410,16 +410,15 @@ fn push_sprite(
 
 #[inline(always)]
 fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) {
-    let l = l.clamp(0.0, 1.0);
-    let r = r.clamp(0.0, 1.0);
-    let t = t.clamp(0.0, 1.0);
-    let b = b.clamp(0.0, 1.0);
-    // If sums exceed 1, normalize proportionally to avoid negative sizes.
-    let sum_x = l + r;
-    let sum_y = t + b;
-    let (l, r) = if sum_x > 1.0 { (l / sum_x, r / sum_x) } else { (l, r) };
-    let (t, b) = if sum_y > 1.0 { (t / sum_y, b / sum_y) } else { (t, b) };
-    (l, r, t, b)
+    // StepMania semantics: clamp each edge independently to [0,1].
+    // If l+r >= 1 or t+b >= 1 the geometry collapses to zero on that axis.
+    // Do NOT renormalize proportionally (that changes which side wins).
+    (
+        l.clamp(0.0, 1.0),
+        r.clamp(0.0, 1.0),
+        t.clamp(0.0, 1.0),
+        b.clamp(0.0, 1.0),
+    )
 }
 
 #[inline(always)]

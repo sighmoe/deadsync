@@ -46,7 +46,6 @@ fn ease_apply(e: Ease, t: f32) -> f32 {
     }
 }
 
-/// Values your `act!` builder consumes each frame.
 #[derive(Clone, Debug)]
 pub struct TweenState {
     pub x: f32,
@@ -59,21 +58,19 @@ pub struct TweenState {
     pub visible: bool,
     pub flip_x: bool,
     pub flip_y: bool,
+    pub rot_z: f32, // NEW: degrees
 }
 
 impl Default for TweenState {
     fn default() -> Self {
         Self {
-            x: 0.0,
-            y: 0.0,
-            w: 0.0,
-            h: 0.0,
-            hx: 0.5,
-            vy: 0.5,
+            x: 0.0, y: 0.0, w: 0.0, h: 0.0,
+            hx: 0.5, vy: 0.5,
             tint: [1.0, 1.0, 1.0, 1.0],
             visible: true,
             flip_x: false,
             flip_y: false,
+            rot_z: 0.0, // NEW
         }
     }
 }
@@ -88,20 +85,16 @@ enum Target {
 enum BuildOp {
     X(Target),
     Y(Target),
-
-    // NEW: absolute size for zoomto/setsize during tweens
     Width(Target),
     Height(Target),
-
-    // NEW: StepMania zoom semantics (scale factors)
-    ZoomBoth(Target),   // uniform scale
+    ZoomBoth(Target),
     ZoomX(Target),
     ZoomY(Target),
-
-    Tint(Target, Target, Target, Target), // r,g,b,a
+    Tint(Target, Target, Target, Target),
     Visible(bool),
     FlipX(bool),
     FlipY(bool),
+    RotZ(Target), // NEW
 }
 
 #[derive(Clone, Debug)]
@@ -111,39 +104,36 @@ struct OpPrepared {
 
 #[derive(Clone, Debug)]
 enum PreparedKind {
-    // From / To values captured when the segment starts
     X { from: f32, to: f32 },
     Y { from: f32, to: f32 },
     WX { from: f32, to: f32 },
     HY { from: f32, to: f32 },
-    Tint {
-        from: [f32; 4],
-        to: [f32; 4],
-    },
-    // Instants applied once at segment start
+    Tint { from: [f32; 4], to: [f32; 4] },
     Visible(bool),
     FlipX(bool),
     FlipY(bool),
+    RotZ { from: f32, to: f32 }, // NEW
 }
 
 impl OpPrepared {
+    #[inline(always)]
     fn apply_lerp(&self, s: &mut TweenState, a: f32) {
         match self.kind {
-            PreparedKind::X { from, to } => s.x = from + (to - from) * a,
-            PreparedKind::Y { from, to } => s.y = from + (to - from) * a,
+            PreparedKind::X { from, to }  => s.x = from + (to - from) * a,
+            PreparedKind::Y { from, to }  => s.y = from + (to - from) * a,
             PreparedKind::WX { from, to } => s.w = from + (to - from) * a,
             PreparedKind::HY { from, to } => s.h = from + (to - from) * a,
             PreparedKind::Tint { from, to } => {
-                for i in 0..4 {
-                    s.tint[i] = from[i] + (to[i] - from[i]) * a;
-                }
+                for i in 0..4 { s.tint[i] = from[i] + (to[i] - from[i]) * a; }
             }
             PreparedKind::Visible(v) => s.visible = v,
             PreparedKind::FlipX(v) => s.flip_x = v,
             PreparedKind::FlipY(v) => s.flip_y = v,
+            PreparedKind::RotZ { from, to } => s.rot_z = from + (to - from) * a, // NEW
         }
     }
 
+    #[inline(always)]
     fn apply_final(&self, s: &mut TweenState) {
         self.apply_lerp(s, 1.0);
     }
@@ -174,9 +164,7 @@ impl Segment {
     }
 
     fn prepare_if_needed(&mut self, s: &TweenState) {
-        if self.prepared_once {
-            return;
-        }
+        if self.prepared_once { return; }
         self.prepared.clear();
 
         for op in &self.build_ops {
@@ -189,8 +177,6 @@ impl Segment {
                     let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.y + dv };
                     self.prepared.push(OpPrepared { kind: PreparedKind::Y { from: s.y, to } });
                 }
-
-                // Absolute size (zoomto/setsize during tweens)
                 BuildOp::Width(t) => {
                     let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.w + dv };
                     self.prepared.push(OpPrepared { kind: PreparedKind::WX { from: s.w, to } });
@@ -199,8 +185,6 @@ impl Segment {
                     let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.h + dv };
                     self.prepared.push(OpPrepared { kind: PreparedKind::HY { from: s.h, to } });
                 }
-
-                // StepMania zoom semantics: scale current size
                 BuildOp::ZoomBoth(t) => {
                     let (fx, fy) = match t { Target::Abs(v) => (v, v), Target::Rel(dv) => (1.0 + dv, 1.0 + dv) };
                     self.prepared.push(OpPrepared { kind: PreparedKind::WX { from: s.w, to: s.w * fx } });
@@ -214,7 +198,6 @@ impl Segment {
                     let f = match t { Target::Abs(v) => v, Target::Rel(dv) => 1.0 + dv };
                     self.prepared.push(OpPrepared { kind: PreparedKind::HY { from: s.h, to: s.h * f } });
                 }
-
                 BuildOp::Tint(tr, tg, tb, ta) => {
                     let to0 = match tr { Target::Abs(v) => v, Target::Rel(dv) => s.tint[0] + dv };
                     let to1 = match tg { Target::Abs(v) => v, Target::Rel(dv) => s.tint[1] + dv };
@@ -230,6 +213,10 @@ impl Segment {
                 }
                 BuildOp::FlipY(v) => {
                     self.prepared.push(OpPrepared { kind: PreparedKind::FlipY(v) });
+                }
+                BuildOp::RotZ(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.rot_z + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::RotZ { from: s.rot_z, to } });
                 }
             }
         }
@@ -297,7 +284,6 @@ impl SegmentBuilder {
 
     // --- StepMania zoom semantics (scale factors) ---
     pub fn zoom(mut self, f: f32, g: f32) -> Self {
-        // uniform path if f==g; still uses both XY prepared updates
         if (f - g).abs() < f32::EPSILON {
             self.ops.push(BuildOp::ZoomBoth(Target::Abs(f)));
         } else {
@@ -329,6 +315,10 @@ impl SegmentBuilder {
     pub fn set_visible(mut self, v: bool) -> Self { self.ops.push(BuildOp::Visible(v)); self }
     pub fn flip_x(mut self, v: bool) -> Self { self.ops.push(BuildOp::FlipX(v)); self }
     pub fn flip_y(mut self, v: bool) -> Self { self.ops.push(BuildOp::FlipY(v)); self }
+
+    // --- rotation (degrees) ---  NEW
+    pub fn rotationz(mut self, deg: f32) -> Self { self.ops.push(BuildOp::RotZ(Target::Abs(deg))); self }
+    pub fn addrotationz(mut self, ddeg: f32) -> Self { self.ops.push(BuildOp::RotZ(Target::Rel(ddeg))); self }
 
     pub fn build(self) -> Step { Step::Segment(Segment::new(self.ease, self.dur, self.ops)) }
 }

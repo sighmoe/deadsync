@@ -55,6 +55,11 @@ pub enum Mod<'a> {
     Content(Cow<'a, str>),
     TAlign(TextAlign),
 
+    // visibility + rotation
+    Visible(bool),     // NEW: immediate or inside tweens
+    RotZ(f32),         // NEW: immediate rotationz (degrees)
+    AddRotZ(f32),      // NEW: immediate addrotationz (degrees delta)
+
     // runtime/tween plumbing
     Tween(&'a [anim::Step]),
 }
@@ -77,10 +82,10 @@ fn build_sprite_like<'a>(
     let (mut vis, mut fx, mut fy) = (true, false, false);
     let (mut cl, mut cr, mut ct, mut cb) = (0.0, 0.0, 0.0, 0.0);
     let mut blend = BlendMode::Alpha;
-    let rot = 0.0_f32; // still exists on Actor; DSL no longer exposes rotation
-    let uv: Option<[f32; 4]> = None; // not set via DSL anymore
-    let cell: Option<(u32, u32)> = None; // not set via DSL anymore
-    let grid: Option<(u32, u32)> = None; // not set via DSL anymore
+    let mut rot = 0.0_f32; // NEW: rotation around Z in degrees
+    let uv: Option<[f32; 4]> = None;
+    let cell: Option<(u32, u32)> = None;
+    let grid: Option<(u32, u32)> = None;
     let mut texv: Option<[f32; 2]> = None;
     let (mut tw, _site_ignored): (Option<&[anim::Step]>, u64) = (None, 0);
 
@@ -105,17 +110,14 @@ fn build_sprite_like<'a>(
             Mod::Alpha(a) => { tint[3] = *a; }
             Mod::Blend(bm) => { blend = *bm; }
 
-            // absolute base size (pre-zoom)
             Mod::SizePx(a, b) => { w = *a; h = *b; }
 
-            // StepMania zoom (post-size)
             Mod::Zoom(f) => { sx = *f; sy = *f; }
             Mod::ZoomX(a) => { sx = *a; }
             Mod::ZoomY(b) => { sy = *b; }
             Mod::AddZoomX(a) => { sx += *a; }
             Mod::AddZoomY(b) => { sy += *b; }
 
-            // preserve aspect by setting one axis of base size
             Mod::ZoomToWidth(new_w) => {
                 if w > 0.0 && h > 0.0 {
                     let aspect = h / w;
@@ -135,14 +137,16 @@ fn build_sprite_like<'a>(
                 }
             }
 
-            Mod::Flip(v) => { fx = *v; /* horizontal only */ }
-
+            Mod::Flip(v) => { fx = *v; }
             Mod::CropLeft(v) => { cl = *v; }
             Mod::CropRight(v) => { cr = *v; }
             Mod::CropTop(v) => { ct = *v; }
             Mod::CropBottom(v) => { cb = *v; }
-
             Mod::TexVel(v) => { texv = Some(*v); }
+
+            Mod::Visible(v) => { vis = *v; }      // NEW
+            Mod::RotZ(d)    => { rot = *d; }      // NEW
+            Mod::AddRotZ(dd)=> { rot += *dd; }    // NEW
 
             // text-only mods ignored here
             Mod::Font(_) | Mod::Content(_) | Mod::TAlign(_) => {}
@@ -157,14 +161,15 @@ fn build_sprite_like<'a>(
         init.hx = hx; init.vy = vy;
         init.tint = tint;
         init.visible = vis; init.flip_x = fx; init.flip_y = fy;
+        init.rot_z = rot; // NEW
 
-        // stable id from callsite; extra "site id" removed
         let sid = runtime::site_id(file, line, col, 0);
         let s = runtime::materialize(sid, init, steps);
 
         x = s.x; y = s.y; w = s.w; h = s.h;
         hx = s.hx; vy = s.vy;
         tint = s.tint; vis = s.visible; fx = s.flip_x; fy = s.flip_y;
+        rot = s.rot_z; // NEW
     }
 
     // apply zoom last
@@ -191,7 +196,7 @@ fn build_sprite_like<'a>(
         croptop: ct,
         cropbottom: cb,
         blend,
-        rot_z_deg: rot,
+        rot_z_deg: rot,   // NEW
         texcoordvelocity: texv,
     }
 }
@@ -483,6 +488,25 @@ macro_rules! __dsl_apply_one {
     // flip (horizontal)
     (flip ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::Flip(($v) as bool));
+    }};
+
+    // --- visibility (immediate or inside a tween) ---
+    (visible ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.set_visible(($v) as bool); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::Visible(($v) as bool)); }
+    }};
+
+    // --- rotationz (degrees) ---
+    (rotationz ($deg:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let d=($deg) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.rotationz(d); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::RotZ(d)); }
+    }};
+
+    (addrotationz ($ddeg:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let dd=($ddeg) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.addrotationz(dd); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::AddRotZ(dd)); }
     }};
 
     // blends: normal, add, subtract only
