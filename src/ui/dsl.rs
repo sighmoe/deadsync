@@ -47,6 +47,12 @@ pub enum Mod<'a> {
     CropTop(f32),
     CropBottom(f32),
 
+    // NEW: edge fades
+    FadeLeft(f32),
+    FadeRight(f32),
+    FadeTop(f32),
+    FadeBottom(f32),
+
     // texture scroll (kept)
     TexVel([f32; 2]),
 
@@ -91,6 +97,7 @@ fn build_sprite_like<'a>(
     let mut z: i16 = 0;
     let (mut vis, mut fx, mut fy) = (true, false, false);
     let (mut cl, mut cr, mut ct, mut cb) = (0.0, 0.0, 0.0, 0.0);
+    let (mut fl, mut fr, mut ft, mut fb) = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
     let mut blend = BlendMode::Alpha;
     let mut rot = 0.0_f32;
     let mut uv: Option<[f32; 4]> = None;
@@ -157,6 +164,12 @@ fn build_sprite_like<'a>(
             Mod::CropRight(v)  => { cr = *v; }
             Mod::CropTop(v)    => { ct = *v; }
             Mod::CropBottom(v) => { cb = *v; }
+
+            Mod::FadeLeft(v)    => { fl = *v; }
+            Mod::FadeRight(v)   => { fr = *v; }
+            Mod::FadeTop(v)     => { ft = *v; }
+            Mod::FadeBottom(v)  => { fb = *v; }
+
             Mod::TexVel(v)     => { texv = Some(*v); }
 
             Mod::Visible(v) => { vis = *v; }
@@ -190,6 +203,7 @@ fn build_sprite_like<'a>(
         init.tint = tint;
         init.visible = vis; init.flip_x = fx; init.flip_y = fy;
         init.rot_z = rot;
+        init.fade_l = fl; init.fade_r = fr; init.fade_t = ft; init.fade_b = fb;
 
         let sid = runtime::site_id(file, line, col, 0);
         let s = runtime::materialize(sid, init, steps);
@@ -198,8 +212,10 @@ fn build_sprite_like<'a>(
         hx = s.hx; vy = s.vy;
         tint = s.tint; vis = s.visible; fx = s.flip_x; fy = s.flip_y;
         rot = s.rot_z;
+        fl = s.fade_l; fr = s.fade_r; ft = s.fade_t; fb = s.fade_b;
         // tweened crops override static ones if present
         cl = s.crop_l; cr = s.crop_r; ct = s.crop_t; cb = s.crop_b;
+        
     }
 
     // --- SM/ITG semantics: negative zoom flips, not negative geometry ---
@@ -230,6 +246,10 @@ fn build_sprite_like<'a>(
         cropright: cr,
         croptop: ct,
         cropbottom: cb,
+        fadeleft: fl,
+        faderight: fr,
+        fadetop: ft,
+        fadebottom: fb,
         blend,
         rot_z_deg: rot,
         texcoordvelocity: texv,
@@ -549,6 +569,27 @@ macro_rules! __dsl_apply_one {
     (cropbottom ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.cropbottom(($v) as f32); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::CropBottom(($v) as f32)); }
+    }};
+    // edge fades (0..1 of visible width/height)
+    (fadeleft ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let vv = ($v) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.fadeleft(vv); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::FadeLeft(vv)); }
+    }};
+    (faderight ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let vv = ($v) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.faderight(vv); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::FadeRight(vv)); }
+    }};
+    (fadetop ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let vv = ($v) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.fadetop(vv); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::FadeTop(vv)); }
+    }};
+    (fadebottom ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let vv = ($v) as f32;
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.fadebottom(vv); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::FadeBottom(vv)); }
     }};
     // --- SM/ITG Sprite: choose frame ---
     (setstate ($i:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{

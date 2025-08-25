@@ -25,6 +25,7 @@ struct SpritePush {
     tint: [f32; 4],
     uv_scale: [f32; 2],
     uv_offset: [f32; 2],
+    edge_fade: [f32; 4], 
 }
 
 #[repr(C)]
@@ -773,15 +774,24 @@ pub fn draw(
             let mut i = 0;
             while i < render_list.objects.len() {
                 match &render_list.objects[i].object_type {
-                    ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
+                    ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset, edge_fade } => {
                         if let Some(RendererTexture::Vulkan(tex)) = textures.get(texture_id) {
                             bind_pipeline!(state.sprite_pipeline);
                             bind_set!(state.sprite_pipeline_layout, tex.descriptor_set);
                             let pc = SpritePush {
                                 mvp: proj * render_list.objects[i].transform,
-                                tint: *tint, uv_scale: *uv_scale, uv_offset: *uv_offset,
+                                tint: *tint,
+                                uv_scale: *uv_scale,
+                                uv_offset: *uv_offset,
+                                edge_fade: *edge_fade,
                             };
-                            device.cmd_push_constants(cmd, state.sprite_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
+                            device.cmd_push_constants(
+                                cmd,
+                                state.sprite_pipeline_layout,
+                                vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+                                0,
+                                bytes_of(&pc),
+                            );
                             device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                             vertices += 4;
                         }

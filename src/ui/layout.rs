@@ -95,6 +95,7 @@ fn build_actor_recursive(
             align, offset, size, source, tint, z,
             cell, grid, uv_rect, visible, flip_x, flip_y,
             cropleft, cropright, croptop, cropbottom, blend,
+            fadeleft, faderight, fadetop, fadebottom,
             rot_z_deg, texcoordvelocity, animate, state_delay,
         } => {
             if !*visible { return; }
@@ -138,8 +139,10 @@ fn build_actor_recursive(
             let before = out.len();
             push_sprite(
                 out, rect, m, *source, *tint, *uv_rect, chosen_cell, chosen_grid,
-                *flip_x, *flip_y, *cropleft, *cropright, *croptop, *cropbottom, *blend,
-                *rot_z_deg, *texcoordvelocity, total_elapsed,
+                *flip_x, *flip_y,
+                *cropleft, *cropright, *croptop, *cropbottom,
+                *fadeleft, *faderight, *fadetop, *fadebottom,
+                *blend, *rot_z_deg, *texcoordvelocity, total_elapsed,
             );
             let layer = base_z.saturating_add(*z);
             for i in before..out.len() {
@@ -219,10 +222,16 @@ fn build_actor_recursive(
                     actors::Background::Color(c) => {
                         let before = out.len();
                         push_sprite(
-                            out, rect, m, actors::SpriteSource::Solid, *c,
-                            None, None, None, false, false,
-                            0.0, 0.0, 0.0, 0.0, BlendMode::Alpha, 0.0,
-                            None, 0.0,
+                            out, rect, m,
+                            actors::SpriteSource::Solid, *c,
+                            None, None, None,
+                            false, false,
+                            0.0, 0.0, 0.0, 0.0,      // crop L/R/T/B
+                            0.0, 0.0, 0.0, 0.0,      // fade L/R/T/B
+                            BlendMode::Alpha,
+                            0.0,                     // rot_z_deg
+                            None,                    // texcoordvelocity
+                            0.0,                     // total_elapsed (use your variable if you have it)
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
@@ -232,10 +241,16 @@ fn build_actor_recursive(
                     actors::Background::Texture(tex) => {
                         let before = out.len();
                         push_sprite(
-                            out, rect, m, actors::SpriteSource::Texture(*tex), [1.0; 4],
-                            None, None, None, false, false,
-                            0.0, 0.0, 0.0, 0.0, BlendMode::Alpha, 0.0,
-                            None, 0.0,
+                            out, rect, m,
+                            actors::SpriteSource::Texture(*tex), [1.0; 4],
+                            None, None, None,
+                            false, false,
+                            0.0, 0.0, 0.0, 0.0,      // crop L/R/T/B
+                            0.0, 0.0, 0.0, 0.0,      // fade L/R/T/B
+                            BlendMode::Alpha,
+                            0.0,                     // rot_z_deg
+                            None,                    // texcoordvelocity
+                            0.0,                     // total_elapsed (or your variable)
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
@@ -395,6 +410,10 @@ fn push_sprite(
     cropright: f32,
     croptop: f32,
     cropbottom: f32,
+    fadeleft: f32,
+    faderight: f32,
+    fadetop: f32,
+    fadebottom: f32,
     blend: BlendMode,
     rot_z_deg: f32,
     texcoordvelocity: Option<[f32; 2]>,
@@ -430,7 +449,23 @@ fn push_sprite(
         ),
     };
 
-    // 5) Compose transform: pivot preserved (translate by *original* center + rotated local offset).
+    // 5) Edge fades
+    let fl = fadeleft.clamp(0.0, 1.0);
+    let fr = faderight.clamp(0.0, 1.0);
+    let ft = fadetop.clamp(0.0, 1.0);
+    let fb = fadebottom.clamp(0.0, 1.0);
+
+    // remove the part eaten by crop, then renormalize to remaining size
+    let mut fl_eff = ((fl - cl).max(0.0) / sx_crop).clamp(0.0, 1.0);
+    let mut fr_eff = ((fr - cr).max(0.0) / sx_crop).clamp(0.0, 1.0);
+    let mut ft_eff = ((ft - ct).max(0.0) / sy_crop).clamp(0.0, 1.0);
+    let mut fb_eff = ((fb - cb).max(0.0) / sy_crop).clamp(0.0, 1.0);
+
+    // swap on flips so "left" and "top" remain screen-space semantics
+    if flip_x { std::mem::swap(&mut fl_eff, &mut fr_eff); }
+    if flip_y { std::mem::swap(&mut ft_eff, &mut fb_eff); }
+
+    // 6) Compose transform: pivot preserved (translate by *original* center + rotated local offset).
     let transform =
         Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0)) *
         Matrix4::from_angle_z(Deg(rot_z_deg)) *
@@ -443,7 +478,7 @@ fn push_sprite(
 
     out.push(renderer::RenderObject {
         object_type: renderer::ObjectType::Sprite {
-            texture_id, tint, uv_scale: uv_s, uv_offset: uv_o
+            texture_id, tint, uv_scale: uv_s, uv_offset: uv_o, edge_fade: [fl_eff, fr_eff, ft_eff, fb_eff],
         },
         transform,
         blend,

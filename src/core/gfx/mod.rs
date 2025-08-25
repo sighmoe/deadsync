@@ -37,6 +37,7 @@ pub enum ObjectType {
         tint: [f32; 4],
         uv_scale: [f32; 2],
         uv_offset: [f32; 2],
+        edge_fade: [f32; 4],
     },
     MsdfGlyph {
         texture_id: &'static str,

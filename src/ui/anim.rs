@@ -63,6 +63,10 @@ pub struct TweenState {
     pub crop_r: f32,
     pub crop_t: f32,
     pub crop_b: f32,
+    pub fade_l: f32,
+    pub fade_r: f32,
+    pub fade_t: f32,
+    pub fade_b: f32,
 }
 
 impl Default for TweenState {
@@ -75,6 +79,7 @@ impl Default for TweenState {
             flip_x: false,
             flip_y: false,
             rot_z: 0.0, // NEW
+            fade_l: 0.0, fade_r: 0.0, fade_t: 0.0, fade_b: 0.0,
             crop_l: 0.0, crop_r: 0.0, crop_t: 0.0, crop_b: 0.0,
         }
     }
@@ -104,6 +109,10 @@ enum BuildOp {
     CropR(Target),
     CropT(Target),
     CropB(Target),
+    FadeL(Target),
+    FadeR(Target),
+    FadeT(Target),
+    FadeB(Target),
 }
 
 #[derive(Clone, Debug)]
@@ -125,7 +134,11 @@ enum PreparedKind {
     CropL { from: f32, to: f32 },
     CropR { from: f32, to: f32 },
     CropT { from: f32, to: f32 },
-    CropB { from: f32, to: f32 },    
+    CropB { from: f32, to: f32 },
+    FadeL { from: f32, to: f32 },
+    FadeR { from: f32, to: f32 },
+    FadeT { from: f32, to: f32 },
+    FadeB { from: f32, to: f32 }, 
 }
 
 impl OpPrepared {
@@ -146,7 +159,11 @@ impl OpPrepared {
             PreparedKind::CropL { from, to } => s.crop_l = from + (to - from) * a,
             PreparedKind::CropR { from, to } => s.crop_r = from + (to - from) * a,
             PreparedKind::CropT { from, to } => s.crop_t = from + (to - from) * a,
-            PreparedKind::CropB { from, to } => s.crop_b = from + (to - from) * a,            
+            PreparedKind::CropB { from, to } => s.crop_b = from + (to - from) * a,
+            PreparedKind::FadeL { from, to } => s.fade_l = from + (to - from) * a,
+            PreparedKind::FadeR { from, to } => s.fade_r = from + (to - from) * a,
+            PreparedKind::FadeT { from, to } => s.fade_t = from + (to - from) * a,
+            PreparedKind::FadeB { from, to } => s.fade_b = from + (to - from) * a,        
         }
     }
 
@@ -250,6 +267,22 @@ impl Segment {
                 BuildOp::CropB(t) => {
                     let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.crop_b + dv };
                     self.prepared.push(OpPrepared { kind: PreparedKind::CropB { from: s.crop_b, to } });
+                }
+                BuildOp::FadeL(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.fade_l + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::FadeL { from: s.fade_l, to } });
+                }
+                BuildOp::FadeR(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.fade_r + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::FadeR { from: s.fade_r, to } });
+                }
+                BuildOp::FadeT(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.fade_t + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::FadeT { from: s.fade_t, to } });
+                }
+                BuildOp::FadeB(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.fade_b + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::FadeB { from: s.fade_b, to } });
                 }                
             }
         }
@@ -361,6 +394,11 @@ impl SegmentBuilder {
     pub fn addcropright(mut self, dv: f32) -> Self { self.ops.push(BuildOp::CropR(Target::Rel(dv))); self }
     pub fn addcroptop(mut self, dv: f32) -> Self { self.ops.push(BuildOp::CropT(Target::Rel(dv))); self }
     pub fn addcropbottom(mut self, dv: f32) -> Self { self.ops.push(BuildOp::CropB(Target::Rel(dv))); self }
+
+    pub fn fadeleft(mut self, v: f32) -> Self { self.ops.push(BuildOp::FadeL(Target::Abs(v))); self }
+    pub fn faderight(mut self, v: f32) -> Self { self.ops.push(BuildOp::FadeR(Target::Abs(v))); self }
+    pub fn fadetop(mut self, v: f32) -> Self { self.ops.push(BuildOp::FadeT(Target::Abs(v))); self }
+    pub fn fadebottom(mut self, v: f32) -> Self { self.ops.push(BuildOp::FadeB(Target::Abs(v))); self }
 
     pub fn build(self) -> Step { Step::Segment(Segment::new(self.ease, self.dur, self.ops)) }
 }

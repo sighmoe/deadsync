@@ -40,6 +40,7 @@ pub struct State {
     px_range_location: UniformLocation,
     instance_vbo: glow::Buffer,
     instanced_location: UniformLocation,
+    edge_fade_location: UniformLocation,
 }
 
 pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
@@ -56,6 +57,7 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
         is_msdf_location,
         px_range_location,
         instanced_location,
+        edge_fade_location,
     ) = create_graphics_program(&gl)?;
 
     // Create shared static unit quad + index + the instance VBO (and wire attributes to it)
@@ -136,6 +138,7 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
         gl.uniform_1_i32(Some(&is_msdf_location), 0);
         gl.uniform_1_f32(Some(&px_range_location), 4.0);
         gl.uniform_1_i32(Some(&instanced_location), 0);
+        gl.uniform_4_f32(Some(&edge_fade_location), 0.0, 0.0, 0.0, 0.0);
         gl.use_program(None);
     }
 
@@ -159,6 +162,7 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
         px_range_location,
         instance_vbo,
         instanced_location,
+        edge_fade_location,
     };
 
     info!("OpenGL backend initialized successfully.");
@@ -281,6 +285,7 @@ pub fn draw(
         let mut last_uv_offset: Option<[f32; 2]> = None;
         let mut last_px_range: Option<f32> = None;
         let mut last_color: Option<[f32; 4]> = None;
+        let mut last_edge_fade: Option<[f32; 4]> = None;
         let mut instanced_on = false;
 
         let proj: [[f32;4];4] = state.projection.into();
@@ -351,17 +356,37 @@ pub fn draw(
             gl.uniform_matrix_4_f32_slice(Some(&state.mvp_location), false, bytemuck::cast_slice(&mvp_array));
 
             match &obj.object_type {
-                ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset } => {
+                ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset, edge_fade } => {
                     if let Some(RendererTexture::OpenGL(gl_tex)) = textures.get(texture_id) {
-                        if last_bound_tex != Some(gl_tex.0) { gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0)); last_bound_tex = Some(gl_tex.0); }
-                        if last_is_msdf != Some(false) { gl.uniform_1_i32(Some(&state.is_msdf_location), 0); last_is_msdf = Some(false); }
-                        if last_uv_scale != Some(*uv_scale) { gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]); last_uv_scale = Some(*uv_scale); }
-                        if last_uv_offset != Some(*uv_offset) { gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]); last_uv_offset = Some(*uv_offset); }
-                        if last_color != Some(*tint) { gl.uniform_4_f32_slice(Some(&state.color_location), tint); last_color = Some(*tint); }
+                        if last_bound_tex != Some(gl_tex.0) {
+                            gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0));
+                            last_bound_tex = Some(gl_tex.0);
+                        }
+                        if last_is_msdf != Some(false) {
+                            gl.uniform_1_i32(Some(&state.is_msdf_location), 0);
+                            last_is_msdf = Some(false);
+                        }
+                        if last_uv_scale != Some(*uv_scale) {
+                            gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
+                            last_uv_scale = Some(*uv_scale);
+                        }
+                        if last_uv_offset != Some(*uv_offset) {
+                            gl.uniform_2_f32(Some(&state.uv_offset_location), uv_offset[0], uv_offset[1]);
+                            last_uv_offset = Some(*uv_offset);
+                        }
+                        if last_color != Some(*tint) {
+                            gl.uniform_4_f32_slice(Some(&state.color_location), tint);
+                            last_color = Some(*tint);
+                        }
+                        if last_edge_fade != Some(*edge_fade) {
+                            gl.uniform_4_f32_slice(Some(&state.edge_fade_location), edge_fade);
+                            last_edge_fade = Some(*edge_fade);
+                        }
                         gl.draw_elements(glow::TRIANGLES, state.index_count, glow::UNSIGNED_SHORT, 0);
                         vertices += 4;
                     }
                 }
+                // We handle MsdfGlyph in the instanced path above
                 ObjectType::MsdfGlyph { .. } => unreachable!("handled above"),
             }
             i += 1;
@@ -477,6 +502,7 @@ fn create_graphics_program(
         UniformLocation, // is_msdf
         UniformLocation, // px_range
         UniformLocation, // instanced
+        UniformLocation, // edge_fade
     ),
     String,
 > {
@@ -525,6 +551,7 @@ fn create_graphics_program(
         let is_msdf_location    = get("u_is_msdf")?;
         let px_range_location   = get("u_px_range")?;
         let instanced_location  = get("u_instanced")?;
+        let edge_fade_location  = get("u_edge_fade")?;
 
         Ok((
             program,
@@ -536,6 +563,7 @@ fn create_graphics_program(
             is_msdf_location,
             px_range_location,
             instanced_location,
+            edge_fade_location,
         ))
     }
 }
