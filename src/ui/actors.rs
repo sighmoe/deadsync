@@ -71,6 +71,8 @@ pub enum Actor {
         // Optional “fit” targets (preserve aspect by scaling)
         fit_width: Option<f32>,
         fit_height: Option<f32>,
+        // NEW: match SM — text honors blend mode too
+        blend: BlendMode,
     },
 
     /// Frame/group box

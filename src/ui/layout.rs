@@ -79,6 +79,7 @@ fn estimate_object_count(actors: &[Actor]) -> usize {
 #[derive(Clone, Copy)]
 struct SmRect { x: f32, y: f32, w: f32, h: f32 }
 
+#[inline(always)]
 fn build_actor_recursive(
     actor: &actors::Actor,
     parent: SmRect,
@@ -112,7 +113,7 @@ fn build_actor_recursive(
         }
         actors::Actor::Text {
             align, offset, px, color, font, content, align_text, z, scale,
-            fit_width, fit_height,
+            fit_width, fit_height, blend,
         } => {
             if let Some(fm) = fonts.get(font) {
                 // Base metrics at requested px (before any zoom/fit)
@@ -133,9 +134,7 @@ fn build_actor_recursive(
                 let sx = (scale[0].max(0.0)) * fit_s;
                 let sy = (scale[1].max(0.0)) * fit_s;
 
-                // Compute baseline origin so that:
-                // - horizalign uses the *scaled* width
-                // - vertical align uses the *scaled* line height (asc/desc)
+                // Compute baseline origin using scaled box (SM semantics)
                 let origin = place_text_baseline(
                     parent, *align, *offset, *align_text,
                     measured_w, asc, desc, sx, sy, m
@@ -164,7 +163,8 @@ fn build_actor_recursive(
                             px_range: fm.px_range,
                         },
                         transform: t,
-                        blend: BlendMode::Alpha,
+                        // NEW: use text actor's blend (matches SM)
+                        blend: *blend,
                         z: layer,
                         order: { let o = *order_counter; *order_counter += 1; o },
                     });

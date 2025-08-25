@@ -238,6 +238,9 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
     let (mut fit_w, mut fit_h): (Option<f32>, Option<f32>) = (None, None);
 
+    // NEW: SM-compatible — text respects blend mode (default Normal/Alpha)
+    let mut blend = BlendMode::Alpha;
+
     for m in mods {
         match m {
             Mod::Xy(a, b)    => { x = *a; y = *b; }
@@ -267,6 +270,10 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
             Mod::ZoomToWidth(w)  => { fit_w = Some(*w); }
             Mod::ZoomToHeight(h) => { fit_h = Some(*h); }
 
+            // NEW: honor blend mode for text
+            Mod::Blend(bm)       => { blend = *bm; }
+
+            // sprite-only mods ignored here
             _ => {}
         }
     }
@@ -283,6 +290,7 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
         scale: [sx, sy],
         fit_width: fit_w,
         fit_height: fit_h,
+        blend,
     }
 }
 
