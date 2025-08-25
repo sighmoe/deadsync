@@ -52,13 +52,19 @@ pub enum Mod<'a> {
 
     // text
     Font(&'static str),
-    Content(Cow<'a, str>),
+    Content(std::borrow::Cow<'a, str>),
     TAlign(TextAlign),
 
     // visibility + rotation
-    Visible(bool),     // NEW: immediate or inside tweens
-    RotZ(f32),         // NEW: immediate rotationz (degrees)
-    AddRotZ(f32),      // NEW: immediate addrotationz (degrees delta)
+    Visible(bool),
+    RotZ(f32),
+    AddRotZ(f32),
+
+    // ---- NEW: SM/ITG-compatible sprite controls ----
+    /// `setstate(i)` — linear state index (row-major); grid inferred from filename `_CxR`.
+    State(u32),
+    /// `customtexturerect(u0,v0,u1,v1)` — normalized UVs, top-left origin.
+    UvRect([f32; 4]),
 
     // runtime/tween plumbing
     Tween(&'a [anim::Step]),
@@ -82,17 +88,17 @@ fn build_sprite_like<'a>(
     let (mut vis, mut fx, mut fy) = (true, false, false);
     let (mut cl, mut cr, mut ct, mut cb) = (0.0, 0.0, 0.0, 0.0);
     let mut blend = BlendMode::Alpha;
-    let mut rot = 0.0_f32; // NEW: rotation around Z in degrees
-    let uv: Option<[f32; 4]> = None;
-    let cell: Option<(u32, u32)> = None;
-    let grid: Option<(u32, u32)> = None;
+    let mut rot = 0.0_f32;
+    let mut uv: Option<[f32; 4]> = None;
+    let mut cell: Option<(u32, u32)> = None; // (col,row) OR (linearIndex, u32::MAX) sentinel
+    let grid: Option<(u32, u32)> = None; // still inferred from filename unless set elsewhere
     let mut texv: Option<[f32; 2]> = None;
     let (mut tw, _site_ignored): (Option<&[anim::Step]>, u64) = (None, 0);
 
     // StepMania zoom (scale factors)
     let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
 
-    // fold mods in order
+    // fold mods in order (last writer wins like SM's cmd() chain)
     for m in mods {
         match m {
             Mod::Xy(a, b) => { x = *a; y = *b; }
@@ -144,12 +150,17 @@ fn build_sprite_like<'a>(
             Mod::CropBottom(v) => { cb = *v; }
             Mod::TexVel(v) => { texv = Some(*v); }
 
-            Mod::Visible(v) => { vis = *v; }      // NEW
-            Mod::RotZ(d)    => { rot = *d; }      // NEW
-            Mod::AddRotZ(dd)=> { rot += *dd; }    // NEW
+            Mod::Visible(v) => { vis = *v; }
+            Mod::RotZ(d)    => { rot = *d; }
+            Mod::AddRotZ(dd)=> { rot += *dd; }
 
-            // text-only mods ignored here
+            // NEW: precise SM/ITG semantics
+            Mod::State(i)      => { cell = Some((*i, u32::MAX)); }         // linear index; grid inferred from filename `_CxR`
+            Mod::UvRect(r)     => { uv = Some(*r); }                        // canonical name + ordering
+
+            // text-only mods ignored
             Mod::Font(_) | Mod::Content(_) | Mod::TAlign(_) => {}
+
             Mod::Tween(steps) => { tw = Some(steps); }
         }
     }
@@ -161,7 +172,7 @@ fn build_sprite_like<'a>(
         init.hx = hx; init.vy = vy;
         init.tint = tint;
         init.visible = vis; init.flip_x = fx; init.flip_y = fy;
-        init.rot_z = rot; // NEW
+        init.rot_z = rot;
 
         let sid = runtime::site_id(file, line, col, 0);
         let s = runtime::materialize(sid, init, steps);
@@ -169,7 +180,7 @@ fn build_sprite_like<'a>(
         x = s.x; y = s.y; w = s.w; h = s.h;
         hx = s.hx; vy = s.vy;
         tint = s.tint; vis = s.visible; fx = s.flip_x; fy = s.flip_y;
-        rot = s.rot_z; // NEW
+        rot = s.rot_z;
     }
 
     // apply zoom last
@@ -186,7 +197,7 @@ fn build_sprite_like<'a>(
         tint,
         z,
         cell,
-        grid,
+        grid,               // still inferred from filename unless a future helper sets it
         uv_rect: uv,
         visible: vis,
         flip_x: fx,
@@ -196,7 +207,7 @@ fn build_sprite_like<'a>(
         croptop: ct,
         cropbottom: cb,
         blend,
-        rot_z_deg: rot,   // NEW
+        rot_z_deg: rot,
         texcoordvelocity: texv,
     }
 }
@@ -484,6 +495,16 @@ macro_rules! __dsl_apply_one {
     (cropright ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropRight(($v) as f32)); }};
     (croptop ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropTop(($v) as f32)); }};
     (cropbottom ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropBottom(($v) as f32)); }};
+
+    // --- SM/ITG Sprite: choose frame ---
+    (setstate ($i:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::State(($i) as u32));
+    }};
+
+    // --- SM/ITG Sprite: explicit UVs (normalized, top-left origin) ---
+    (customtexturerect ($u0:expr, $v0:expr, $u1:expr, $v1:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::UvRect([($u0) as f32, ($v0) as f32, ($u1) as f32, ($v1) as f32]));
+    }};
 
     // flip (horizontal)
     (flip ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
