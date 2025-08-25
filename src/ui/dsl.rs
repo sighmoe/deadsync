@@ -204,9 +204,44 @@ fn build_sprite_like<'a>(
         init.visible = vis; init.flip_x = fx; init.flip_y = fy;
         init.rot_z = rot;
         init.fade_l = fl; init.fade_r = fr; init.fade_t = ft; init.fade_b = fb;
+        // tweened crops override static ones if present
+        init.crop_l = cl; init.crop_r = cr; init.crop_t = ct; init.crop_b = cb;
 
-        let sid = runtime::site_id(file, line, col, 0);
-        let s = runtime::materialize(sid, init, steps);
+        // --- NEW: automatic salt so duplicates from the same callsite don't collide
+        #[inline(always)]
+        fn auto_salt(src: &SpriteSource, init: &anim::TweenState, steps: &[anim::Step]) -> u64 {
+            let mut h = 0xcbf29ce484222325u64;
+            #[inline(always)] fn mix(h:&mut u64, v:u64){ *h ^= v.wrapping_mul(0x9E3779B97F4A7C15); *h = h.rotate_left(27) ^ (*h >> 33); }
+            #[inline(always)] fn f32b(f:f32)->u64{ f.to_bits() as u64 }
+
+            // texture identity
+            match src {
+                SpriteSource::Texture(key) => { mix(&mut h, (*key).as_ptr() as usize as u64); mix(&mut h, (*key).len() as u64); }
+                SpriteSource::Solid       => { mix(&mut h, 0x5EED5EED); }
+            }
+
+            // initial state
+            mix(&mut h, f32b(init.x)); mix(&mut h, f32b(init.y));
+            mix(&mut h, f32b(init.w)); mix(&mut h, f32b(init.h));
+            mix(&mut h, f32b(init.hx)); mix(&mut h, f32b(init.vy));
+            mix(&mut h, f32b(init.rot_z));
+            for c in init.tint { mix(&mut h, f32b(c)); }
+            mix(&mut h, u64::from(init.visible));
+            mix(&mut h, u64::from(init.flip_x));
+            mix(&mut h, u64::from(init.flip_y));
+            mix(&mut h, f32b(init.fade_l)); mix(&mut h, f32b(init.fade_r));
+            mix(&mut h, f32b(init.fade_t)); mix(&mut h, f32b(init.fade_b));
+            mix(&mut h, f32b(init.crop_l)); mix(&mut h, f32b(init.crop_r));
+            mix(&mut h, f32b(init.crop_t)); mix(&mut h, f32b(init.crop_b));
+
+            // steps fingerprint(s)
+            for s in steps { mix(&mut h, s.fingerprint64()); }
+            h
+        }
+
+        let salt = auto_salt(&source, &init, steps);
+        let sid  = runtime::site_id(file, line, col, salt);
+        let s    = runtime::materialize(sid, init, steps);
 
         x = s.x; y = s.y; w = s.w; h = s.h;
         hx = s.hx; vy = s.vy;
@@ -215,7 +250,6 @@ fn build_sprite_like<'a>(
         fl = s.fade_l; fr = s.fade_r; ft = s.fade_t; fb = s.fade_b;
         // tweened crops override static ones if present
         cl = s.crop_l; cr = s.crop_r; ct = s.crop_t; cb = s.crop_b;
-        
     }
 
     // --- SM/ITG semantics: negative zoom flips, not negative geometry ---

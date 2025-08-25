@@ -4,7 +4,7 @@ use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
 use crate::ui::actors::Actor;
 use crate::ui::msdf;
-use crate::screens::{gameplay, menu, options, Screen as CurrentScreen, ScreenAction};
+use crate::screens::{gameplay, menu, options, init, Screen as CurrentScreen, ScreenAction};
 use crate::act;
 
 use log::{error, info, warn};
@@ -123,13 +123,14 @@ pub struct App {
     last_vpf: u32,
     show_overlay: bool,
     transition: TransitionState, // Add this new field
+    init_state: init::State,          // NEW
 }
 
 impl App {
     fn new(backend_type: BackendType, vsync_enabled: bool, fullscreen_enabled: bool) -> Self {
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
-            current_screen: CurrentScreen::Menu, menu_state: menu::init(), gameplay_state: gameplay::init(), options_state: options::init(),
+            current_screen: CurrentScreen::Init, init_state: init::init(), menu_state: menu::init(), gameplay_state: gameplay::init(), options_state: options::init(),
             input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay: false,
@@ -164,8 +165,9 @@ impl App {
         }
 
         // Logical IDs -> filenames
-        let texture_paths: [&'static str; 5] = [
+        let texture_paths: [&'static str; 6] = [
             "logo.png",
+            "init_arrow.png",
             "dance.png",
             "meter_arrow.png",
             "fallback_banner.png",
@@ -282,9 +284,10 @@ impl App {
         };
 
         let mut actors = match self.current_screen {
-            CurrentScreen::Menu => menu::get_actors(&self.menu_state, &self.metrics, screen_alpha_multiplier),
+            CurrentScreen::Menu     => menu::get_actors(&self.menu_state, &self.metrics, screen_alpha_multiplier),
             CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state, &self.metrics),
             CurrentScreen::Options  => options::get_actors(&self.options_state, &self.metrics),
+            CurrentScreen::Init     => init::get_actors(&self.init_state, &self.metrics), // NEW
         };
 
         if self.show_overlay {
@@ -459,6 +462,7 @@ impl ApplicationHandler for App {
                     CurrentScreen::Menu     => menu::handle_key_press(&mut self.menu_state, &key_event),
                     CurrentScreen::Gameplay => gameplay::handle_key_press(&mut self.gameplay_state, &key_event),
                     CurrentScreen::Options  => options::handle_key_press(&mut self.options_state, &key_event),
+                    CurrentScreen::Init     => init::handle_key_press(&mut self.init_state, &key_event), // NEW
                 };
                 if let Err(e) = self.handle_action(action, event_loop) {
                     error!("Failed to handle action: {}", e);
@@ -493,8 +497,21 @@ impl ApplicationHandler for App {
                     }
                     TransitionState::Idle => {
                         // Only run game logic when not transitioning
-                        if self.current_screen == CurrentScreen::Gameplay {
-                        gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
+                        match self.current_screen {
+                            CurrentScreen::Gameplay => {
+                                gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
+                            }
+                            CurrentScreen::Init => {
+                                // allow the init screen to time out into Menu
+                                let action = init::update(&mut self.init_state, delta_time);
+                                if let ScreenAction::Navigate(_) | ScreenAction::Exit = action {
+                                    if let Err(e) = self.handle_action(action, event_loop) {
+                                        error!("Failed to handle action: {}", e);
+                                        event_loop.exit();
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
