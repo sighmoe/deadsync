@@ -115,41 +115,40 @@ fn build_actor_recursive(
             fit_width, fit_height,
         } => {
             if let Some(fm) = fonts.get(font) {
-                // Base unscaled line width at `px`
-                let measured = fm.measure_line_width(content, *px);
+                // Base metrics at requested px (before any zoom/fit)
+                let measured_w = fm.measure_line_width(content, *px);
+                let (asc, desc) = line_extents_px(fm, content, *px);
+                let line_h_px   = asc + desc;
 
-                // StepMania zoom factors (>= 0)
-                let sx0 = scale[0].max(0.0);
-                let sy0 = scale[1].max(0.0);
-
-                // Optional uniform "fit" scale derived from width/height targets
-                let fit_w = fit_width.map(|w| if measured > 0.0 { (w / measured).max(0.0) } else { 1.0 });
-                let fit_h = fit_height.map(|h| if *px > 0.0 { (h / *px).max(0.0) } else { 1.0 });
-                let fit = match (fit_w, fit_h) {
-                    (Some(a), Some(b)) => a.min(b),
-                    (Some(a), None)    => a,
-                    (None, Some(b))    => b,
-                    (None, None)       => 1.0,
+                // Fit scalar: prefer explicit width, else height; uniform to preserve aspect.
+                let fit_s = if let Some(w_target) = *fit_width {
+                    if measured_w > 0.0 { (w_target / measured_w).max(0.0) } else { 1.0 }
+                } else if let Some(h_target) = *fit_height {
+                    if line_h_px > 0.0 { (h_target / line_h_px).max(0.0) } else { 1.0 }
+                } else {
+                    1.0
                 };
 
-                // Final scales
-                let sx = sx0 * fit;
-                let sy = sy0 * fit;
+                // Final per-axis scale = fit * zoomx/zoomy
+                let sx = (scale[0].max(0.0)) * fit_s;
+                let sy = (scale[1].max(0.0)) * fit_s;
 
-                // Place baseline using the *scaled* width/height so alignment stays correct
-                let measured_scaled = measured * sx;
-                let px_scaled       = *px * sy;
+                // Compute baseline origin so that:
+                // - horizalign uses the *scaled* width
+                // - vertical align uses the *scaled* line height (asc/desc)
                 let origin = place_text_baseline(
                     parent, *align, *offset, *align_text,
-                    measured_scaled, fm, content, px_scaled, m
+                    measured_w, asc, desc, sx, sy, m
                 );
 
                 let layer = base_z.saturating_add(*z);
 
-                // Layout at base px, then apply final scales around `origin`
                 for g in msdf::layout_line(fm, content, *px, origin) {
+                    // Scale glyph position about the origin (baseline pivot)
                     let cx = origin.x + (g.center.x - origin.x) * sx;
                     let cy = origin.y + (g.center.y - origin.y) * sy;
+
+                    // Scale glyph size
                     let size_x = g.size.x * sx;
                     let size_y = g.size.y * sy;
 
@@ -438,38 +437,38 @@ fn apply_crop_to_rect(mut rect: SmRect, l: f32, r: f32, t: f32, b: f32) -> SmRec
 #[inline(always)]
 fn place_text_baseline(
     parent: SmRect,
-    actor_align: [f32; 2],
-    offset: [f32; 2],
-    align: actors::TextAlign,
-    measured_width: f32,
-    font: &msdf::Font,
-    content: &str,
-    pixel_height: f32,
+    actor_align: [f32; 2],          // halign/valign pivot inside the line box
+    offset: [f32; 2],               // parent TL space
+    talign: actors::TextAlign,      // horizalign: left/center/right
+    measured_width_px: f32,         // at the provided px (pre-scale)
+    asc_px: f32,                    // at the provided px (pre-scale)
+    desc_px: f32,                   // at the provided px (pre-scale)
+    sx: f32,                        // final X scale (fit * zoomx)
+    sy: f32,                        // final Y scale (fit * zoomy)
     m: &Metrics,
 ) -> Vector2<f32> {
     // Parent reference is ALWAYS its top-left in SM.
     let rx = parent.x;
     let ry = parent.y;
 
-    // Horizontal text layout relative to the baseline's x:
-    // talign(left)=0, center=-W/2, right=-W
-    let align_offset = match align {
+    // Horizontal offset uses the *scaled* width so center/right anchor correctly under zoom.
+    let width_scaled = measured_width_px * sx;
+    let align_offset_x = match talign {
         actors::TextAlign::Left   => 0.0,
-        actors::TextAlign::Center => -0.5 * measured_width,
-        actors::TextAlign::Right  => -measured_width,
+        actors::TextAlign::Center => -0.5 * width_scaled,
+        actors::TextAlign::Right  => -width_scaled,
     };
 
-    // Vertical: use actor align's Y to position the *line box* (asc+desc).
-    let (asc, desc) = line_extents_px(font, content, pixel_height);
-    let line_h_px   = asc + desc;
-    let ay          = actor_align[1]; // only vertical matters for baseline
+    // Vertical: compute baseline so the chosen pivot inside the (scaled) line box stays put.
+    let asc_s   = asc_px * sy;
+    let line_hs = (asc_px + desc_px) * sy;
+    let ay      = actor_align[1]; // 0=top, .5=middle, 1=bottom
 
-    // Top of the line box given xy ay
-    let text_top_sm_y   = ry + offset[1] - ay * line_h_px;
-    let baseline_sm_y   = text_top_sm_y + asc;
+    let text_top_sm_y = ry + offset[1] - ay * line_hs;
+    let baseline_sm_y = text_top_sm_y + asc_s;
 
     // Convert SM top-left "px" to world
-    let world_x = m.left + (rx + offset[0] + align_offset);
+    let world_x = m.left + (rx + offset[0] + align_offset_x);
     let world_y = m.top  - baseline_sm_y;
 
     Vector2::new(world_x, world_y)

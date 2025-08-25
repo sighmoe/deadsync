@@ -41,9 +41,9 @@ pub fn build(params: ScreenBarParams) -> Actor {
         act!(text:
             align(0.5, 0.5):
             xy(screen_center_x(), 0.5 * BAR_H):
-            px(title_px):
+            zoomtoheight(title_px):
             diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
-            font("wendy"): settext(params.title): talign(center)
+            font("wendy"): settext(params.title): horizalign(center)
         )
     ];
 
@@ -51,9 +51,9 @@ pub fn build(params: ScreenBarParams) -> Actor {
         children.push(act!(text:
             align(0.0, 0.5):
             xy(SIDE_TEXT_MARGIN, 0.5 * BAR_H):
-            px(SIDE_TEXT_PX):
+            zoomtoheight(SIDE_TEXT_PX):
             diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
-            font("miso"): settext(text): talign(left)
+            font("miso"): settext(text): horizalign(left)
         ));
     }
 
@@ -61,9 +61,9 @@ pub fn build(params: ScreenBarParams) -> Actor {
         children.push(act!(text:
             align(1.0, 0.5):
             xy(screen_width() - SIDE_TEXT_MARGIN, 0.5 * BAR_H):
-            px(SIDE_TEXT_PX):
+            zoomtoheight(SIDE_TEXT_PX):
             diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
-            font("miso"): settext(text): talign(right)
+            font("miso"): settext(text): horizalign(right)
         ));
     }
 

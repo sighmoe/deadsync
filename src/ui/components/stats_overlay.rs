@@ -25,31 +25,31 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
         act!(text:
             align(1.0, 0.0):
             xy(w + MARGIN_X, MARGIN_Y):
-            px(PX):
+            zoomtoheight(PX):
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):
             settext(format!("{:.0} FPS", fps.max(0.0))):
-            talign(right):
+            horizalign(right):
             z(1100)
         ),
         act!(text:
             align(1.0, 0.0):
             xy(w + MARGIN_X, MARGIN_Y + PX + GAP):
-            px(PX):
+            zoomtoheight(PX):
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):
             settext(format!("{} VPF", vpf)):
-            talign(right):
+            horizalign(right):
             z(1100)
         ),
         act!(text:
             align(1.0, 0.0):
             xy(w + MARGIN_X, MARGIN_Y + 2.0 * PX + 2.0 * GAP):
-            px(PX):
+            zoomtoheight(PX):
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):
             settext(backend_label(backend)):
-            talign(right):
+            horizalign(right):
             z(1100)
         ),
     ]

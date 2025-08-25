@@ -6,59 +6,57 @@ use std::borrow::Cow;
 #[allow(dead_code)]
 #[derive(Clone)]
 pub enum Mod<'a> {
+    // position
     Xy(f32, f32),
     SetX(f32),
     SetY(f32),
     AddX(f32),
     AddY(f32),
 
+    // pivot inside the rect (0..1)
     Align(f32, f32),
     HAlign(f32),
     VAlign(f32),
 
+    // draw order & color
     Z(i16),
     Tint([f32; 4]),
     Alpha(f32),
-    RotationZ(f32),
     Blend(BlendMode),
 
-    // Absolute size
+    // absolute size (pre-zoom) in SM TL space
     SizePx(f32, f32),
 
-    // StepMania zoom (scale factors)
+    // StepMania zoom semantics (scale factors)
     Zoom(f32),
     ZoomX(f32),
     ZoomY(f32),
     AddZoomX(f32),
     AddZoomY(f32),
 
-    // NEW: helpers that set one axis and preserve aspect (sprites immediate; text via layout)
+    // helpers that set one axis and preserve aspect
     ZoomToWidth(f32),
     ZoomToHeight(f32),
 
-    Visible(bool),
-    FlipX(bool),
-    FlipY(bool),
+    // misc
+    Flip(bool),
 
+    // cropping (fractions 0..1)
     CropLeft(f32),
     CropRight(f32),
     CropTop(f32),
     CropBottom(f32),
 
-    Cell(u32, u32),
-    Grid(u32, u32),
-    UvRect([f32; 4]),
+    // texture scroll (kept)
     TexVel([f32; 2]),
 
     // text
-    Px(f32),
     Font(&'static str),
     Content(Cow<'a, str>),
     TAlign(TextAlign),
 
     // runtime/tween plumbing
     Tween(&'a [anim::Step]),
-    SiteId(u64),
 }
 
 /* ======================== SPRITE/QUAD CORE ======================== */
@@ -79,14 +77,14 @@ fn build_sprite_like<'a>(
     let (mut vis, mut fx, mut fy) = (true, false, false);
     let (mut cl, mut cr, mut ct, mut cb) = (0.0, 0.0, 0.0, 0.0);
     let mut blend = BlendMode::Alpha;
-    let mut rot = 0.0_f32;
-    let mut cell: Option<(u32, u32)> = None;
-    let mut grid: Option<(u32, u32)> = None;
-    let mut uv: Option<[f32; 4]> = None;
+    let mut rot = 0.0_f32; // still exists on Actor; DSL no longer exposes rotation
+    let mut uv: Option<[f32; 4]> = None; // not set via DSL anymore
+    let mut cell: Option<(u32, u32)> = None; // not set via DSL anymore
+    let mut grid: Option<(u32, u32)> = None; // not set via DSL anymore
     let mut texv: Option<[f32; 2]> = None;
-    let (mut tw, mut site_extra): (Option<&[anim::Step]>, u64) = (None, 0);
+    let (mut tw, _site_ignored): (Option<&[anim::Step]>, u64) = (None, 0);
 
-    // StepMania zoom (scale)
+    // StepMania zoom (scale factors)
     let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
 
     // fold mods in order
@@ -103,29 +101,27 @@ fn build_sprite_like<'a>(
             Mod::Align(a, b) => { hx = *a; vy = *b; }
 
             Mod::Z(v) => { z = *v; }
-            Mod::Tint(r) => { tint = *r; }
+            Mod::Tint(rgba) => { tint = *rgba; }
             Mod::Alpha(a) => { tint[3] = *a; }
-            Mod::RotationZ(r) => { rot = *r; }
             Mod::Blend(bm) => { blend = *bm; }
 
-            // absolute size (pre-scale)
+            // absolute base size (pre-zoom)
             Mod::SizePx(a, b) => { w = *a; h = *b; }
 
-            // StepMania zoom (scale) — post-size
+            // StepMania zoom (post-size)
             Mod::Zoom(f) => { sx = *f; sy = *f; }
             Mod::ZoomX(a) => { sx = *a; }
             Mod::ZoomY(b) => { sy = *b; }
             Mod::AddZoomX(a) => { sx += *a; }
             Mod::AddZoomY(b) => { sy += *b; }
 
-            // NEW: keep aspect: change one axis of base size
+            // preserve aspect by setting one axis of base size
             Mod::ZoomToWidth(new_w) => {
                 if w > 0.0 && h > 0.0 {
                     let aspect = h / w;
                     w = *new_w;
                     h = w * aspect;
                 } else {
-                    // unknown aspect: best effort
                     w = *new_w;
                 }
             }
@@ -139,23 +135,18 @@ fn build_sprite_like<'a>(
                 }
             }
 
-            Mod::Visible(v) => { vis = *v; }
-            Mod::FlipX(v) => { fx = *v; }
-            Mod::FlipY(v) => { fy = *v; }
+            Mod::Flip(v) => { fx = *v; /* horizontal only */ }
 
             Mod::CropLeft(v) => { cl = *v; }
             Mod::CropRight(v) => { cr = *v; }
             Mod::CropTop(v) => { ct = *v; }
             Mod::CropBottom(v) => { cb = *v; }
 
-            Mod::Cell(c, r) => { cell = Some((*c, *r)); }
-            Mod::Grid(c, r) => { grid = Some((*c, *r)); }
-            Mod::UvRect(u) => { uv = Some(*u); }
             Mod::TexVel(v) => { texv = Some(*v); }
 
-            Mod::Px(_) | Mod::Font(_) | Mod::Content(_) | Mod::TAlign(_) => {}
+            // text-only mods ignored here
+            Mod::Font(_) | Mod::Content(_) | Mod::TAlign(_) => {}
             Mod::Tween(steps) => { tw = Some(steps); }
-            Mod::SiteId(id) => { site_extra = *id; }
         }
     }
 
@@ -167,7 +158,8 @@ fn build_sprite_like<'a>(
         init.tint = tint;
         init.visible = vis; init.flip_x = fx; init.flip_y = fy;
 
-        let sid = runtime::site_id(file, line, col, site_extra);
+        // stable id from callsite; extra "site id" removed
+        let sid = runtime::site_id(file, line, col, 0);
         let s = runtime::materialize(sid, init, steps);
 
         x = s.x; y = s.y; w = s.w; h = s.h;
@@ -175,7 +167,7 @@ fn build_sprite_like<'a>(
         tint = s.tint; vis = s.visible; fx = s.flip_x; fy = s.flip_y;
     }
 
-    // apply scale last
+    // apply zoom last
     if w != 0.0 || h != 0.0 {
         w *= sx;
         h *= sy;
@@ -219,7 +211,7 @@ pub fn quad<'a>(mods: &[Mod<'a>], f: &'static str, l: u32, c: u32) -> Actor {
 pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     let (mut x, mut y) = (0.0, 0.0);
     let (mut hx, mut vy) = (0.5, 0.5);
-    let mut px = 16.0_f32;
+    let mut px = 16.0_f32; // internal base pixel height (no public `px` command)
     let mut color = [1.0, 1.0, 1.0, 1.0];
     let mut font: &'static str = "miso";
     let mut content: Cow<'a, str> = Cow::Borrowed("");
@@ -242,7 +234,6 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
             Mod::VAlign(b)   => { vy = *b; }
             Mod::Align(a, b) => { hx = *a; vy = *b; }
 
-            Mod::Px(p)       => { px = *p; }
             Mod::Tint(r)     => { color = *r; }
             Mod::Alpha(a)    => { color[3] = *a; }
             Mod::Font(f)     => { font = *f; }
@@ -256,7 +247,7 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
             Mod::AddZoomX(a) => { sx += *a; }
             Mod::AddZoomY(b) => { sy += *b; }
 
-            // capture fit targets (applied at layout with actual text metrics)
+            // capture fit targets (applied at layout with actual metrics)
             Mod::ZoomToWidth(w)  => { fit_w = Some(*w); }
             Mod::ZoomToHeight(h) => { fit_h = Some(*h); }
 
@@ -294,7 +285,7 @@ macro_rules! __ui_textalign_from_ident {
     };
     ($other:ident) => {
         compile_error!(concat!(
-            "talign expects left|center|right, got: ",
+            "horizalign expects left|center|right, got: ",
             stringify!($other)
         ));
     };
@@ -327,30 +318,25 @@ macro_rules! act {
         let mut __mods = ::std::vec::Vec::new();
         let mut __tw = ::std::vec::Vec::new();
         let mut __cur: ::core::option::Option<$crate::ui::anim::SegmentBuilder> = None;
-        let mut __site: u64 = 0;
-        $crate::__dsl_apply!( ($($tail)+) __mods __tw __cur __site );
+        $crate::__dsl_apply!( ($($tail)+) __mods __tw __cur _dummy_site );
         if let ::core::option::Option::Some(seg)=__cur.take(){__tw.push(seg.build());}
         if !__tw.is_empty(){ __mods.push($crate::ui::dsl::Mod::Tween(&__tw)); }
-        if __site!=0{ __mods.push($crate::ui::dsl::Mod::SiteId(__site)); }
         $crate::ui::dsl::sprite($tex, &__mods, file!(), line!(), column!())
     }};
     (quad: $($tail:tt)+) => {{
         let mut __mods = ::std::vec::Vec::new();
         let mut __tw = ::std::vec::Vec::new();
         let mut __cur: ::core::option::Option<$crate::ui::anim::SegmentBuilder> = None;
-        let mut __site: u64 = 0;
-        $crate::__dsl_apply!( ($($tail)+) __mods __tw __cur __site );
+        $crate::__dsl_apply!( ($($tail)+) __mods __tw __cur _dummy_site );
         if let ::core::option::Option::Some(seg)=__cur.take(){__tw.push(seg.build());}
         if !__tw.is_empty(){ __mods.push($crate::ui::dsl::Mod::Tween(&__tw)); }
-        if __site!=0{ __mods.push($crate::ui::dsl::Mod::SiteId(__site)); }
         $crate::ui::dsl::quad(&__mods, file!(), line!(), column!())
     }};
     (text: $($tail:tt)+) => {{
         let mut __mods = ::std::vec::Vec::new();
-        let mut __tw: ::std::vec::Vec<$crate::ui::anim::Step> = ::std::vec::Vec::new(); // <-- typed
+        let mut __tw: ::std::vec::Vec<$crate::ui::anim::Step> = ::std::vec::Vec::new(); // typed
         let mut __cur: ::core::option::Option<$crate::ui::anim::SegmentBuilder> = None; // ignored
-        let mut __site: u64 = 0; // ignored
-        $crate::__dsl_apply!( ($($tail)+) __mods __tw __cur __site );
+        $crate::__dsl_apply!( ($($tail)+) __mods __tw __cur _dummy_site );
         $crate::ui::dsl::text(&__mods)
     }};
 }
@@ -372,9 +358,7 @@ macro_rules! __dsl_apply {
 #[macro_export]
 #[doc(hidden)]
 macro_rules! __dsl_apply_one {
-    (id ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $site = ($v) as u64; }};
-
-    // segments
+    // --- segment controls ---
     (linear ($d:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(seg)=$cur.take(){$tw.push(seg.build());}
         $cur = ::core::option::Option::Some($crate::ui::anim::linear(($d) as f32));
@@ -392,7 +376,7 @@ macro_rules! __dsl_apply_one {
         $tw.push($crate::ui::anim::sleep(($d) as f32));
     }};
 
-    // tweenable props
+    // --- tweenable props ---
     (xy ($x:expr, $y:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.x(($x) as f32).y(($y) as f32); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::Xy(($x) as f32, ($y) as f32)); }
@@ -412,6 +396,18 @@ macro_rules! __dsl_apply_one {
     (addy ($dy:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.addy(($dy) as f32); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::AddY(($dy) as f32)); }
+    }};
+
+    // --- color (present both for sprite & text) ---
+    (diffuse ($r:expr,$g:expr,$b:expr,$a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        // tweenable in segments later if desired; currently immediate
+        $mods.push($crate::ui::dsl::Mod::Tint([($r) as f32,($g) as f32,($b) as f32,($a) as f32]));
+    }};
+    (alpha ($a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::Alpha(($a) as f32));
+    }};
+    (diffusealpha ($a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::Alpha(($a) as f32));
     }};
 
     // --- StepMania zoom semantics (scale) ---
@@ -441,7 +437,7 @@ macro_rules! __dsl_apply_one {
         else { $mods.push($crate::ui::dsl::Mod::AddZoomY(df)); }
     }};
 
-    // Absolute size (zoomto/setsize) — uses dedicated tween op now
+    // Absolute size (zoomto/setsize) — tweenable size op
     (zoomto ($w:expr, $h:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.size(($w) as f32, ($h) as f32); $cur=::core::option::Option::Some(seg); }
         else { $mods.push($crate::ui::dsl::Mod::SizePx(($w) as f32, ($h) as f32)); }
@@ -450,31 +446,7 @@ macro_rules! __dsl_apply_one {
         $crate::__dsl_apply_one!(zoomto(($w), ($h)) $mods $tw $cur $site)
     }};
 
-    (diffuse ($r:expr,$g:expr,$b:expr,$a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.diffuse(($r) as f32,($g) as f32,($b) as f32,($a) as f32); $cur=::core::option::Option::Some(seg); }
-        else { $mods.push($crate::ui::dsl::Mod::Tint([($r) as f32,($g) as f32,($b) as f32,($a) as f32])); }
-    }};
-    (alpha ($a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.alpha(($a) as f32); $cur=::core::option::Option::Some(seg); }
-        else { $mods.push($crate::ui::dsl::Mod::Alpha(($a) as f32)); }
-    }};
-    (diffusealpha ($a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $crate::__dsl_apply_one!(alpha(($a)) $mods $tw $cur $site) }};
-
-    (set_visible ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.set_visible(($v) as bool); $cur=::core::option::Option::Some(seg); }
-        else { $mods.push($crate::ui::dsl::Mod::Visible(($v) as bool)); }
-    }};
-    (visible ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $crate::__dsl_apply_one!(set_visible(($v)) $mods $tw $cur $site) }};
-    (flipx ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.flip_x(($v) as bool); $cur=::core::option::Option::Some(seg); }
-        else { $mods.push($crate::ui::dsl::Mod::FlipX(($v) as bool)); }
-    }};
-    (flipy ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.flip_y(($v) as bool); $cur=::core::option::Option::Some(seg); }
-        else { $mods.push($crate::ui::dsl::Mod::FlipY(($v) as bool)); }
-    }};
-
-    // --- absolute size helpers that preserve aspect ---------------------
+    // --- absolute size helpers preserving aspect ---------------------
     (zoomtowidth ($w:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::ZoomToWidth(($w) as f32));
     }};
@@ -482,7 +454,7 @@ macro_rules! __dsl_apply_one {
         $mods.push($crate::ui::dsl::Mod::ZoomToHeight(($h) as f32));
     }};
 
-    // static sprite bits / cropping / uv / blend / rotation ---------------
+    // static sprite bits / cropping / uv / blend ---------------------
     (align ($h:expr,$v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::Align(($h) as f32, ($v) as f32));
     }};
@@ -500,15 +472,6 @@ macro_rules! __dsl_apply_one {
     }};
 
     (z ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Z(($v) as i16)); }};
-    (cell ($c:expr,$r:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Cell(($c) as u32, ($r) as u32)); }};
-    (setstate ($i:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Cell(($i) as u32, u32::MAX)); }};
-    (grid ($c:expr,$r:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Grid(($c) as u32, ($r) as u32)); }};
-    (texrect ($u0:expr,$v0:expr,$u1:expr,$v1:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        $mods.push($crate::ui::dsl::Mod::UvRect([($u0) as f32,($v0) as f32,($u1) as f32,($v1) as f32]));
-    }};
-    (customtexturerect ($u0:expr,$v0:expr,$u1:expr,$v1:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        $crate::__dsl_apply_one!(texrect(($u0),($v0),($u1),($v1)) $mods $tw $cur $site)
-    }};
     (texcoordvelocity ($vx:expr,$vy:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::TexVel([($vx) as f32, ($vy) as f32]));
     }};
@@ -516,28 +479,35 @@ macro_rules! __dsl_apply_one {
     (cropright ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropRight(($v) as f32)); }};
     (croptop ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropTop(($v) as f32)); }};
     (cropbottom ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropBottom(($v) as f32)); }};
-    (blend (alpha) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Alpha)); }};
-    (blend (normal) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Alpha)); }};
-    (blend (add) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Add)); }};
-    (blend (additive) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $crate::__dsl_apply_one!(blend(add) $mods $tw $cur $site) }};
-    (blend (multiply) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Multiply)); }};
-    (rotation ($z:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::RotationZ(($z) as f32)); }};
-    (rotationz ($z:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $crate::__dsl_apply_one!(rotation(($z)) $mods $tw $cur $site) }};
 
-    // Text properties (SM-compatible only)
-    (px ($p:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Px(($p) as f32)); }};
+    // flip (horizontal)
+    (flip ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::Flip(($v) as bool));
+    }};
+
+    // blends: normal, add, subtract only
+    (blend (normal) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Alpha));
+    }};
+    (blend (add) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Add));
+    }};
+    // TODO: implement Subtract in backends; currently mapped to Add to keep compiling.
+    (blend (subtract) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::Blend($crate::core::gfx::BlendMode::Add));
+    }};
+
+    // Text properties (SM-compatible)
     (font ($n:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::Font($n)); }};
     (settext ($s:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::Content(::std::borrow::Cow::from(($s))));
-    }};
-    (talign ($dir:ident) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        $mods.push($crate::ui::dsl::Mod::TAlign($crate::__ui_textalign_from_ident!($dir)));
     }};
     (horizalign ($dir:ident) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::TAlign($crate::__ui_textalign_from_ident!($dir)));
     }};
 
+    // unknown
     ($other:ident ( $($args:expr),* ) $mods:ident $tw:ident $cur:ident $site:ident) => {
-        compile_error!(concat!("act!: unknown command: ", stringify!($other)));
+        compile_error!(concat!("act!: unknown or removed command: ", stringify!($other)));
     };
 }

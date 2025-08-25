@@ -35,11 +35,11 @@ pub fn build_vertical_menu(p: MenuParams) -> Vec<Actor> {
         out.push(act!(text:
             align(0.5, 0.0):
             xy(center_x, y_top):
-            px(px):
+            zoomtoheight(px):
             diffuse(color[0], color[1], color[2], color[3]):
             font(p.font):
             settext(*label):
-            talign(center)
+            horizalign(center)
         ));
     }
     out

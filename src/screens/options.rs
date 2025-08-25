@@ -100,7 +100,6 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
             xy(x, y):
             zoomto(CORNER_SIZE, CORNER_SIZE):
             diffuse(col[0], col[1], col[2], col[3]):
-            rotationz(rot):
             z(50) // draw above bg
         ));
     }
@@ -109,22 +108,22 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     actors.push(act!(text:
         align(0.5, 1.0):                // bottom-center baseline
         xy(0.5 * w, h - 100.0):
-        px(60.0):
+        zoomtoheight(60.0):
         font("miso"):
         diffuse(0.80, 0.90, 0.70, 1.0):
         settext("This is miso font!"):
-        talign(center)
+        horizalign(center)
     ));
 
     // --- small bottom hint ---
     actors.push(act!(text:
         align(0.5, 1.0):
         xy(0.5 * w, h - 60.0):
-        px(20.0):
+        zoomtoheight(20.0):
         font("miso"):
         diffuse(0.85, 0.90, 0.75, 0.9):
         settext("Press Esc to return"):
-        talign(center)
+        horizalign(center)
     ));
 
     actors

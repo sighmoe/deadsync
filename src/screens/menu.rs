@@ -105,12 +105,12 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics, alpha_multipli
 
     actors.push(act!(text:
         align(0.5, 0.0): xy(screen_center_x(), info1_y_tl):
-        px(INFO_PX): font("miso"): settext("DeadSync 0.2.174"): talign(center):
+        zoomtoheight(INFO_PX): font("miso"): settext("DeadSync 0.2.174"): horizalign(center):
         diffuse(info_color[0], info_color[1], info_color[2], info_color[3])
     ));
     actors.push(act!(text:
         align(0.5, 0.0): xy(screen_center_x(), info2_y_tl):
-        px(INFO_PX): font("miso"): settext("2672 songs in 29 groups, 209 courses"): talign(center):
+        zoomtoheight(INFO_PX): font("miso"): settext("2672 songs in 29 groups, 209 courses"): horizalign(center):
         diffuse(info_color[0], info_color[1], info_color[2], info_color[3])
     ));
 
