@@ -281,22 +281,6 @@ fn place_rect(parent: SmRect, align: [f32; 2], offset: [f32; 2], size: [SizeSpec
 }
 
 #[inline(always)]
-fn rect_transform(rect: SmRect, m: &Metrics) -> Matrix4<f32> {
-    // top-left "SM px" rect -> world center/size transform
-    let (center, size) = sm_rect_to_world_center_size(rect, m);
-    Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0))
-        * Matrix4::from_nonuniform_scale(size.x, size.y, 1.0)
-}
-
-#[inline(always)]
-fn rect_transform_with_rot(rect: SmRect, m:&Metrics, rot_z_deg:f32) -> Matrix4<f32> {
-    let (center, size) = sm_rect_to_world_center_size(rect, m);
-    Matrix4::from_translation(Vector3::new(center.x, center.y, 0.0))
-        * Matrix4::from_angle_z(Deg(rot_z_deg))
-        * Matrix4::from_nonuniform_scale(size.x, size.y, 1.0)
-}
-
-#[inline(always)]
 fn calculate_uvs(
     texture: &'static str,
     uv_rect: Option<[f32; 4]>,
@@ -444,18 +428,6 @@ fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) 
         t.clamp(0.0, 1.0),
         b.clamp(0.0, 1.0),
     )
-}
-
-#[inline(always)]
-fn apply_crop_to_rect(mut rect: SmRect, l: f32, r: f32, t: f32, b: f32) -> SmRect {
-    // Assumes l,r,t,b are already clamped and normalized.
-    let dx = rect.w * l;
-    let dy = rect.h * t;
-    rect.x += dx;
-    rect.y += dy;
-    rect.w *= (1.0 - l - r).max(0.0);
-    rect.h *= (1.0 - t - b).max(0.0);
-    rect
 }
 
 #[inline(always)]
