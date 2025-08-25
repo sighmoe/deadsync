@@ -59,6 +59,10 @@ pub struct TweenState {
     pub flip_x: bool,
     pub flip_y: bool,
     pub rot_z: f32, // NEW: degrees
+    pub crop_l: f32,
+    pub crop_r: f32,
+    pub crop_t: f32,
+    pub crop_b: f32,
 }
 
 impl Default for TweenState {
@@ -71,6 +75,7 @@ impl Default for TweenState {
             flip_x: false,
             flip_y: false,
             rot_z: 0.0, // NEW
+            crop_l: 0.0, crop_r: 0.0, crop_t: 0.0, crop_b: 0.0,
         }
     }
 }
@@ -94,7 +99,11 @@ enum BuildOp {
     Visible(bool),
     FlipX(bool),
     FlipY(bool),
-    RotZ(Target), // NEW
+    RotZ(Target),
+    CropL(Target),
+    CropR(Target),
+    CropT(Target),
+    CropB(Target),
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +121,11 @@ enum PreparedKind {
     Visible(bool),
     FlipX(bool),
     FlipY(bool),
-    RotZ { from: f32, to: f32 }, // NEW
+    RotZ { from: f32, to: f32 },
+    CropL { from: f32, to: f32 },
+    CropR { from: f32, to: f32 },
+    CropT { from: f32, to: f32 },
+    CropB { from: f32, to: f32 },    
 }
 
 impl OpPrepared {
@@ -129,7 +142,11 @@ impl OpPrepared {
             PreparedKind::Visible(v) => s.visible = v,
             PreparedKind::FlipX(v) => s.flip_x = v,
             PreparedKind::FlipY(v) => s.flip_y = v,
-            PreparedKind::RotZ { from, to } => s.rot_z = from + (to - from) * a, // NEW
+            PreparedKind::RotZ { from, to } => s.rot_z = from + (to - from) * a,
+            PreparedKind::CropL { from, to } => s.crop_l = from + (to - from) * a,
+            PreparedKind::CropR { from, to } => s.crop_r = from + (to - from) * a,
+            PreparedKind::CropT { from, to } => s.crop_t = from + (to - from) * a,
+            PreparedKind::CropB { from, to } => s.crop_b = from + (to - from) * a,            
         }
     }
 
@@ -218,6 +235,22 @@ impl Segment {
                     let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.rot_z + dv };
                     self.prepared.push(OpPrepared { kind: PreparedKind::RotZ { from: s.rot_z, to } });
                 }
+                BuildOp::CropL(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.crop_l + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::CropL { from: s.crop_l, to } });
+                }
+                BuildOp::CropR(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.crop_r + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::CropR { from: s.crop_r, to } });
+                }
+                BuildOp::CropT(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.crop_t + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::CropT { from: s.crop_t, to } });
+                }
+                BuildOp::CropB(t) => {
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.crop_b + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::CropB { from: s.crop_b, to } });
+                }                
             }
         }
 
@@ -319,6 +352,15 @@ impl SegmentBuilder {
     // --- rotation (degrees) ---  NEW
     pub fn rotationz(mut self, deg: f32) -> Self { self.ops.push(BuildOp::RotZ(Target::Abs(deg))); self }
     pub fn addrotationz(mut self, ddeg: f32) -> Self { self.ops.push(BuildOp::RotZ(Target::Rel(ddeg))); self }
+
+    pub fn cropleft(mut self, v: f32) -> Self { self.ops.push(BuildOp::CropL(Target::Abs(v))); self }
+    pub fn cropright(mut self, v: f32) -> Self { self.ops.push(BuildOp::CropR(Target::Abs(v))); self }
+    pub fn croptop(mut self, v: f32) -> Self { self.ops.push(BuildOp::CropT(Target::Abs(v))); self }
+    pub fn cropbottom(mut self, v: f32) -> Self { self.ops.push(BuildOp::CropB(Target::Abs(v))); self }
+    pub fn addcropleft(mut self, dv: f32) -> Self { self.ops.push(BuildOp::CropL(Target::Rel(dv))); self }
+    pub fn addcropright(mut self, dv: f32) -> Self { self.ops.push(BuildOp::CropR(Target::Rel(dv))); self }
+    pub fn addcroptop(mut self, dv: f32) -> Self { self.ops.push(BuildOp::CropT(Target::Rel(dv))); self }
+    pub fn addcropbottom(mut self, dv: f32) -> Self { self.ops.push(BuildOp::CropB(Target::Rel(dv))); self }
 
     pub fn build(self) -> Step { Step::Segment(Segment::new(self.ease, self.dur, self.ops)) }
 }

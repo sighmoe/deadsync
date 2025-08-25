@@ -189,6 +189,8 @@ fn build_sprite_like<'a>(
         hx = s.hx; vy = s.vy;
         tint = s.tint; vis = s.visible; fx = s.flip_x; fy = s.flip_y;
         rot = s.rot_z;
+        // tweened crops override static ones if present
+        cl = s.crop_l; cr = s.crop_r; ct = s.crop_t; cb = s.crop_b;
     }
 
     // --- SM/ITG semantics: negative zoom flips, not negative geometry ---
@@ -521,11 +523,22 @@ macro_rules! __dsl_apply_one {
     (texcoordvelocity ($vx:expr,$vy:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::TexVel([($vx) as f32, ($vy) as f32]));
     }};
-    (cropleft ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropLeft(($v) as f32)); }};
-    (cropright ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropRight(($v) as f32)); }};
-    (croptop ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropTop(($v) as f32)); }};
-    (cropbottom ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{ $mods.push($crate::ui::dsl::Mod::CropBottom(($v) as f32)); }};
-
+    (cropleft ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.cropleft(($v) as f32); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::CropLeft(($v) as f32)); }
+    }};
+    (cropright ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.cropright(($v) as f32); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::CropRight(($v) as f32)); }
+    }};
+    (croptop ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.croptop(($v) as f32); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::CropTop(($v) as f32)); }
+    }};
+    (cropbottom ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        if let ::core::option::Option::Some(mut seg)=$cur.take(){ seg=seg.cropbottom(($v) as f32); $cur=::core::option::Option::Some(seg); }
+        else { $mods.push($crate::ui::dsl::Mod::CropBottom(($v) as f32)); }
+    }};
     // --- SM/ITG Sprite: choose frame ---
     (setstate ($i:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::State(($i) as u32));
