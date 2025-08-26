@@ -18,7 +18,6 @@ const ARROW_FADE_OUT: f32   = 0.75;
 
 // black bar behind arrows
 const BAR_TARGET_H: f32  = 128.0;
-const BAR_ALPHA: f32     = 0.90;
 
 const SQUISH_START_DELAY: f32 = 0.50;   // NEW: pause before unsquish begins
 const SQUISH_IN_DURATION: f32 = 0.35;
@@ -89,7 +88,7 @@ pub fn build_squish_bar(progress: f32) -> Actor {
         align(0.5, 0.5):
         xy(0.5 * w, cy):
         zoomto(w, BAR_TARGET_H):
-        diffuse(0.0, 0.0, 0.0, BAR_ALPHA):
+        diffuse(0.0, 0.0, 0.0, 1.0):
         croptop(crop): cropbottom(crop):
         z(105)   // above the hearts
     )
