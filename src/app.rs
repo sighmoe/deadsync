@@ -21,11 +21,19 @@ use winit::{
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 800;
 
-// --- NEW: Transition timing constants ---
-const FADE_OUT_DELAY: f32 = 0.1;    // Time before the black overlay starts fading in
-const FADE_OUT_DURATION: f32 = 0.4; // Time for the black overlay to fade to full
-const FADE_IN_DURATION: f32 = 0.4;  // Time for the black overlay to fade out on the new screen
-const MENU_ACTORS_FADE_DURATION: f32 = 0.65; // Time for menu's own actors to fade
+/* -------------------- transition timing constants -------------------- */
+// global full-screen fade (kept as default for non-Init→Menu)
+const FADE_OUT_DELAY: f32 = 0.1;
+const FADE_OUT_DURATION: f32 = 0.4;
+const FADE_IN_DURATION: f32 = 0.4;
+
+// menu actors fade duration (only used after the special Init→Menu squish)
+const MENU_ACTORS_FADE_DURATION: f32 = 0.65;
+
+// special Init→Menu: center bar collapse
+const BAR_SQUISH_DURATION: f32 = 0.35;
+const BAR_TARGET_H: f32      = 128.0;  // must match init.rs
+const BAR_ALPHA: f32         = 0.90;   // must match init.rs
 
 // ---- args ----
 fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
@@ -56,10 +64,10 @@ fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
                         vsync = v;
                         i += 1;
                     } else {
-                        vsync = true; // plain `--vsync`
+                        vsync = true;
                     }
                 } else {
-                    vsync = true;     // plain `--vsync`
+                    vsync = true;
                 }
             }
             _ if a.starts_with("--vsync=") => {
@@ -73,10 +81,10 @@ fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
                         fullscreen = v;
                         i += 1;
                     } else {
-                        fullscreen = true; // plain `--fullscreen`
+                        fullscreen = true;
                     }
                 } else {
-                    fullscreen = true;     // plain `--fullscreen`
+                    fullscreen = true;
                 }
             }
             "--windowed" => fullscreen = false,
@@ -92,13 +100,20 @@ fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
     (backend, vsync, fullscreen)
 }
 
+/* -------------------- transition state machine -------------------- */
 #[derive(Clone, Copy, Debug)]
 enum TransitionState {
     Idle,
-    // Fading out the OLD screen
+
+    // Generic global fade — for everything EXCEPT Init→Menu
     FadingOut { elapsed: f32, target: CurrentScreen },
-    // Fading in the NEW screen
-    FadingIn { elapsed: f32 },
+    FadingIn  { elapsed: f32 },
+
+    // Special Init→Menu: squish the bar while still on Init
+    BarSquishOut { elapsed: f32, target: CurrentScreen },
+
+    // Then, on Menu, fade ONLY the Menu actors in (no global overlay)
+    ActorsFadeIn { elapsed: f32 },
 }
 
 pub struct App {
@@ -114,7 +129,7 @@ pub struct App {
     frame_count: u32,
     last_title_update: Instant,
     last_frame_time: Instant,
-    start_time: Instant, // NEW
+    start_time: Instant,
     vsync_enabled: bool,
     fullscreen_enabled: bool,
     fonts: HashMap<&'static str, msdf::Font>,
@@ -122,8 +137,8 @@ pub struct App {
     last_fps: f32,
     last_vpf: u32,
     show_overlay: bool,
-    transition: TransitionState, // Add this new field
-    init_state: init::State,          // NEW
+    transition: TransitionState,
+    init_state: init::State,
 }
 
 impl App {
@@ -151,7 +166,7 @@ impl App {
             image::RgbaImage::from_raw(2, 2, data.to_vec()).expect("fallback image")
         }
 
-        // ---- 0) built-in 1x1 white texture for "solid quads" ----
+        // 1x1 white solid
         {
             let white = image::RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255]).unwrap();
             let white_tex = renderer::create_texture(
@@ -159,12 +174,10 @@ impl App {
                 &white,
                 renderer::TextureColorSpace::Srgb,
             )?;
-            // reserved key for solids:
             self.texture_manager.insert("__white", white_tex);
-            info!("Loaded built-in texture: __white (1x1 white)");
+            info!("Loaded built-in texture: __white");
         }
 
-        // Logical IDs -> filenames
         let texture_paths: [&'static str; 6] = [
             "logo.png",
             "init_arrow.png",
@@ -174,7 +187,6 @@ impl App {
             "heart.png",
         ];
 
-        // 1) Decode images in parallel (CPU-only work)
         let mut handles = Vec::with_capacity(texture_paths.len());
         for &key in &texture_paths {
             let path = Path::new("assets/graphics").join(key);
@@ -186,21 +198,19 @@ impl App {
             }));
         }
 
-        // Create the fallback image once and wrap in an Arc for cheap cloning.
-        let fallback_image = Arc::new(fallback_rgba());
-        let mut decoded: Vec<(&'static str, Arc<image::RgbaImage>)> = Vec::with_capacity(texture_paths.len());
+        let fallback_image = std::sync::Arc::new(fallback_rgba());
+        let mut decoded: Vec<(&'static str, std::sync::Arc<image::RgbaImage>)> = Vec::with_capacity(texture_paths.len());
 
         for h in handles {
             match h.join().expect("texture decode thread panicked") {
-                Ok((key, rgba)) => decoded.push((key, Arc::new(rgba))),
+                Ok((key, rgba)) => decoded.push((key, std::sync::Arc::new(rgba))),
                 Err((key, msg)) => {
-                    warn!("Failed to load 'assets/graphics/{}': {}. Using generated fallback.", key, msg);
+                    warn!("Failed to load 'assets/graphics/{}': {}. Using fallback.", key, msg);
                     decoded.push((key, fallback_image.clone()));
                 }
             }
         }
 
-        // 2) Create GPU textures sequentially
         for (key, rgba_arc) in decoded {
             let texture = renderer::create_texture(
                 backend,
@@ -218,20 +228,16 @@ impl App {
         let json_path = format!("assets/fonts/{}.json", name);
         let png_path  = format!("assets/fonts/{}.png",  name);
 
-        // Read JSON and atlas image from disk
         let json_data  = std::fs::read(&json_path)?;
         let image_data = image::open(&png_path)?.to_rgba8();
 
-        // Upload atlas texture to GPU (MSDF wants linear color space)
         let texture = renderer::create_texture(
             backend,
             &image_data,
             renderer::TextureColorSpace::Linear,
         )?;
-        // Use the font NAME as the texture key; avoids leaking boxed strings.
         self.texture_manager.insert(name, texture);
 
-        // Parse JSON and store font metrics; refer to the texture by NAME
         let font = msdf::load_font(&json_data, name, 4.0);
         self.fonts.insert(name, font);
         info!("Loaded font '{}'", name);
@@ -252,10 +258,16 @@ impl App {
     ) -> Result<(), Box<dyn Error>> {
         match action {
             ScreenAction::Navigate(screen) => {
-                // Instead of navigating directly, start the fade-out process
                 if matches!(self.transition, TransitionState::Idle) {
-                    info!("Starting fade out to screen: {:?}", screen);
-                    self.transition = TransitionState::FadingOut { elapsed: 0.0, target: screen };
+                    if self.current_screen == CurrentScreen::Init && screen == CurrentScreen::Menu {
+                        // SPECIAL: Init → Menu = bar squish + menu actors fade-in
+                        info!("Starting special Init→Menu transition (bar squish; no global fade)");
+                        self.transition = TransitionState::BarSquishOut { elapsed: 0.0, target: screen };
+                    } else {
+                        // Generic: use global black overlay fade
+                        info!("Starting global fade out to screen: {:?}", screen);
+                        self.transition = TransitionState::FadingOut { elapsed: 0.0, target: screen };
+                    }
                 }
             }
             ScreenAction::Exit => {
@@ -271,23 +283,30 @@ impl App {
         crate::ui::layout::build_screen(actors, clear_color, &self.metrics, &self.fonts, total_elapsed)
     }
 
-    // `get_current_actors` now calculates fade alphas and adds the global overlay
     fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
 
-        // Determine the alpha multiplier for the screen's own actors
-        let screen_alpha_multiplier = match self.transition {
-            TransitionState::FadingOut { elapsed, .. } => {
-                (1.0 - (elapsed / MENU_ACTORS_FADE_DURATION)).clamp(0.0, 1.0)
+        // Menu fade-in only
+        let mut screen_alpha_multiplier = 1.0;
+        if let TransitionState::ActorsFadeIn { elapsed } = self.transition {
+            if self.current_screen == CurrentScreen::Menu {
+                screen_alpha_multiplier = (elapsed / MENU_ACTORS_FADE_DURATION).clamp(0.0, 1.0);
             }
-            _ => 1.0,
-        };
+        }
 
+        // ⬇️ key change is inside the Init branch
         let mut actors = match self.current_screen {
             CurrentScreen::Menu     => menu::get_actors(&self.menu_state, &self.metrics, screen_alpha_multiplier),
             CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state, &self.metrics),
             CurrentScreen::Options  => options::get_actors(&self.options_state, &self.metrics),
-            CurrentScreen::Init     => init::get_actors(&self.init_state, &self.metrics), // NEW
+            CurrentScreen::Init     => {
+                // During the squish phase, draw ONLY background (no original bar)
+                if matches!(self.transition, TransitionState::BarSquishOut { .. }) {
+                    init::get_actors_bg_only(&self.init_state, &self.metrics)
+                } else {
+                    init::get_actors(&self.init_state, &self.metrics)
+                }
+            }
         };
 
         if self.show_overlay {
@@ -299,15 +318,11 @@ impl App {
             actors.extend(overlay);
         }
 
-        // Add the global black fade overlay if needed
+        // No global overlay for the special squish flow
         let overlay_alpha = match self.transition {
-            TransitionState::FadingOut { elapsed, .. } => {
-                ((elapsed - FADE_OUT_DELAY) / FADE_OUT_DURATION).clamp(0.0, 1.0)
-            }
-            TransitionState::FadingIn { elapsed, .. } => {
-                1.0 - (elapsed / FADE_IN_DURATION).clamp(0.0, 1.0)
-            }
-            TransitionState::Idle => 0.0,
+            TransitionState::FadingOut { elapsed, .. } => ((elapsed - FADE_OUT_DELAY) / FADE_OUT_DURATION).clamp(0.0, 1.0),
+            TransitionState::FadingIn  { elapsed, .. } => 1.0 - (elapsed / FADE_IN_DURATION).clamp(0.0, 1.0),
+            _ => 0.0,
         };
 
         if overlay_alpha > 0.0 {
@@ -318,7 +333,27 @@ impl App {
                 xy(0.0, 0.0):
                 zoomto(w, h):
                 diffuse(0.0, 0.0, 0.0, overlay_alpha):
-                z(500) // Ensure it's drawn on top of everything
+                z(1200)
+            ));
+        }
+
+        // Special squish bar: put it ABOVE the hearts so it’s visible,
+        // and since we suppressed the original bar, this is the only bar drawn.
+        if let TransitionState::BarSquishOut { elapsed, .. } = self.transition {
+            let w  = self.metrics.right - self.metrics.left;
+            let h  = self.metrics.top - self.metrics.bottom;
+            let cy = 0.5 * h;
+
+            let t = (elapsed / BAR_SQUISH_DURATION).clamp(0.0, 1.0);
+            let crop = 0.5 * t;
+
+            actors.push(act!(quad:
+                align(0.5, 0.5):
+                xy(0.5 * w, cy):
+                zoomto(w, BAR_TARGET_H):
+                diffuse(0.0, 0.0, 0.0, BAR_ALPHA):
+                croptop(crop): cropbottom(crop):
+                z(700)   // <-- above heart_bg (which draws at z=600)
             ));
         }
 
@@ -331,7 +366,7 @@ impl App {
         let elapsed = now.duration_since(self.last_title_update);
         if elapsed.as_secs_f32() >= 1.0 {
             let fps = self.frame_count as f32 / elapsed.as_secs_f32();
-            self.last_fps = fps; // cache for overlay
+            self.last_fps = fps;
 
             let screen_name = format!("{:?}", self.current_screen);
             window.set_title(&format!(
@@ -343,7 +378,7 @@ impl App {
         }
     }
 
-        fn init_graphics(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
+    fn init_graphics(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
         let mut window_attributes = Window::default_attributes()
             .with_title(format!("Simple Renderer - {:?}", self.backend_type))
             .with_resizable(true);
@@ -357,7 +392,11 @@ impl App {
                     log::info!("Fullscreen: using EXCLUSIVE {}x{} @ {} mHz", WINDOW_WIDTH, WINDOW_HEIGHT, mode.refresh_rate_millihertz());
                     Some(winit::window::Fullscreen::Exclusive(mode))
                 } else {
-                    log::warn!("No exact EXCLUSIVE mode {}x{}; using BORDERLESS on primary monitor.", WINDOW_WIDTH, WINDOW_HEIGHT);
+                    log::warn!(
+                        "No exact EXCLUSIVE mode {}x{}; using BORDERLESS.",
+                        WINDOW_WIDTH,
+                        WINDOW_HEIGHT
+                    );
                     Some(winit::window::Fullscreen::Borderless(Some(mon)))
                 }
             } else {
@@ -381,8 +420,6 @@ impl App {
         self.load_textures()?;
         self.load_fonts()?;
 
-        // The initial screen is drawn on the first RedrawRequested event,
-        // so no need to explicitly draw or load here.
         info!("Starting event loop...");
         Ok(())
     }
@@ -404,13 +441,11 @@ impl ApplicationHandler for App {
         window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
-        // Clone the Arc to avoid holding an immutable borrow of `self` while mutating `self`.
         let Some(window) = self.window.as_ref().cloned() else { return; };
         if window_id != window.id() {
             return;
         }
 
-        // Disable most input while transitioning
         let is_transitioning = !matches!(self.transition, TransitionState::Idle);
 
         match event {
@@ -419,13 +454,9 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::Resized(new_size) => {
-                info!("Window resized to: {}x{}", new_size.width, new_size.height);
                 if new_size.width > 0 && new_size.height > 0 {
-                    // keep metrics in sync
                     self.metrics = space::metrics_for_window(new_size.width, new_size.height);
-
                     space::set_current_metrics(self.metrics);
-
                     if let Some(backend) = &mut self.backend {
                         renderer::resize(backend, new_size.width, new_size.height);
                     }
@@ -433,36 +464,32 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
                 input::handle_keyboard_input(&key_event, &mut self.input_state);
-                
+
                 if key_event.state == winit::event::ElementState::Pressed {
                     if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F3) = key_event.physical_key {
                         self.show_overlay = !self.show_overlay;
                         info!("Overlay {}", if self.show_overlay { "ON" } else { "OFF" });
                     }
-                    
-                    // --- FIX: Make the global Escape handler context-aware ---
+
+                    // Only exit directly from the menu.
                     if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) = key_event.physical_key {
-                        // Only exit directly from the menu. Other screens will handle this
-                        // key press locally to navigate back to the menu.
                         if self.current_screen == CurrentScreen::Menu {
                             if let Err(e) = self.handle_action(ScreenAction::Exit, event_loop) {
                                 error!("Failed to handle exit action: {}", e);
                                 event_loop.exit();
                             }
-                            // Return early to avoid menu's own handler processing Exit again
                             return;
                         }
                     }
                 }
-                
-                // Block other input while fading
+
                 if is_transitioning { return; }
 
                 let action = match self.current_screen {
                     CurrentScreen::Menu     => menu::handle_key_press(&mut self.menu_state, &key_event),
                     CurrentScreen::Gameplay => gameplay::handle_key_press(&mut self.gameplay_state, &key_event),
                     CurrentScreen::Options  => options::handle_key_press(&mut self.options_state, &key_event),
-                    CurrentScreen::Init     => init::handle_key_press(&mut self.init_state, &key_event), // NEW
+                    CurrentScreen::Init     => init::handle_key_press(&mut self.init_state, &key_event),
                 };
                 if let Err(e) = self.handle_action(action, event_loop) {
                     error!("Failed to handle action: {}", e);
@@ -477,16 +504,14 @@ impl ApplicationHandler for App {
 
                 crate::ui::runtime::tick(delta_time);
 
-                // Update transition state machine
                 match &mut self.transition {
+                    // Generic overlay fade
                     TransitionState::FadingOut { elapsed, target } => {
                         *elapsed += delta_time;
-                        // Total fade out time is delay + duration
                         if *elapsed >= FADE_OUT_DELAY + FADE_OUT_DURATION {
                             self.current_screen = *target;
                             self.transition = TransitionState::FadingIn { elapsed: 0.0 };
-                            // Clear tweens for the new screen
-                            crate::ui::runtime::clear_all(); 
+                            crate::ui::runtime::clear_all();
                         }
                     }
                     TransitionState::FadingIn { elapsed } => {
@@ -495,8 +520,25 @@ impl ApplicationHandler for App {
                             self.transition = TransitionState::Idle;
                         }
                     }
+
+                    // Special flow
+                    TransitionState::BarSquishOut { elapsed, target } => {
+                        *elapsed += delta_time;
+                        if *elapsed >= BAR_SQUISH_DURATION {
+                            self.current_screen = *target;
+                            self.transition = TransitionState::ActorsFadeIn { elapsed: 0.0 };
+                            crate::ui::runtime::clear_all();
+                        }
+                    }
+                    TransitionState::ActorsFadeIn { elapsed } => {
+                        *elapsed += delta_time;
+                        if *elapsed >= MENU_ACTORS_FADE_DURATION {
+                            self.transition = TransitionState::Idle;
+                        }
+                    }
+
+                    // Idle → run per-screen logic
                     TransitionState::Idle => {
-                        // Only run game logic when not transitioning
                         match self.current_screen {
                             CurrentScreen::Gameplay => {
                                 gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
@@ -519,7 +561,6 @@ impl ApplicationHandler for App {
                 let (actors, clear_color) = self.get_current_actors();
                 let screen = self.build_screen(&actors, clear_color, total_elapsed);
 
-                // Update title/FPS without conflicting borrows.
                 self.update_fps_title(&window, now);
 
                 if let Some(backend) = &mut self.backend {
@@ -534,7 +575,7 @@ impl ApplicationHandler for App {
             }
             _ => {}
         }
-}
+    }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {
@@ -543,7 +584,6 @@ impl ApplicationHandler for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        info!("Cleaning up resources...");
         if let Some(backend) = &mut self.backend {
             renderer::dispose_textures(backend, &mut self.texture_manager);
             renderer::cleanup(backend);
@@ -552,23 +592,13 @@ impl ApplicationHandler for App {
 }
 
 // ---- public entry point ----
-pub fn run() -> Result<(), Box<dyn Error>> {
-    use log::info;
+pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
 
     let args: Vec<String> = std::env::args().collect();
     let (backend_type, vsync_enabled, fullscreen_enabled) = parse_args(&args);
-
-    // Only consider the legacy flags for detection
-    let backend_specified = args.iter().any(|a| a == "--opengl" || a == "--vulkan");
-    if !backend_specified {
-        info!("No backend specified. Defaulting to Vulkan.");
-        info!("Use '--opengl' or '--vulkan' to select a backend.");
-    }
-
-    if fullscreen_enabled {
-        info!("Fullscreen enabled (try exclusive at {}x{}).", WINDOW_WIDTH, WINDOW_HEIGHT);
-        info!("Use '--windowed' or '--fullscreen=false' to disable.");
-    }
 
     let event_loop = EventLoop::new()?;
     let mut app = App::new(backend_type, vsync_enabled, fullscreen_enabled);

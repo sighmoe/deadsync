@@ -4,8 +4,7 @@ use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::components::heart_bg;
-use winit::event::{ElementState, KeyEvent};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::event::{KeyEvent};
 
 /* ----------------------- timing & layout ----------------------- */
 
@@ -50,17 +49,8 @@ pub fn init() -> State {
 
 /* -------------------------- input -> nav ----------------------- */
 
-pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
-    if e.state == ElementState::Pressed {
-        match e.physical_key {
-            PhysicalKey::Code(KeyCode::Enter)
-            | PhysicalKey::Code(KeyCode::Space)
-            | PhysicalKey::Code(KeyCode::Escape) => {
-                return ScreenAction::Navigate(Screen::Menu);
-            }
-            _ => {}
-        }
-    }
+// Block ALL input during the splash. Let it auto-advance only.
+pub fn handle_key_press(_: &mut State, _: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
@@ -76,6 +66,15 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
 }
 
 /* --------------------------- drawing --------------------------- */
+
+pub fn get_actors_bg_only(state: &State, _m: &crate::core::space::Metrics) -> Vec<Actor> {
+    let mut actors: Vec<Actor> = Vec::with_capacity(16);
+    actors.extend(state.bg.build(heart_bg::Params {
+        active_color_index: state.base_color_index,
+        backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
+    }));
+    actors
+}
 
 pub fn get_actors(state: &State, _m: &crate::core::space::Metrics) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(32 + ARROW_COUNT);
