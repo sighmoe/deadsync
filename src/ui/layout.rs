@@ -158,8 +158,9 @@ fn build_actor_recursive(
             if let Some(fm) = fonts.get(font) {
                 // Base metrics at requested px (before any zoom/fit)
                 let measured_w = fm.measure_line_width(content, *px);
-                let (asc, desc) = line_extents_px(fm, content, *px);
-                let line_h_px   = asc + desc;
+                // --- Use a stable reference box for fitting so zoomtoheight is consistent ---
+                let (asc_fit, desc_fit) = line_extents_px(fm, "Hg", *px);
+                let line_h_px = asc_fit + desc_fit;
 
                 // Fit scalar: prefer explicit width, else height; uniform to preserve aspect.
                 let fit_s = if let Some(w_target) = *fit_width {
@@ -176,7 +177,9 @@ fn build_actor_recursive(
                 let sx_abs = sx_raw.abs();
                 let sy_abs = sy_raw.abs();
 
-                // Compute baseline origin using ABS scales so pivot stays fixed under flips.
+                // --- Use the actual string's asc/desc for baseline placement ---
+                let (asc, desc) = line_extents_px(fm, content, *px);
+
                 let origin = place_text_baseline(
                     parent, *align, *offset, *align_text,
                     measured_w, asc, desc, sx_abs, sy_abs, m

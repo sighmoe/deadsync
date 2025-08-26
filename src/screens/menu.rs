@@ -16,9 +16,9 @@ const NORMAL_COLOR_HEX: &str = "#888888";
 const OPTION_COUNT: usize = 3;
 const MENU_OPTIONS: [&str; OPTION_COUNT] = ["GAMEPLAY", "OPTIONS", "EXIT"];
 
-const MENU_SELECTED_PX: f32 = 28.0;
-const MENU_NORMAL_PX: f32 = 23.0;
-const MENU_BELOW_LOGO: f32 = 28.0;
+const MENU_SELECTED_PX: f32 = 23.0;
+const MENU_NORMAL_PX: f32 = 19.0;
+const MENU_BELOW_LOGO: f32 = 25.0;
 const MENU_ROW_SPACING: f32 = 23.0;
 
 const INFO_PX: f32 = 15.0;

@@ -6,7 +6,7 @@ use crate::ui::color;
 // --- Constants ---
 const BAR_H: f32 = 32.0;
 const TOP_BAR_TITLE_PX: f32 = 33.0;
-const BOTTOM_BAR_TITLE_PX: f32 = 28.0;
+const BOTTOM_BAR_TITLE_PX: f32 = 24.0;
 const SIDE_TEXT_PX: f32 = 15.0;
 const SIDE_TEXT_MARGIN: f32 = 42.0;
 

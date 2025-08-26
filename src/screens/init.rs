@@ -76,6 +76,25 @@ pub fn get_actors_bg_only(state: &State, _m: &crate::core::space::Metrics) -> Ve
     actors
 }
 
+// A single black bar that collapses to the center as `progress` goes 0→1.
+pub fn build_squish_bar(progress: f32) -> Actor {
+    let w  = screen_width();
+    let cy = screen_center_y();
+
+    let t = progress.clamp(0.0, 1.0);
+    let crop = 0.5 * t;
+
+    act!(quad:
+        align(0.5, 0.5):
+        xy(0.5 * w, cy):
+        zoomto(w, BAR_TARGET_H):
+        diffuse(0.0, 0.0, 0.0, BAR_ALPHA):
+        croptop(crop): cropbottom(crop):
+        z(700)   // above the hearts
+    )
+}
+
+
 pub fn get_actors(state: &State, _m: &crate::core::space::Metrics) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(32 + ARROW_COUNT);
 

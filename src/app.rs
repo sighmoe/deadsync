@@ -5,7 +5,6 @@ use crate::core::space::{self as space, Metrics};
 use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::screens::{gameplay, menu, options, init, Screen as CurrentScreen, ScreenAction};
-use crate::act;
 
 use log::{error, info, warn};
 use image;
@@ -32,8 +31,6 @@ const MENU_ACTORS_FADE_DURATION: f32 = 0.65;
 
 // special Init→Menu: center bar collapse
 const BAR_SQUISH_DURATION: f32 = 0.35;
-const BAR_TARGET_H: f32      = 128.0;  // must match init.rs
-const BAR_ALPHA: f32         = 0.90;   // must match init.rs
 
 // ---- args ----
 fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
@@ -326,35 +323,14 @@ impl App {
         };
 
         if overlay_alpha > 0.0 {
-            let w = self.metrics.right - self.metrics.left;
-            let h = self.metrics.top - self.metrics.bottom;
-            actors.push(act!(quad:
-                align(0.0, 0.0):
-                xy(0.0, 0.0):
-                zoomto(w, h):
-                diffuse(0.0, 0.0, 0.0, overlay_alpha):
-                z(1200)
-            ));
+            actors.push(crate::ui::components::fade::black(overlay_alpha));
         }
 
         // Special squish bar: put it ABOVE the hearts so it’s visible,
         // and since we suppressed the original bar, this is the only bar drawn.
         if let TransitionState::BarSquishOut { elapsed, .. } = self.transition {
-            let w  = self.metrics.right - self.metrics.left;
-            let h  = self.metrics.top - self.metrics.bottom;
-            let cy = 0.5 * h;
-
             let t = (elapsed / BAR_SQUISH_DURATION).clamp(0.0, 1.0);
-            let crop = 0.5 * t;
-
-            actors.push(act!(quad:
-                align(0.5, 0.5):
-                xy(0.5 * w, cy):
-                zoomto(w, BAR_TARGET_H):
-                diffuse(0.0, 0.0, 0.0, BAR_ALPHA):
-                croptop(crop): cropbottom(crop):
-                z(700)   // <-- above heart_bg (which draws at z=600)
-            ));
+            actors.push(crate::screens::init::build_squish_bar(t));
         }
 
         (actors, CLEAR)
