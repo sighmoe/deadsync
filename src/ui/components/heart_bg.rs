@@ -48,7 +48,7 @@ impl State {
     pub fn with_texture(tex_key: &'static str) -> Self {
         // Read real image dimensions from disk using the full path:
         let full_path = format!("assets/graphics/{}", tex_key);
-        let (w_px, h_px) = image::image_dimensions(&full_path).unwrap_or((319, 271));
+        let (w_px, h_px) = image::image_dimensions(&full_path).unwrap_or((668, 566));
 
         let variants = [0, 1, 2, 0, 1, 0, 2, 0, 1, 2]; // normal,big,small pattern
         Self {
@@ -78,12 +78,11 @@ impl State {
         let aspect = self.base_h / self.base_w;
 
         // original widths (approx):
-        const BW_BIG: f32 = 320.0;
-        const BW_NORMAL: f32 = 256.0;
-        const BW_SMALL: f32 = 192.0;
+        const BW_BIG: f32 = 668.0;
+        const BW_NORMAL: f32 = 543.0;
+        const BW_SMALL: f32 = 400.0;
 
-        // scale so big ≈ base_w * 1.3
-        let scale_k = (self.base_w * 1.3) / BW_BIG;
+        let scale_k = (self.base_w * 0.6) / BW_BIG;
         let var_w = [BW_NORMAL * scale_k, BW_BIG * scale_k, BW_SMALL * scale_k]; // [normal, big, small]
         let var_h = [var_w[0] * aspect, var_w[1] * aspect, var_w[2] * aspect];
 
