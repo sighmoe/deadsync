@@ -475,6 +475,10 @@ macro_rules! __dsl_apply_one {
         if let ::core::option::Option::Some(seg)=$cur.take(){$tw.push(seg.build());}
         $cur = ::core::option::Option::Some($crate::ui::anim::decelerate(($d) as f32));
     }};
+    (ease ($d:expr, $f:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        if let ::core::option::Option::Some(seg) = $cur.take() { $tw.push(seg.build()); }
+        $cur = ::core::option::Option::Some($crate::ui::anim::ease(($d) as f32, ($f) as f32));
+    }};
     (sleep ($d:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(seg)=$cur.take(){$tw.push(seg.build());}
         $tw.push($crate::ui::anim::sleep(($d) as f32));

@@ -27,7 +27,7 @@
 #![allow(unused_assignments,dead_code)]
 use std::collections::VecDeque;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)] // <-- removed Eq
 pub enum Ease {
     /// StepMania: `linear(t)`
     Linear,
@@ -35,15 +35,58 @@ pub enum Ease {
     Accelerate,
     /// StepMania: `decelerate(t)` (quad-out)
     Decelerate,
+    /// StepMania: `ease(time, fEase)` — weighted in–out; `bias` == fEase in [-100,100].
+    EaseInOut { bias: f32 },
 }
 
+#[inline(always)]
 fn ease_apply(e: Ease, t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
-    match e {
-        Ease::Linear => t,
-        Ease::Accelerate => t * t,
-        Ease::Decelerate => 1.0 - (1.0 - t) * (1.0 - t),
+
+    #[inline(always)]
+    fn ease_in_quad(u: f32) -> f32 { u * u }
+
+    #[inline(always)]
+    fn ease_out_quad(u: f32) -> f32 { 1.0 - (1.0 - u) * (1.0 - u) }
+
+    #[inline(always)]
+    fn ease_weighted_inout(t: f32, fease: f32) -> f32 {
+        // Map fEase [-100,100] → split around 0.5.
+        // 0   => d1=d2=0.5 (symmetry)
+        // >0  => out-heavy (shorter accel, longer decel)
+        // <0  => in-heavy  (longer accel, shorter decel)
+        let w = fease.abs().min(100.0) * 0.01; // [0,1]
+        let s = if fease > 0.0 { 1.0 } else if fease < 0.0 { -1.0 } else { 0.0 };
+        let delta = 0.5 * w;                   // [0,0.5]
+        let d1 = (0.5 - s * delta).clamp(0.0, 1.0);
+        let d2 = (1.0 - d1).max(0.0);
+
+        if d1 == 0.0 { return ease_out_quad(t); } // +100 → pure ease-out
+        if d2 == 0.0 { return ease_in_quad(t); }  // -100 → pure ease-in
+
+        if t <= d1 {
+            let u = (t / d1).clamp(0.0, 1.0);
+            0.5 * ease_in_quad(u)
+        } else {
+            let u = ((t - d1) / d2).clamp(0.0, 1.0);
+            0.5 + 0.5 * ease_out_quad(u)
+        }
     }
+
+    match e {
+        Ease::Linear                 => t,
+        Ease::Accelerate             => ease_in_quad(t),
+        Ease::Decelerate             => ease_out_quad(t),
+        Ease::EaseInOut { bias }     => ease_weighted_inout(t, bias),
+    }
+}
+
+/// Construct `ease(time, fEase)` — fEase in [-100, 100]; 0 = symmetric in–out.
+/// Positive fEase biases ease-out (fast early), negative biases ease-in.
+#[inline(always)]
+pub fn ease(dur: f32, f_ease: f32) -> SegmentBuilder {
+    let bias = f_ease.clamp(-100.0, 100.0);
+    SegmentBuilder::new(Ease::EaseInOut { bias }, dur)
 }
 
 #[derive(Clone, Debug)]
@@ -100,9 +143,13 @@ impl Step {
                 mix(&mut h, 1);
                 // These fields are private but we're in the same module
                 match seg.ease {
-                    Ease::Linear => mix(&mut h, 0),
-                    Ease::Accelerate => mix(&mut h, 1),
-                    Ease::Decelerate => mix(&mut h, 2),
+                    Ease::Linear      => mix(&mut h, 0),
+                    Ease::Accelerate  => mix(&mut h, 1),
+                    Ease::Decelerate  => mix(&mut h, 2),
+                    Ease::EaseInOut { bias } => {
+                        mix(&mut h, 3);
+                        mix(&mut h, f32b(bias));
+                    }
                 }
                 mix(&mut h, f32b(seg.dur));
 
