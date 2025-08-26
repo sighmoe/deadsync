@@ -91,7 +91,7 @@ pub fn build_squish_bar(progress: f32) -> Actor {
         zoomto(w, BAR_TARGET_H):
         diffuse(0.0, 0.0, 0.0, BAR_ALPHA):
         croptop(crop): cropbottom(crop):
-        z(700)   // above the hearts
+        z(105)   // above the hearts
     )
 }
 
