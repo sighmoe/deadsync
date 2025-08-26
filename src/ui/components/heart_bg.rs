@@ -135,7 +135,7 @@ impl State {
                         xy(x, y):
                         zoomto(heart_w, heart_h):
                         diffuse(rgba[0], rgba[1], rgba[2], rgba[3]):
-                        z(600)
+                        z(100)
                     ));
                 }
             }
