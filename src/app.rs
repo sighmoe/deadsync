@@ -4,7 +4,7 @@ use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
 use crate::ui::actors::Actor;
 use crate::ui::msdf;
-use crate::screens::{gameplay, menu, options, init, Screen as CurrentScreen, ScreenAction};
+use crate::screens::{gameplay, menu, options, init, select_color, Screen as CurrentScreen, ScreenAction};
 
 use log::{error, info, warn};
 use image;
@@ -136,6 +136,7 @@ pub struct App {
     show_overlay: bool,
     transition: TransitionState,
     init_state: init::State,
+    select_color_state: select_color::State,
 }
 
 impl App {
@@ -143,7 +144,7 @@ impl App {
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
             current_screen: CurrentScreen::Init, init_state: init::init(), menu_state: menu::init(), gameplay_state: gameplay::init(), options_state: options::init(),
-            input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
+            select_color_state: select_color::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay: false,
             last_fps: 0.0, last_vpf: 0, transition: TransitionState::Idle,
@@ -296,6 +297,7 @@ impl App {
             CurrentScreen::Menu     => menu::get_actors(&self.menu_state, &self.metrics, screen_alpha_multiplier),
             CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state, &self.metrics),
             CurrentScreen::Options  => options::get_actors(&self.options_state, &self.metrics),
+            CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, &self.metrics),
             CurrentScreen::Init     => {
                 // During the squish phase, draw ONLY background (no original bar)
                 if matches!(self.transition, TransitionState::BarSquishOut { .. }) {
@@ -465,6 +467,7 @@ impl ApplicationHandler for App {
                     CurrentScreen::Menu     => menu::handle_key_press(&mut self.menu_state, &key_event),
                     CurrentScreen::Gameplay => gameplay::handle_key_press(&mut self.gameplay_state, &key_event),
                     CurrentScreen::Options  => options::handle_key_press(&mut self.options_state, &key_event),
+                    CurrentScreen::SelectColor => select_color::handle_key_press(&mut self.select_color_state, &key_event),
                     CurrentScreen::Init     => init::handle_key_press(&mut self.init_state, &key_event),
                 };
                 if let Err(e) = self.handle_action(action, event_loop) {
@@ -485,7 +488,16 @@ impl ApplicationHandler for App {
                     TransitionState::FadingOut { elapsed, target } => {
                         *elapsed += delta_time;
                         if *elapsed >= FADE_OUT_DELAY + FADE_OUT_DURATION {
+                            let prev = self.current_screen;
                             self.current_screen = *target;
+
+                            // If we just left SelectColor for Gameplay, apply chosen color.
+                            if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Gameplay {
+                                let idx = self.select_color_state.active_color_index;
+                                let rgba = select_color::palette_rgba(idx);
+                                self.gameplay_state.player_color = rgba;
+                            }
+
                             self.transition = TransitionState::FadingIn { elapsed: 0.0 };
                             crate::ui::runtime::clear_all();
                         }
@@ -501,7 +513,9 @@ impl ApplicationHandler for App {
                     TransitionState::BarSquishOut { elapsed, target } => {
                         *elapsed += delta_time;
                         if *elapsed >= BAR_SQUISH_DURATION {
+                            let prev = self.current_screen;
                             self.current_screen = *target;
+                            // (No SelectColor involved in this special init→menu path.)
                             self.transition = TransitionState::ActorsFadeIn { elapsed: 0.0 };
                             crate::ui::runtime::clear_all();
                         }
@@ -520,14 +534,13 @@ impl ApplicationHandler for App {
                                 gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
                             }
                             CurrentScreen::Init => {
-                                // allow the init screen to time out into Menu
                                 let action = init::update(&mut self.init_state, delta_time);
                                 if let ScreenAction::Navigate(_) | ScreenAction::Exit = action {
-                                    if let Err(e) = self.handle_action(action, event_loop) {
-                                        error!("Failed to handle action: {}", e);
-                                        event_loop.exit();
-                                    }
+                                    if let Err(e) = self.handle_action(action, event_loop) { /* ... */ }
                                 }
+                            }
+                            CurrentScreen::SelectColor => {
+                                select_color::update(&mut self.select_color_state, delta_time);  // ⬅ this is the whole point
                             }
                             _ => {}
                         }

@@ -46,7 +46,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 
     match event.physical_key {
         PhysicalKey::Code(KeyCode::Enter) => match state.selected_index {
-            0 => ScreenAction::Navigate(Screen::Gameplay),
+            0 => ScreenAction::Navigate(Screen::SelectColor),
             1 => ScreenAction::Navigate(Screen::Options),
             2 => ScreenAction::Exit,
             _ => ScreenAction::None,

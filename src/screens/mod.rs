@@ -1,7 +1,8 @@
 pub mod gameplay;
 pub mod menu;
 pub mod options;
-pub mod init;       // NEW
+pub mod init;
+pub mod select_color;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenAction {
@@ -15,5 +16,6 @@ pub enum Screen {
     Menu,
     Gameplay,
     Options,
-    Init,            // NEW
+    Init,
+    SelectColor,
 }

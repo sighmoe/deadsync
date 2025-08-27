@@ -13,11 +13,13 @@ const PLAYER_SPEED: f32 = 250.0;
 
 pub struct State {
     pub player_position: Vector2<f32>,
+    pub player_color: [f32; 4],
 }
 
 pub fn init() -> State {
     State {
         player_position: Vector2::new(0.0, 0.0),
+        player_color: [0.0, 0.0, 1.0, 1.0], // default blue
     }
 }
 
@@ -59,7 +61,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         xy(cx + state.player_position.x,
            cy + state.player_position.y):
         zoomto(100.0, 100.0):
-        diffuse(0.0, 0.0, 1.0, 1.0)
+        diffuse(state.player_color[0], state.player_color[1], state.player_color[2], state.player_color[3])
     );
 
     vec![player]
