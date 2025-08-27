@@ -4,6 +4,7 @@ use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
 use crate::ui::actors::Actor;
 use crate::ui::msdf;
+use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, Screen as CurrentScreen, ScreenAction};
 
 use log::{error, info, warn};
@@ -491,11 +492,15 @@ impl ApplicationHandler for App {
                             let prev = self.current_screen;
                             self.current_screen = *target;
 
-                            // If we just left SelectColor for Gameplay, apply chosen color.
+                            // When leaving SelectColor -> Gameplay, apply chosen DECORATIVE color
                             if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Gameplay {
                                 let idx = self.select_color_state.active_color_index;
-                                let rgba = select_color::palette_rgba(idx);
-                                self.gameplay_state.player_color = rgba;
+                                self.gameplay_state.player_color = color::decorative_rgba(idx);
+                            }
+
+                            // When returning SelectColor -> Menu, keep Menu’s active index in sync
+                            if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Menu {
+                                self.menu_state.active_color_index = self.select_color_state.active_color_index;
                             }
 
                             self.transition = TransitionState::FadingIn { elapsed: 0.0 };

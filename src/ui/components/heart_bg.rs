@@ -99,7 +99,7 @@ impl State {
             let half_w = heart_w * 0.5;
             let half_h = heart_h * 0.5;
 
-            let mut rgba = theme_color_rgba(params.active_color_index + COLOR_ADD[i]);
+            let mut rgba = color::decorative_rgba(params.active_color_index + COLOR_ADD[i]);
             rgba[3] = DIFFUSE_ALPHA[i];
 
             let vx_px = -2.0 * UV_VEL[i][0] * speed_scale_px;

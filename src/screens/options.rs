@@ -3,6 +3,7 @@ use crate::act;
 use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
+use crate::ui::color; // add
 use crate::ui::components::{heart_bg, screen_bar};
 
 use winit::event::{ElementState, KeyEvent};
@@ -37,7 +38,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     // --- animated background (shared with menu) ---
     let backdrop = [0.0, 0.0, 0.0, 1.0];
     actors.extend(state.bg.build(heart_bg::Params {
-        active_color_index: 0, // Default color index
+        active_color_index: color::DEFAULT_COLOR_INDEX,
         backdrop_rgba: backdrop,
     }));
 

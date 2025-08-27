@@ -10,7 +10,6 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 use crate::core::space::globals::*;
 
-const SELECTED_COLOR_HEX: &str = "#ff5d47";
 const NORMAL_COLOR_HEX: &str = "#888888";
 
 const OPTION_COUNT: usize = 3;
@@ -35,7 +34,7 @@ pub struct State {
 pub fn init() -> State {
     State {
         selected_index: 0,
-        active_color_index: 0,
+        active_color_index: color::DEFAULT_COLOR_INDEX, // was 0
         rainbow_mode: false,
         bg: heart_bg::State::new(),
     }
@@ -116,8 +115,8 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics, alpha_multipli
 
     // 3) menu list
     let base_y = lp.top_margin + lp.target_h + MENU_BELOW_LOGO;
-    let mut selected = color::rgba_hex(SELECTED_COLOR_HEX);
-    let mut normal = color::rgba_hex(NORMAL_COLOR_HEX);
+    let mut selected = color::menu_selected_rgba(state.active_color_index);
+    let mut normal   = color::rgba_hex(NORMAL_COLOR_HEX);
     selected[3] *= alpha_multiplier;
     normal[3] *= alpha_multiplier;
 

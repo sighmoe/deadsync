@@ -4,6 +4,7 @@ use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::components::heart_bg;
+use crate::ui::color;
 use winit::event::{KeyEvent};
 
 /* ----------------------- timing & layout ----------------------- */
@@ -42,7 +43,7 @@ pub struct State {
 pub fn init() -> State {
     State {
         elapsed: 0.0,
-        base_color_index: 0,          // keep the splash stable; change if you want variety
+        base_color_index: color::DEFAULT_COLOR_INDEX,
         bg: heart_bg::State::new(),
     }
 }
@@ -122,7 +123,7 @@ pub fn get_actors(state: &State, _m: &crate::core::space::Metrics) -> Vec<Actor>
     for i in 1..=ARROW_COUNT {
         let x     = (i as f32 - 4.0) * ARROW_SPACING;
         let delay = unsquish_end + ARROW_BASE_DELAY + ARROW_STEP_DELAY * (i as f32);
-        let tint  = palette_color(state.base_color_index - i as i32 - 4);
+        let tint = color::decorative_rgba(state.base_color_index - i as i32 - 4);
 
         actors.push(act!(sprite("init_arrow.png"):
             align(0.5, 0.5):

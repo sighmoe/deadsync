@@ -1,4 +1,3 @@
-// src/screens/select_color.rs
 use crate::act;
 use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
@@ -8,22 +7,6 @@ use crate::ui::components::{heart_bg, screen_bar};
 use crate::ui::components::screen_bar::{ScreenBarPosition, ScreenBarTitlePlacement};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-
-/// Decorative palette (safe defaults). Feel free to swap/add colors.
-pub const DECORATIVE_HEX: [&str; 12] = [
-    "#FF3C23",
-    "#FF003C",
-    "#C1006F",
-    "#8200A1",
-    "#413AD0",
-    "#0073FF",
-    "#00ADC0",
-    "#5CE087",
-    "#AEFA44",
-    "#FFFF00",
-    "#FFBE00",
-    "#FF7D00",
-];
 
 // Native art size of heart.png (for aspect-correct sizing)
 const HEART_NATIVE_W: f32 = 668.0;
@@ -53,12 +36,6 @@ fn is_wide() -> bool {
     screen_width() / screen_height() >= 1.6 // ~16:10/16:9 and wider
 }
 
-#[inline(always)]
-pub fn palette_rgba(idx: i32) -> [f32; 4] {
-    let n = DECORATIVE_HEX.len() as i32;
-    color::rgba_hex(DECORATIVE_HEX[idx.rem_euclid(n) as usize])
-}
-
 /* -------------------------------- state -------------------------------- */
 
 pub struct State {
@@ -71,8 +48,8 @@ pub struct State {
 
 pub fn init() -> State {
     State {
-        active_color_index: 0,
-        scroll: 0.0, // keep in sync with active_color_index
+        active_color_index: color::DEFAULT_COLOR_INDEX,
+        scroll: color::DEFAULT_COLOR_INDEX as f32,
         bg: heart_bg::State::new(),
     }
 }
@@ -186,7 +163,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         let a = o.abs();
 
         // palette color for this slot (stick to integer to avoid “color lerp” look)
-        let tint = palette_rgba(base_i + offset_i);
+        let tint = color::decorative_rgba(base_i + offset_i);
 
         // X centered via distance samples (sign from side)
         let x_off = super::select_color::sample_linear(&x_samples, a);

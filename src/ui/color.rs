@@ -1,4 +1,5 @@
 // src/ui/color.rs
+
 #[inline(always)]
 pub fn srgb8_to_linear(c: u8) -> f32 {
     let x = (c as f32) / 255.0;
@@ -7,7 +8,6 @@ pub fn srgb8_to_linear(c: u8) -> f32 {
 
 /// Accepts "#rgb", "#rgba", "#rrggbb", "#rrggbbaa" (or without '#').
 /// Panics on invalid input; use only with trusted literals.
-// src/ui/color.rs
 pub fn rgba_hex(s: &str) -> [f32; 4] {
     #[inline(always)] fn nib(b: u8) -> u8 {
         match b {
@@ -39,4 +39,62 @@ pub fn rgba_hex(s: &str) -> [f32; 4] {
         srgb8_to_linear(bl),
         (a as f32) / 255.0,
     ]
+}
+
+/* =========================== THEME PALETTES =========================== */
+
+/// Start at #C1006F in the decorative palette.
+pub const DEFAULT_COLOR_INDEX: i32 = 2;
+
+/// Decorative / sprite tint palette (hearts, backgrounds, sprites)
+pub const DECORATIVE_HEX: [&str; 12] = [
+    "#FF3C23",
+    "#FF003C",
+    "#C1006F",
+    "#8200A1",
+    "#413AD0",
+    "#0073FF",
+    "#00ADC0",
+    "#5CE087",
+    "#AEFA44",
+    "#FFFF00",
+    "#FFBE00",
+    "#FF7D00",
+];
+
+/// Simply Love-ish UI accent palette (text highlights, etc.)
+pub const SIMPLY_LOVE_HEX: [&str; 12] = [
+    "#FF5D47",
+    "#FF577E",
+    "#FF47B3",
+    "#DD57FF",
+    "#8885ff",
+    "#3D94FF",
+    "#00B8CC",
+    "#5CE087",
+    "#AEFA44",
+    "#FFFF00",
+    "#FFBE00",
+    "#FF7D00",
+];
+
+#[inline(always)]
+fn wrap(n: usize, i: i32) -> usize {
+    (i.rem_euclid(n as i32)) as usize
+}
+
+#[inline(always)]
+pub fn decorative_rgba(idx: i32) -> [f32; 4] {
+    rgba_hex(DECORATIVE_HEX[wrap(DECORATIVE_HEX.len(), idx)])
+}
+
+#[inline(always)]
+pub fn simply_love_rgba(idx: i32) -> [f32; 4] {
+    rgba_hex(SIMPLY_LOVE_HEX[wrap(SIMPLY_LOVE_HEX.len(), idx)])
+}
+
+/// Menu selected color rule: “current SIMPLY_LOVE minus 2”
+#[inline(always)]
+pub fn menu_selected_rgba(active_idx: i32) -> [f32; 4] {
+    simply_love_rgba(active_idx - 2)
 }
