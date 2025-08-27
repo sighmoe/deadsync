@@ -10,18 +10,18 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 /// Decorative palette (safe defaults). Feel free to swap/add colors.
 pub const DECORATIVE_HEX: [&str; 12] = [
-		"#FF3C23",
-		"#FF003C",
-		"#C1006F",
-		"#8200A1",
-		"#413AD0",
-		"#0073FF",
-		"#00ADC0",
-		"#5CE087",
-		"#AEFA44",
-		"#FFFF00",
-		"#FFBE00",
-		"#FF7D00"
+    "#FF3C23",
+    "#FF003C",
+    "#C1006F",
+    "#8200A1",
+    "#413AD0",
+    "#0073FF",
+    "#00ADC0",
+    "#5CE087",
+    "#AEFA44",
+    "#FFFF00",
+    "#FFBE00",
+    "#FF7D00",
 ];
 
 // Native art size of heart.png (for aspect-correct sizing)
@@ -29,12 +29,32 @@ const HEART_NATIVE_W: f32 = 668.0;
 const HEART_NATIVE_H: f32 = 566.0;
 const HEART_ASPECT: f32 = HEART_NATIVE_W / HEART_NATIVE_H;
 
-// Wheel tuning
+// Wheel tuning (baseline behavior)
 const SCROLL_SPEED_SLOTS_PER_SEC: f32 = 5.0; // how fast the wheel slides
-const ROT_PER_SLOT_DEG: f32 = 15.0;           // inward tilt amount (± per slot)
-const ZOOM_CENTER: f32 = 1.05;                // center heart size
-const EDGE_MIN_RATIO: f32 = 0.17;        // edge zoom = ZOOM_CENTER * EDGE_MIN_RATIO
-const WHEEL_Z_BASE: i16 = 105;                // above BG, below bars
+const ROT_PER_SLOT_DEG: f32 = 15.0;          // inward tilt amount (± per slot)
+const ZOOM_CENTER: f32 = 1.05;               // center heart size
+const EDGE_MIN_RATIO: f32 = 0.17;            // edge zoom = ZOOM_CENTER * EDGE_MIN_RATIO
+const WHEEL_Z_BASE: i16 = 105;               // above BG, below bars
+
+// -----------------------------------------------------------------------------
+// OPTIONAL PER-SLOT OVERRIDES (symmetric L/R, keyed by distance from center):
+//  - DIST_OVERRIDES: extra pixels of spacing from center (added on top of baseline).
+//  - ZOOM_MULT_OVERRIDES: multiplicative size factor for that ring.
+//
+// Keep arrays EMPTY to render EXACTLY like the baseline.
+// Example tweaks (uncomment to try):
+//   • Make the second heart (index 1) 12 px farther from center:
+//       (1, 12.0)
+//   • Make the second heart 8% larger:
+//       (1, 1.08)
+// -----------------------------------------------------------------------------
+const DIST_OVERRIDES: &[(usize, f32)] = &[
+    //(1, 12.0),
+];
+
+const ZOOM_MULT_OVERRIDES: &[(usize, f32)] = &[
+    (1, 1.25), (2, 1.45), (3, 1.50), (4, 1.15)
+];
 
 #[inline(always)]
 fn is_wide() -> bool {
@@ -46,6 +66,40 @@ pub fn palette_rgba(idx: i32) -> [f32; 4] {
     let n = DECORATIVE_HEX.len() as i32;
     color::rgba_hex(DECORATIVE_HEX[idx.rem_euclid(n) as usize])
 }
+
+/* ---------- tiny helpers for array-driven sampling (exact baseline) ---------- */
+
+#[inline(always)]
+fn lerp(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
+
+/// Linear sample from a 1D array at fractional position `x`.
+/// With a linear ramp like [0, s, 2s, ...], this reproduces `x * s` exactly.
+#[inline(always)]
+fn sample_linear(samples: &[f32], x: f32) -> f32 {
+    if samples.is_empty() { return 0.0; }
+    if x <= 0.0 { return samples[0]; }
+    let max = (samples.len() - 1) as f32;
+    if x >= max { return samples[samples.len() - 1]; }
+    let i0 = x.floor() as usize;
+    let t  = x - i0 as f32;
+    lerp(samples[i0], samples[i0 + 1], t)
+}
+
+/// Exponential sample using a table of natural logs. This gives **exact**
+/// Z(a) = exp(lerp(logZ[k], logZ[k+1], frac)) when `logZ[k]` is linear in k.
+/// We build logs so it matches `ZOOM_CENTER * r^a` exactly.
+#[inline(always)]
+fn sample_exp_from_logs(logs: &[f32], x: f32) -> f32 {
+    if logs.is_empty() { return 0.0; }
+    if x <= 0.0 { return logs[0].exp(); }
+    let max = (logs.len() - 1) as f32;
+    if x >= max { return logs[logs.len() - 1].exp(); }
+    let i0 = x.floor() as usize;
+    let t  = x - i0 as f32;
+    (lerp(logs[i0], logs[i0 + 1], t)).exp()
+}
+
+/* -------------------------------- state -------------------------------- */
 
 pub struct State {
     /// Which color in DECORATIVE_HEX is focused (and previewed in the bg)
@@ -83,6 +137,8 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
     }
 }
 
+/* ------------------------------- drawing ------------------------------- */
+
 pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(64);
 
@@ -115,10 +171,49 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     let wide = is_wide();
     let num_slots: i32 = if wide { 11 } else { 7 };
     let center_slot: i32 = num_slots / 2;
-    let w = screen_width();
+    let w_screen = screen_width();
 
     // symmetric spacing so the visual center is true center
-    let x_spacing = w / (num_slots as f32 - 1.0);
+    let x_spacing = w_screen / (num_slots as f32 - 1.0);
+
+    // Build array-driven **distance** and **size** samples that reproduce the baseline exactly.
+    // side_slots = number of slots on ONE side (not counting the center on the other side)
+    let side_slots: usize = center_slot as usize;
+
+    // (A) X-distance samples (center-relative). Matches: x_off = |o| * x_spacing
+    // e.g., [0, 1*s, 2*s, 3*s, ...]
+    let mut x_samples: Vec<f32> = Vec::with_capacity(side_slots + 1);
+    for k in 0..=side_slots {
+        x_samples.push(k as f32 * x_spacing);
+    }
+
+    // (B) Zoom samples in log-space so we match: Z = ZOOM_CENTER * r^(|o| clamped)
+    let max_off_all     = 0.5 * (num_slots as f32 - 1.0);          // theoretical edges
+    let max_off_visible = (max_off_all - 1.0).max(1.0);            // one in from edges
+    let r               = EDGE_MIN_RATIO.powf(1.0 / max_off_visible);
+    let ln_zc = ZOOM_CENTER.ln();
+    let ln_r  = r.ln();
+
+    let mut zoom_logs: Vec<f32> = Vec::with_capacity(side_slots + 1);
+    for k in 0..=side_slots {
+        let a = (k as f32).min(max_off_visible);
+        zoom_logs.push(ln_zc + a * ln_r); // log(Z_k)
+    }
+
+    // --- Apply user overrides (symmetric for left/right) -----------------
+    // Distance overrides: add pixels from center
+    for &(k, add_px) in DIST_OVERRIDES {
+        if k <= side_slots {
+            x_samples[k] += add_px;
+        }
+    }
+    // Size overrides: multiply size; logs store ln(size)
+    for &(k, mult) in ZOOM_MULT_OVERRIDES {
+        if k <= side_slots && mult > 0.0 {
+            zoom_logs[k] += mult.ln();
+        }
+    }
+    // ---------------------------------------------------------------------
 
     // split scroll into integer + fractional parts (stable left/right motion)
     let base_i = state.scroll.floor() as i32;
@@ -129,45 +224,42 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
 
         // fractional offset used for position/zoom/rotation (smooth slide)
         let o = offset_i as f32 - frac;
+        let a = o.abs();
 
         // palette color for this slot (stick to integer to avoid “color lerp” look)
         let tint = palette_rgba(base_i + offset_i);
 
-        // X centered, Y forms a gentle bow
-        let x = screen_center_x() + o * x_spacing;
+        // X centered via distance samples (sign from side)
+        let x_off = sample_linear(&x_samples, a);
+        let x = screen_center_x() + if o >= 0.0 { x_off } else { -x_off };
+
+        // Y forms a gentle bow (unchanged)
         let y = 12.0 * o * o - 20.0;
 
-        // inward tilt: left leans right, right leans left
+        // inward tilt: left leans right, right leans left (unchanged)
         let rot_deg = -o * ROT_PER_SLOT_DEG;
 
-        // Geometric falloff against the farthest **visible** slot
-        // (we hide slot 0 and last). That makes the outermost *visible*
-        // hearts hit exactly ZOOM_CENTER * EDGE_MIN_RATIO.
-        let max_off_all = 0.5 * (num_slots as f32 - 1.0); // theoretical edges
-        let max_off_visible = (max_off_all - 1.0).max(1.0); // one in from edges
-        let r = EDGE_MIN_RATIO.powf(1.0 / max_off_visible); // per-slot factor
-        let zoom = ZOOM_CENTER * r.powf(o.abs().min(max_off_visible));
+        // Zoom via exponential sampling in log space — EXACT match to old formula
+        let a_clamped = a.min(max_off_visible);
+        let zoom = sample_exp_from_logs(&zoom_logs, a_clamped);
 
-        // depth so near-center draws on top
-        let z_layer = WHEEL_Z_BASE - (o.abs().round() as i16);
+        // depth so near-center draws on top (unchanged)
+        let z_layer = WHEEL_Z_BASE - (a.round() as i16);
 
-        // correct aspect (don’t stretch tall)
+        // correct aspect (don’t stretch tall) (unchanged)
         let base_h = 168.0; // overall heart height (tweak)
         let base_w = base_h * HEART_ASPECT;
 
-        // hide the very first/last as subtle padding (no animated fade)
-        // Soft fade near edges so hearts slide on/off (no popping) on both sides.
+        // Soft fade near edges so hearts slide on/off (unchanged)
         // Start fading one slot before the extreme edge and hit 0 at the edge.
-        let max_off_all = 0.5 * (num_slots as f32 - 1.0);
         let start_fade  = (max_off_all - 1.0).max(0.0); // begin fade
         let end_fade    = max_off_all;                  // fully hidden
-        let d = o.abs();
-        let alpha = if d <= start_fade {
+        let alpha = if a <= start_fade {
             1.0
-        } else if d >= end_fade {
+        } else if a >= end_fade {
             0.0
         } else {
-            let t = (d - start_fade) / (end_fade - start_fade);
+            let t = (a - start_fade) / (end_fade - start_fade);
             1.0 - t * t // ease-out
         };
 
@@ -184,6 +276,8 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
 
     actors
 }
+
+/* ------------------------------- update ------------------------------- */
 
 pub fn update(state: &mut State, dt: f32) {
     // glide scroll toward the selected slot
