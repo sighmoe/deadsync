@@ -42,7 +42,7 @@ pub fn build(params: ScreenBarParams) -> Actor {
             align(0.5, 0.5):
             xy(screen_center_x(), 0.5 * BAR_H):
             zoomtoheight(title_px):
-            z(120):
+            z(2):
             diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
             font("wendy"): settext(params.title): horizalign(center)
         )
@@ -53,7 +53,7 @@ pub fn build(params: ScreenBarParams) -> Actor {
             align(0.0, 0.5):
             xy(SIDE_TEXT_MARGIN, 0.5 * BAR_H):
             zoomtoheight(SIDE_TEXT_PX):
-            z(120):
+            z(2):
             diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
             font("miso"): settext(text): horizalign(left)
         ));
@@ -64,7 +64,7 @@ pub fn build(params: ScreenBarParams) -> Actor {
             align(1.0, 0.5):
             xy(screen_width() - SIDE_TEXT_MARGIN, 0.5 * BAR_H):
             zoomtoheight(SIDE_TEXT_PX):
-            z(120):
+            z(2):
             diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
             font("miso"): settext(text): horizalign(right)
         ));
@@ -76,6 +76,6 @@ pub fn build(params: ScreenBarParams) -> Actor {
         size:   [SizeSpec::Fill, SizeSpec::Px(BAR_H)],
         children,
         background,
-        z: 0i16,
+        z: 120i16,
     }
 }
