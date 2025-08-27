@@ -17,18 +17,6 @@ const UV_VEL: [[f32; 2]; 10] = [
     [ 0.05, 0.03], [ 0.03, 0.04],
 ];
 
-const THEME_COLORS: [&str; 12] = [
-    "#C1006F", "#8200A1", "#413AD0", "#0073FF", "#00ADC0", "#5CE087",
-    "#AEFA44", "#FFFF00", "#FFBE00", "#FF7D00", "#FF3C23", "#FF003C",
-];
-
-#[inline(always)]
-fn theme_color_rgba(idx: i32) -> [f32; 4] {
-    let n = THEME_COLORS.len() as i32;
-    let i = idx.rem_euclid(n) as usize;
-    color::rgba_hex(THEME_COLORS[i])
-}
-
 pub struct State {
     pub t0: Instant,
     base_w: f32,

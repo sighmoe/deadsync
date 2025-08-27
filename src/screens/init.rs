@@ -140,12 +140,3 @@ pub fn get_actors(state: &State, _m: &crate::core::space::Metrics) -> Vec<Actor>
 
     actors
 }
-
-/* ------------------------- color helper ------------------------ */
-
-fn palette_color(idx: i32) -> [f32; 4] {
-    const HEX: [&str; 7] = [
-        "#FFFF00", "#AEFA44", "#5CE087", "#00ADC0", "#0073FF", "#413AD0", "#8200A1"
-    ];
-    crate::ui::color::rgba_hex(HEX[idx.rem_euclid(HEX.len() as i32) as usize])
-}
