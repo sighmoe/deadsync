@@ -118,7 +118,8 @@ pub fn init() -> State {
 }
 
 pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
-    if e.state != ElementState::Pressed {
+    // Only react to the *initial* press, ignore OS key auto-repeat
+    if e.state != ElementState::Pressed || e.repeat {
         return ScreenAction::None;
     }
 
@@ -131,7 +132,7 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
             state.active_color_index -= 1;
             ScreenAction::None
         }
-        PhysicalKey::Code(KeyCode::Enter) => ScreenAction::Navigate(Screen::Gameplay),
+        PhysicalKey::Code(KeyCode::Enter)  => ScreenAction::Navigate(Screen::Gameplay),
         PhysicalKey::Code(KeyCode::Escape) => ScreenAction::Navigate(Screen::Menu),
         _ => ScreenAction::None,
     }
