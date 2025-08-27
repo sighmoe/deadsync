@@ -33,7 +33,7 @@ const HEART_ASPECT: f32 = HEART_NATIVE_W / HEART_NATIVE_H;
 const SCROLL_SPEED_SLOTS_PER_SEC: f32 = 10.0; // how fast the wheel slides
 const ROT_PER_SLOT_DEG: f32 = 10.0;           // inward tilt amount (± per slot)
 const ZOOM_CENTER: f32 = 1.25;                // center heart size
-const ZOOM_EDGE: f32 = 0.45;                  // edge heart size
+const EDGE_MIN_RATIO: f32 = 0.20;        // edge zoom = ZOOM_CENTER * EDGE_MIN_RATIO
 const WHEEL_Z_BASE: i16 = 105;                // above BG, below bars
 
 #[inline(always)]
@@ -140,9 +140,13 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         // inward tilt: left leans right, right leans left
         let rot_deg = -o * ROT_PER_SLOT_DEG;
 
-        // zoom larger near center, smaller toward edges (linear ramp)
-        let t = (o.abs() / ((num_slots as f32 - 1.0) * 0.5)).clamp(0.0, 1.0);
-        let zoom = ZOOM_CENTER + (ZOOM_EDGE - ZOOM_CENTER) * t;
+        // Geometric falloff against the farthest **visible** slot
+        // (we hide slot 0 and last). That makes the outermost *visible*
+        // hearts hit exactly ZOOM_CENTER * EDGE_MIN_RATIO.
+        let max_off_all = 0.5 * (num_slots as f32 - 1.0); // theoretical edges
+        let max_off_visible = (max_off_all - 1.0).max(1.0); // one in from edges
+        let r = EDGE_MIN_RATIO.powf(1.0 / max_off_visible); // per-slot factor
+        let zoom = ZOOM_CENTER * r.powf(o.abs().min(max_off_visible));
 
         // depth so near-center draws on top
         let z_layer = WHEEL_Z_BASE - (o.abs().round() as i16);
