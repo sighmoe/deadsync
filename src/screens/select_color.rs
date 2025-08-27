@@ -32,8 +32,8 @@ const HEART_ASPECT: f32 = HEART_NATIVE_W / HEART_NATIVE_H;
 // Wheel tuning
 const SCROLL_SPEED_SLOTS_PER_SEC: f32 = 5.0; // how fast the wheel slides
 const ROT_PER_SLOT_DEG: f32 = 15.0;           // inward tilt amount (± per slot)
-const ZOOM_CENTER: f32 = 1.2;                // center heart size
-const EDGE_MIN_RATIO: f32 = 0.15;        // edge zoom = ZOOM_CENTER * EDGE_MIN_RATIO
+const ZOOM_CENTER: f32 = 1.05;                // center heart size
+const EDGE_MIN_RATIO: f32 = 0.17;        // edge zoom = ZOOM_CENTER * EDGE_MIN_RATIO
 const WHEEL_Z_BASE: i16 = 105;                // above BG, below bars
 
 #[inline(always)]
