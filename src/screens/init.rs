@@ -73,6 +73,7 @@ pub fn get_actors_bg_only(state: &State, _m: &crate::core::space::Metrics) -> Ve
     actors.extend(state.bg.build(heart_bg::Params {
         active_color_index: state.base_color_index,
         backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
+        alpha_mul: 1.0,
     }));
     actors
 }
@@ -102,6 +103,7 @@ pub fn get_actors(state: &State, _m: &crate::core::space::Metrics) -> Vec<Actor>
     actors.extend(state.bg.build(heart_bg::Params {
         active_color_index: state.base_color_index,
         backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
+        alpha_mul: 1.0,
     }));
 
     // 2) SQUISH BAR — wait, then unsquish over SQUISH_IN_DURATION

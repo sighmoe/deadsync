@@ -78,6 +78,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics, alpha_multipli
     actors.extend(state.bg.build(heart_bg::Params {
         active_color_index: state.active_color_index,
         backdrop_rgba: backdrop,
+        alpha_mul: 1.0,
     }));
 
     // If fully faded, don't create the other actors

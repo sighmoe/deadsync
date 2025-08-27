@@ -20,6 +20,9 @@ const ZOOM_CENTER: f32 = 1.05;               // center heart size
 const EDGE_MIN_RATIO: f32 = 0.17;            // edge zoom = ZOOM_CENTER * EDGE_MIN_RATIO
 const WHEEL_Z_BASE: i16 = 105;               // above BG, below bars
 
+// Background cross-fade (to mimic Simply Love's slight delay)
+const BG_FADE_DURATION: f32 = 0.20; // seconds, linear fade
+
 // -----------------------------------------------------------------------------
 // OPTIONAL PER-SLOT OVERRIDES (symmetric L/R, keyed by distance from center):
 // -----------------------------------------------------------------------------
@@ -44,6 +47,10 @@ pub struct State {
     /// Smooth wheel offset (in “slots”); eased toward active_color_index
     pub scroll: f32,
     bg: heart_bg::State,
+    /// Background fade: from -> to over BG_FADE_DURATION
+    pub bg_from_index: i32,
+    pub bg_to_index: i32,
+    pub bg_fade_t: f32, // [0, BG_FADE_DURATION] ; >= dur means finished
 }
 
 pub fn init() -> State {
@@ -51,6 +58,9 @@ pub fn init() -> State {
         active_color_index: color::DEFAULT_COLOR_INDEX,
         scroll: color::DEFAULT_COLOR_INDEX as f32,
         bg: heart_bg::State::new(),
+        bg_from_index: color::DEFAULT_COLOR_INDEX,
+        bg_to_index:   color::DEFAULT_COLOR_INDEX,
+        bg_fade_t:     BG_FADE_DURATION, // start "finished"
     }
 }
 
@@ -63,10 +73,29 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
     match e.physical_key {
         PhysicalKey::Code(KeyCode::ArrowRight) | PhysicalKey::Code(KeyCode::KeyD) => {
             state.active_color_index += 1;
+            // start a new cross-fade from what's effectively on screen now
+            let showing_now = if state.bg_fade_t < BG_FADE_DURATION {
+                let a = (state.bg_fade_t / BG_FADE_DURATION).clamp(0.0, 1.0);
+                if (1.0 - a) >= a { state.bg_from_index } else { state.bg_to_index }
+            } else {
+                state.bg_to_index
+            };
+            state.bg_from_index = showing_now;
+            state.bg_to_index   = state.active_color_index;
+            state.bg_fade_t     = 0.0;
             ScreenAction::None
         }
         PhysicalKey::Code(KeyCode::ArrowLeft) | PhysicalKey::Code(KeyCode::KeyA) => {
             state.active_color_index -= 1;
+            let showing_now = if state.bg_fade_t < BG_FADE_DURATION {
+                let a = (state.bg_fade_t / BG_FADE_DURATION).clamp(0.0, 1.0);
+                if (1.0 - a) >= a { state.bg_from_index } else { state.bg_to_index }
+            } else {
+                state.bg_to_index
+            };
+            state.bg_from_index = showing_now;
+            state.bg_to_index   = state.active_color_index;
+            state.bg_fade_t     = 0.0;
             ScreenAction::None
         }
         PhysicalKey::Code(KeyCode::Enter) => ScreenAction::Navigate(Screen::Gameplay),
@@ -80,11 +109,31 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
 pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(64);
 
-    // 1) Animated heart background, tinted by the currently focused color
-    actors.extend(state.bg.build(heart_bg::Params {
-        active_color_index: state.active_color_index,
-        backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
-    }));
+    // 1) Animated heart background with a short cross-fade between colors.
+    let a = (state.bg_fade_t / BG_FADE_DURATION).clamp(0.0, 1.0);
+    if a >= 1.0 || state.bg_from_index == state.bg_to_index {
+        // No active fade: draw a single layer + normal backdrop
+        actors.extend(state.bg.build(heart_bg::Params {
+            active_color_index: state.bg_to_index,
+            backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
+            alpha_mul: 1.0,
+        }));
+    } else {
+        let alpha_from = 1.0 - a;
+        let alpha_to   = a;
+        // Bottom: previous color + full backdrop
+        actors.extend(state.bg.build(heart_bg::Params {
+            active_color_index: state.bg_from_index,
+            backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
+            alpha_mul: alpha_from,
+        }));
+        // Top: new color + NO backdrop (avoid double darkening)
+        actors.extend(state.bg.build(heart_bg::Params {
+            active_color_index: state.bg_to_index,
+            backdrop_rgba: [0.0, 0.0, 0.0, 0.0],
+            alpha_mul: alpha_to,
+        }));
+    }
 
     // 2) Bars (top + bottom)
     const FG: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
@@ -251,5 +300,10 @@ pub fn update(state: &mut State, dt: f32) {
         state.scroll = target;                 // snap when close
     } else {
         state.scroll += delta.signum() * max_step;
+    }
+
+    // drive background cross-fade
+    if state.bg_fade_t < BG_FADE_DURATION {
+        state.bg_fade_t = (state.bg_fade_t + dt).min(BG_FADE_DURATION);
     }
 }

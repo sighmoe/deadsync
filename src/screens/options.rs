@@ -40,6 +40,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     actors.extend(state.bg.build(heart_bg::Params {
         active_color_index: color::DEFAULT_COLOR_INDEX,
         backdrop_rgba: backdrop,
+        alpha_mul: 1.0,
     }));
 
     const FG_COLOR: [f32; 4] = [1.0, 1.0, 1.0, 1.0];

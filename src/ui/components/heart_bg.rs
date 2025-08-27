@@ -28,6 +28,8 @@ pub struct State {
 pub struct Params {
     pub active_color_index: i32,
     pub backdrop_rgba: [f32; 4],
+    /// Multiplies the per-layer heart alpha (for cross-fades). 1.0 = unchanged.
+    pub alpha_mul: f32,
 }
 
 impl State {
@@ -88,7 +90,7 @@ impl State {
             let half_h = heart_h * 0.5;
 
             let mut rgba = color::decorative_rgba(params.active_color_index + COLOR_ADD[i]);
-            rgba[3] = DIFFUSE_ALPHA[i];
+            rgba[3] = DIFFUSE_ALPHA[i] * params.alpha_mul;
 
             let vx_px = -2.0 * UV_VEL[i][0] * speed_scale_px;
             let vy_px = -2.0 * UV_VEL[i][1] * speed_scale_px;
