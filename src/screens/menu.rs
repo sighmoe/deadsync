@@ -3,7 +3,7 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::logo::{self, LogoParams};
-use crate::ui::components::menu_list::{self, MenuParams};
+use crate::ui::components::menu_list::{self};
 use crate::ui::components::{heart_bg, screen_bar};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -121,7 +121,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics, alpha_multipli
     selected[3] *= alpha_multiplier;
     normal[3] *= alpha_multiplier;
 
-    let params = MenuParams {
+    let params = menu_list::MenuParams {
         options: &MENU_OPTIONS,
         selected_index: state.selected_index,
         start_center_y: base_y + 0.5 * MENU_NORMAL_PX,
@@ -140,9 +140,11 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics, alpha_multipli
 
     actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "EVENT MODE",
+        title_placement: screen_bar::ScreenBarTitlePlacement::Center,
         position: screen_bar::ScreenBarPosition::Bottom,
         transparent: true,
         left_text: Some("PRESS START"),
+        center_text: None,
         right_text: Some("PRESS START"),
         fg_color: footer_fg,
     }));

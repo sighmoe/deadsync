@@ -46,9 +46,11 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     // --- top bar title ---
     actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "OPTIONS",
+        title_placement: screen_bar::ScreenBarTitlePlacement::Center,
         position: screen_bar::ScreenBarPosition::Top,
         transparent: false,
         left_text: None,
+        center_text: None,
         right_text: None,
         fg_color: FG_COLOR,
     }));
@@ -56,9 +58,11 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     // --- footer bar (demonstration) ---
     actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "FOOTER",
+        title_placement: screen_bar::ScreenBarTitlePlacement::Center,
         position: screen_bar::ScreenBarPosition::Bottom,
         transparent: false,
         left_text: None,
+        center_text: None,
         right_text: None,
         fg_color: FG_COLOR,
     }));

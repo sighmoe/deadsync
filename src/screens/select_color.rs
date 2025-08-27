@@ -5,6 +5,7 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::{heart_bg, screen_bar};
+use crate::ui::components::screen_bar::{ScreenBarPosition, ScreenBarTitlePlacement};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -38,15 +39,6 @@ const WHEEL_Z_BASE: i16 = 105;               // above BG, below bars
 
 // -----------------------------------------------------------------------------
 // OPTIONAL PER-SLOT OVERRIDES (symmetric L/R, keyed by distance from center):
-//  - DIST_OVERRIDES: extra pixels of spacing from center (added on top of baseline).
-//  - ZOOM_MULT_OVERRIDES: multiplicative size factor for that ring.
-//
-// Keep arrays EMPTY to render EXACTLY like the baseline.
-// Example tweaks (uncomment to try):
-//   • Make the second heart (index 1) 12 px farther from center:
-//       (1, 12.0)
-//   • Make the second heart 8% larger:
-//       (1, 1.08)
 // -----------------------------------------------------------------------------
 const DIST_OVERRIDES: &[(usize, f32)] = &[
     //(1, 12.0),
@@ -65,38 +57,6 @@ fn is_wide() -> bool {
 pub fn palette_rgba(idx: i32) -> [f32; 4] {
     let n = DECORATIVE_HEX.len() as i32;
     color::rgba_hex(DECORATIVE_HEX[idx.rem_euclid(n) as usize])
-}
-
-/* ---------- tiny helpers for array-driven sampling (exact baseline) ---------- */
-
-#[inline(always)]
-fn lerp(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
-
-/// Linear sample from a 1D array at fractional position `x`.
-/// With a linear ramp like [0, s, 2s, ...], this reproduces `x * s` exactly.
-#[inline(always)]
-fn sample_linear(samples: &[f32], x: f32) -> f32 {
-    if samples.is_empty() { return 0.0; }
-    if x <= 0.0 { return samples[0]; }
-    let max = (samples.len() - 1) as f32;
-    if x >= max { return samples[samples.len() - 1]; }
-    let i0 = x.floor() as usize;
-    let t  = x - i0 as f32;
-    lerp(samples[i0], samples[i0 + 1], t)
-}
-
-/// Exponential sample using a table of natural logs. This gives **exact**
-/// Z(a) = exp(lerp(logZ[k], logZ[k+1], frac)) when `logZ[k]` is linear in k.
-/// We build logs so it matches `ZOOM_CENTER * r^a` exactly.
-#[inline(always)]
-fn sample_exp_from_logs(logs: &[f32], x: f32) -> f32 {
-    if logs.is_empty() { return 0.0; }
-    if x <= 0.0 { return logs[0].exp(); }
-    let max = (logs.len() - 1) as f32;
-    if x >= max { return logs[logs.len() - 1].exp(); }
-    let i0 = x.floor() as usize;
-    let t  = x - i0 as f32;
-    (lerp(logs[i0], logs[i0 + 1], t)).exp()
 }
 
 /* -------------------------------- state -------------------------------- */
@@ -118,7 +78,7 @@ pub fn init() -> State {
 }
 
 pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
-    // Only react to the *initial* press, ignore OS key auto-repeat
+    // Only react to the initial key press; ignore OS key auto-repeat
     if e.state != ElementState::Pressed || e.repeat {
         return ScreenAction::None;
     }
@@ -132,7 +92,7 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
             state.active_color_index -= 1;
             ScreenAction::None
         }
-        PhysicalKey::Code(KeyCode::Enter)  => ScreenAction::Navigate(Screen::Gameplay),
+        PhysicalKey::Code(KeyCode::Enter) => ScreenAction::Navigate(Screen::Gameplay),
         PhysicalKey::Code(KeyCode::Escape) => ScreenAction::Navigate(Screen::Menu),
         _ => ScreenAction::None,
     }
@@ -152,18 +112,22 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     // 2) Bars (top + bottom)
     const FG: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
     actors.push(screen_bar::build(screen_bar::ScreenBarParams {
-        title: "SELECT COLOR",
-        position: screen_bar::ScreenBarPosition::Top,
+        title: "SELECT A COLOR",
+        title_placement: ScreenBarTitlePlacement::Left,   // big title on the left
+        position: ScreenBarPosition::Top,
         transparent: false,
-        left_text: None,
-        right_text: None,
+        left_text: None,     // keep this None to avoid overlap with left title
+        center_text: None,   // later: Some("01:23")
+        right_text: None,    // later: Some("P1 • READY")
         fg_color: FG,
     }));
     actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "EVENT MODE",
-        position: screen_bar::ScreenBarPosition::Bottom,
+        title_placement: ScreenBarTitlePlacement::Center, // unchanged look
+        position: ScreenBarPosition::Bottom,
         transparent: false,
         left_text: None,
+        center_text: None,
         right_text: Some("NOT PRESENT"),
         fg_color: FG,
     }));
@@ -174,23 +138,19 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     let center_slot: i32 = num_slots / 2;
     let w_screen = screen_width();
 
-    // symmetric spacing so the visual center is true center
     let x_spacing = w_screen / (num_slots as f32 - 1.0);
 
-    // Build array-driven **distance** and **size** samples that reproduce the baseline exactly.
-    // side_slots = number of slots on ONE side (not counting the center on the other side)
     let side_slots: usize = center_slot as usize;
 
-    // (A) X-distance samples (center-relative). Matches: x_off = |o| * x_spacing
-    // e.g., [0, 1*s, 2*s, 3*s, ...]
+    // (A) X-distance samples
     let mut x_samples: Vec<f32> = Vec::with_capacity(side_slots + 1);
     for k in 0..=side_slots {
         x_samples.push(k as f32 * x_spacing);
     }
 
-    // (B) Zoom samples in log-space so we match: Z = ZOOM_CENTER * r^(|o| clamped)
-    let max_off_all     = 0.5 * (num_slots as f32 - 1.0);          // theoretical edges
-    let max_off_visible = (max_off_all - 1.0).max(1.0);            // one in from edges
+    // (B) Zoom samples in log-space
+    let max_off_all     = 0.5 * (num_slots as f32 - 1.0);
+    let max_off_visible = (max_off_all - 1.0).max(1.0);
     let r               = EDGE_MIN_RATIO.powf(1.0 / max_off_visible);
     let ln_zc = ZOOM_CENTER.ln();
     let ln_r  = r.ln();
@@ -202,13 +162,11 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     }
 
     // --- Apply user overrides (symmetric for left/right) -----------------
-    // Distance overrides: add pixels from center
     for &(k, add_px) in DIST_OVERRIDES {
         if k <= side_slots {
             x_samples[k] += add_px;
         }
     }
-    // Size overrides: multiply size; logs store ln(size)
     for &(k, mult) in ZOOM_MULT_OVERRIDES {
         if k <= side_slots && mult > 0.0 {
             zoom_logs[k] += mult.ln();
@@ -231,28 +189,27 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
         let tint = palette_rgba(base_i + offset_i);
 
         // X centered via distance samples (sign from side)
-        let x_off = sample_linear(&x_samples, a);
+        let x_off = super::select_color::sample_linear(&x_samples, a);
         let x = screen_center_x() + if o >= 0.0 { x_off } else { -x_off };
 
-        // Y forms a gentle bow (unchanged)
+        // Y forms a gentle bow
         let y = 12.0 * o * o - 20.0;
 
-        // inward tilt: left leans right, right leans left (unchanged)
+        // inward tilt
         let rot_deg = -o * ROT_PER_SLOT_DEG;
 
-        // Zoom via exponential sampling in log space — EXACT match to old formula
+        // Zoom via exponential sampling in log space
         let a_clamped = a.min(max_off_visible);
-        let zoom = sample_exp_from_logs(&zoom_logs, a_clamped);
+        let zoom = super::select_color::sample_exp_from_logs(&zoom_logs, a_clamped);
 
-        // depth so near-center draws on top (unchanged)
+        // depth so near-center draws on top
         let z_layer = WHEEL_Z_BASE - (a.round() as i16);
 
-        // correct aspect (don’t stretch tall) (unchanged)
+        // correct aspect (don’t stretch tall)
         let base_h = 168.0; // overall heart height (tweak)
         let base_w = base_h * HEART_ASPECT;
 
-        // Soft fade near edges so hearts slide on/off (unchanged)
-        // Start fading one slot before the extreme edge and hit 0 at the edge.
+        // Soft fade near edges so hearts slide on/off
         let start_fade  = (max_off_all - 1.0).max(0.0); // begin fade
         let end_fade    = max_off_all;                  // fully hidden
         let alpha = if a <= start_fade {
@@ -276,6 +233,33 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     }
 
     actors
+}
+
+/* ---------- tiny helpers for array-driven sampling (used above) ---------- */
+
+#[inline(always)]
+fn lerp(a: f32, b: f32, t: f32) -> f32 { a + (b - a) * t }
+
+#[inline(always)]
+fn sample_linear(samples: &[f32], x: f32) -> f32 {
+    if samples.is_empty() { return 0.0; }
+    if x <= 0.0 { return samples[0]; }
+    let max = (samples.len() - 1) as f32;
+    if x >= max { return samples[samples.len() - 1]; }
+    let i0 = x.floor() as usize;
+    let t  = x - i0 as f32;
+    lerp(samples[i0], samples[i0 + 1], t)
+}
+
+#[inline(always)]
+fn sample_exp_from_logs(logs: &[f32], x: f32) -> f32 {
+    if logs.is_empty() { return 0.0; }
+    if x <= 0.0 { return logs[0].exp(); }
+    let max = (logs.len() - 1) as f32;
+    if x >= max { return logs[logs.len() - 1].exp(); }
+    let i0 = x.floor() as usize;
+    let t  = x - i0 as f32;
+    (lerp(logs[i0], logs[i0 + 1], t)).exp()
 }
 
 /* ------------------------------- update ------------------------------- */
