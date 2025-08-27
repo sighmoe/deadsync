@@ -9,11 +9,19 @@ use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 /// Decorative palette (safe defaults). Feel free to swap/add colors.
-pub const DECORATIVE_HEX: [&str; 16] = [
-    "#FF5D47", "#FF9C3A", "#FFD166", "#AEFA44",
-    "#5CE087", "#00ADC0", "#32B5FF", "#0073FF",
-    "#413AD0", "#7B51E8", "#B05EFF", "#E357C9",
-    "#FF6FAE", "#FF7B7B", "#FFB399", "#FFE08C",
+pub const DECORATIVE_HEX: [&str; 12] = [
+		"#FF3C23",
+		"#FF003C",
+		"#C1006F",
+		"#8200A1",
+		"#413AD0",
+		"#0073FF",
+		"#00ADC0",
+		"#5CE087",
+		"#AEFA44",
+		"#FFFF00",
+		"#FFBE00",
+		"#FF7D00"
 ];
 
 // Native art size of heart.png (for aspect-correct sizing)
