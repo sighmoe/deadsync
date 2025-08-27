@@ -30,7 +30,7 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
             font("miso"):
             settext(format!("{:.0} FPS", fps.max(0.0))):
             horizalign(right):
-            z(1100)
+            z(200)
         ),
         act!(text:
             align(1.0, 0.0):
@@ -40,7 +40,7 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
             font("miso"):
             settext(format!("{} VPF", vpf)):
             horizalign(right):
-            z(1100)
+            z(200)
         ),
         act!(text:
             align(1.0, 0.0):
@@ -50,7 +50,7 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
             font("miso"):
             settext(backend_label(backend)):
             horizalign(right):
-            z(1100)
+            z(200)
         ),
     ]
 }

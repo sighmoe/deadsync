@@ -71,7 +71,7 @@ impl State {
             xy(0.0, 0.0):
             zoomto(w, h):
             diffuse(params.backdrop_rgba[0], params.backdrop_rgba[1], params.backdrop_rgba[2], params.backdrop_rgba[3]):
-            z(-200)
+            z(-100)
         ));
 
         // aspect
@@ -134,7 +134,7 @@ impl State {
                         xy(x, y):
                         zoomto(heart_w, heart_h):
                         diffuse(rgba[0], rgba[1], rgba[2], rgba[3]):
-                        z(100)
+                        z(-99)
                     ));
                 }
             }

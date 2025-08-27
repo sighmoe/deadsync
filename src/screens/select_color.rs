@@ -34,7 +34,7 @@ const SCROLL_SPEED_SLOTS_PER_SEC: f32 = 10.0; // how fast the wheel slides
 const ROT_PER_SLOT_DEG: f32 = 10.0;           // inward tilt amount (± per slot)
 const ZOOM_CENTER: f32 = 1.25;                // center heart size
 const ZOOM_EDGE: f32 = 0.45;                  // edge heart size
-const WHEEL_Z_BASE: i16 = 300;                // above BG, below bars
+const WHEEL_Z_BASE: i16 = 105;                // above BG, below bars
 
 #[inline(always)]
 fn is_wide() -> bool {
