@@ -9,6 +9,23 @@ use crate::ui::components::screen_bar::{ScreenBarPosition, ScreenBarTitlePlaceme
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
+/* =============================================================================
+   Options — clean-slate layout (rows LEFT, description RIGHT)
+   + hearts background + top/bottom bars
+   -----------------------------------------------------------------------------
+   Spec (base/unscaled “design” units; scaled to current screen):
+   • 10 rows, each 55 px high, 3 px between rows
+   • Rows area width: 721 px
+   • 3 px separator, then a 484 px-wide description box
+   • Description box height: 584 px (total block height)
+   • Active row background: #333333; others: black @ 50% alpha
+   • Separator uses #333333 (matches active/desc)
+   • Text: Miso. Active text color = SIMPLY_LOVE_HEX[selected index]. Others white.
+   • Little heart next to each option, same *height* as text (from heart.png)
+   • When a row is ACTIVE, heart tint == active text color.
+   • Top bar: "OPTIONS" (left). Bottom bar: "EVENT MODE" (center).
+============================================================================= */
+
 /// Bars in `screen_bar.rs` use 32.0 px height.
 const BAR_H: f32 = 32.0;
 
@@ -215,11 +232,12 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let content_left = list_x + TEXT_LEFT_PAD * s;
 
         // Heart sprite (left of text)
+        let heart_tint = if is_active { col_active_text } else { col_white };
         v.push(act!(sprite("heart.png"):
             align(0.0, 0.5):
             xy(content_left, row_mid_y):
             zoomto(heart_w, heart_h):
-            diffuse(1.0, 1.0, 1.0, 1.0)
+            diffuse(heart_tint[0], heart_tint[1], heart_tint[2], heart_tint[3])
         ));
 
         // Text (Miso)
