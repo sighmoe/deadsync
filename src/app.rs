@@ -518,7 +518,6 @@ impl ApplicationHandler for App {
                     TransitionState::BarSquishOut { elapsed, target } => {
                         *elapsed += delta_time;
                         if *elapsed >= BAR_SQUISH_DURATION {
-                            let prev = self.current_screen;
                             self.current_screen = *target;
                             // (No SelectColor involved in this special init→menu path.)
                             self.transition = TransitionState::ActorsFadeIn { elapsed: 0.0 };
@@ -541,7 +540,7 @@ impl ApplicationHandler for App {
                             CurrentScreen::Init => {
                                 let action = init::update(&mut self.init_state, delta_time);
                                 if let ScreenAction::Navigate(_) | ScreenAction::Exit = action {
-                                    if let Err(e) = self.handle_action(action, event_loop) { /* ... */ }
+                                    if self.handle_action(action, event_loop).is_err() { /* ... */ }
                                 }
                             }
                             CurrentScreen::SelectColor => {
