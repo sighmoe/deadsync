@@ -15,28 +15,15 @@ pub fn build_screen(
     fonts: &std::collections::HashMap<&'static str, msdf::Font>,
     total_elapsed: f32,
 ) -> RenderList {
-    let mut objects = Vec::with_capacity(estimate_object_count(actors));
+    let mut objects = Vec::with_capacity(estimate_object_count(actors, fonts));
     let mut order_counter: u32 = 0;
 
-    let root_rect = SmRect {
-        x: 0.0,
-        y: 0.0,
-        w: m.right - m.left,
-        h: m.top - m.bottom,
-    };
-
+    let root_rect = SmRect { x: 0.0, y: 0.0, w: m.right - m.left, h: m.top - m.bottom };
     let parent_z: i16 = 0;
 
     for actor in actors {
         build_actor_recursive(
-            actor,
-            root_rect,
-            m,
-            fonts,
-            parent_z,
-            &mut order_counter,
-            &mut objects,
-            total_elapsed,
+            actor, root_rect, m, fonts, parent_z, &mut order_counter, &mut objects, total_elapsed,
         );
     }
 
@@ -44,24 +31,40 @@ pub fn build_screen(
     RenderList { clear_color, objects }
 }
 
-// ===== REPLACE the whole function in src/ui/layout.rs =====
 #[inline(always)]
-fn estimate_object_count(actors: &[Actor]) -> usize {
+fn estimate_object_count(
+    actors: &[Actor],
+    fonts: &std::collections::HashMap<&'static str, msdf::Font>,
+) -> usize {
     let mut stack: Vec<&Actor> = Vec::with_capacity(actors.len());
     stack.extend(actors.iter());
 
     let mut total = 0usize;
     while let Some(a) = stack.pop() {
         match a {
-            Actor::Sprite { visible, .. } => {
-                if *visible {
+            Actor::Sprite { visible, tint, .. } => {
+                // Count only visible sprites with non-zero alpha
+                if *visible && tint[3] > 0.0 {
                     total += 1;
                 }
             }
-            Actor::Text { content, .. } => {
-                // Count Unicode scalar values (skip newlines), not raw bytes.
-                // This better matches how we later emit MSDF glyphs.
-                total += content.chars().filter(|&ch| ch != '\n').count();
+            Actor::Text { content, font, .. } => {
+                // If we have the font, count only glyphs that will emit quads.
+                if let Some(fm) = fonts.get(font) {
+                    let mut n = 0usize;
+                    for ch in content.chars() {
+                        if ch == '\n' { continue; }
+                        if let Some(g) = fm.glyphs.get(&ch) {
+                            if g.plane_w > 0.0 && g.plane_h > 0.0 {
+                                n += 1;
+                            }
+                        }
+                    }
+                    total += n;
+                } else {
+                    // Fallback: old heuristic (skip newlines)
+                    total += content.chars().filter(|&ch| ch != '\n').count();
+                }
             }
             Actor::Frame { children, background, .. } => {
                 if background.is_some() {
