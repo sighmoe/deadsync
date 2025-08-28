@@ -14,12 +14,12 @@ use winit::keyboard::{KeyCode, PhysicalKey};
    + hearts background + top/bottom bars
 
    Margins (screen pixels, not scaled):
-   • LEFT  = 42 px from the left edge to the start of the rows
-   • TOP   = 29 px from the content area’s top (just below the top bar) to row #1
-   • RIGHT = 29 px from the screen’s right edge to the *right edge* of the description box
+   • LEFT  = 25 px from the left edge to the start of the rows
+   • TOP   = 17 px from the content area’s top (just below the top bar) to row #1
+   • RIGHT = 17 px from the screen’s right edge to the *right edge* of the description box
 
    Layout block (unscaled spec; uniformly scaled by `s` to fit between gutters):
-   • Rows area width: 721 px, 10 rows, each 55 px tall, 3 px vertical gap
+   • Rows area width: 721 px, 10 visible rows, each 55 px tall, 3 px vertical gap
    • Separator: 3 px
    • Description: 484 px wide, **577 px tall** (matches 10×55 + 9×3)
 ============================================================================= */
@@ -33,15 +33,15 @@ const RIGHT_MARGIN_PX: f32 = 17.0;
 const FIRST_ROW_TOP_MARGIN_PX: f32 = 17.0;
 
 /// Unscaled spec constants (we’ll uniformly scale).
-const ROW_COUNT: usize = 10;
+const VISIBLE_ROWS: usize = 10; // how many rows are shown at once
 const ROW_H: f32 = 55.0;
 const ROW_GAP: f32 = 3.0;
 const LIST_W: f32 = 721.0;
 
 const SEP_W: f32 = 3.0;     // gap/stripe between rows and description
 const DESC_W: f32 = 484.0;  // description panel width
-// derive description height from rows so it never includes a trailing gap
-const DESC_H: f32 = (ROW_COUNT as f32) * ROW_H + ((ROW_COUNT - 1) as f32) * ROW_GAP;
+// derive description height from visible rows so it never includes a trailing gap
+const DESC_H: f32 = (VISIBLE_ROWS as f32) * ROW_H + ((VISIBLE_ROWS - 1) as f32) * ROW_GAP;
 
 /// Text sizing (unscaled). Picked to sit nicely inside 55px rows.
 const TEXT_PX: f32 = 26.0;
@@ -70,6 +70,13 @@ const ITEMS: &[Item] = &[
     Item { name: "View Bookkeeping Data",           help: &["Audit play counts, coins, uptime."] },
     Item { name: "Advanced Options",                help: &["Low-level engine toggles."] },
     Item { name: "MenuTimer Options",               help: &["Per-screen time limits."] },
+    Item { name: "Network Options",                 help: &["Online features, matchmaking, latency…"] },
+    Item { name: "Profiles",                        help: &["Create, select, and edit player profiles."] },
+    Item { name: "Theme Options",                   help: &["UI skin, colorway, layout, accessibility."] },
+    Item { name: "Data Management",                 help: &["Save data, screenshots, logs, cache."] },
+    Item { name: "Service Options",                 help: &["Cabinet/service settings for operators."] },
+    Item { name: "Credits",                         help: &["Project contributors and licenses."] },
+    Item { name: "Exit",                            help: &["Return to the main menu."] },
 ];
 
 pub struct State {
@@ -87,18 +94,19 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
     if e.state != ElementState::Pressed || e.repeat {
         return ScreenAction::None;
     }
+    let total = ITEMS.len();
     match e.physical_key {
         PhysicalKey::Code(KeyCode::Escape) => ScreenAction::Navigate(Screen::Menu),
         PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
-            if state.selected == 0 { state.selected = ROW_COUNT - 1; } else { state.selected -= 1; }
+            if state.selected == 0 { state.selected = total.saturating_sub(1); } else { state.selected -= 1; }
             ScreenAction::None
         }
         PhysicalKey::Code(KeyCode::ArrowDown) | PhysicalKey::Code(KeyCode::KeyS) => {
-            state.selected = (state.selected + 1) % ROW_COUNT;
+            state.selected = if total == 0 { 0 } else { (state.selected + 1) % total };
             ScreenAction::None
         }
         PhysicalKey::Code(KeyCode::Enter) => {
-            // No navigation yet; stub for future actions.
+            // Example: handle Exit activation here in the future.
             ScreenAction::None
         }
         _ => ScreenAction::None,
@@ -135,8 +143,7 @@ fn scaled_block_origin_with_margins() -> (f32, f32, f32) {
 
     // X origin:
     // Right-align inside [LEFT..(sw-RIGHT)] so the description box ends exactly
-    // RIGHT_MARGIN_PX from the screen edge. When height limits scale (s < s_w),
-    // this will increase the left gap beyond 42 px, which is fine.
+    // RIGHT_MARGIN_PX from the screen edge.
     let ox = LEFT_MARGIN_PX + (avail_w - total_w * s).max(0.0);
 
     // Y origin is fixed under the top bar by the requested margin.
@@ -173,9 +180,13 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     /* --------------------------- MAIN CONTENT UI -------------------------- */
 
     // --- global colors ---
-    let col_active_bg   = color::rgba_hex("#333333");
-    let col_inactive_bg = [0.0, 0.0, 0.0, 0.5];
-    let col_white       = [1.0, 1.0, 1.0, 1.0];
+    let col_active_bg  = color::rgba_hex("#333333");
+
+    // inactive bg = #071016 @ 0.8 alpha
+    let base_inactive  = color::rgba_hex("#071016");
+    let col_inactive_bg: [f32; 4] = [base_inactive[0], base_inactive[1], base_inactive[2], 0.8];
+
+    let col_white      = [1.0, 1.0, 1.0, 1.0];
 
     // Active text color uses the Simply Love palette at the selected index.
     let col_active_text = color::simply_love_rgba(state.selected as i32);
@@ -206,12 +217,25 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         diffuse(col_active_bg[0], col_active_bg[1], col_active_bg[2], col_active_bg[3]) // #333333
     ));
 
-    // Row loop (backgrounds + content). Rows now start exactly at `list_y`.
-    for i in 0..ROW_COUNT {
-        let row_y = list_y + (i as f32) * (ROW_H + ROW_GAP) * s;
+    // ---------------------------- Scrolling math ---------------------------
+    let total_items = ITEMS.len();
+    let anchor_row: usize = 4; // keep cursor near middle (5th visible row)
+    let max_offset = total_items.saturating_sub(VISIBLE_ROWS);
+    let offset_rows = if total_items <= VISIBLE_ROWS {
+        0
+    } else {
+        state.selected.saturating_sub(anchor_row).min(max_offset)
+    };
+
+    // Row loop (backgrounds + content). We render the visible window.
+    for i_vis in 0..VISIBLE_ROWS {
+        let item_idx = offset_rows + i_vis;
+        if item_idx >= total_items { break; }
+
+        let row_y = list_y + (i_vis as f32) * (ROW_H + ROW_GAP) * s;
 
         // Row background
-        let is_active = i == state.selected;
+        let is_active = item_idx == state.selected;
         let bg = if is_active { col_active_bg } else { col_inactive_bg };
 
         v.push(act!(quad:
@@ -243,7 +267,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
         // Text (Miso)
         let text_x = content_left + heart_w + HEART_TEXT_GAP * s;
-        let label  = ITEMS[i].name;
+        let label  = ITEMS[item_idx].name;
         let color_t = if is_active { col_active_text } else { col_white };
 
         v.push(act!(text:
