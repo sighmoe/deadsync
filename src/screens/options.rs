@@ -15,22 +15,22 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
    Margins (screen pixels, not scaled):
    • LEFT  = 42 px from the left edge to the start of the rows
-   • TOP   = 82 px from the content area’s top (just below the top bar) to row #1
+   • TOP   = 29 px from the content area’s top (just below the top bar) to row #1
    • RIGHT = 29 px from the screen’s right edge to the *right edge* of the description box
 
    Layout block (unscaled spec; uniformly scaled by `s` to fit between gutters):
    • Rows area width: 721 px, 10 rows, each 55 px tall, 3 px vertical gap
    • Separator: 3 px
-   • Description: 484 px wide, 584 px tall
+   • Description: 484 px wide, **577 px tall** (matches 10×55 + 9×3)
 ============================================================================= */
 
 /// Bars in `screen_bar.rs` use 32.0 px height.
 const BAR_H: f32 = 32.0;
 
 /// Screen-space margins (pixels, not scaled)
-const LEFT_MARGIN_PX: f32 = 42.0;
-const RIGHT_MARGIN_PX: f32 = 29.0;
-const FIRST_ROW_TOP_MARGIN_PX: f32 = 29.0;
+const LEFT_MARGIN_PX: f32 = 25.0;
+const RIGHT_MARGIN_PX: f32 = 17.0;
+const FIRST_ROW_TOP_MARGIN_PX: f32 = 17.0;
 
 /// Unscaled spec constants (we’ll uniformly scale).
 const ROW_COUNT: usize = 10;
@@ -40,7 +40,8 @@ const LIST_W: f32 = 721.0;
 
 const SEP_W: f32 = 3.0;     // gap/stripe between rows and description
 const DESC_W: f32 = 484.0;  // description panel width
-const DESC_H: f32 = 584.0;  // total block height
+// derive description height from rows so it never includes a trailing gap
+const DESC_H: f32 = (ROW_COUNT as f32) * ROW_H + ((ROW_COUNT - 1) as f32) * ROW_GAP;
 
 /// Text sizing (unscaled). Picked to sit nicely inside 55px rows.
 const TEXT_PX: f32 = 26.0;
