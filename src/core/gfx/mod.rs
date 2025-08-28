@@ -163,3 +163,9 @@ pub fn cleanup(backend: &mut Backend) {
         Backend::OpenGL(state) => opengl::cleanup(state),
     }
 }
+
+impl core::fmt::Display for BackendType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self { Self::Vulkan => write!(f, "Vulkan"), Self::OpenGL => write!(f, "OpenGL") }
+    }
+}

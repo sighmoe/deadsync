@@ -3,14 +3,6 @@ use crate::ui::actors::Actor;
 use crate::act;
 use crate::core::space::globals::*;
 
-#[inline(always)]
-fn backend_label(b: BackendType) -> &'static str {
-    match b {
-        BackendType::OpenGL => "OpenGL",
-        BackendType::Vulkan => "Vulkan",
-    }
-}
-
 /// Three-line stats: FPS, VPF, Backend — top-right, miso, white.
 pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
     const PX: f32 = 12.0;
@@ -48,7 +40,7 @@ pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {
             zoomtoheight(PX):
             diffuse(color[0], color[1], color[2], color[3]):
             font("miso"):
-            settext(backend_label(backend)):
+            settext(backend.to_string()):
             horizalign(right):
             z(200)
         ),
