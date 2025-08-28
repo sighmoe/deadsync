@@ -36,9 +36,7 @@ impl State {
     pub fn new() -> Self { Self::with_texture("heart.png") }
 
     pub fn with_texture(tex_key: &'static str) -> Self {
-        // Read real image dimensions from disk using the full path:
-        let full_path = format!("assets/graphics/{}", tex_key);
-        let (w_px, h_px) = image::image_dimensions(&full_path).unwrap_or((668, 566));
+        let (w_px, h_px) = image_dims_cached(tex_key);
 
         let variants = [0, 1, 2, 0, 1, 0, 2, 0, 1, 2]; // normal,big,small pattern
         Self {
@@ -132,4 +130,23 @@ impl State {
 
         actors
     }
+}
+
+#[inline(always)]
+fn image_dims_cached(tex_key: &'static str) -> (u32, u32) {
+    static DIM_CACHE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<&'static str, (u32, u32)>>
+    > = std::sync::OnceLock::new();
+
+    let cache = DIM_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    // Fast path: hit the cache
+    if let Some(&dims) = cache.lock().unwrap().get(tex_key) {
+        return dims;
+    }
+
+    // Miss: compute and insert
+    let full_path = format!("assets/graphics/{}", tex_key);
+    let dims = image::image_dimensions(&full_path).unwrap_or((668, 566));
+    cache.lock().unwrap().insert(tex_key, dims);
+    dims
 }
