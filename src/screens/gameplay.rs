@@ -32,17 +32,18 @@ pub fn handle_key_press(_state: &mut State, event: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
+#[inline(always)]
 pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
-    // Map to {-1.0, 0.0, 1.0} without branches.
-    let dx = (input.right as i32 - input.left as i32) as f32;
-    let dy = (input.down  as i32 - input.up   as i32) as f32;
+    // booleans → {-1,0,1} as f32
+    let dx = (input.right as u8 as f32) - (input.left as u8 as f32);
+    let dy = (input.down  as u8 as f32) - (input.up   as u8 as f32);
 
     if dx == 0.0 && dy == 0.0 {
         return;
     }
 
-    // Exactly diagonal? Then normalize by 1/sqrt(2).
-    const INV_SQRT2: f32 = 0.707_106_77;
+    // Diagonal check without squares: if both axes are non-zero, scale by 1/√2.
+    const INV_SQRT2: f32 = 0.70710678118;
     let norm = if dx != 0.0 && dy != 0.0 { INV_SQRT2 } else { 1.0 };
 
     let step = PLAYER_SPEED * delta_time * norm;
