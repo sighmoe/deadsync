@@ -234,14 +234,17 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
         let row_y = list_y + (i_vis as f32) * (ROW_H + ROW_GAP) * s;
 
-        // Row background
+        // Row background width:
+        // - inactive rows: stop 3px (sep_w) BEFORE the separator to create a gap
+        // - active row: extend ACROSS the separator to visually connect with the desc area
         let is_active = item_idx == state.selected;
+        let row_w = if is_active { list_w + sep_w } else { list_w - sep_w };
         let bg = if is_active { col_active_bg } else { col_inactive_bg };
 
         v.push(act!(quad:
             align(0.0, 0.0):
             xy(list_x, row_y):
-            zoomto(list_w, ROW_H * s):
+            zoomto(row_w, ROW_H * s):
             diffuse(bg[0], bg[1], bg[2], bg[3])
         ));
 
