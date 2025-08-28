@@ -169,18 +169,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         fg_color: FG,
     }));
 
-    /* ----------------------------- BOTTOM BAR ----------------------------- */
-    v.push(screen_bar::build(screen_bar::ScreenBarParams {
-        title: "EVENT MODE",
-        title_placement: ScreenBarTitlePlacement::Center,
-        position: ScreenBarPosition::Bottom,
-        transparent: false,
-        left_text: None,
-        center_text: None,
-        right_text: None,
-        fg_color: FG,
-    }));
-
     /* --------------------------- MAIN CONTENT UI -------------------------- */
 
     // --- global colors ---
