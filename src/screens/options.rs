@@ -45,8 +45,8 @@ const DESC_H: f32 = (VISIBLE_ROWS as f32) * ROW_H + ((VISIBLE_ROWS - 1) as f32) 
 
 /// Text sizing (unscaled). Picked to sit nicely inside 55px rows.
 const TEXT_PX: f32 = 26.0;
-const TEXT_LEFT_PAD: f32 = 16.0; // padding inside a row before the heart
-const HEART_TEXT_GAP: f32 = 10.0;
+const TEXT_LEFT_PAD: f32 = 19.0; // padding inside a row before the heart
+const HEART_TEXT_GAP: f32 = 17.0;
 
 /// Heart native aspect (for aspect-correct scaling).
 const HEART_NATIVE_W: f32 = 668.0;
@@ -106,8 +106,13 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
             ScreenAction::None
         }
         PhysicalKey::Code(KeyCode::Enter) => {
-            // Example: handle Exit activation here in the future.
-            ScreenAction::None
+            // If the last item ("Exit") is selected, go back to main menu.
+            if total > 0 && state.selected == total - 1 {
+                ScreenAction::Navigate(Screen::Menu)
+            } else {
+                // Stub for other items (open sub-screens later).
+                ScreenAction::None
+            }
         }
         _ => ScreenAction::None,
     }
@@ -180,15 +185,19 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     /* --------------------------- MAIN CONTENT UI -------------------------- */
 
     // --- global colors ---
-    let col_active_bg  = color::rgba_hex("#333333");
+    let col_active_bg  = color::rgba_hex("#333333"); // active bg for normal rows
 
     // inactive bg = #071016 @ 0.8 alpha
     let base_inactive  = color::rgba_hex("#071016");
     let col_inactive_bg: [f32; 4] = [base_inactive[0], base_inactive[1], base_inactive[2], 0.8];
 
     let col_white      = [1.0, 1.0, 1.0, 1.0];
+    let col_black      = [0.0, 0.0, 0.0, 1.0];
 
-    // Active text color uses the Simply Love palette at the selected index.
+    // Simply Love brand color (same index used by the heart bg).
+    let col_brand_bg   = color::simply_love_rgba(color::DEFAULT_COLOR_INDEX);
+
+    // Active text color (for normal rows) – keep using a palette color keyed by selection.
     let col_active_text = color::simply_love_rgba(state.selected as i32);
 
     // --- scale & origin honoring fixed screen-space margins ---
@@ -234,12 +243,26 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
         let row_y = list_y + (i_vis as f32) * (ROW_H + ROW_GAP) * s;
 
-        // Row background width:
-        // - inactive rows: stop 3px (sep_w) BEFORE the separator to create a gap
-        // - active row: extend ACROSS the separator to visually connect with the desc area
         let is_active = item_idx == state.selected;
-        let row_w = if is_active { list_w + sep_w } else { list_w - sep_w };
-        let bg = if is_active { col_active_bg } else { col_inactive_bg };
+        let is_exit   = item_idx == total_items - 1;
+
+        // Row background width:
+        // - Exit: always keep the 3px gap (even when active)
+        // - Normal items: inactive keeps gap; active touches the separator
+        let row_w = if is_exit {
+            list_w - sep_w
+        } else if is_active {
+            list_w
+        } else {
+            list_w - sep_w
+        };
+
+        // Choose bg color with special case for active Exit row
+        let bg = if is_active {
+            if is_exit { col_brand_bg } else { col_active_bg }
+        } else {
+            col_inactive_bg
+        };
 
         v.push(act!(quad:
             align(0.0, 0.0):
@@ -252,26 +275,43 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let row_mid_y = row_y + 0.5 * ROW_H * s;
         let text_h    = TEXT_PX * s;
 
-        // Heart same height as text
+        // Heart/icon sizing
         let heart_h = text_h;
         let heart_w = heart_h * HEART_ASPECT;
 
         // Left padding INSIDE the row
         let content_left = list_x + TEXT_LEFT_PAD * s;
 
-        // Heart sprite (left of text)
-        let heart_tint = if is_active { col_active_text } else { col_white };
-        v.push(act!(sprite("heart.png"):
-            align(0.0, 0.5):
-            xy(content_left, row_mid_y):
-            zoomto(heart_w, heart_h):
-            diffuse(heart_tint[0], heart_tint[1], heart_tint[2], heart_tint[3])
-        ));
+        // Heart sprite (skip for Exit)
+        if !is_exit {
+            let heart_tint = if is_active { col_active_text } else { col_white };
+            v.push(act!(sprite("heart.png"):
+                align(0.0, 0.5):
+                xy(content_left, row_mid_y):
+                zoomto(heart_w, heart_h):
+                diffuse(heart_tint[0], heart_tint[1], heart_tint[2], heart_tint[3])
+            ));
+        }
 
         // Text (Miso)
-        let text_x = content_left + heart_w + HEART_TEXT_GAP * s;
-        let label  = ITEMS[item_idx].name;
-        let color_t = if is_active { col_active_text } else { col_white };
+        let text_x = if is_exit {
+            // no heart => start at left pad
+            content_left
+        } else {
+            // heart + gap
+            content_left + heart_w + HEART_TEXT_GAP * s
+        };
+
+        let label = ITEMS[item_idx].name;
+
+        // Exit text: white when inactive; black when active.
+        let color_t = if is_exit {
+            if is_active { col_black } else { col_white }
+        } else if is_active {
+            col_active_text
+        } else {
+            col_white
+        };
 
         v.push(act!(text:
             align(0.0, 0.0):
@@ -287,7 +327,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     // ------------------- Description content (selected) -------------------
     let sel = state.selected.min(ITEMS.len() - 1);
     let title_px = 28.0 * s;
-    let body_px  = 18.0 * s;
+    let body_px  = 28.0 * s;
 
     let desc_pad_x = 18.0 * s;
     let mut cursor_y = list_y + 18.0 * s;
