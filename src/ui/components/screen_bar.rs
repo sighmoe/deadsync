@@ -3,7 +3,7 @@ use crate::act;
 use crate::core::space::globals::*;
 use crate::ui::color;
 
-// --- Constants (unchanged) ---
+// --- Constants ---
 const BAR_H: f32 = 32.0;
 const TOP_BAR_TITLE_PX: f32 = 27.0;      // top bar (Wendy) — left/center/right
 const BOTTOM_BAR_TITLE_PX: f32 = 24.0;   // bottom bar center title

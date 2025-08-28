@@ -118,7 +118,7 @@ pub struct State {
     images_in_flight: Vec<vk::Fence>,
     current_frame: usize,
     window_size: PhysicalSize<u32>,
-    vsync_enabled: bool, // New immutable field
+    vsync_enabled: bool,
     projection: Matrix4<f32>,
     msdf_pipeline_layout: vk::PipelineLayout,
     msdf_pipeline: vk::Pipeline,
@@ -292,7 +292,7 @@ fn create_descriptor_pool(device: &Device) -> Result<vk::DescriptorPool, vk::Res
     unsafe { device.create_descriptor_pool(&pool_info, None) }
 }
 
-// --- NEW PIPELINE CREATION FUNCTIONS ---
+// --- PIPELINE CREATION FUNCTIONS ---
 
 fn create_sprite_pipeline(
     device: &Device,

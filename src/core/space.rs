@@ -1,6 +1,5 @@
-// src/core/space.rs
 use cgmath::Matrix4;
-use std::cell::Cell; // NEW
+use std::cell::Cell;
 
 #[inline(always)] pub const fn logical_height() -> f32 { 480.0 }
 #[inline(always)] pub const fn design_width_16_9() -> f32 { 854.0 }
@@ -13,7 +12,7 @@ pub struct Metrics {
     pub bottom: f32,
 }
 
-// ---------- NEW: thread-local current metrics + setters/getters ----------
+// ---------- thread-local current metrics + setters/getters ----------
 thread_local! {
     static CURRENT_METRICS: Cell<Metrics> = Cell::new(default_metrics());
 }

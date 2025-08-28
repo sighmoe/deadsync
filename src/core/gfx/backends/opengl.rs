@@ -97,7 +97,7 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
         gl.enable_vertex_attrib_array(1);
         gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, stride, (2 * mem::size_of::<f32>()) as i32);
 
-        // NEW: per-instance attributes buffer (locations 2..5)
+        //  per-instance attributes buffer (locations 2..5)
         let instance_vbo = gl.create_buffer()?;
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_vbo));
         let i_stride = (8 * mem::size_of::<f32>()) as i32; // center(2), size(2), uv_scale(2), uv_offset(2)

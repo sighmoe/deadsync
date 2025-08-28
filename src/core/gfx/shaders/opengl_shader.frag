@@ -31,7 +31,7 @@ void main() {
         return;
     }
 
-    // MSDF path (unchanged except optional edge fade on alpha)
+    // MSDF path
     float sd = median3(s.rgb);
     vec2 texSize = vec2(textureSize(u_texture, 0));
     float texelsPerScreenPx = length(fwidth(v_tex_coord * texSize));

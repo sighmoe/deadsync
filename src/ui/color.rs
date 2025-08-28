@@ -1,5 +1,3 @@
-// src/ui/color.rs
-
 #[inline(always)]
 pub fn srgb8_to_linear(c: u8) -> f32 {
     let x = (c as f32) / 255.0;

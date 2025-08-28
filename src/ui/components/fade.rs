@@ -1,4 +1,3 @@
-// src/ui/components/fade.rs
 use crate::act;
 use crate::core::space::globals::*;
 use crate::ui::actors::Actor;

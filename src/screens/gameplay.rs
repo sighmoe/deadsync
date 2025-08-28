@@ -6,7 +6,7 @@ use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-// new: import the globals getters
+// import the globals getters
 use crate::core::space::globals::*;
 
 const PLAYER_SPEED: f32 = 250.0;

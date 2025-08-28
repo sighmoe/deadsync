@@ -1,6 +1,3 @@
-// src/core/gfx/mod.rs
-
-//! This module serves as the single, public-facing API for all rendering operations.
 mod backends;
 
 use crate::core::gfx::backends::{opengl, vulkan};
@@ -10,7 +7,7 @@ use image::RgbaImage;
 use std::{collections::HashMap, error::Error, sync::Arc};
 use winit::window::Window;
 
-// --- Public Data Contract (Formerly types.rs) ---
+// --- Public Data Contract ---
 
 /// A simple container for all objects to be drawn in a single frame.
 #[derive(Clone)]

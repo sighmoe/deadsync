@@ -149,7 +149,7 @@ pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> 
     }));
     actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "EVENT MODE",
-        title_placement: ScreenBarTitlePlacement::Center, // unchanged look
+        title_placement: ScreenBarTitlePlacement::Center,
         position: ScreenBarPosition::Bottom,
         transparent: false,
         left_text: None,

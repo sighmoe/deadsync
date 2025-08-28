@@ -1,4 +1,3 @@
-// src/ui/anim.rs
 //! StepMania-like tween segments with a tiny queueing system.
 //!
 //! Usage sketch:

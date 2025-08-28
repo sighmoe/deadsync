@@ -1,4 +1,3 @@
-// src/screens/options.rs
 use crate::act;
 use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
