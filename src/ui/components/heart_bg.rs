@@ -36,11 +36,30 @@ impl State {
     pub fn new() -> Self { Self::with_texture("heart.png") }
 
     pub fn with_texture(tex_key: &'static str) -> Self {
-        let (w_px, h_px) = image_dims_cached(tex_key);
+        // Cache: tex_key -> (w,h). Keeps everything local; no new top-level imports.
+        static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<&'static str, (u32, u32)>>> =
+            std::sync::OnceLock::new();
+        let map = CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+        #[inline(always)]
+        fn fallback_dims() -> (u32, u32) { (668, 566) }
+
+        let (w_px, h_px) = {
+            // Hit cache
+            if let Some(&wh) = map.lock().unwrap().get(tex_key) {
+                wh
+            } else {
+                // Miss: query once, then stash
+                let full_path = format!("assets/graphics/{}", tex_key);
+                let wh = image::image_dimensions(&full_path).unwrap_or(fallback_dims());
+                map.lock().unwrap().insert(tex_key, wh);
+                wh
+            }
+        };
 
         let variants = [0, 1, 2, 0, 1, 0, 2, 0, 1, 2]; // normal,big,small pattern
         Self {
-            t0: Instant::now(),
+            t0: std::time::Instant::now(),
             base_w: w_px as f32,
             base_h: h_px as f32,
             variants,
@@ -130,23 +149,4 @@ impl State {
 
         actors
     }
-}
-
-#[inline(always)]
-fn image_dims_cached(tex_key: &'static str) -> (u32, u32) {
-    static DIM_CACHE: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<&'static str, (u32, u32)>>
-    > = std::sync::OnceLock::new();
-
-    let cache = DIM_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
-    // Fast path: hit the cache
-    if let Some(&dims) = cache.lock().unwrap().get(tex_key) {
-        return dims;
-    }
-
-    // Miss: compute and insert
-    let full_path = format!("assets/graphics/{}", tex_key);
-    let dims = image::image_dimensions(&full_path).unwrap_or((668, 566));
-    cache.lock().unwrap().insert(tex_key, dims);
-    dims
 }
