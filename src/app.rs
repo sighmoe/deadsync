@@ -279,7 +279,7 @@ impl App {
     }
 
     fn build_screen(&self, actors: &[Actor], clear_color: [f32; 4], total_elapsed: f32) -> RenderList {
-        crate::ui::layout::build_screen(actors, clear_color, &self.metrics, &self.fonts, total_elapsed)
+        crate::ui::compose::build_screen(actors, clear_color, &self.metrics, &self.fonts, total_elapsed)
     }
 
     fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
