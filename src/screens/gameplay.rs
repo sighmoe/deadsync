@@ -33,18 +33,17 @@ pub fn handle_key_press(_state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
-    // Convert booleans to {-1.0, 0.0, 1.0} without branches.
-    let dx = (input.right as u8 as f32) - (input.left as u8 as f32);
-    let dy = (input.down  as u8 as f32) - (input.up   as u8 as f32);
+    // Map to {-1.0, 0.0, 1.0} without branches.
+    let dx = (input.right as i32 - input.left as i32) as f32;
+    let dy = (input.down  as i32 - input.up   as i32) as f32;
 
-    // Early-out if idle.
     if dx == 0.0 && dy == 0.0 {
         return;
     }
 
-    // Normalize diagonal speed (1/√2).
-    let len_sq = dx * dx + dy * dy;                    // ∈ {1.0, 2.0}
-    let norm = if (len_sq - 2.0).abs() < f32::EPSILON { 0.70710678 } else { 1.0 };
+    // Exactly diagonal? Then normalize by 1/sqrt(2).
+    const INV_SQRT2: f32 = 0.707_106_77;
+    let norm = if dx != 0.0 && dy != 0.0 { INV_SQRT2 } else { 1.0 };
 
     let step = PLAYER_SPEED * delta_time * norm;
     state.player_position.x += dx * step;
