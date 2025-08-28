@@ -48,6 +48,9 @@ const TEXT_PX: f32 = 26.0;
 const TEXT_LEFT_PAD: f32 = 19.0; // padding inside a row before the heart
 const HEART_TEXT_GAP: f32 = 17.0;
 
+/// Baseline nudge for row labels (screen pixels, not scaled)
+const TEXT_BASELINE_NUDGE_PX: f32 = 1.0;
+
 /// Heart native aspect (for aspect-correct scaling).
 const HEART_NATIVE_W: f32 = 668.0;
 const HEART_NATIVE_H: f32 = 566.0;
@@ -315,7 +318,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
         v.push(act!(text:
             align(0.0, 0.0):
-            xy(text_x, row_mid_y - 0.5 * text_h):
+            xy(text_x, row_mid_y - 0.5 * text_h + TEXT_BASELINE_NUDGE_PX):
             zoomtoheight(text_h):
             diffuse(color_t[0], color_t[1], color_t[2], color_t[3]):
             font("miso"):
