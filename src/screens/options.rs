@@ -10,26 +10,29 @@ use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 /* =============================================================================
-   Options — clean-slate layout (rows LEFT, description RIGHT)
+   Options — rows LEFT, description RIGHT
    + hearts background + top/bottom bars
-   -----------------------------------------------------------------------------
-   Spec (base/unscaled “design” units; scaled to current screen):
-   • 10 rows, each 55 px high, 3 px between rows
-   • Rows area width: 721 px
-   • 3 px separator, then a 484 px-wide description box
-   • Description box height: 584 px (total block height)
-   • Active row background: #333333; others: black @ 50% alpha
-   • Separator uses #333333 (matches active/desc)
-   • Text: Miso. Active text color = SIMPLY_LOVE_HEX[selected index]. Others white.
-   • Little heart next to each option, same *height* as text (from heart.png)
-   • When a row is ACTIVE, heart tint == active text color.
-   • Top bar: "OPTIONS" (left). Bottom bar: "EVENT MODE" (center).
+
+   Margins (screen pixels, not scaled):
+   • LEFT  = 42 px from the left edge to the start of the rows
+   • TOP   = 82 px from the content area’s top (just below the top bar) to row #1
+   • RIGHT = 29 px from the screen’s right edge to the *right edge* of the description box
+
+   Layout block (unscaled spec; uniformly scaled by `s` to fit between gutters):
+   • Rows area width: 721 px, 10 rows, each 55 px tall, 3 px vertical gap
+   • Separator: 3 px
+   • Description: 484 px wide, 584 px tall
 ============================================================================= */
 
 /// Bars in `screen_bar.rs` use 32.0 px height.
 const BAR_H: f32 = 32.0;
 
-/// Unscaled spec constants (we’ll uniformly scale to the available content rect).
+/// Screen-space margins (pixels, not scaled)
+const LEFT_MARGIN_PX: f32 = 42.0;
+const RIGHT_MARGIN_PX: f32 = 29.0;
+const FIRST_ROW_TOP_MARGIN_PX: f32 = 29.0;
+
+/// Unscaled spec constants (we’ll uniformly scale).
 const ROW_COUNT: usize = 10;
 const ROW_H: f32 = 55.0;
 const ROW_GAP: f32 = 3.0;
@@ -104,24 +107,41 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
 /* --------------------------------- layout -------------------------------- */
 
 /// content rect = full screen minus top & bottom bars.
-/// Returns (scale, origin_x, origin_y) for the block inside that content rect.
-fn scaled_block_origin() -> (f32, f32, f32) {
+/// We fit the (rows + separator + description) block inside that content rect,
+/// honoring LEFT, RIGHT and TOP margins in *screen pixels*.
+/// Returns (scale, origin_x, origin_y).
+fn scaled_block_origin_with_margins() -> (f32, f32, f32) {
     let total_w = LIST_W + SEP_W + DESC_W;
     let total_h = DESC_H;
 
     let sw = screen_width();
     let sh = screen_height();
 
-    // available height excluding bars
-    let avail_h = (sh - 2.0 * BAR_H).max(0.0);
-    let s = (sw / total_w).min(avail_h / total_h);
-    let ox = 0.5 * (sw - total_w * s);
-    let oy = BAR_H + 0.5 * (avail_h - total_h * s);
-    (s, ox, oy)
-}
+    // content area (between bars)
+    let content_top = BAR_H;
+    let content_bottom = sh - BAR_H;
+    let content_h = (content_bottom - content_top).max(0.0);
 
-fn list_total_height() -> f32 {
-    (ROW_COUNT as f32) * ROW_H + (ROW_COUNT.saturating_sub(1) as f32) * ROW_GAP
+    // available width between fixed left/right gutters
+    let avail_w = (sw - LEFT_MARGIN_PX - RIGHT_MARGIN_PX).max(0.0);
+    // available height after the fixed top margin (inside content area)
+    let avail_h = (content_h - FIRST_ROW_TOP_MARGIN_PX).max(0.0);
+
+    // candidate scales
+    let s_w = if total_w > 0.0 { avail_w / total_w } else { 1.0 };
+    let s_h = if total_h > 0.0 { avail_h / total_h } else { 1.0 };
+    let s = s_w.min(s_h).max(0.0);
+
+    // X origin:
+    // Right-align inside [LEFT..(sw-RIGHT)] so the description box ends exactly
+    // RIGHT_MARGIN_PX from the screen edge. When height limits scale (s < s_w),
+    // this will increase the left gap beyond 42 px, which is fine.
+    let ox = LEFT_MARGIN_PX + (avail_w - total_w * s).max(0.0);
+
+    // Y origin is fixed under the top bar by the requested margin.
+    let oy = content_top + FIRST_ROW_TOP_MARGIN_PX;
+
+    (s, ox, oy)
 }
 
 /* -------------------------------- drawing -------------------------------- */
@@ -171,8 +191,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     // Active text color uses the Simply Love palette at the selected index.
     let col_active_text = color::simply_love_rgba(state.selected as i32);
 
-    // --- scale & origin (within content area between the bars) ---
-    let (s, ox, oy) = scaled_block_origin();
+    // --- scale & origin honoring fixed screen-space margins ---
+    let (s, list_x, list_y) = scaled_block_origin_with_margins();
 
     // Geometry (scaled)
     let list_w = LIST_W * s;
@@ -180,33 +200,24 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let desc_w = DESC_W * s;
     let desc_h = DESC_H * s;
 
-    let block_x = ox;
-    let block_y = oy;
-
-    // Rows area (LEFT)
-    let list_x = block_x;
-    let list_h_unscaled = list_total_height();
-    let list_h = list_h_unscaled * s;
-    let list_y = block_y + 0.5 * (desc_h - list_h); // vertically centered inside desc block
-
-    // Separator immediately to the RIGHT of the rows
+    // Separator immediately to the RIGHT of the rows, aligned to the FIRST row top
     v.push(act!(quad:
         align(0.0, 0.0):
-        xy(list_x + list_w, block_y):
+        xy(list_x + list_w, list_y):
         zoomto(sep_w, desc_h):
         diffuse(col_active_bg[0], col_active_bg[1], col_active_bg[2], col_active_bg[3]) // #333333
     ));
 
-    // Description box (RIGHT of separator)
+    // Description box (RIGHT of separator), aligned to the first row top
     let desc_x = list_x + list_w + sep_w;
     v.push(act!(quad:
         align(0.0, 0.0):
-        xy(desc_x, block_y):
+        xy(desc_x, list_y):
         zoomto(desc_w, desc_h):
         diffuse(col_active_bg[0], col_active_bg[1], col_active_bg[2], col_active_bg[3]) // #333333
     ));
 
-    // Row loop (backgrounds + content)
+    // Row loop (backgrounds + content). Rows now start exactly at `list_y`.
     for i in 0..ROW_COUNT {
         let row_y = list_y + (i as f32) * (ROW_H + ROW_GAP) * s;
 
@@ -229,6 +240,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let heart_h = text_h;
         let heart_w = heart_h * HEART_ASPECT;
 
+        // Left padding INSIDE the row
         let content_left = list_x + TEXT_LEFT_PAD * s;
 
         // Heart sprite (left of text)
@@ -262,7 +274,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let body_px  = 18.0 * s;
 
     let desc_pad_x = 18.0 * s;
-    let mut cursor_y = block_y + 18.0 * s;
+    let mut cursor_y = list_y + 18.0 * s;
 
     // Title (selected item name)
     v.push(act!(text:
