@@ -31,7 +31,7 @@ pub fn handle_key_press(_: &mut State, e: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
-pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
+pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(64);
 
     // --- animated background (shared with menu) ---

@@ -106,7 +106,7 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
 
 /* ------------------------------- drawing ------------------------------- */
 
-pub fn get_actors(state: &State, _: &crate::core::space::Metrics) -> Vec<Actor> {
+pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(64);
 
     // 1) Animated heart background with a short cross-fade between colors.

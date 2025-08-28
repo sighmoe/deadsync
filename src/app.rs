@@ -295,16 +295,16 @@ impl App {
 
         // ⬇️ key change is inside the Init branch
         let mut actors = match self.current_screen {
-            CurrentScreen::Menu     => menu::get_actors(&self.menu_state, &self.metrics, screen_alpha_multiplier),
-            CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state, &self.metrics),
-            CurrentScreen::Options  => options::get_actors(&self.options_state, &self.metrics),
-            CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, &self.metrics),
+            CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier),
+            CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state),
+            CurrentScreen::Options  => options::get_actors(&self.options_state),
+            CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state),
             CurrentScreen::Init     => {
                 // During the squish phase, draw ONLY background (no original bar)
                 if matches!(self.transition, TransitionState::BarSquishOut { .. }) {
-                    init::get_actors_bg_only(&self.init_state, &self.metrics)
+                    init::get_actors_bg_only(&self.init_state)
                 } else {
-                    init::get_actors(&self.init_state, &self.metrics)
+                    init::get_actors(&self.init_state)
                 }
             }
         };

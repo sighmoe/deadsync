@@ -69,7 +69,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 // Signature changed to accept the alpha_multiplier
-pub fn get_actors(state: &State, _: &crate::core::space::Metrics, alpha_multiplier: f32) -> Vec<Actor> {
+pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
     let lp = LogoParams::default();
     let mut actors: Vec<Actor> = Vec::with_capacity(96);
 

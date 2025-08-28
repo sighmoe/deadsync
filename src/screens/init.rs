@@ -67,7 +67,7 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
 
 /* --------------------------- drawing --------------------------- */
 
-pub fn get_actors_bg_only(state: &State, _m: &crate::core::space::Metrics) -> Vec<Actor> {
+pub fn get_actors_bg_only(state: &State) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(16);
     actors.extend(state.bg.build(heart_bg::Params {
         active_color_index: state.base_color_index,
@@ -95,7 +95,7 @@ pub fn build_squish_bar(progress: f32) -> Actor {
     )
 }
 
-pub fn get_actors(state: &State, _m: &crate::core::space::Metrics) -> Vec<Actor> {
+pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(32 + ARROW_COUNT);
 
     // 1) HEART BACKGROUND — starts immediately
