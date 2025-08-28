@@ -425,11 +425,21 @@ fn push_sprite(
     texcoordvelocity: Option<[f32; 2]>,
     total_elapsed: f32,
 ) {
+    // 0) Trivial reject: fully transparent
+    if tint[3] <= 0.0 {
+        return;
+    }
+
     // 1) Clamp crop once (SM behavior).
     let (cl, cr, ct, cb) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
 
     // 2) Base world center/size from the *uncropped* rect (pivot already applied by place_rect).
     let (base_center, base_size) = sm_rect_to_world_center_size(rect, m);
+
+    // Trivial reject: zero-sized before/after crop
+    if base_size.x <= 0.0 || base_size.y <= 0.0 {
+        return;
+    }
 
     // 3) Compute crop scale and local offset (in pre-rot, world units).
     let sx_crop = (1.0 - cl - cr).max(0.0);
@@ -447,9 +457,9 @@ fn push_sprite(
     let size_x = base_size.x * sx_crop;
     let size_y = base_size.y * sy_crop;
 
-    // 4) UVs: crop in UV space as well so the remaining area is not stretched.
+    // 4) UVs
     let (uv_scale, uv_offset) = match source {
-        actors::SpriteSource::Solid => ([1.0, 1.0], [0.0, 0.0]), // solids ignore UVs
+        actors::SpriteSource::Solid => ([1.0, 1.0], [0.0, 0.0]),
         actors::SpriteSource::Texture(texture) => calculate_uvs(
             texture, uv_rect, cell, grid, flip_x, flip_y, cl, cr, ct, cb, texcoordvelocity, total_elapsed
         ),
@@ -461,17 +471,15 @@ fn push_sprite(
     let ft = fadetop.clamp(0.0, 1.0);
     let fb = fadebottom.clamp(0.0, 1.0);
 
-    // remove the part eaten by crop, then renormalize to remaining size
     let mut fl_eff = ((fl - cl).max(0.0) / sx_crop).clamp(0.0, 1.0);
     let mut fr_eff = ((fr - cr).max(0.0) / sx_crop).clamp(0.0, 1.0);
     let mut ft_eff = ((ft - ct).max(0.0) / sy_crop).clamp(0.0, 1.0);
     let mut fb_eff = ((fb - cb).max(0.0) / sy_crop).clamp(0.0, 1.0);
 
-    // swap on flips so "left" and "top" remain screen-space semantics
     if flip_x { std::mem::swap(&mut fl_eff, &mut fr_eff); }
     if flip_y { std::mem::swap(&mut ft_eff, &mut fb_eff); }
 
-    // 6) Compose transform: pivot preserved (translate by *original* center + rotated local offset).
+    // 6) Compose transform
     let transform =
         Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0)) *
         Matrix4::from_angle_z(Deg(rot_z_deg)) *
