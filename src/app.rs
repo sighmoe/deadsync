@@ -5,7 +5,7 @@ use crate::core::space::{self as space, Metrics};
 use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::ui::color;
-use crate::screens::{gameplay, menu, options, init, select_color, Screen as CurrentScreen, ScreenAction};
+use crate::screens::{gameplay, menu, options, init, select_color, select_music, Screen as CurrentScreen, ScreenAction};
 
 use log::{error, info, warn};
 use image;
@@ -138,6 +138,7 @@ pub struct App {
     transition: TransitionState,
     init_state: init::State,
     select_color_state: select_color::State,
+    select_music_state: select_music::State,
 }
 
 impl App {
@@ -145,7 +146,7 @@ impl App {
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
             current_screen: CurrentScreen::Init, init_state: init::init(), menu_state: menu::init(), gameplay_state: gameplay::init(), options_state: options::init(),
-            select_color_state: select_color::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
+            select_color_state: select_color::init(), select_music_state: select_music::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay: false,
             last_fps: 0.0, last_vpf: 0, transition: TransitionState::Idle,
@@ -299,6 +300,7 @@ impl App {
             CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state),
             CurrentScreen::Options  => options::get_actors(&self.options_state),
             CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state),
+            CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state),
             CurrentScreen::Init     => {
                 // During the squish phase, draw ONLY background (no original bar)
                 if matches!(self.transition, TransitionState::BarSquishOut { .. }) {
@@ -469,6 +471,7 @@ impl ApplicationHandler for App {
                     CurrentScreen::Gameplay => gameplay::handle_key_press(&mut self.gameplay_state, &key_event),
                     CurrentScreen::Options  => options::handle_key_press(&mut self.options_state, &key_event),
                     CurrentScreen::SelectColor => select_color::handle_key_press(&mut self.select_color_state, &key_event),
+                    CurrentScreen::SelectMusic => select_music::handle_key_press(&mut self.select_music_state, &key_event),
                     CurrentScreen::Init     => init::handle_key_press(&mut self.init_state, &key_event),
                 };
                 if let Err(e) = self.handle_action(action, event_loop) {
@@ -496,6 +499,11 @@ impl ApplicationHandler for App {
                             if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Gameplay {
                                 let idx = self.select_color_state.active_color_index;
                                 self.gameplay_state.player_color = color::decorative_rgba(idx);
+                            }
+
+                            // Pass chosen color from SelectColor -> SelectMusic
+                            if prev == CurrentScreen::SelectColor && *target == CurrentScreen::SelectMusic { // MODIFIED
+                                self.select_music_state.active_color_index = self.select_color_state.active_color_index;
                             }
 
                             // When returning SelectColor -> Menu, keep Menu’s active index in sync
@@ -544,7 +552,10 @@ impl ApplicationHandler for App {
                                 }
                             }
                             CurrentScreen::SelectColor => {
-                                select_color::update(&mut self.select_color_state, delta_time);  // ⬅ this is the whole point
+                                select_color::update(&mut self.select_color_state, delta_time);
+                            }
+                            CurrentScreen::SelectMusic => {
+                                select_music::update(&mut self.select_music_state, delta_time);
                             }
                             _ => {}
                         }

@@ -98,7 +98,7 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
             state.bg_fade_t     = 0.0;
             ScreenAction::None
         }
-        PhysicalKey::Code(KeyCode::Enter) => ScreenAction::Navigate(Screen::Gameplay),
+        PhysicalKey::Code(KeyCode::Enter) => ScreenAction::Navigate(Screen::SelectMusic), // CHANGED
         PhysicalKey::Code(KeyCode::Escape) => ScreenAction::Navigate(Screen::Menu),
         _ => ScreenAction::None,
     }

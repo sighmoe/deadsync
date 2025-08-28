@@ -3,6 +3,7 @@ pub mod menu;
 pub mod options;
 pub mod init;
 pub mod select_color;
+pub mod select_music;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScreenAction {
@@ -18,4 +19,5 @@ pub enum Screen {
     Options,
     Init,
     SelectColor,
+    SelectMusic,
 }
