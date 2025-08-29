@@ -182,7 +182,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     const BAR_H: f32 = 32.0;
 
     let accent = color::simply_love_rgba(state.active_color_index);
-    let box_w = 310.0;
+    let box_w = 374.0;
     let box_h = 60.0;
 
     let box_bottom = screen_height() - BAR_H;     // top edge of the bottom bar
