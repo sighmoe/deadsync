@@ -243,6 +243,37 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         z(z_layer)
     ));
 
+    // --- 5) Step Artist Box ---
+    const STEP_ARTIST_BOX_W: f32 = 175.2;
+    const STEP_ARTIST_BOX_H: f32 = 16.8;
+    const GAP_ABOVE_DENSITY: f32 = 1.0;
+
+    let step_artist_box_color = color::simply_love_rgba(state.active_color_index);
+    let density_graph_left_x = step_info_box_right_x - STEP_INFO_BOX_W;
+    let step_artist_box_bottom_y = rating_box_top_y - GAP_ABOVE_DENSITY;
+
+    actors.push(act!(quad:
+        align(0.0, 1.0): // bottom-right pivot
+        xy(density_graph_left_x, step_artist_box_bottom_y):
+        zoomto(STEP_ARTIST_BOX_W, STEP_ARTIST_BOX_H):
+        diffuse(step_artist_box_color[0], step_artist_box_color[1], step_artist_box_color[2], 1.0):
+        z(z_layer)
+    ));
+
+    // --- 6) Banner Box ---
+    const BANNER_BOX_W: f32 = 319.8;
+    const BANNER_BOX_H: f32 = 126.0;
+    const GAP_BELOW_TOP_BAR: f32 = 2.0;
+
+    let banner_box_top_y = BAR_H + GAP_BELOW_TOP_BAR;
+    let banner_box_left_x = density_graph_left_x; // Align with boxes below
+
+    actors.push(act!(sprite("fallback_banner.png"):
+        align(0.0, 0.0): // top-left pivot
+        xy(banner_box_left_x, banner_box_top_y):
+        zoomto(BANNER_BOX_W, BANNER_BOX_H):
+        z(z_layer)
+    ));
 
     // Label inside the box (top-left, small)
     let pad_x = 10.0;
