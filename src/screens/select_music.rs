@@ -197,6 +197,53 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         z(50)
     ));
 
+    // --- 3) Step Info & Rating boxes (above the accent box) ---
+    const RATING_BOX_W: f32 = 31.8;
+    const RATING_BOX_H: f32 = 151.8;
+    const STEP_INFO_BOX_W: f32 = 286.2;
+    const STEP_INFO_BOX_H: f32 = 63.6;
+
+    const GAP: f32 = 3.0;
+    const MARGIN_ABOVE_STATS_BOX: f32 = 9.0;
+
+    let ui_box_color = col_music_wheel_box();
+    let z_layer = 51; // Just above the accent box (50)
+
+    // The bottom of these new boxes aligns to a Y position above the accent box.
+    let boxes_bottom_y = box_top - MARGIN_ABOVE_STATS_BOX;
+
+    // The rating box is right-aligned with the accent box below it.
+    let rating_box_right_x = box_w;
+    actors.push(act!(quad:
+        align(1.0, 1.0): // bottom-right pivot
+        xy(rating_box_right_x, boxes_bottom_y):
+        zoomto(RATING_BOX_W, RATING_BOX_H):
+        diffuse(ui_box_color[0], ui_box_color[1], ui_box_color[2], 1.0):
+        z(z_layer)
+    ));
+
+    // The step info box is to the left of the rating box, with a gap.
+    let step_info_box_right_x = rating_box_right_x - RATING_BOX_W - GAP;
+    actors.push(act!(quad:
+        align(1.0, 1.0): // bottom-right pivot
+        xy(step_info_box_right_x, boxes_bottom_y):
+        zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
+        diffuse(ui_box_color[0], ui_box_color[1], ui_box_color[2], 1.0):
+        z(z_layer)
+    ));
+
+    // --- 4) Density Graph Box ---
+    // Aligned to the top of the rating box, with the same dimensions as the step info box.
+    let rating_box_top_y = boxes_bottom_y - RATING_BOX_H;
+    actors.push(act!(quad:
+        align(1.0, 0.0): // top-right pivot
+        xy(step_info_box_right_x, rating_box_top_y):
+        zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
+        diffuse(ui_box_color[0], ui_box_color[1], ui_box_color[2], 1.0):
+        z(z_layer)
+    ));
+
+
     // Label inside the box (top-left, small)
     let pad_x = 10.0;
     let pad_y = 8.0;
