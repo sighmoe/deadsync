@@ -172,9 +172,9 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         position: ScreenBarPosition::Bottom,
         transparent: false,
         fg_color: [1.0; 4],
-        left_text: None,
+        left_text: Some("PerfectTaste"),
         center_text: None,
-        right_text: Some("P1: Ready"),
+        right_text: None,
     }));
 
     // --- 2) Primary accent box (left, flush to top of footer bar) ---
@@ -182,7 +182,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     const BAR_H: f32 = 32.0;
 
     let accent = color::simply_love_rgba(state.active_color_index);
-    let box_w = 374.0;
+    let box_w = 373.8;
     let box_h = 60.0;
 
     let box_bottom = screen_height() - BAR_H;     // top edge of the bottom bar
@@ -203,8 +203,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     const STEP_INFO_BOX_W: f32 = 286.2;
     const STEP_INFO_BOX_H: f32 = 63.6;
 
-    const GAP: f32 = 3.0;
-    const MARGIN_ABOVE_STATS_BOX: f32 = 9.0;
+    const GAP: f32 = 1.8;
+    const MARGIN_ABOVE_STATS_BOX: f32 = 5.4;
 
     let ui_box_color = col_music_wheel_box();
     let z_layer = 51; // Just above the accent box (50)
@@ -274,6 +274,58 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         zoomto(BANNER_BOX_W, BANNER_BOX_H):
         z(z_layer)
     ));
+
+    // --- 7) BPM/Length Box ---
+    const BPM_BOX_H: f32 = 49.8;
+    const GAP_BELOW_BANNER: f32 = 2.0;
+
+    let bpm_box_top_y = banner_box_top_y + BANNER_BOX_H + GAP_BELOW_BANNER;
+
+    actors.push(act!(quad:
+        align(0.0, 0.0): // top-left pivot
+        xy(banner_box_left_x, bpm_box_top_y):
+        zoomto(BANNER_BOX_W, BPM_BOX_H):
+        diffuse(ui_box_color[0], ui_box_color[1], ui_box_color[2], 1.0):
+        z(z_layer)
+    ));
+
+    // --- 8) Music Wheel ---
+    const WHEEL_W: f32 = 352.8;
+    const NUM_WHEEL_ITEMS: usize = 13;
+    const WHEEL_ITEM_GAP: f32 = 2.0;
+
+    let wheel_right_x = screen_width();
+    let wheel_left_x = wheel_right_x - WHEEL_W;
+
+    // Calculate vertical dimensions dynamically
+    let content_area_y_start = BAR_H;
+    let content_area_y_end = screen_height() - BAR_H;
+    let total_available_h = content_area_y_end - content_area_y_start;
+
+    // There are (N+1) gaps for N items (one top, one bottom, N-1 in between)
+    let total_gap_h = (NUM_WHEEL_ITEMS + 1) as f32 * WHEEL_ITEM_GAP;
+    let total_items_h = total_available_h - total_gap_h;
+    let item_h = total_items_h / NUM_WHEEL_ITEMS as f32;
+
+    let wheel_item_color = col_music_wheel_box();
+
+    // Only draw the wheel if the calculated height is positive
+    if item_h > 0.0 {
+        for i in 0..NUM_WHEEL_ITEMS {
+            let item_top_y = content_area_y_start
+                + WHEEL_ITEM_GAP
+                + (i as f32 * (item_h + WHEEL_ITEM_GAP));
+
+            actors.push(act!(quad:
+                align(0.0, 0.0): // top-left pivot
+                xy(wheel_left_x, item_top_y):
+                zoomto(WHEEL_W, item_h):
+                diffuse(wheel_item_color[0], wheel_item_color[1], wheel_item_color[2], 1.0):
+                z(z_layer)
+            ));
+        }
+    }
+
 
     // Label inside the box (top-left, small)
     let pad_x = 10.0;
