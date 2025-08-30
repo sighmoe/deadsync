@@ -4,7 +4,8 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::components::heart_bg;
 use crate::ui::color;
-use winit::event::{KeyEvent};
+use winit::event::{ElementState, KeyEvent};
+use winit::keyboard::{KeyCode, PhysicalKey};
 
 /* ----------------------- timing & layout ----------------------- */
 
@@ -49,9 +50,19 @@ pub fn init() -> State {
 
 /* -------------------------- input -> nav ----------------------- */
 
-// Block ALL input during the splash. Let it auto-advance only.
-pub fn handle_key_press(_: &mut State, _: &KeyEvent) -> ScreenAction {
-    ScreenAction::None
+// Allow skipping the splash screen with Enter or Escape.
+pub fn handle_key_press(_: &mut State, event: &KeyEvent) -> ScreenAction {
+    // Only fire on the initial press, not on release or OS repeat.
+    if event.state != ElementState::Pressed {
+        return ScreenAction::None;
+    }
+
+    match event.physical_key {
+        PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::Escape) => {
+            ScreenAction::Navigate(Screen::Menu)
+        }
+        _ => ScreenAction::None,
+    }
 }
 
 /* ---------------------------- update --------------------------- */
