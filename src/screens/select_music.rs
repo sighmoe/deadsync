@@ -20,7 +20,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 static UI_BOX_BG_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#1E282F"));
 
 // --- Typography (targets in SM TL units) ---
-const MUSIC_WHEEL_TEXT_TARGET_PX: f32 = 16.0;
+const MUSIC_WHEEL_TEXT_TARGET_PX: f32 = 15.0;
 const DETAIL_HEADER_TEXT_TARGET_PX: f32 = 22.0;
 const DETAIL_VALUE_TEXT_TARGET_PX: f32 = 15.0;
 
@@ -29,7 +29,7 @@ const NUM_WHEEL_ITEMS: usize = 13;
 const CENTER_WHEEL_SLOT_INDEX: usize = NUM_WHEEL_ITEMS / 2;
 const SELECTION_ANIMATION_CYCLE_DURATION: f32 = 1.0;
 
-const SONG_TEXT_LEFT_PADDING: f32 = 20.0;
+const SONG_TEXT_LEFT_PADDING: f32 = 66.0;
 const PACK_COUNT_RIGHT_PADDING: f32 = 11.0;
 const PACK_COUNT_TEXT_TARGET_PX: f32 = 14.0;
 
