@@ -17,7 +17,7 @@ use winit::{
 
 use log::{error, info, warn};
 use image;
-use std::{collections::HashMap, error::Error, path::Path, sync::Arc, time::Instant}; // <-- IMPORT thread
+use std::{collections::HashMap, error::Error, path::{Path, PathBuf}, sync::Arc, time::Instant};
 
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 800;
@@ -129,6 +129,7 @@ pub struct App {
     init_state: init::State,
     select_color_state: select_color::State,
     select_music_state: select_music::State,
+    banner_cache: HashMap<PathBuf, &'static str>,
 }
 
 impl App {
@@ -142,6 +143,7 @@ impl App {
             start_time: Instant::now(), metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay: false,
             last_fps: 0.0, last_vpf: 0, transition: TransitionState::Idle,
+            banner_cache: HashMap::new(),
         }
     }
 
@@ -256,6 +258,43 @@ impl App {
         Ok(())
     }
 
+    fn load_banner_texture(&mut self, path: &Path) -> &'static str {
+        if let Some(key) = self.banner_cache.get(path) {
+            return key;
+        }
+
+        info!("Loading dynamic banner: {:?}", path);
+        let backend = match self.backend.as_mut() {
+            Some(b) => b,
+            None => return "banner1.png", // Return a fallback if the backend isn't ready
+        };
+
+        match image::open(path) {
+            Ok(img) => {
+                let rgba = img.to_rgba8();
+                match renderer::create_texture(backend, &rgba, renderer::TextureColorSpace::Srgb) {
+                    Ok(texture) => {
+                        // Leak the string to get a 'static lifetime. This is acceptable here
+                        // because these keys need to live for the duration of the program.
+                        let key: &'static str = Box::leak(path.to_string_lossy().into_owned().into_boxed_str());
+                        self.texture_manager.insert(key, texture);
+                        self.banner_cache.insert(path.to_path_buf(), key);
+                        key
+                    }
+                    Err(e) => {
+                        warn!("Failed to create GPU texture for {:?}: {}. Using fallback.", path, e);
+                        "banner1.png"
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to open banner image {:?}: {}. Using fallback.", path, e);
+                "banner1.png"
+            }
+        }
+    }
+
+    // Replace the existing handle_action() function with this one
     fn handle_action(
         &mut self,
         action: ScreenAction,
@@ -276,6 +315,9 @@ impl App {
             ScreenAction::Exit => {
                 info!("Exit action received. Shutting down.");
                 event_loop.exit();
+            }
+            ScreenAction::RequestBanner(_) => {
+                 // This is handled directly in the update loop, not here.
             }
             ScreenAction::None => {}
         }
@@ -545,7 +587,11 @@ impl ApplicationHandler for App {
                                 select_color::update(&mut self.select_color_state, delta_time);
                             }
                             CurrentScreen::SelectMusic => {
-                                select_music::update(&mut self.select_music_state, delta_time);
+                                let action = select_music::update(&mut self.select_music_state, delta_time);
+                                if let ScreenAction::RequestBanner(path) = action {
+                                    let key = self.load_banner_texture(&path);
+                                    self.select_music_state.current_banner_key = key;
+                                }
                             }
                             _ => {}
                         }

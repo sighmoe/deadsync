@@ -12,6 +12,8 @@ pub struct SongData {
     pub title: String,
     pub artist: String,
     pub banner_path: Option<PathBuf>, // Use PathBuf for flexible paths
+    pub background_path: Option<PathBuf>,
+    pub music_path: Option<PathBuf>,
     pub total_length_seconds: i32,
     pub charts: Vec<ChartData>,
 }
@@ -114,10 +116,32 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
         })
         .collect();
 
+    let simfile_dir = path.parent().ok_or_else(|| "Could not determine simfile directory".to_string())?;
+
+    let banner_path = if !summary.banner_path.is_empty() {
+        Some(simfile_dir.join(summary.banner_path))
+    } else {
+        None
+    };
+
+    let background_path = if !summary.background_path.is_empty() {
+        Some(simfile_dir.join(summary.background_path))
+    } else {
+        None
+    };
+
+    let music_path = if !summary.music_path.is_empty() {
+        Some(simfile_dir.join(summary.music_path))
+    } else {
+        None
+    };
+
     Ok(SongData {
         title: summary.title_str,
         artist: summary.artist_str,
-        banner_path: None, // Banner finding logic can be added later
+        banner_path,
+        background_path,
+        music_path,
         total_length_seconds: summary.total_length,
         charts,
     })

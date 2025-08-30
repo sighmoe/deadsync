@@ -4,12 +4,14 @@ pub mod options;
 pub mod init;
 pub mod select_color;
 pub mod select_music;
+use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScreenAction {
     None,
     Navigate(Screen),
     Exit,
+    RequestBanner(PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

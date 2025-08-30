@@ -8,6 +8,7 @@ use crate::ui::color;
 use crate::ui::components::heart_bg;
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use std::sync::{Arc, LazyLock};
+use std::path::PathBuf;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use log::info;
@@ -60,6 +61,8 @@ pub struct State {
     pub selection_animation_timer: f32,
     pub expanded_pack_name: Option<String>,
     bg: heart_bg::State,
+    pub last_checked_banner_path: Option<PathBuf>,
+    pub current_banner_key: &'static str,
 }
 
 /// Rebuilds the visible `entries` list based on which pack is expanded.
@@ -83,7 +86,6 @@ fn rebuild_displayed_entries(state: &mut State) {
     state.entries = new_entries;
 }
 
-// The updated init() function
 pub fn init() -> State {
     info!("Initializing SelectMusic screen, reading from song cache...");
     let mut all_entries = vec![];
@@ -111,6 +113,8 @@ pub fn init() -> State {
         selection_animation_timer: 0.0,
         expanded_pack_name: None,
         bg: heart_bg::State::new(),
+        last_checked_banner_path: None,
+        current_banner_key: "banner1.png", // Default fallback
     };
 
     rebuild_displayed_entries(&mut state);
@@ -177,22 +181,36 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
-pub fn update(state: &mut State, dt: f32) {
+pub fn update(state: &mut State, dt: f32) -> ScreenAction {
     state.selection_animation_timer += dt;
     if state.selection_animation_timer > SELECTION_ANIMATION_CYCLE_DURATION {
         state.selection_animation_timer -= SELECTION_ANIMATION_CYCLE_DURATION;
     }
+
+    let mut requested_action = ScreenAction::None;
+    let mut new_path: Option<PathBuf> = None;
+
+    if let Some(entry) = state.entries.get(state.selected_index) {
+        if let MusicWheelEntry::Song(song) = entry {
+            if let Some(banner_path) = &song.banner_path {
+                new_path = Some(banner_path.clone());
+            }
+        }
+    }
+
+    if state.last_checked_banner_path != new_path {
+        if let Some(path) = new_path.clone() {
+             requested_action = ScreenAction::RequestBanner(path);
+        }
+        state.last_checked_banner_path = new_path;
+    }
+    
+    requested_action
 }
 
 /* ==================================================================
  *                           DRAWING
  * ================================================================== */
-// The updated get_actors() function
-// Path: src/screens/select_music.rs
-
-// ... (other constants at the top of the file)
-// Note: The `DIFFICULTY_COLORS` static array has been removed.
-
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(256);
 
@@ -260,14 +278,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     const GAP_BELOW_TOP_BAR: f32 = 1.0;
     let banner_box_top_y = BAR_H + GAP_BELOW_TOP_BAR;
     let banner_box_left_x = density_graph_left_x;
-
-    let num_banners = BANNER_KEYS.len();
-    let wrapped_index = (state.active_color_index.rem_euclid(num_banners as i32)) as usize;
-    let banner_key = BANNER_KEYS[wrapped_index];
-
-    actors.push(act!(sprite(banner_key): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
     
-    // 3. --- Add difficulty rating boxes and numbers ---
+    // 3. --- Add difficulty rating boxes and numbers AND determine banner key ---
     let selected_song: Option<&Arc<SongData>> = if let Some(entry) = state.entries.get(state.selected_index) {
         if let MusicWheelEntry::Song(song_info) = entry {
             Some(song_info)
@@ -277,6 +289,22 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     } else {
         None
     };
+
+    let banner_key = if let Some(song) = selected_song {
+        if song.banner_path.is_some() {
+            state.current_banner_key
+        } else {
+            let num_banners = BANNER_KEYS.len();
+            let wrapped_index = (state.active_color_index.rem_euclid(num_banners as i32)) as usize;
+            BANNER_KEYS[wrapped_index]
+        }
+    } else {
+        let num_banners = BANNER_KEYS.len();
+        let wrapped_index = (state.active_color_index.rem_euclid(num_banners as i32)) as usize;
+        BANNER_KEYS[wrapped_index]
+    };
+
+    actors.push(act!(sprite(banner_key): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
 
     let rating_box_left_x = rating_box_right_x - RATING_BOX_W;
     
@@ -301,15 +329,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
                 let meter = chart.meter;
                 if meter > 0 {
-                    // Calculate color dynamically. Challenge uses the active color, others step backwards.
                     let color_offset = (DIFFICULTY_NAMES.len() - 1 - i) as i32;
                     let text_color = color::simply_love_rgba(state.active_color_index - color_offset);
-                    
                     const METER_TEXT_PX: f32 = 20.0;
-                    
                     let text_center_x = inner_box_x + 0.5 * INNER_BOX_SIZE;
                     let text_center_y = inner_box_y + 0.5 * INNER_BOX_SIZE;
-                    
                     actors.push(act!(text:
                         align(0.5, 0.5):
                         xy(text_center_x, text_center_y):
