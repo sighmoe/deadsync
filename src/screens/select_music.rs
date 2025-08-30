@@ -31,12 +31,8 @@ const SELECTION_ANIMATION_CYCLE_DURATION: f32 = 1.0;
 const SONG_TEXT_LEFT_PADDING: f32 = 66.0;
 const PACK_COUNT_RIGHT_PADDING: f32 = 11.0;
 const PACK_COUNT_TEXT_TARGET_PX: f32 = 14.0;
-const DIFFICULTY_DISPLAY_INNER_BOX_COLOR: [f32; 4] = [0.059, 0.059, 0.059, 1.0];
+static DIFFICULTY_DISPLAY_INNER_BOX_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#0f0f0f"));
 const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
-static DIFFICULTY_COLORS: LazyLock<[[f32; 4]; 5]> = LazyLock::new(|| [
-    color::simply_love_rgba(10), color::simply_love_rgba(11), color::simply_love_rgba(0),
-    color::simply_love_rgba(1), color::simply_love_rgba(2),
-]);
 
 const BANNER_KEYS: [&'static str; 12] = [
     "banner1.png", "banner2.png", "banner3.png", "banner4.png",
@@ -192,9 +188,15 @@ pub fn update(state: &mut State, dt: f32) {
  *                           DRAWING
  * ================================================================== */
 // The updated get_actors() function
+// Path: src/screens/select_music.rs
+
+// ... (other constants at the top of the file)
+// Note: The `DIFFICULTY_COLORS` static array has been removed.
+
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(256);
 
+    // 1. Draw background and standard screen bars
     actors.extend(state.bg.build(heart_bg::Params {
         active_color_index: state.active_color_index,
         backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
@@ -216,13 +218,18 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         fg_color: [1.0; 4],
         left_text: Some("PerfectTaste"), center_text: None, right_text: None,
     }));
+
+    // --- Layout Constants & Calculations ---
     const BAR_H: f32 = 32.0;
     let accent = color::simply_love_rgba(state.active_color_index);
     let box_w = 373.8;
     let box_h = 60.0;
     let box_bottom = screen_height() - BAR_H;
     let box_top = box_bottom - box_h;
+
+    // 2. Draw the main UI panels on the left
     actors.push(act!(quad: align(0.0, 1.0): xy(0.0, box_bottom): zoomto(box_w, box_h): diffuse(accent[0], accent[1], accent[2], 1.0): z(50) ));
+
     const RATING_BOX_W: f32 = 31.8;
     const RATING_BOX_H: f32 = 151.8;
     const STEP_INFO_BOX_W: f32 = 286.2;
@@ -232,11 +239,14 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let z_layer = 51;
     let boxes_bottom_y = box_top - MARGIN_ABOVE_STATS_BOX;
     let rating_box_right_x = box_w;
+
     actors.push(act!(quad: align(1.0, 1.0): xy(rating_box_right_x, boxes_bottom_y): zoomto(RATING_BOX_W, RATING_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
+
     let step_info_box_right_x = rating_box_right_x - RATING_BOX_W - GAP;
     actors.push(act!(quad: align(1.0, 1.0): xy(step_info_box_right_x, boxes_bottom_y): zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
     let rating_box_top_y = boxes_bottom_y - RATING_BOX_H;
     actors.push(act!(quad: align(1.0, 0.0): xy(step_info_box_right_x, rating_box_top_y): zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
+
     const STEP_ARTIST_BOX_W: f32 = 175.2;
     const STEP_ARTIST_BOX_H: f32 = 16.8;
     const GAP_ABOVE_DENSITY: f32 = 1.0;
@@ -244,25 +254,83 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let density_graph_left_x = step_info_box_right_x - STEP_INFO_BOX_W;
     let step_artist_box_bottom_y = rating_box_top_y - GAP_ABOVE_DENSITY;
     actors.push(act!(quad: align(0.0, 1.0): xy(density_graph_left_x, step_artist_box_bottom_y): zoomto(STEP_ARTIST_BOX_W, STEP_ARTIST_BOX_H): diffuse(step_artist_box_color[0], step_artist_box_color[1], step_artist_box_color[2], 1.0): z(z_layer) ));
+
     const BANNER_BOX_W: f32 = 319.8;
     const BANNER_BOX_H: f32 = 126.0;
     const GAP_BELOW_TOP_BAR: f32 = 1.0;
     let banner_box_top_y = BAR_H + GAP_BELOW_TOP_BAR;
     let banner_box_left_x = density_graph_left_x;
 
-    // --- DYNAMIC BANNER SELECTION ---
     let num_banners = BANNER_KEYS.len();
-    // Use rem_euclid for correct wrapping of negative indices. The result will
-    // be in the range [0, num_banners - 1].
     let wrapped_index = (state.active_color_index.rem_euclid(num_banners as i32)) as usize;
     let banner_key = BANNER_KEYS[wrapped_index];
 
     actors.push(act!(sprite(banner_key): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
+    
+    // 3. --- Add difficulty rating boxes and numbers ---
+    let selected_song: Option<&Arc<SongData>> = if let Some(entry) = state.entries.get(state.selected_index) {
+        if let MusicWheelEntry::Song(song_info) = entry {
+            Some(song_info)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let rating_box_left_x = rating_box_right_x - RATING_BOX_W;
+    
+    const INNER_BOX_SIZE: f32 = 28.2;
+    const HORIZONTAL_PADDING: f32 = 1.8;
+    const VERTICAL_GAP: f32 = 1.8;
+
+    for i in 0..DIFFICULTY_NAMES.len() {
+        let inner_box_x = rating_box_left_x + HORIZONTAL_PADDING;
+        let inner_box_y = rating_box_top_y + VERTICAL_GAP + (i as f32 * (INNER_BOX_SIZE + VERTICAL_GAP));
+
+        actors.push(act!(quad:
+            align(0.0, 0.0):
+            xy(inner_box_x, inner_box_y):
+            zoomto(INNER_BOX_SIZE, INNER_BOX_SIZE):
+            diffuse(DIFFICULTY_DISPLAY_INNER_BOX_COLOR[0], DIFFICULTY_DISPLAY_INNER_BOX_COLOR[1], DIFFICULTY_DISPLAY_INNER_BOX_COLOR[2], 1.0):
+            z(z_layer + 1)
+        ));
+
+        if let Some(song) = selected_song {
+            let difficulty_name = DIFFICULTY_NAMES[i];
+            if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
+                let meter = chart.meter;
+                if meter > 0 {
+                    // Calculate color dynamically. Challenge uses the active color, others step backwards.
+                    let color_offset = (DIFFICULTY_NAMES.len() - 1 - i) as i32;
+                    let text_color = color::simply_love_rgba(state.active_color_index - color_offset);
+                    
+                    const METER_TEXT_PX: f32 = 20.0;
+                    
+                    let text_center_x = inner_box_x + 0.5 * INNER_BOX_SIZE;
+                    let text_center_y = inner_box_y + 0.5 * INNER_BOX_SIZE;
+                    
+                    actors.push(act!(text:
+                        align(0.5, 0.5):
+                        xy(text_center_x, text_center_y):
+                        zoomtoheight(METER_TEXT_PX):
+                        font("wendy"):
+                        settext(format!("{}", meter)):
+                        horizalign(center):
+                        diffuse(text_color[0], text_color[1], text_color[2], 1.0):
+                        z(z_layer + 2)
+                    ));
+                }
+            }
+        }
+    }
 
     const BPM_BOX_H: f32 = 49.8;
     const GAP_BELOW_BANNER: f32 = 1.0;
     let bpm_box_top_y = banner_box_top_y + BANNER_BOX_H + GAP_BELOW_BANNER;
     actors.push(act!(quad: align(0.0, 0.0): xy(banner_box_left_x, bpm_box_top_y): zoomto(BANNER_BOX_W, BPM_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
+
+    // 4. Draw the music wheel on the right
     const WHEEL_W: f32 = 352.8;
     const WHEEL_ITEM_GAP: f32 = 1.0;
     let wheel_right_x = screen_width();
@@ -317,8 +385,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             }
         }
     }
+
+    // 5. Draw placeholder text in the "STEP STATS" box
     let pad_x = 10.0;
     let pad_y = 8.0;
     actors.push(act!(text: align(0.0, 0.0): xy(pad_x, box_top + pad_y): zoomtoheight(15.0): font("miso"): settext("STEP STATS"): horizalign(left): diffuse(1.0, 1.0, 1.0, 1.0): z(51) ));
+
     actors
 }
