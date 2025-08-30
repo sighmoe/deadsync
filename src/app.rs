@@ -478,10 +478,6 @@ impl ApplicationHandler for App {
                                 self.gameplay_state.player_color = color::decorative_rgba(idx);
                             }
 
-                            if prev == CurrentScreen::SelectColor && *target == CurrentScreen::SelectMusic {
-                                self.select_music_state.active_color_index = self.select_color_state.active_color_index;
-                            }
-
                             if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Menu {
                                 self.menu_state.active_color_index = self.select_color_state.active_color_index;
                             }
@@ -489,6 +485,10 @@ impl ApplicationHandler for App {
                             // When navigating to SelectMusic, re-initialize its state to load the latest songs
                             if *target == CurrentScreen::SelectMusic {
                                 self.select_music_state = select_music::init();
+                                // THEN, if coming from SelectColor, pass the chosen color over.
+                                if prev == CurrentScreen::SelectColor {
+                                    self.select_music_state.active_color_index = self.select_color_state.active_color_index;
+                                }
                             }
 
                             self.transition = TransitionState::FadingIn { elapsed: 0.0 };

@@ -45,7 +45,7 @@ static DIFFICULTY_COLORS: LazyLock<[[f32; 4]; 5]> = LazyLock::new(|| [
 
 #[derive(Clone, Debug)]
 pub enum MusicWheelEntry {
-    PackHeader { name: String, color: [f32; 4] },
+    PackHeader { name: String, original_index: usize },
     Song(Arc<SongData>),
 }
 
@@ -81,7 +81,7 @@ fn rebuild_displayed_entries(state: &mut State) {
     state.entries = new_entries;
 }
 
-/// Initializes the screen state by reading from the global song cache.
+// The updated init() function
 pub fn init() -> State {
     info!("Initializing SelectMusic screen, reading from song cache...");
     let mut all_entries = vec![];
@@ -90,7 +90,7 @@ pub fn init() -> State {
     for (i, pack) in song_cache.iter().enumerate() {
         all_entries.push(MusicWheelEntry::PackHeader {
             name: pack.name.clone(),
-            color: color::simply_love_rgba(i as i32),
+            original_index: i,
         });
         for song in &pack.songs {
             all_entries.push(MusicWheelEntry::Song(song.clone()));
@@ -185,6 +185,7 @@ pub fn update(state: &mut State, dt: f32) {
 /* ==================================================================
  *                           DRAWING
  * ================================================================== */
+// The updated get_actors() function
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(256);
 
@@ -274,14 +275,15 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                             let final_box_color = if is_selected_slot { lerp_color(base_color, selected_color, anim_t) } else { base_color };
                             (song_info.title.clone(), final_box_color, [1.0; 4], wheel_left_x + SONG_TEXT_LEFT_PADDING, None)
                         }
-                        MusicWheelEntry::PackHeader { name, color: pack_color } => {
+                        MusicWheelEntry::PackHeader { name, original_index } => {
                             let song_cache = get_song_cache();
                             let count = song_cache.iter().find(|p| &p.name == name).map(|p| p.songs.len()).unwrap_or(0);
                             let base_color = col_pack_header_box();
                             let selected_color = col_selected_pack_header_box();
                             let final_box_color = if is_selected_slot { lerp_color(base_color, selected_color, anim_t) } else { base_color };
                             let text_x = wheel_left_x + 0.5 * WHEEL_W;
-                            (name.clone(), final_box_color, *pack_color, text_x, Some(count))
+                            let pack_color = color::simply_love_rgba(state.active_color_index + *original_index as i32);
+                            (name.clone(), final_box_color, pack_color, text_x, Some(count))
                         }
                     }
                 } else { ("".to_string(), col_music_wheel_box(), [1.0; 4], wheel_left_x, None) }
