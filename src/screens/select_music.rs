@@ -38,6 +38,12 @@ static DIFFICULTY_COLORS: LazyLock<[[f32; 4]; 5]> = LazyLock::new(|| [
     color::simply_love_rgba(1), color::simply_love_rgba(2),
 ]);
 
+const BANNER_KEYS: [&'static str; 12] = [
+    "banner1.png", "banner2.png", "banner3.png", "banner4.png",
+    "banner5.png", "banner6.png", "banner7.png", "banner8.png",
+    "banner9.png", "banner10.png", "banner11.png", "banner12.png",
+];
+
 /* ==================================================================
  *                            STATE & DATA
  * ================================================================== */
@@ -243,13 +249,22 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     const GAP_BELOW_TOP_BAR: f32 = 1.0;
     let banner_box_top_y = BAR_H + GAP_BELOW_TOP_BAR;
     let banner_box_left_x = density_graph_left_x;
-    actors.push(act!(sprite("fallback_banner.png"): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
+
+    // --- DYNAMIC BANNER SELECTION ---
+    let num_banners = BANNER_KEYS.len();
+    // Use rem_euclid for correct wrapping of negative indices. The result will
+    // be in the range [0, num_banners - 1].
+    let wrapped_index = (state.active_color_index.rem_euclid(num_banners as i32)) as usize;
+    let banner_key = BANNER_KEYS[wrapped_index];
+
+    actors.push(act!(sprite(banner_key): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
+
     const BPM_BOX_H: f32 = 49.8;
     const GAP_BELOW_BANNER: f32 = 1.0;
     let bpm_box_top_y = banner_box_top_y + BANNER_BOX_H + GAP_BELOW_BANNER;
     actors.push(act!(quad: align(0.0, 0.0): xy(banner_box_left_x, bpm_box_top_y): zoomto(BANNER_BOX_W, BPM_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
     const WHEEL_W: f32 = 352.8;
-    const WHEEL_ITEM_GAP: f32 = 2.0;
+    const WHEEL_ITEM_GAP: f32 = 1.0;
     let wheel_right_x = screen_width();
     let wheel_left_x = wheel_right_x - WHEEL_W;
     let content_area_y_start = BAR_H;

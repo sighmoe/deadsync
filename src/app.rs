@@ -170,18 +170,31 @@ impl App {
             info!("Loaded built-in texture: __white");
         }
 
-        let texture_paths: [&'static str; 6] = [
-            "logo.png",
-            "init_arrow.png",
-            "dance.png",
-            "meter_arrow.png",
-            "fallback_banner.png",
-            "heart.png",
+        // An explicit list of all textures to load and their keys.
+        // The key is the first element, the path relative to `assets/graphics` is the second.
+        let textures_to_load: Vec<(&'static str, &'static str)> = vec![
+            ("logo.png", "logo.png"),
+            ("init_arrow.png", "init_arrow.png"),
+            ("dance.png", "dance.png"),
+            ("meter_arrow.png", "meter_arrow.png"),
+            ("heart.png", "heart.png"),
+            ("banner1.png", "_fallback/banner1.png"),
+            ("banner2.png", "_fallback/banner2.png"),
+            ("banner3.png", "_fallback/banner3.png"),
+            ("banner4.png", "_fallback/banner4.png"),
+            ("banner5.png", "_fallback/banner5.png"),
+            ("banner6.png", "_fallback/banner6.png"),
+            ("banner7.png", "_fallback/banner7.png"),
+            ("banner8.png", "_fallback/banner8.png"),
+            ("banner9.png", "_fallback/banner9.png"),
+            ("banner10.png", "_fallback/banner10.png"),
+            ("banner11.png", "_fallback/banner11.png"),
+            ("banner12.png", "_fallback/banner12.png"),
         ];
 
-        let mut handles = Vec::with_capacity(texture_paths.len());
-        for &key in &texture_paths {
-            let path = Path::new("assets/graphics").join(key);
+        let mut handles = Vec::with_capacity(textures_to_load.len());
+        for &(key, relative_path) in &textures_to_load {
+            let path = Path::new("assets/graphics").join(relative_path);
             handles.push(std::thread::spawn(move || {
                 match image::open(&path) {
                     Ok(img) => Ok::<(&'static str, image::RgbaImage), (&'static str, String)>((key, img.to_rgba8())),
@@ -191,13 +204,13 @@ impl App {
         }
 
         let fallback_image = std::sync::Arc::new(fallback_rgba());
-        let mut decoded: Vec<(&'static str, std::sync::Arc<image::RgbaImage>)> = Vec::with_capacity(texture_paths.len());
+        let mut decoded: Vec<(&'static str, std::sync::Arc<image::RgbaImage>)> = Vec::with_capacity(textures_to_load.len());
 
         for h in handles {
             match h.join().expect("texture decode thread panicked") {
                 Ok((key, rgba)) => decoded.push((key, std::sync::Arc::new(rgba))),
                 Err((key, msg)) => {
-                    warn!("Failed to load 'assets/graphics/{}': {}. Using fallback.", key, msg);
+                    warn!("Failed to load texture for key '{}': {}. Using fallback.", key, msg);
                     decoded.push((key, fallback_image.clone()));
                 }
             }
@@ -210,7 +223,7 @@ impl App {
                 renderer::TextureColorSpace::Srgb,
             )?;
             self.texture_manager.insert(key, texture);
-            info!("Loaded texture: assets/graphics/{}", key);
+            info!("Loaded texture: {}", key);
         }
         Ok(())
     }
