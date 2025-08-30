@@ -348,7 +348,7 @@ impl App {
 
             let screen_name = format!("{:?}", self.current_screen);
             window.set_title(&format!(
-                "Simple Renderer - {:?} | {} | {:.2} FPS",
+                "DeadSync - {:?} | {} | {:.2} FPS",
                 self.backend_type, screen_name, fps
             ));
             self.frame_count = 0;
@@ -358,7 +358,7 @@ impl App {
 
     fn init_graphics(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
         let mut window_attributes = Window::default_attributes()
-            .with_title(format!("Simple Renderer - {:?}", self.backend_type))
+            .with_title(format!("DeadSync - {:?}", self.backend_type))
             .with_resizable(true);
 
         if self.fullscreen_enabled {
