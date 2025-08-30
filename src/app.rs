@@ -6,10 +6,7 @@ use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, Screen as CurrentScreen, ScreenAction};
-
-use log::{error, info, warn};
-use image;
-use std::{collections::HashMap, error::Error, path::Path, sync::Arc, time::Instant};
+use crate::core::song_loading; // <-- IMPORT THE NEW MODULE
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -18,19 +15,18 @@ use winit::{
     window::Window,
 };
 
+use log::{error, info, warn};
+use image;
+use std::{collections::HashMap, error::Error, path::Path, sync::Arc, time::Instant, thread}; // <-- IMPORT thread
+
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 800;
 
 /* -------------------- transition timing constants -------------------- */
-// global full-screen fade (kept as default for non-Init→Menu)
 const FADE_OUT_DELAY: f32 = 0.1;
 const FADE_OUT_DURATION: f32 = 0.4;
 const FADE_IN_DURATION: f32 = 0.4;
-
-// menu actors fade duration (only used after the special Init→Menu squish)
 const MENU_ACTORS_FADE_DURATION: f32 = 0.65;
-
-// special Init→Menu: center bar collapse
 const BAR_SQUISH_DURATION: f32 = 0.35;
 
 // ---- args ----
@@ -102,15 +98,9 @@ fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
 #[derive(Clone, Copy, Debug)]
 enum TransitionState {
     Idle,
-
-    // Generic global fade — for everything EXCEPT Init→Menu
     FadingOut { elapsed: f32, target: CurrentScreen },
     FadingIn  { elapsed: f32 },
-
-    // Special Init→Menu: squish the bar while still on Init
     BarSquishOut { elapsed: f32, target: CurrentScreen },
-
-    // Then, on Menu, fade ONLY the Menu actors in (no global overlay)
     ActorsFadeIn { elapsed: f32 },
 }
 
@@ -143,6 +133,13 @@ pub struct App {
 
 impl App {
     fn new(backend_type: BackendType, vsync_enabled: bool, fullscreen_enabled: bool) -> Self {
+        // --- ADD THIS BLOCK TO START LOADING SONGS ---
+        // Spawn a background thread to scan and load songs without blocking the UI.
+        thread::spawn(|| {
+            song_loading::scan_and_load_songs("songs");
+        });
+        // ---------------------------------------------
+
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
             current_screen: CurrentScreen::Init, init_state: init::init(), menu_state: menu::init(), gameplay_state: gameplay::init(), options_state: options::init(),
@@ -260,11 +257,9 @@ impl App {
             ScreenAction::Navigate(screen) => {
                 if matches!(self.transition, TransitionState::Idle) {
                     if self.current_screen == CurrentScreen::Init && screen == CurrentScreen::Menu {
-                        // SPECIAL: Init → Menu = bar squish + menu actors fade-in
                         info!("Starting special Init→Menu transition (bar squish; no global fade)");
                         self.transition = TransitionState::BarSquishOut { elapsed: 0.0, target: screen };
                     } else {
-                        // Generic: use global black overlay fade
                         info!("Starting global fade out to screen: {:?}", screen);
                         self.transition = TransitionState::FadingOut { elapsed: 0.0, target: screen };
                     }
@@ -286,7 +281,6 @@ impl App {
     fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
 
-        // Menu fade-in only
         let mut screen_alpha_multiplier = 1.0;
         if let TransitionState::ActorsFadeIn { elapsed } = self.transition {
             if self.current_screen == CurrentScreen::Menu {
@@ -294,7 +288,6 @@ impl App {
             }
         }
 
-        // ⬇️ key change is inside the Init branch
         let mut actors = match self.current_screen {
             CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier),
             CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state),
@@ -302,7 +295,6 @@ impl App {
             CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state),
             CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state),
             CurrentScreen::Init     => {
-                // During the squish phase, draw ONLY background (no original bar)
                 if matches!(self.transition, TransitionState::BarSquishOut { .. }) {
                     init::get_actors_bg_only(&self.init_state)
                 } else {
@@ -320,7 +312,6 @@ impl App {
             actors.extend(overlay);
         }
 
-        // No global overlay for the special squish flow
         let overlay_alpha = match self.transition {
             TransitionState::FadingOut { elapsed, .. } => ((elapsed - FADE_OUT_DELAY) / FADE_OUT_DURATION).clamp(0.0, 1.0),
             TransitionState::FadingIn  { elapsed, .. } => 1.0 - (elapsed / FADE_IN_DURATION).clamp(0.0, 1.0),
@@ -331,8 +322,6 @@ impl App {
             actors.push(crate::ui::components::fade::black(overlay_alpha));
         }
 
-        // Special squish bar: put it ABOVE the hearts so it’s visible,
-        // and since we suppressed the original bar, this is the only bar drawn.
         if let TransitionState::BarSquishOut { elapsed, .. } = self.transition {
             let t = (elapsed / BAR_SQUISH_DURATION).clamp(0.0, 1.0);
             actors.push(crate::screens::init::build_squish_bar(t));
@@ -373,11 +362,7 @@ impl App {
                     log::info!("Fullscreen: using EXCLUSIVE {}x{} @ {} mHz", WINDOW_WIDTH, WINDOW_HEIGHT, mode.refresh_rate_millihertz());
                     Some(winit::window::Fullscreen::Exclusive(mode))
                 } else {
-                    log::warn!(
-                        "No exact EXCLUSIVE mode {}x{}; using BORDERLESS.",
-                        WINDOW_WIDTH,
-                        WINDOW_HEIGHT
-                    );
+                    log::warn!("No exact EXCLUSIVE mode {}x{}; using BORDERLESS.", WINDOW_WIDTH, WINDOW_HEIGHT);
                     Some(winit::window::Fullscreen::Borderless(Some(mon)))
                 }
             } else {
@@ -452,7 +437,6 @@ impl ApplicationHandler for App {
                         info!("Overlay {}", if self.show_overlay { "ON" } else { "OFF" });
                     }
 
-                    // Only exit directly from the menu.
                     if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) = key_event.physical_key {
                         if self.current_screen == CurrentScreen::Menu {
                             if let Err(e) = self.handle_action(ScreenAction::Exit, event_loop) {
@@ -488,27 +472,28 @@ impl ApplicationHandler for App {
                 crate::ui::runtime::tick(delta_time);
 
                 match &mut self.transition {
-                    // Generic overlay fade
                     TransitionState::FadingOut { elapsed, target } => {
                         *elapsed += delta_time;
                         if *elapsed >= FADE_OUT_DELAY + FADE_OUT_DURATION {
                             let prev = self.current_screen;
                             self.current_screen = *target;
 
-                            // When leaving SelectColor -> Gameplay, apply chosen DECORATIVE color
                             if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Gameplay {
                                 let idx = self.select_color_state.active_color_index;
                                 self.gameplay_state.player_color = color::decorative_rgba(idx);
                             }
 
-                            // Pass chosen color from SelectColor -> SelectMusic
-                            if prev == CurrentScreen::SelectColor && *target == CurrentScreen::SelectMusic { // MODIFIED
+                            if prev == CurrentScreen::SelectColor && *target == CurrentScreen::SelectMusic {
                                 self.select_music_state.active_color_index = self.select_color_state.active_color_index;
                             }
 
-                            // When returning SelectColor -> Menu, keep Menu’s active index in sync
                             if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Menu {
                                 self.menu_state.active_color_index = self.select_color_state.active_color_index;
+                            }
+                            
+                            // When navigating to SelectMusic, re-initialize its state to load the latest songs
+                            if *target == CurrentScreen::SelectMusic {
+                                self.select_music_state = select_music::init();
                             }
 
                             self.transition = TransitionState::FadingIn { elapsed: 0.0 };
@@ -522,12 +507,10 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    // Special flow
                     TransitionState::BarSquishOut { elapsed, target } => {
                         *elapsed += delta_time;
                         if *elapsed >= BAR_SQUISH_DURATION {
                             self.current_screen = *target;
-                            // (No SelectColor involved in this special init→menu path.)
                             self.transition = TransitionState::ActorsFadeIn { elapsed: 0.0 };
                             crate::ui::runtime::clear_all();
                         }
@@ -539,7 +522,6 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    // Idle → run per-screen logic
                     TransitionState::Idle => {
                         match self.current_screen {
                             CurrentScreen::Gameplay => {
@@ -595,7 +577,6 @@ impl ApplicationHandler for App {
     }
 }
 
-// ---- public entry point ----
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = env_logger::builder()
         .filter_level(log::LevelFilter::Info)
