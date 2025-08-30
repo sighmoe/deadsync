@@ -26,9 +26,6 @@ const BG_FADE_DURATION: f32 = 0.20; // seconds, linear fade
 // -----------------------------------------------------------------------------
 // OPTIONAL PER-SLOT OVERRIDES (symmetric L/R, keyed by distance from center):
 // -----------------------------------------------------------------------------
-const DIST_OVERRIDES: &[(usize, f32)] = &[
-    //(1, 12.0),
-];
 
 const ZOOM_MULT_OVERRIDES: &[(usize, f32)] = &[
     (1, 1.25), (2, 1.45), (3, 1.50), (4, 1.15)
@@ -188,11 +185,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     }
 
     // --- Apply user overrides (symmetric for left/right) -----------------
-    for &(k, add_px) in DIST_OVERRIDES {
-        if k <= side_slots {
-            x_samples[k] += add_px;
-        }
-    }
     for &(k, mult) in ZOOM_MULT_OVERRIDES {
         if k <= side_slots && mult > 0.0 {
             zoom_logs[k] += mult.ln();
