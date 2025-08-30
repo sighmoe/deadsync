@@ -6,7 +6,7 @@ use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, Screen as CurrentScreen, ScreenAction};
-use crate::core::song_loading;
+use crate::core::song_loading::{self, ChartData};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -130,6 +130,7 @@ pub struct App {
     select_color_state: select_color::State,
     select_music_state: select_music::State,
     current_dynamic_banner: Option<(&'static str, PathBuf)>,
+    current_density_graph: Option<(&'static str, String)>,
 }
 
 impl App {
@@ -142,6 +143,7 @@ impl App {
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay: false,
             last_fps: 0.0, last_vpf: 0, transition: TransitionState::Idle,
             current_dynamic_banner: None,
+            current_density_graph: None,
         }
     }
 
@@ -246,6 +248,22 @@ impl App {
         }
     }
 
+    fn destroy_current_density_graph(&mut self) {
+        if let Some((key, _hash)) = self.current_density_graph.take() {
+            if let Some(backend) = self.backend.as_mut() {
+                if let renderer::Backend::Vulkan(vk_state) = backend {
+                    if let Some(device) = &vk_state.device {
+                        unsafe { let _ = device.device_wait_idle(); }
+                    }
+                }
+            }
+            self.texture_manager.remove(key);
+            unsafe {
+                let _ = Box::from_raw(key as *const str as *mut str);
+            }
+        }
+    }
+
     fn set_dynamic_banner(&mut self, path_opt: Option<PathBuf>) -> &'static str {
         if let Some(path) = path_opt {
             if self.current_dynamic_banner.as_ref().map_or(false, |(_, p)| p == &path) {
@@ -286,6 +304,58 @@ impl App {
         }
     }
 
+
+    fn set_density_graph(&mut self, chart_opt: Option<&ChartData>) -> &'static str {
+        const FALLBACK_KEY: &'static str = "__white";
+
+        if let Some(chart) = chart_opt {
+            // If the graph for this chart's hash is already the active one, do nothing.
+            if self.current_density_graph.as_ref().map_or(false, |(_, h)| h == &chart.short_hash) {
+                return self.current_density_graph.as_ref().unwrap().0;
+            }
+
+            // It's a new chart, so destroy the old graph texture.
+            self.destroy_current_density_graph();
+            
+            if let Some(graph_data) = &chart.density_graph {
+                let backend = match self.backend.as_mut() {
+                    Some(b) => b,
+                    None => return FALLBACK_KEY,
+                };
+
+                // This is where the engine takes on the dependency to create an image object.
+                let rgba_image = match image::RgbaImage::from_raw(graph_data.width, graph_data.height, graph_data.data.clone()) {
+                    Some(img) => img,
+                    None => {
+                        warn!("Failed to create RgbaImage from raw graph data for chart hash '{}'. Using fallback.", chart.short_hash);
+                        return FALLBACK_KEY;
+                    }
+                };
+
+                match renderer::create_texture(backend, &rgba_image, renderer::TextureColorSpace::Srgb) {
+                    Ok(texture) => {
+                        let key: &'static str = Box::leak(chart.short_hash.clone().into_boxed_str());
+                        self.texture_manager.insert(key, texture);
+                        self.current_density_graph = Some((key, chart.short_hash.clone()));
+                        key
+                    }
+                    Err(e) => {
+                        warn!("Failed to create GPU texture for density graph ('{}'): {}. Using fallback.", chart.short_hash, e);
+                        FALLBACK_KEY
+                    }
+                }
+            } else {
+                // The chart exists, but has no graph data.
+                self.destroy_current_density_graph();
+                FALLBACK_KEY
+            }
+        } else {
+            // No chart is selected (e.g., a pack header is selected).
+            self.destroy_current_density_graph();
+            FALLBACK_KEY
+        }
+    }
+
     fn handle_action(&mut self, action: ScreenAction, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
         match action {
             ScreenAction::Navigate(screen) => {
@@ -303,7 +373,9 @@ impl App {
                 info!("Exit action received. Shutting down.");
                 event_loop.exit();
             }
+            // Add the missing pattern arm here
             ScreenAction::RequestBanner(_) => {}
+            ScreenAction::RequestDensityGraph(_) => {} // This action is handled in RedrawRequested
             ScreenAction::None => {}
         }
         Ok(())
@@ -543,9 +615,16 @@ impl ApplicationHandler for App {
                             CurrentScreen::SelectColor => select_color::update(&mut self.select_color_state, delta_time),
                             CurrentScreen::SelectMusic => {
                                 let action = select_music::update(&mut self.select_music_state, delta_time);
-                                if let ScreenAction::RequestBanner(path_opt) = action {
-                                    let key = self.set_dynamic_banner(path_opt);
-                                    self.select_music_state.current_banner_key = key;
+                                match action {
+                                    ScreenAction::RequestBanner(path_opt) => {
+                                        let key = self.set_dynamic_banner(path_opt);
+                                        self.select_music_state.current_banner_key = key;
+                                    }
+                                    ScreenAction::RequestDensityGraph(chart_opt) => {
+                                        let key = self.set_density_graph(chart_opt.as_ref());
+                                        self.select_music_state.current_graph_key = key;
+                                    }
+                                    _ => {}
                                 }
                             }
                             _ => {}

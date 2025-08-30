@@ -6,12 +6,15 @@ pub mod select_color;
 pub mod select_music;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+use crate::core::song_loading::ChartData;
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ScreenAction {
     None,
     Navigate(Screen),
     Exit,
     RequestBanner(Option<PathBuf>),
+    RequestDensityGraph(Option<ChartData>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

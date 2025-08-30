@@ -1,9 +1,10 @@
 use log::{info, warn};
 use rssp::{analyze, AnalysisOptions};
+use rssp::graph::GraphImageData;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use once_cell::sync::Lazy; // Use once_cell's Lazy for static initialization
+use once_cell::sync::Lazy;
 
 // --- Data Structures representing a loaded song ---
 
@@ -11,19 +12,21 @@ use once_cell::sync::Lazy; // Use once_cell's Lazy for static initialization
 pub struct SongData {
     pub title: String,
     pub artist: String,
-    pub banner_path: Option<PathBuf>, // Use PathBuf for flexible paths
+    pub banner_path: Option<PathBuf>,
     pub background_path: Option<PathBuf>,
     pub music_path: Option<PathBuf>,
     pub total_length_seconds: i32,
     pub charts: Vec<ChartData>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ChartData {
     pub difficulty: String,
     pub meter: u32,
     pub step_artist: String,
-    pub notes: Vec<u8>, // The arrow data
+    pub notes: Vec<u8>,
+    pub density_graph: Option<GraphImageData>,
+    pub short_hash: String,
 }
 
 #[derive(Clone, Debug)]
@@ -113,6 +116,8 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
             meter: c.rating_str.parse().unwrap_or(0),
             step_artist: c.step_artist_str.join(", "),
             notes: c.notes,
+            density_graph: c.density_graph,
+            short_hash: c.short_hash,
         })
         .collect();
 

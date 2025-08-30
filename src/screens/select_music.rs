@@ -11,7 +11,7 @@ use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use log::info;
 
-use crate::core::song_loading::{SongData, get_song_cache};
+use crate::core::song_loading::{SongData, get_song_cache, ChartData};
 
 #[allow(dead_code)] fn col_music_wheel_box() -> [f32; 4] { color::rgba_hex("#0a141b") }
 #[allow(dead_code)] fn col_pack_header_box() -> [f32; 4] { color::rgba_hex("#4c565d") }
@@ -37,6 +37,7 @@ const BANNER_KEYS: [&'static str; 12] = [
     "banner9.png", "banner10.png", "banner11.png", "banner12.png",
 ];
 
+
 #[derive(Clone, Debug)]
 pub enum MusicWheelEntry {
     PackHeader { name: String, original_index: usize },
@@ -54,6 +55,8 @@ pub struct State {
     bg: heart_bg::State,
     pub last_requested_banner_path: Option<PathBuf>,
     pub current_banner_key: &'static str,
+    pub last_requested_chart_hash: Option<String>,
+    pub current_graph_key: &'static str,
 }
 
 fn rebuild_displayed_entries(state: &mut State) {
@@ -104,6 +107,9 @@ pub fn init() -> State {
         bg: heart_bg::State::new(),
         last_requested_banner_path: None,
         current_banner_key: "banner1.png",
+        // --- INITIALIZE NEW FIELDS ---
+        last_requested_chart_hash: None,
+        current_graph_key: "__white",
     };
 
     rebuild_displayed_entries(&mut state);
@@ -172,18 +178,29 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         state.selection_animation_timer -= SELECTION_ANIMATION_CYCLE_DURATION;
     }
 
-    let mut new_path_to_request: Option<PathBuf> = None;
-    if let Some(entry) = state.entries.get(state.selected_index) {
-        if let MusicWheelEntry::Song(song) = entry {
-            new_path_to_request = song.banner_path.clone();
-        }
-    }
+    let selected_song = if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
+        Some(song.clone())
+    } else {
+        None
+    };
 
-    if state.last_requested_banner_path != new_path_to_request {
-        state.last_requested_banner_path = new_path_to_request.clone();
-        return ScreenAction::RequestBanner(new_path_to_request);
+    let chart_to_display = selected_song.as_ref().and_then(|song| {
+        let difficulty_name = DIFFICULTY_NAMES[state.selected_difficulty_index];
+        song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).cloned()
+    });
+    
+    let new_chart_hash = chart_to_display.as_ref().map(|c| c.short_hash.clone());
+    if state.last_requested_chart_hash != new_chart_hash {
+        state.last_requested_chart_hash = new_chart_hash;
+        return ScreenAction::RequestDensityGraph(chart_to_display);
     }
     
+    let new_banner_path = selected_song.as_ref().and_then(|s| s.banner_path.clone());
+    if state.last_requested_banner_path != new_banner_path {
+        state.last_requested_banner_path = new_banner_path.clone();
+        return ScreenAction::RequestBanner(new_banner_path);
+    }
+
     ScreenAction::None
 }
 
@@ -236,21 +253,35 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let step_info_box_right_x = rating_box_right_x - RATING_BOX_W - GAP;
     actors.push(act!(quad: align(1.0, 1.0): xy(step_info_box_right_x, boxes_bottom_y): zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
     let rating_box_top_y = boxes_bottom_y - RATING_BOX_H;
-    actors.push(act!(quad: align(1.0, 0.0): xy(step_info_box_right_x, rating_box_top_y): zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
+    
+    // --- DENSITY GRAPH AREA ---
+    let density_graph_area_left_x = step_info_box_right_x - STEP_INFO_BOX_W;
+    let density_graph_area_bottom_y = rating_box_top_y - GAP; // Positioned below the rating box
+    let density_graph_area_top_y = density_graph_area_bottom_y - STEP_INFO_BOX_H;
 
-    const STEP_ARTIST_BOX_W: f32 = 175.2;
-    const STEP_ARTIST_BOX_H: f32 = 16.8;
-    const GAP_ABOVE_DENSITY: f32 = 1.0;
-    let step_artist_box_color = color::simply_love_rgba(state.active_color_index);
-    let density_graph_left_x = step_info_box_right_x - STEP_INFO_BOX_W;
-    let step_artist_box_bottom_y = rating_box_top_y - GAP_ABOVE_DENSITY;
-    actors.push(act!(quad: align(0.0, 1.0): xy(density_graph_left_x, step_artist_box_bottom_y): zoomto(STEP_ARTIST_BOX_W, STEP_ARTIST_BOX_H): diffuse(step_artist_box_color[0], step_artist_box_color[1], step_artist_box_color[2], 1.0): z(z_layer) ));
+    // Background for the density graph area
+    actors.push(act!(quad:
+        align(0.0, 0.0):
+        xy(density_graph_area_left_x, density_graph_area_top_y):
+        zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
+        diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0):
+        z(z_layer)
+    ));
+    
+    // The actual density graph sprite, using the key managed by App
+    actors.push(act!(sprite(state.current_graph_key):
+        align(0.0, 0.0):
+        xy(density_graph_area_left_x, density_graph_area_top_y):
+        zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
+        z(z_layer + 1)
+    ));
+
 
     const BANNER_BOX_W: f32 = 319.8;
     const BANNER_BOX_H: f32 = 126.0;
     const GAP_BELOW_TOP_BAR: f32 = 1.0;
     let banner_box_top_y = BAR_H + GAP_BELOW_TOP_BAR;
-    let banner_box_left_x = density_graph_left_x;
+    let banner_box_left_x = density_graph_area_left_x;
     
     let selected_song: Option<&Arc<SongData>> = if let Some(entry) = state.entries.get(state.selected_index) {
         if let MusicWheelEntry::Song(song_info) = entry { Some(song_info) } else { None }
