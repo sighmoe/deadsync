@@ -17,7 +17,7 @@ use winit::{
 
 use log::{error, info, warn};
 use image;
-use std::{collections::HashMap, error::Error, path::Path, sync::Arc, time::Instant, thread}; // <-- IMPORT thread
+use std::{collections::HashMap, error::Error, path::Path, sync::Arc, time::Instant}; // <-- IMPORT thread
 
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 800;
@@ -133,12 +133,7 @@ pub struct App {
 
 impl App {
     fn new(backend_type: BackendType, vsync_enabled: bool, fullscreen_enabled: bool) -> Self {
-        // --- ADD THIS BLOCK TO START LOADING SONGS ---
-        // Spawn a background thread to scan and load songs without blocking the UI.
-        thread::spawn(|| {
-            song_loading::scan_and_load_songs("songs");
-        });
-        // ---------------------------------------------
+        // Song loading is now done synchronously in run() before this constructor is called.
 
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
@@ -584,6 +579,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let args: Vec<String> = std::env::args().collect();
     let (backend_type, vsync_enabled, fullscreen_enabled) = parse_args(&args);
+
+    // Load songs synchronously before starting the UI.
+    song_loading::scan_and_load_songs("songs");
 
     let event_loop = EventLoop::new()?;
     let mut app = App::new(backend_type, vsync_enabled, fullscreen_enabled);

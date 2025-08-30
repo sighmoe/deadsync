@@ -8,6 +8,9 @@ use crate::ui::components::{heart_bg, screen_bar};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
+// --- Add this import to access the song cache ---
+use crate::core::song_loading::get_song_cache;
+
 use crate::core::space::globals::*;
 
 const NORMAL_COLOR_HEX: &str = "#888888";
@@ -108,9 +111,16 @@ pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
         zoomtoheight(INFO_PX): font("miso"): settext("DeadSync 0.2.207"): horizalign(center):
         diffuse(info_color[0], info_color[1], info_color[2], info_color[3])
     ));
+
+    // --- DYNAMICALLY CALCULATE AND DISPLAY SONG/PACK COUNT ---
+    let song_cache = get_song_cache();
+    let num_packs = song_cache.len();
+    let num_songs: usize = song_cache.iter().map(|pack| pack.songs.len()).sum();
+    let song_info_text = format!("{} songs in {} groups, X courses", num_songs, num_packs);
+
     actors.push(act!(text:
         align(0.5, 0.0): xy(screen_center_x(), info2_y_tl):
-        zoomtoheight(INFO_PX): font("miso"): settext("2672 songs in 29 groups, 209 courses"): horizalign(center):
+        zoomtoheight(INFO_PX): font("miso"): settext(song_info_text): horizalign(center):
         diffuse(info_color[0], info_color[1], info_color[2], info_color[3])
     ));
 

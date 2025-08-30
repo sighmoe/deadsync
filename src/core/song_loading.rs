@@ -3,7 +3,6 @@ use rssp::{analyze, AnalysisOptions};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use once_cell::sync::Lazy; // Use once_cell's Lazy for static initialization
 
 // --- Data Structures representing a loaded song ---
