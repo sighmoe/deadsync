@@ -11,7 +11,7 @@ pub enum ScreenAction {
     None,
     Navigate(Screen),
     Exit,
-    RequestBanner(PathBuf),
+    RequestBanner(Option<PathBuf>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

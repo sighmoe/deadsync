@@ -6,7 +6,7 @@ use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, Screen as CurrentScreen, ScreenAction};
-use crate::core::song_loading; // <-- IMPORT THE NEW MODULE
+use crate::core::song_loading;
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -129,13 +129,11 @@ pub struct App {
     init_state: init::State,
     select_color_state: select_color::State,
     select_music_state: select_music::State,
-    banner_cache: HashMap<PathBuf, &'static str>,
+    current_dynamic_banner: Option<(&'static str, PathBuf)>,
 }
 
 impl App {
     fn new(backend_type: BackendType, vsync_enabled: bool, fullscreen_enabled: bool) -> Self {
-        // Song loading is now done synchronously in run() before this constructor is called.
-
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
             current_screen: CurrentScreen::Init, init_state: init::init(), menu_state: menu::init(), gameplay_state: gameplay::init(), options_state: options::init(),
@@ -143,7 +141,7 @@ impl App {
             start_time: Instant::now(), metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay: false,
             last_fps: 0.0, last_vpf: 0, transition: TransitionState::Idle,
-            banner_cache: HashMap::new(),
+            current_dynamic_banner: None,
         }
     }
 
@@ -160,37 +158,22 @@ impl App {
             image::RgbaImage::from_raw(2, 2, data.to_vec()).expect("fallback image")
         }
 
-        // 1x1 white solid
         {
             let white = image::RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255]).unwrap();
-            let white_tex = renderer::create_texture(
-                backend,
-                &white,
-                renderer::TextureColorSpace::Srgb,
-            )?;
+            let white_tex = renderer::create_texture(backend, &white, renderer::TextureColorSpace::Srgb)?;
             self.texture_manager.insert("__white", white_tex);
             info!("Loaded built-in texture: __white");
         }
 
-        // An explicit list of all textures to load and their keys.
-        // The key is the first element, the path relative to `assets/graphics` is the second.
         let textures_to_load: Vec<(&'static str, &'static str)> = vec![
-            ("logo.png", "logo.png"),
-            ("init_arrow.png", "init_arrow.png"),
-            ("dance.png", "dance.png"),
-            ("meter_arrow.png", "meter_arrow.png"),
-            ("heart.png", "heart.png"),
-            ("banner1.png", "_fallback/banner1.png"),
-            ("banner2.png", "_fallback/banner2.png"),
-            ("banner3.png", "_fallback/banner3.png"),
-            ("banner4.png", "_fallback/banner4.png"),
-            ("banner5.png", "_fallback/banner5.png"),
-            ("banner6.png", "_fallback/banner6.png"),
-            ("banner7.png", "_fallback/banner7.png"),
-            ("banner8.png", "_fallback/banner8.png"),
-            ("banner9.png", "_fallback/banner9.png"),
-            ("banner10.png", "_fallback/banner10.png"),
-            ("banner11.png", "_fallback/banner11.png"),
+            ("logo.png", "logo.png"), ("init_arrow.png", "init_arrow.png"),
+            ("dance.png", "dance.png"), ("meter_arrow.png", "meter_arrow.png"),
+            ("heart.png", "heart.png"), ("banner1.png", "_fallback/banner1.png"),
+            ("banner2.png", "_fallback/banner2.png"), ("banner3.png", "_fallback/banner3.png"),
+            ("banner4.png", "_fallback/banner4.png"), ("banner5.png", "_fallback/banner5.png"),
+            ("banner6.png", "_fallback/banner6.png"), ("banner7.png", "_fallback/banner7.png"),
+            ("banner8.png", "_fallback/banner8.png"), ("banner9.png", "_fallback/banner9.png"),
+            ("banner10.png", "_fallback/banner10.png"), ("banner11.png", "_fallback/banner11.png"),
             ("banner12.png", "_fallback/banner12.png"),
         ];
 
@@ -206,26 +189,19 @@ impl App {
         }
 
         let fallback_image = std::sync::Arc::new(fallback_rgba());
-        let mut decoded: Vec<(&'static str, std::sync::Arc<image::RgbaImage>)> = Vec::with_capacity(textures_to_load.len());
-
         for h in handles {
             match h.join().expect("texture decode thread panicked") {
-                Ok((key, rgba)) => decoded.push((key, std::sync::Arc::new(rgba))),
+                Ok((key, rgba)) => {
+                    let texture = renderer::create_texture(backend, &rgba, renderer::TextureColorSpace::Srgb)?;
+                    self.texture_manager.insert(key, texture);
+                    info!("Loaded texture: {}", key);
+                }
                 Err((key, msg)) => {
                     warn!("Failed to load texture for key '{}': {}. Using fallback.", key, msg);
-                    decoded.push((key, fallback_image.clone()));
+                    let texture = renderer::create_texture(backend, &fallback_image, renderer::TextureColorSpace::Srgb)?;
+                    self.texture_manager.insert(key, texture);
                 }
             }
-        }
-
-        for (key, rgba_arc) in decoded {
-            let texture = renderer::create_texture(
-                backend,
-                &rgba_arc,
-                renderer::TextureColorSpace::Srgb,
-            )?;
-            self.texture_manager.insert(key, texture);
-            info!("Loaded texture: {}", key);
         }
         Ok(())
     }
@@ -238,11 +214,7 @@ impl App {
         let json_data  = std::fs::read(&json_path)?;
         let image_data = image::open(&png_path)?.to_rgba8();
 
-        let texture = renderer::create_texture(
-            backend,
-            &image_data,
-            renderer::TextureColorSpace::Linear,
-        )?;
+        let texture = renderer::create_texture(backend, &image_data, renderer::TextureColorSpace::Linear)?;
         self.texture_manager.insert(name, texture);
 
         let font = msdf::load_font(&json_data, name, 4.0);
@@ -258,48 +230,63 @@ impl App {
         Ok(())
     }
 
-    fn load_banner_texture(&mut self, path: &Path) -> &'static str {
-        if let Some(key) = self.banner_cache.get(path) {
-            return key;
-        }
-
-        info!("Loading dynamic banner: {:?}", path);
-        let backend = match self.backend.as_mut() {
-            Some(b) => b,
-            None => return "banner1.png", // Return a fallback if the backend isn't ready
-        };
-
-        match image::open(path) {
-            Ok(img) => {
-                let rgba = img.to_rgba8();
-                match renderer::create_texture(backend, &rgba, renderer::TextureColorSpace::Srgb) {
-                    Ok(texture) => {
-                        // Leak the string to get a 'static lifetime. This is acceptable here
-                        // because these keys need to live for the duration of the program.
-                        let key: &'static str = Box::leak(path.to_string_lossy().into_owned().into_boxed_str());
-                        self.texture_manager.insert(key, texture);
-                        self.banner_cache.insert(path.to_path_buf(), key);
-                        key
-                    }
-                    Err(e) => {
-                        warn!("Failed to create GPU texture for {:?}: {}. Using fallback.", path, e);
-                        "banner1.png"
+    fn destroy_current_dynamic_banner(&mut self) {
+        if let Some((key, _path)) = self.current_dynamic_banner.take() {
+            if let Some(backend) = self.backend.as_mut() {
+                if let renderer::Backend::Vulkan(vk_state) = backend {
+                    if let Some(device) = &vk_state.device {
+                        unsafe { let _ = device.device_wait_idle(); }
                     }
                 }
             }
-            Err(e) => {
-                warn!("Failed to open banner image {:?}: {}. Using fallback.", path, e);
-                "banner1.png"
+            self.texture_manager.remove(key);
+            unsafe {
+                let _ = Box::from_raw(key as *const str as *mut str);
             }
         }
     }
 
-    // Replace the existing handle_action() function with this one
-    fn handle_action(
-        &mut self,
-        action: ScreenAction,
-        event_loop: &ActiveEventLoop,
-    ) -> Result<(), Box<dyn Error>> {
+    fn set_dynamic_banner(&mut self, path_opt: Option<PathBuf>) -> &'static str {
+        if let Some(path) = path_opt {
+            if self.current_dynamic_banner.as_ref().map_or(false, |(_, p)| p == &path) {
+                return self.current_dynamic_banner.as_ref().unwrap().0;
+            }
+
+            self.destroy_current_dynamic_banner();
+
+            let backend = match self.backend.as_mut() {
+                Some(b) => b,
+                None => return "banner1.png",
+            };
+
+            match image::open(&path) {
+                Ok(img) => {
+                    let rgba = img.to_rgba8();
+                    match renderer::create_texture(backend, &rgba, renderer::TextureColorSpace::Srgb) {
+                        Ok(texture) => {
+                            let key: &'static str = Box::leak(path.to_string_lossy().into_owned().into_boxed_str());
+                            self.texture_manager.insert(key, texture);
+                            self.current_dynamic_banner = Some((key, path));
+                            key
+                        }
+                        Err(e) => {
+                            warn!("Failed to create GPU texture for {:?}: {}. Using fallback.", path, e);
+                            "banner1.png"
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to open banner image {:?}: {}. Using fallback.", path, e);
+                    "banner1.png"
+                }
+            }
+        } else {
+            self.destroy_current_dynamic_banner();
+            "banner1.png"
+        }
+    }
+
+    fn handle_action(&mut self, action: ScreenAction, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
         match action {
             ScreenAction::Navigate(screen) => {
                 if matches!(self.transition, TransitionState::Idle) {
@@ -316,9 +303,7 @@ impl App {
                 info!("Exit action received. Shutting down.");
                 event_loop.exit();
             }
-            ScreenAction::RequestBanner(_) => {
-                 // This is handled directly in the update loop, not here.
-            }
+            ScreenAction::RequestBanner(_) => {}
             ScreenAction::None => {}
         }
         Ok(())
@@ -330,7 +315,6 @@ impl App {
 
     fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
-
         let mut screen_alpha_multiplier = 1.0;
         if let TransitionState::ActorsFadeIn { elapsed } = self.transition {
             if self.current_screen == CurrentScreen::Menu {
@@ -354,11 +338,7 @@ impl App {
         };
 
         if self.show_overlay {
-            let overlay = crate::ui::components::stats_overlay::build(
-                self.backend_type,
-                self.last_fps,
-                self.last_vpf,
-            );
+            let overlay = crate::ui::components::stats_overlay::build(self.backend_type, self.last_fps, self.last_vpf);
             actors.extend(overlay);
         }
 
@@ -376,7 +356,6 @@ impl App {
             let t = (elapsed / BAR_SQUISH_DURATION).clamp(0.0, 1.0);
             actors.push(crate::screens::init::build_squish_bar(t));
         }
-
         (actors, CLEAR)
     }
 
@@ -387,12 +366,8 @@ impl App {
         if elapsed.as_secs_f32() >= 1.0 {
             let fps = self.frame_count as f32 / elapsed.as_secs_f32();
             self.last_fps = fps;
-
             let screen_name = format!("{:?}", self.current_screen);
-            window.set_title(&format!(
-                "DeadSync - {:?} | {} | {:.2} FPS",
-                self.backend_type, screen_name, fps
-            ));
+            window.set_title(&format!("DeadSync - {:?} | {} | {:.2} FPS", self.backend_type, screen_name, fps));
             self.frame_count = 0;
             self.last_title_update = now;
         }
@@ -428,14 +403,11 @@ impl App {
         let sz = window.inner_size();
         self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
         crate::core::space::set_current_metrics(self.metrics);
-
         let backend = create_backend(self.backend_type, window.clone(), self.vsync_enabled)?;
         self.window = Some(window);
         self.backend = Some(backend);
-
         self.load_textures()?;
         self.load_fonts()?;
-
         info!("Starting event loop...");
         Ok(())
     }
@@ -458,10 +430,7 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         let Some(window) = self.window.as_ref().cloned() else { return; };
-        if window_id != window.id() {
-            return;
-        }
-
+        if window_id != window.id() { return; }
         let is_transitioning = !matches!(self.transition, TransitionState::Idle);
 
         match event {
@@ -480,13 +449,11 @@ impl ApplicationHandler for App {
             }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
                 input::handle_keyboard_input(&key_event, &mut self.input_state);
-
                 if key_event.state == winit::event::ElementState::Pressed {
                     if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F3) = key_event.physical_key {
                         self.show_overlay = !self.show_overlay;
                         info!("Overlay {}", if self.show_overlay { "ON" } else { "OFF" });
                     }
-
                     if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) = key_event.physical_key {
                         if self.current_screen == CurrentScreen::Menu {
                             if let Err(e) = self.handle_action(ScreenAction::Exit, event_loop) {
@@ -508,7 +475,7 @@ impl ApplicationHandler for App {
                     CurrentScreen::SelectMusic => select_music::handle_key_press(&mut self.select_music_state, &key_event),
                     CurrentScreen::Init     => init::handle_key_press(&mut self.init_state, &key_event),
                 };
-                if let Err(e) = self.handle_action(action, event_loop) {
+                if let Err(e) = self.handle_action(action.clone(), event_loop) {
                     error!("Failed to handle action: {}", e);
                     event_loop.exit();
                 }
@@ -518,7 +485,6 @@ impl ApplicationHandler for App {
                 let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
                 self.last_frame_time = now;
                 let total_elapsed = now.duration_since(self.start_time).as_secs_f32();
-
                 crate::ui::runtime::tick(delta_time);
 
                 match &mut self.transition {
@@ -532,20 +498,15 @@ impl ApplicationHandler for App {
                                 let idx = self.select_color_state.active_color_index;
                                 self.gameplay_state.player_color = color::decorative_rgba(idx);
                             }
-
                             if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Menu {
                                 self.menu_state.active_color_index = self.select_color_state.active_color_index;
                             }
-                            
-                            // When navigating to SelectMusic, re-initialize its state to load the latest songs
                             if *target == CurrentScreen::SelectMusic {
                                 self.select_music_state = select_music::init();
-                                // THEN, if coming from SelectColor, pass the chosen color over.
                                 if prev == CurrentScreen::SelectColor {
                                     self.select_music_state.active_color_index = self.select_color_state.active_color_index;
                                 }
                             }
-
                             self.transition = TransitionState::FadingIn { elapsed: 0.0 };
                             crate::ui::runtime::clear_all();
                         }
@@ -556,7 +517,6 @@ impl ApplicationHandler for App {
                             self.transition = TransitionState::Idle;
                         }
                     }
-
                     TransitionState::BarSquishOut { elapsed, target } => {
                         *elapsed += delta_time;
                         if *elapsed >= BAR_SQUISH_DURATION {
@@ -571,25 +531,20 @@ impl ApplicationHandler for App {
                             self.transition = TransitionState::Idle;
                         }
                     }
-
                     TransitionState::Idle => {
                         match self.current_screen {
-                            CurrentScreen::Gameplay => {
-                                gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time);
-                            }
+                            CurrentScreen::Gameplay => gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time),
                             CurrentScreen::Init => {
                                 let action = init::update(&mut self.init_state, delta_time);
-                                if let ScreenAction::Navigate(_) | ScreenAction::Exit = action {
-                                    if self.handle_action(action, event_loop).is_err() { /* ... */ }
+                                if let ScreenAction::Navigate(_) | ScreenAction::Exit = action.clone() {
+                                    if self.handle_action(action, event_loop).is_err() {}
                                 }
                             }
-                            CurrentScreen::SelectColor => {
-                                select_color::update(&mut self.select_color_state, delta_time);
-                            }
+                            CurrentScreen::SelectColor => select_color::update(&mut self.select_color_state, delta_time),
                             CurrentScreen::SelectMusic => {
                                 let action = select_music::update(&mut self.select_music_state, delta_time);
-                                if let ScreenAction::RequestBanner(path) = action {
-                                    let key = self.load_banner_texture(&path);
+                                if let ScreenAction::RequestBanner(path_opt) = action {
+                                    let key = self.set_dynamic_banner(path_opt);
                                     self.select_music_state.current_banner_key = key;
                                 }
                             }
@@ -600,7 +555,6 @@ impl ApplicationHandler for App {
 
                 let (actors, clear_color) = self.get_current_actors();
                 let screen = self.build_screen(&actors, clear_color, total_elapsed);
-
                 self.update_fps_title(&window, now);
 
                 if let Some(backend) = &mut self.backend {
@@ -624,6 +578,7 @@ impl ApplicationHandler for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.destroy_current_dynamic_banner();
         if let Some(backend) = &mut self.backend {
             renderer::dispose_textures(backend, &mut self.texture_manager);
             renderer::cleanup(backend);
@@ -632,16 +587,10 @@ impl ApplicationHandler for App {
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let _ = env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
-        .try_init();
-
+    let _ = env_logger::builder().filter_level(log::LevelFilter::Info).try_init();
     let args: Vec<String> = std::env::args().collect();
     let (backend_type, vsync_enabled, fullscreen_enabled) = parse_args(&args);
-
-    // Load songs synchronously before starting the UI.
     song_loading::scan_and_load_songs("songs");
-
     let event_loop = EventLoop::new()?;
     let mut app = App::new(backend_type, vsync_enabled, fullscreen_enabled);
     event_loop.run_app(&mut app)?;

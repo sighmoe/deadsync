@@ -1,5 +1,3 @@
-// Path: /mnt/c/Users/perfe/Documents/GitHub/new-engine/src/screens/select_music.rs
-
 use crate::act;
 use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
@@ -13,10 +11,8 @@ use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use log::info;
 
-// --- IMPORT DATA STRUCTURES FROM THE NEW MODULE ---
-use crate::core::song_loading::{ChartData, SongData, get_song_cache};
+use crate::core::song_loading::{SongData, get_song_cache};
 
-// --- (UI layout constants remain the same) ---
 #[allow(dead_code)] fn col_music_wheel_box() -> [f32; 4] { color::rgba_hex("#0a141b") }
 #[allow(dead_code)] fn col_pack_header_box() -> [f32; 4] { color::rgba_hex("#4c565d") }
 #[allow(dead_code)] fn col_selected_song_box() -> [f32; 4] { color::rgba_hex("#272f35") }
@@ -41,11 +37,6 @@ const BANNER_KEYS: [&'static str; 12] = [
     "banner9.png", "banner10.png", "banner11.png", "banner12.png",
 ];
 
-/* ==================================================================
- *                            STATE & DATA
- * ================================================================== */
-// Note: SongData and ChartData are now imported from core::song_loading
-
 #[derive(Clone, Debug)]
 pub enum MusicWheelEntry {
     PackHeader { name: String, original_index: usize },
@@ -61,15 +52,13 @@ pub struct State {
     pub selection_animation_timer: f32,
     pub expanded_pack_name: Option<String>,
     bg: heart_bg::State,
-    pub last_checked_banner_path: Option<PathBuf>,
+    pub last_requested_banner_path: Option<PathBuf>,
     pub current_banner_key: &'static str,
 }
 
-/// Rebuilds the visible `entries` list based on which pack is expanded.
 fn rebuild_displayed_entries(state: &mut State) {
     let mut new_entries = Vec::new();
     let mut current_pack_name: Option<String> = None;
-
     for entry in &state.all_entries {
         match entry {
             MusicWheelEntry::PackHeader { name, .. } => {
@@ -113,17 +102,14 @@ pub fn init() -> State {
         selection_animation_timer: 0.0,
         expanded_pack_name: None,
         bg: heart_bg::State::new(),
-        last_checked_banner_path: None,
-        current_banner_key: "banner1.png", // Default fallback
+        last_requested_banner_path: None,
+        current_banner_key: "banner1.png",
     };
 
     rebuild_displayed_entries(&mut state);
     state
 }
 
-/* ==================================================================
- *                         INPUT & UPDATE
- * ================================================================== */
 fn lerp_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
     [
         a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
@@ -156,7 +142,6 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                 match entry {
                     MusicWheelEntry::Song(song) => {
                         info!("Selected song: '{}'. It has {} charts.", song.title, song.charts.len());
-                        // Future: Pass the selected song/chart to the gameplay screen
                         return ScreenAction::Navigate(Screen::Gameplay);
                     }
                     MusicWheelEntry::PackHeader { name, .. } => {
@@ -187,34 +172,24 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         state.selection_animation_timer -= SELECTION_ANIMATION_CYCLE_DURATION;
     }
 
-    let mut requested_action = ScreenAction::None;
-    let mut new_path: Option<PathBuf> = None;
-
+    let mut new_path_to_request: Option<PathBuf> = None;
     if let Some(entry) = state.entries.get(state.selected_index) {
         if let MusicWheelEntry::Song(song) = entry {
-            if let Some(banner_path) = &song.banner_path {
-                new_path = Some(banner_path.clone());
-            }
+            new_path_to_request = song.banner_path.clone();
         }
     }
 
-    if state.last_checked_banner_path != new_path {
-        if let Some(path) = new_path.clone() {
-             requested_action = ScreenAction::RequestBanner(path);
-        }
-        state.last_checked_banner_path = new_path;
+    if state.last_requested_banner_path != new_path_to_request {
+        state.last_requested_banner_path = new_path_to_request.clone();
+        return ScreenAction::RequestBanner(new_path_to_request);
     }
     
-    requested_action
+    ScreenAction::None
 }
 
-/* ==================================================================
- *                           DRAWING
- * ================================================================== */
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(256);
 
-    // 1. Draw background and standard screen bars
     actors.extend(state.bg.build(heart_bg::Params {
         active_color_index: state.active_color_index,
         backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
@@ -237,7 +212,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         left_text: Some("PerfectTaste"), center_text: None, right_text: None,
     }));
 
-    // --- Layout Constants & Calculations ---
     const BAR_H: f32 = 32.0;
     let accent = color::simply_love_rgba(state.active_color_index);
     let box_w = 373.8;
@@ -245,7 +219,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let box_bottom = screen_height() - BAR_H;
     let box_top = box_bottom - box_h;
 
-    // 2. Draw the main UI panels on the left
     actors.push(act!(quad: align(0.0, 1.0): xy(0.0, box_bottom): zoomto(box_w, box_h): diffuse(accent[0], accent[1], accent[2], 1.0): z(50) ));
 
     const RATING_BOX_W: f32 = 31.8;
@@ -279,32 +252,19 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let banner_box_top_y = BAR_H + GAP_BELOW_TOP_BAR;
     let banner_box_left_x = density_graph_left_x;
     
-    // 3. --- Add difficulty rating boxes and numbers AND determine banner key ---
     let selected_song: Option<&Arc<SongData>> = if let Some(entry) = state.entries.get(state.selected_index) {
-        if let MusicWheelEntry::Song(song_info) = entry {
-            Some(song_info)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+        if let MusicWheelEntry::Song(song_info) = entry { Some(song_info) } else { None }
+    } else { None };
 
-    let banner_key = if let Some(song) = selected_song {
-        if song.banner_path.is_some() {
-            state.current_banner_key
-        } else {
-            let num_banners = BANNER_KEYS.len();
-            let wrapped_index = (state.active_color_index.rem_euclid(num_banners as i32)) as usize;
-            BANNER_KEYS[wrapped_index]
-        }
+    let banner_key_to_draw = if selected_song.is_some() {
+        state.current_banner_key // Use the key managed by App for the current song
     } else {
+        // Fallback for when a pack header is selected
         let num_banners = BANNER_KEYS.len();
         let wrapped_index = (state.active_color_index.rem_euclid(num_banners as i32)) as usize;
         BANNER_KEYS[wrapped_index]
     };
-
-    actors.push(act!(sprite(banner_key): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
+    actors.push(act!(sprite(banner_key_to_draw): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
 
     let rating_box_left_x = rating_box_right_x - RATING_BOX_W;
     
@@ -317,9 +277,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let inner_box_y = rating_box_top_y + VERTICAL_GAP + (i as f32 * (INNER_BOX_SIZE + VERTICAL_GAP));
 
         actors.push(act!(quad:
-            align(0.0, 0.0):
-            xy(inner_box_x, inner_box_y):
-            zoomto(INNER_BOX_SIZE, INNER_BOX_SIZE):
+            align(0.0, 0.0): xy(inner_box_x, inner_box_y): zoomto(INNER_BOX_SIZE, INNER_BOX_SIZE):
             diffuse(DIFFICULTY_DISPLAY_INNER_BOX_COLOR[0], DIFFICULTY_DISPLAY_INNER_BOX_COLOR[1], DIFFICULTY_DISPLAY_INNER_BOX_COLOR[2], 1.0):
             z(z_layer + 1)
         ));
@@ -327,22 +285,16 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         if let Some(song) = selected_song {
             let difficulty_name = DIFFICULTY_NAMES[i];
             if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
-                let meter = chart.meter;
-                if meter > 0 {
+                if chart.meter > 0 {
                     let color_offset = (DIFFICULTY_NAMES.len() - 1 - i) as i32;
                     let text_color = color::simply_love_rgba(state.active_color_index - color_offset);
                     const METER_TEXT_PX: f32 = 20.0;
                     let text_center_x = inner_box_x + 0.5 * INNER_BOX_SIZE;
                     let text_center_y = inner_box_y + 0.5 * INNER_BOX_SIZE;
                     actors.push(act!(text:
-                        align(0.5, 0.5):
-                        xy(text_center_x, text_center_y):
-                        zoomtoheight(METER_TEXT_PX):
-                        font("wendy"):
-                        settext(format!("{}", meter)):
-                        horizalign(center):
-                        diffuse(text_color[0], text_color[1], text_color[2], 1.0):
-                        z(z_layer + 2)
+                        align(0.5, 0.5): xy(text_center_x, text_center_y): zoomtoheight(METER_TEXT_PX):
+                        font("wendy"): settext(format!("{}", chart.meter)): horizalign(center):
+                        diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(z_layer + 2)
                     ));
                 }
             }
@@ -354,7 +306,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let bpm_box_top_y = banner_box_top_y + BANNER_BOX_H + GAP_BELOW_BANNER;
     actors.push(act!(quad: align(0.0, 0.0): xy(banner_box_left_x, bpm_box_top_y): zoomto(BANNER_BOX_W, BPM_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
 
-    // 4. Draw the music wheel on the right
     const WHEEL_W: f32 = 352.8;
     const WHEEL_ITEM_GAP: f32 = 1.0;
     let wheel_right_x = screen_width();
@@ -410,7 +361,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         }
     }
 
-    // 5. Draw placeholder text in the "STEP STATS" box
     let pad_x = 10.0;
     let pad_y = 8.0;
     actors.push(act!(text: align(0.0, 0.0): xy(pad_x, box_top + pad_y): zoomtoheight(15.0): font("miso"): settext("STEP STATS"): horizalign(left): diffuse(1.0, 1.0, 1.0, 1.0): z(51) ));
