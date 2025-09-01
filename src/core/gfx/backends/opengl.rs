@@ -100,6 +100,14 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
         //  per-instance attributes buffer (locations 2..5)
         let instance_vbo = gl.create_buffer()?;
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(instance_vbo));
+
+        // Allocate some initial storage for the instance buffer. This is critical.
+        // Without this, drivers may crash on a non-instanced draw if instanced
+        // vertex attributes are enabled, as it would be a read from an
+        // uninitialized buffer. The size is arbitrary; it will be re-specified
+        // by `buffer_data_u8_slice` in the draw call anyway.
+        gl.buffer_data_size(glow::ARRAY_BUFFER, 1024, glow::STREAM_DRAW);
+
         let i_stride = (8 * mem::size_of::<f32>()) as i32; // center(2), size(2), uv_scale(2), uv_offset(2)
 
         gl.enable_vertex_attrib_array(2);
