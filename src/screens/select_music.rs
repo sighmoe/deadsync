@@ -252,28 +252,46 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     let step_info_box_right_x = rating_box_right_x - RATING_BOX_W - GAP;
     actors.push(act!(quad: align(1.0, 1.0): xy(step_info_box_right_x, boxes_bottom_y): zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
-    let rating_box_top_y = boxes_bottom_y - RATING_BOX_H;
     
-    // --- DENSITY GRAPH AREA ---
-    let density_graph_area_left_x = step_info_box_right_x - STEP_INFO_BOX_W;
-    let density_graph_area_bottom_y = rating_box_top_y - GAP; // Positioned below the rating box
-    let density_graph_area_top_y = density_graph_area_bottom_y - STEP_INFO_BOX_H;
+    // The top of the main content boxes (rating, step info)
+    let boxes_top_y = boxes_bottom_y - RATING_BOX_H;
+    let boxes_left_x = step_info_box_right_x - STEP_INFO_BOX_W;
+
+    // --- DENSITY GRAPH ---
+    // Its top should align with the top of the rating box.
+    let density_graph_top_y = boxes_top_y;
 
     // Background for the density graph area
     actors.push(act!(quad:
-        align(0.0, 0.0):
-        xy(density_graph_area_left_x, density_graph_area_top_y):
+        align(0.0, 0.0): // top-left alignment
+        xy(boxes_left_x, density_graph_top_y):
         zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
         diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0):
         z(z_layer)
     ));
     
-    // The actual density graph sprite, using the key managed by App
+    // The actual density graph sprite
     actors.push(act!(sprite(state.current_graph_key):
         align(0.0, 0.0):
-        xy(density_graph_area_left_x, density_graph_area_top_y):
+        xy(boxes_left_x, density_graph_top_y):
         zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
         z(z_layer + 1)
+    ));
+
+    // --- STEP ARTIST BOX ---
+    // Positioned just above the density graph with a small gap.
+    const STEP_ARTIST_BOX_W: f32 = 175.2;
+    const STEP_ARTIST_BOX_H: f32 = 16.8;
+    const GAP_ABOVE_DENSITY: f32 = 1.0;
+    let step_artist_box_color = color::simply_love_rgba(state.active_color_index);
+    let step_artist_box_bottom_y = density_graph_top_y - GAP_ABOVE_DENSITY;
+    
+    actors.push(act!(quad:
+        align(0.0, 1.0): // bottom-left alignment
+        xy(boxes_left_x, step_artist_box_bottom_y):
+        zoomto(STEP_ARTIST_BOX_W, STEP_ARTIST_BOX_H):
+        diffuse(step_artist_box_color[0], step_artist_box_color[1], step_artist_box_color[2], 1.0):
+        z(z_layer)
     ));
 
 
@@ -281,7 +299,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     const BANNER_BOX_H: f32 = 126.0;
     const GAP_BELOW_TOP_BAR: f32 = 1.0;
     let banner_box_top_y = BAR_H + GAP_BELOW_TOP_BAR;
-    let banner_box_left_x = density_graph_area_left_x;
+    let banner_box_left_x = boxes_left_x;
     
     let selected_song: Option<&Arc<SongData>> = if let Some(entry) = state.entries.get(state.selected_index) {
         if let MusicWheelEntry::Song(song_info) = entry { Some(song_info) } else { None }
@@ -305,7 +323,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     for i in 0..DIFFICULTY_NAMES.len() {
         let inner_box_x = rating_box_left_x + HORIZONTAL_PADDING;
-        let inner_box_y = rating_box_top_y + VERTICAL_GAP + (i as f32 * (INNER_BOX_SIZE + VERTICAL_GAP));
+        let inner_box_y = boxes_top_y + VERTICAL_GAP + (i as f32 * (INNER_BOX_SIZE + VERTICAL_GAP));
 
         actors.push(act!(quad:
             align(0.0, 0.0): xy(inner_box_x, inner_box_y): zoomto(INNER_BOX_SIZE, INNER_BOX_SIZE):
