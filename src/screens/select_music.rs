@@ -5,13 +5,17 @@ use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::heart_bg;
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
+use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use log::info;
+use std::fs;
 
-use crate::core::song_loading::{SongData, get_song_cache, ChartData};
+
+use crate::core::song_loading::{SongData, get_song_cache, ChartData, SongPack};
 
 #[allow(dead_code)] fn col_music_wheel_box() -> [f32; 4] { color::rgba_hex("#0a141b") }
 #[allow(dead_code)] fn col_pack_header_box() -> [f32; 4] { color::rgba_hex("#4c565d") }
@@ -31,16 +35,17 @@ const PACK_COUNT_TEXT_TARGET_PX: f32 = 14.0;
 static DIFFICULTY_DISPLAY_INNER_BOX_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#0f0f0f"));
 const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
 
-const BANNER_KEYS: [&'static str; 12] = [
-    "banner1.png", "banner2.png", "banner3.png", "banner4.png",
-    "banner5.png", "banner6.png", "banner7.png", "banner8.png",
-    "banner9.png", "banner10.png", "banner11.png", "banner12.png",
-];
+// --- NEW CONSTANTS FOR BEHAVIORS ---
+const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
+const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(250);
+const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(80);
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum NavDirection { Left, Right }
 
 #[derive(Clone, Debug)]
 pub enum MusicWheelEntry {
-    PackHeader { name: String, original_index: usize },
+    PackHeader { name: String, original_index: usize, banner_path: Option<PathBuf> },
     Song(Arc<SongData>),
 }
 
@@ -57,6 +62,50 @@ pub struct State {
     pub current_banner_key: &'static str,
     pub last_requested_chart_hash: Option<String>,
     pub current_graph_key: &'static str,
+    // --- NEW STATE FOR BEHAVIORS ---
+    pub active_chord_keys: HashSet<KeyCode>,
+    pub last_difficulty_nav_key: Option<KeyCode>,
+    pub last_difficulty_nav_time: Option<Instant>,
+    pub nav_key_held_direction: Option<NavDirection>,
+    pub nav_key_held_since: Option<Instant>,
+    pub nav_key_last_scrolled_at: Option<Instant>,
+}
+
+/// Helper function to check if a specific difficulty index has a playable chart
+pub(crate) fn is_difficulty_playable(song: &Arc<SongData>, difficulty_index: usize) -> bool {
+    if difficulty_index >= DIFFICULTY_NAMES.len() { return false; }
+    let target_difficulty_name = DIFFICULTY_NAMES[difficulty_index];
+    // Our parser doesn't expose stepstype, but for now we assume all charts are dance-single.
+    // We check if notes exist.
+    song.charts.iter().any(|c| {
+        c.difficulty.eq_ignore_ascii_case(target_difficulty_name) && !c.notes.is_empty()
+    })
+}
+
+fn find_pack_banner(pack: &SongPack) -> Option<PathBuf> {
+    // We need to determine the pack's directory. We can get it from the first song.
+    let Some(first_song) = pack.songs.first() else { return None; };
+    let Some(song_folder) = first_song.banner_path.as_ref().and_then(|p| p.parent()) else { return None; };
+    let Some(pack_folder_path) = song_folder.parent() else { return None; };
+
+    if !pack_folder_path.is_dir() { return None; }
+    
+    let banner_name_patterns = ["banner", "bn", "ban"];
+    for pattern in banner_name_patterns {
+        let entries = fs::read_dir(pack_folder_path).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(filename_str) = path.file_name().and_then(|s| s.to_str()) {
+                    let filename_lower = filename_str.to_lowercase();
+                    if filename_lower.contains(pattern) && (filename_lower.ends_with(".png") || filename_lower.ends_with(".jpg")) {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn rebuild_displayed_entries(state: &mut State) {
@@ -64,8 +113,8 @@ fn rebuild_displayed_entries(state: &mut State) {
     let mut current_pack_name: Option<String> = None;
     for entry in &state.all_entries {
         match entry {
-            MusicWheelEntry::PackHeader { name, .. } => {
-                current_pack_name = Some(name.clone());
+            MusicWheelEntry::PackHeader { .. } => {
+                current_pack_name = if let MusicWheelEntry::PackHeader { name, .. } = entry { Some(name.clone()) } else { None };
                 new_entries.push(entry.clone());
             }
             MusicWheelEntry::Song(_) => {
@@ -87,6 +136,7 @@ pub fn init() -> State {
         all_entries.push(MusicWheelEntry::PackHeader {
             name: pack.name.clone(),
             original_index: i,
+            banner_path: find_pack_banner(pack),
         });
         for song in &pack.songs {
             all_entries.push(MusicWheelEntry::Song(song.clone()));
@@ -107,9 +157,15 @@ pub fn init() -> State {
         bg: heart_bg::State::new(),
         last_requested_banner_path: None,
         current_banner_key: "banner1.png",
-        // --- INITIALIZE NEW FIELDS ---
         last_requested_chart_hash: None,
         current_graph_key: "__white",
+        // --- INITIALIZE NEW STATE ---
+        active_chord_keys: HashSet::new(),
+        last_difficulty_nav_key: None,
+        last_difficulty_nav_time: None,
+        nav_key_held_direction: None,
+        nav_key_held_since: None,
+        nav_key_last_scrolled_at: None,
     };
 
     rebuild_displayed_entries(&mut state);
@@ -124,50 +180,131 @@ fn lerp_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
 }
 
 pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
-    if event.state != ElementState::Pressed { return ScreenAction::None; }
     let num_entries = state.entries.len();
-    if num_entries == 0 { return ScreenAction::None; }
+    let is_song_selected = num_entries > 0
+        && matches!(state.entries.get(state.selected_index), Some(MusicWheelEntry::Song(_)));
+    
+    let Some(PhysicalKey::Code(key_code)) = Some(event.physical_key) else { return ScreenAction::None; };
 
-    match event.physical_key {
-        PhysicalKey::Code(KeyCode::ArrowRight) | PhysicalKey::Code(KeyCode::KeyD) => {
-            state.selected_index = (state.selected_index + 1) % num_entries;
-            state.selection_animation_timer = 0.0;
+    if event.state == ElementState::Pressed {
+        if matches!(key_code, KeyCode::ArrowUp | KeyCode::ArrowDown) {
+            state.active_chord_keys.insert(key_code);
         }
-        PhysicalKey::Code(KeyCode::ArrowLeft) | PhysicalKey::Code(KeyCode::KeyA) => {
-            state.selected_index = (state.selected_index + num_entries - 1) % num_entries;
-            state.selection_animation_timer = 0.0;
-        }
-        PhysicalKey::Code(KeyCode::ArrowDown) | PhysicalKey::Code(KeyCode::KeyS) => {
-            state.selected_difficulty_index = (state.selected_difficulty_index + 1).min(DIFFICULTY_NAMES.len() - 1);
-        }
-        PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
-            state.selected_difficulty_index = state.selected_difficulty_index.saturating_sub(1);
-        }
-        PhysicalKey::Code(KeyCode::Enter) => {
-            if let Some(entry) = state.entries.get(state.selected_index).cloned() {
-                match entry {
-                    MusicWheelEntry::Song(song) => {
-                        info!("Selected song: '{}'. It has {} charts.", song.title, song.charts.len());
-                        return ScreenAction::Navigate(Screen::Gameplay);
-                    }
-                    MusicWheelEntry::PackHeader { name, .. } => {
-                        let pack_name_to_focus = name.clone();
-                        if state.expanded_pack_name.as_ref() == Some(&pack_name_to_focus) {
-                            state.expanded_pack_name = None;
-                        } else {
-                            state.expanded_pack_name = Some(pack_name_to_focus.clone());
-                        }
-                        rebuild_displayed_entries(state);
-                        let new_selection = state.entries.iter().position(|e| {
-                            if let MusicWheelEntry::PackHeader{ name: n, .. } = e { n == &pack_name_to_focus } else { false }
-                        }).unwrap_or(0);
-                        state.selected_index = new_selection;
-                    }
+
+        if !event.repeat {
+            let mut combo_action_taken = false;
+            // Chord to collapse pack
+            if state.active_chord_keys.contains(&KeyCode::ArrowUp) && state.active_chord_keys.contains(&KeyCode::ArrowDown) {
+                if state.expanded_pack_name.is_some() {
+                    info!("Up+Down combo: Collapsing pack.");
+                    state.expanded_pack_name = None;
+                    rebuild_displayed_entries(state); // Rebuild is important
+                    // Sound effect would go here
+                    combo_action_taken = true;
                 }
             }
+
+            if combo_action_taken { return ScreenAction::None; }
+
+            match key_code {
+                KeyCode::ArrowRight | KeyCode::KeyD => {
+                    if num_entries > 0 {
+                        state.selected_index = (state.selected_index + 1) % num_entries;
+                        state.selection_animation_timer = 0.0;
+                        state.nav_key_held_direction = Some(NavDirection::Right);
+                        state.nav_key_held_since = Some(Instant::now());
+                        state.nav_key_last_scrolled_at = Some(Instant::now());
+                    }
+                }
+                KeyCode::ArrowLeft | KeyCode::KeyA => {
+                    if num_entries > 0 {
+                        state.selected_index = (state.selected_index + num_entries - 1) % num_entries;
+                        state.selection_animation_timer = 0.0;
+                        state.nav_key_held_direction = Some(NavDirection::Left);
+                        state.nav_key_held_since = Some(Instant::now());
+                        state.nav_key_last_scrolled_at = Some(Instant::now());
+                    }
+                }
+                KeyCode::ArrowUp | KeyCode::KeyW => {
+                    if is_song_selected {
+                        let now = Instant::now();
+                        if state.last_difficulty_nav_key == Some(key_code) && state.last_difficulty_nav_time.map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW) {
+                            if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
+                                let mut new_idx = state.selected_difficulty_index;
+                                while new_idx > 0 {
+                                    new_idx -= 1;
+                                    if is_difficulty_playable(song, new_idx) {
+                                        state.selected_difficulty_index = new_idx;
+                                        break;
+                                    }
+                                }
+                            }
+                            state.last_difficulty_nav_key = None;
+                            state.last_difficulty_nav_time = None;
+                        } else {
+                            state.last_difficulty_nav_key = Some(key_code);
+                            state.last_difficulty_nav_time = Some(now);
+                        }
+                    }
+                }
+                KeyCode::ArrowDown | KeyCode::KeyS => {
+                    if is_song_selected {
+                        let now = Instant::now();
+                        if state.last_difficulty_nav_key == Some(key_code) && state.last_difficulty_nav_time.map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW) {
+                            if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
+                                let mut new_idx = state.selected_difficulty_index;
+                                while new_idx < DIFFICULTY_NAMES.len() - 1 {
+                                    new_idx += 1;
+                                    if is_difficulty_playable(song, new_idx) {
+                                        state.selected_difficulty_index = new_idx;
+                                        break;
+                                    }
+                                }
+                            }
+                            state.last_difficulty_nav_key = None;
+                            state.last_difficulty_nav_time = None;
+                        } else {
+                            state.last_difficulty_nav_key = Some(key_code);
+                            state.last_difficulty_nav_time = Some(now);
+                        }
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(entry) = state.entries.get(state.selected_index).cloned() {
+                        match entry {
+                            MusicWheelEntry::Song(song) => {
+                                info!("Selected song: '{}'. It has {} charts.", song.title, song.charts.len());
+                                return ScreenAction::Navigate(Screen::Gameplay);
+                            }
+                            MusicWheelEntry::PackHeader { name, .. } => {
+                                let pack_name_to_focus = name.clone();
+                                if state.expanded_pack_name.as_ref() == Some(&pack_name_to_focus) {
+                                    state.expanded_pack_name = None;
+                                } else {
+                                    state.expanded_pack_name = Some(pack_name_to_focus.clone());
+                                }
+                                rebuild_displayed_entries(state);
+                                let new_selection = state.entries.iter().position(|e| {
+                                    if let MusicWheelEntry::PackHeader{ name: n, .. } = e { n == &pack_name_to_focus } else { false }
+                                }).unwrap_or(0);
+                                state.selected_index = new_selection;
+                            }
+                        }
+                    }
+                }
+                KeyCode::Escape => return ScreenAction::Navigate(Screen::Menu),
+                _ => {}
+            }
         }
-        PhysicalKey::Code(KeyCode::Escape) => return ScreenAction::Navigate(Screen::Menu),
-        _ => {}
+    } else if event.state == ElementState::Released {
+        if matches!(key_code, KeyCode::ArrowUp | KeyCode::ArrowDown) {
+            state.active_chord_keys.remove(&key_code);
+        }
+        if matches!(key_code, KeyCode::ArrowLeft | KeyCode::KeyA | KeyCode::ArrowRight | KeyCode::KeyD) {
+            state.nav_key_held_direction = None;
+            state.nav_key_held_since = None;
+            state.nav_key_last_scrolled_at = None;
+        }
     }
     ScreenAction::None
 }
@@ -177,12 +314,47 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
     if state.selection_animation_timer > SELECTION_ANIMATION_CYCLE_DURATION {
         state.selection_animation_timer -= SELECTION_ANIMATION_CYCLE_DURATION;
     }
+    
+    // Auto-scroll logic
+    if let (Some(direction), Some(held_since), Some(last_scrolled_at)) =
+        (state.nav_key_held_direction.clone(), state.nav_key_held_since, state.nav_key_last_scrolled_at)
+    {
+        let now = Instant::now();
+        if now.duration_since(held_since) > NAV_INITIAL_HOLD_DELAY {
+            if now.duration_since(last_scrolled_at) >= NAV_REPEAT_SCROLL_INTERVAL {
+                let num_entries = state.entries.len();
+                if num_entries > 0 {
+                    match direction {
+                        NavDirection::Left => state.selected_index = (state.selected_index + num_entries - 1) % num_entries,
+                        NavDirection::Right => state.selected_index = (state.selected_index + 1) % num_entries,
+                    }
+                    state.nav_key_last_scrolled_at = Some(now);
+                }
+            }
+        }
+    }
 
-    let selected_song = if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
-        Some(song.clone())
+
+    let (selected_song, selected_pack) = if let Some(entry) = state.entries.get(state.selected_index) {
+        match entry {
+            MusicWheelEntry::Song(song) => (Some(song.clone()), None),
+            MusicWheelEntry::PackHeader { name, banner_path, .. } => (None, Some((name.clone(), banner_path.clone()))),
+        }
     } else {
-        None
+        (None, None)
     };
+
+    // Auto-adjust difficulty
+    if let Some(song) = &selected_song {
+        if !is_difficulty_playable(song, state.selected_difficulty_index) {
+            for i in 0..DIFFICULTY_NAMES.len() {
+                if is_difficulty_playable(song, i) {
+                    state.selected_difficulty_index = i;
+                    break;
+                }
+            }
+        }
+    }
 
     let chart_to_display = selected_song.as_ref().and_then(|song| {
         let difficulty_name = DIFFICULTY_NAMES[state.selected_difficulty_index];
@@ -195,7 +367,7 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         return ScreenAction::RequestDensityGraph(chart_to_display);
     }
     
-    let new_banner_path = selected_song.as_ref().and_then(|s| s.banner_path.clone());
+    let new_banner_path = selected_song.as_ref().and_then(|s| s.banner_path.clone()).or_else(|| selected_pack.and_then(|(_, path)| path));
     if state.last_requested_banner_path != new_banner_path {
         state.last_requested_banner_path = new_banner_path.clone();
         return ScreenAction::RequestBanner(new_banner_path);
@@ -253,24 +425,17 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let step_info_box_right_x = rating_box_right_x - RATING_BOX_W - GAP;
     actors.push(act!(quad: align(1.0, 1.0): xy(step_info_box_right_x, boxes_bottom_y): zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
     
-    // The top of the main content boxes (rating, step info)
     let boxes_top_y = boxes_bottom_y - RATING_BOX_H;
     let boxes_left_x = step_info_box_right_x - STEP_INFO_BOX_W;
-
-    // --- DENSITY GRAPH ---
-    // Its top should align with the top of the rating box.
     let density_graph_top_y = boxes_top_y;
 
-    // Background for the density graph area
     actors.push(act!(quad:
-        align(0.0, 0.0): // top-left alignment
+        align(0.0, 0.0):
         xy(boxes_left_x, density_graph_top_y):
         zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
         diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0):
         z(z_layer)
     ));
-    
-    // The actual density graph sprite
     actors.push(act!(sprite(state.current_graph_key):
         align(0.0, 0.0):
         xy(boxes_left_x, density_graph_top_y):
@@ -278,22 +443,18 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         z(z_layer + 1)
     ));
 
-    // --- STEP ARTIST BOX ---
-    // Positioned just above the density graph with a small gap.
     const STEP_ARTIST_BOX_W: f32 = 175.2;
     const STEP_ARTIST_BOX_H: f32 = 16.8;
     const GAP_ABOVE_DENSITY: f32 = 1.0;
     let step_artist_box_color = color::simply_love_rgba(state.active_color_index);
     let step_artist_box_bottom_y = density_graph_top_y - GAP_ABOVE_DENSITY;
-    
     actors.push(act!(quad:
-        align(0.0, 1.0): // bottom-left alignment
+        align(0.0, 1.0):
         xy(boxes_left_x, step_artist_box_bottom_y):
         zoomto(STEP_ARTIST_BOX_W, STEP_ARTIST_BOX_H):
         diffuse(step_artist_box_color[0], step_artist_box_color[1], step_artist_box_color[2], 1.0):
         z(z_layer)
     ));
-
 
     const BANNER_BOX_W: f32 = 319.8;
     const BANNER_BOX_H: f32 = 126.0;
@@ -301,22 +462,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let banner_box_top_y = BAR_H + GAP_BELOW_TOP_BAR;
     let banner_box_left_x = boxes_left_x;
     
-    let selected_song: Option<&Arc<SongData>> = if let Some(entry) = state.entries.get(state.selected_index) {
-        if let MusicWheelEntry::Song(song_info) = entry { Some(song_info) } else { None }
-    } else { None };
-
-    let banner_key_to_draw = if selected_song.is_some() {
-        state.current_banner_key // Use the key managed by App for the current song
-    } else {
-        // Fallback for when a pack header is selected
-        let num_banners = BANNER_KEYS.len();
-        let wrapped_index = (state.active_color_index.rem_euclid(num_banners as i32)) as usize;
-        BANNER_KEYS[wrapped_index]
-    };
+    let selected_entry = state.entries.get(state.selected_index);
+    let banner_key_to_draw = state.current_banner_key; // Use the key managed by App, updated in update()
     actors.push(act!(sprite(banner_key_to_draw): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
 
     let rating_box_left_x = rating_box_right_x - RATING_BOX_W;
-    
     const INNER_BOX_SIZE: f32 = 28.2;
     const HORIZONTAL_PADDING: f32 = 1.8;
     const VERTICAL_GAP: f32 = 1.8;
@@ -331,20 +481,21 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             z(z_layer + 1)
         ));
 
-        if let Some(song) = selected_song {
-            let difficulty_name = DIFFICULTY_NAMES[i];
-            if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
-                if chart.meter > 0 {
-                    let color_offset = (DIFFICULTY_NAMES.len() - 1 - i) as i32;
-                    let text_color = color::simply_love_rgba(state.active_color_index - color_offset);
-                    const METER_TEXT_PX: f32 = 20.0;
-                    let text_center_x = inner_box_x + 0.5 * INNER_BOX_SIZE;
-                    let text_center_y = inner_box_y + 0.5 * INNER_BOX_SIZE;
-                    actors.push(act!(text:
-                        align(0.5, 0.5): xy(text_center_x, text_center_y): zoomtoheight(METER_TEXT_PX):
-                        font("wendy"): settext(format!("{}", chart.meter)): horizalign(center):
-                        diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(z_layer + 2)
-                    ));
+        if let Some(MusicWheelEntry::Song(song)) = selected_entry {
+            if is_difficulty_playable(song, i) {
+                if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(DIFFICULTY_NAMES[i])) {
+                    if chart.meter > 0 {
+                        let color_offset = (DIFFICULTY_NAMES.len() - 1 - i) as i32;
+                        let text_color = color::simply_love_rgba(state.active_color_index - color_offset);
+                        const METER_TEXT_PX: f32 = 20.0;
+                        let text_center_x = inner_box_x + 0.5 * INNER_BOX_SIZE;
+                        let text_center_y = inner_box_y + 0.5 * INNER_BOX_SIZE;
+                        actors.push(act!(text:
+                            align(0.5, 0.5): xy(text_center_x, text_center_y): zoomtoheight(METER_TEXT_PX):
+                            font("wendy"): settext(format!("{}", chart.meter)): horizalign(center):
+                            diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(z_layer + 2)
+                        ));
+                    }
                 }
             }
         }
@@ -382,7 +533,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                             let final_box_color = if is_selected_slot { lerp_color(base_color, selected_color, anim_t) } else { base_color };
                             (song_info.title.clone(), final_box_color, [1.0; 4], wheel_left_x + SONG_TEXT_LEFT_PADDING, None)
                         }
-                        MusicWheelEntry::PackHeader { name, original_index } => {
+                        MusicWheelEntry::PackHeader { name, original_index, .. } => {
                             let song_cache = get_song_cache();
                             let count = song_cache.iter().find(|p| &p.name == name).map(|p| p.songs.len()).unwrap_or(0);
                             let base_color = col_pack_header_box();
