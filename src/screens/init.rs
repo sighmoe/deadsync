@@ -20,7 +20,7 @@ const ARROW_FADE_OUT: f32   = 0.75;
 // black bar behind arrows
 const BAR_TARGET_H: f32  = 128.0;
 
-const SQUISH_START_DELAY: f32 = 0.50;   // NEW: pause before unsquish begins
+const SQUISH_START_DELAY: f32 = 0.50;
 const SQUISH_IN_DURATION: f32 = 0.35;
 
 /* ----------------------- auto-advance ----------------------- */
@@ -35,15 +35,14 @@ fn auto_to_menu_at() -> f32 {
 
 pub struct State {
     elapsed: f32,
-    /// Fixed palette base chosen once for this screen (no cycling).
-    base_color_index: i32,
+    pub active_color_index: i32,
     bg: heart_bg::State,
 }
 
 pub fn init() -> State {
     State {
         elapsed: 0.0,
-        base_color_index: color::DEFAULT_COLOR_INDEX,
+        active_color_index: color::DEFAULT_COLOR_INDEX,
         bg: heart_bg::State::new(),
     }
 }
@@ -81,7 +80,7 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
 pub fn get_actors_bg_only(state: &State) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(16);
     actors.extend(state.bg.build(heart_bg::Params {
-        active_color_index: state.base_color_index,
+        active_color_index: state.active_color_index,
         backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
         alpha_mul: 1.0,
     }));
@@ -111,7 +110,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     // 1) HEART BACKGROUND — starts immediately
     actors.extend(state.bg.build(heart_bg::Params {
-        active_color_index: state.base_color_index,
+        active_color_index: state.active_color_index,
         backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
         alpha_mul: 1.0,
     }));
@@ -135,7 +134,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     for i in 1..=ARROW_COUNT {
         let x     = (i as f32 - 4.0) * ARROW_SPACING;
         let delay = unsquish_end + ARROW_BASE_DELAY + ARROW_STEP_DELAY * (i as f32);
-        let tint = color::decorative_rgba(state.base_color_index - i as i32 - 4);
+        // The arrows now use the active color index as a base for their rainbow effect.
+        let tint = color::decorative_rgba(state.active_color_index - i as i32 - 4);
 
         actors.push(act!(sprite("init_arrow.png"):
             align(0.5, 0.5):

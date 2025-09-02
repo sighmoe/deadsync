@@ -88,12 +88,15 @@ impl App {
         select_color_state.bg_from_index = color_index;
         select_color_state.bg_to_index = color_index;
 
-        let mut options_state = options::init(); // <-- ADDED
-        options_state.active_color_index = color_index; // <-- ADDED
+        let mut options_state = options::init();
+        options_state.active_color_index = color_index;
+        
+        let mut init_state = init::init();
+        init_state.active_color_index = color_index;
 
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
-            current_screen: CurrentScreen::Init, init_state: init::init(), menu_state, gameplay_state: gameplay::init(), options_state,
+            current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: gameplay::init(), options_state,
             select_color_state, select_music_state: select_music::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay,
@@ -535,7 +538,7 @@ impl ApplicationHandler for App {
                                 self.menu_state.active_color_index = idx;
                                 self.select_music_state.active_color_index = idx;
                                 self.gameplay_state.player_color = color::decorative_rgba(idx);
-                                self.options_state.active_color_index = idx; // <-- ADDED
+                                self.options_state.active_color_index = idx;
                             }
 
                             // Handle initializations for the target screen.
