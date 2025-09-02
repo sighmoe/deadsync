@@ -588,7 +588,7 @@ pub fn create_texture(
         Some(image_data),
     )?;
 
-    let fmt = if srgb { vk::Format::R8G8B8A8_SRGB } else { vk::Format::R8G8B8A8_UNORM };
+    let fmt = vk::Format::R8G8B8A8_UNORM; // Always use non-sRGB format for legacy blending
     let (tex_image, tex_mem) = create_image(
         state, width, height, fmt, vk::ImageTiling::OPTIMAL,
         vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
@@ -1369,9 +1369,10 @@ fn create_swapchain(
     let formats = unsafe { surface_loader.get_physical_device_surface_formats(pdevice, surface)? };
     let present_modes = unsafe { surface_loader.get_physical_device_surface_present_modes(pdevice, surface)? };
 
-    let format = formats.iter().find(|f| {
-        f.format == vk::Format::B8G8R8A8_SRGB && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
-    }).cloned().unwrap_or(formats[0]);
+    // Force a non-sRGB format to match legacy blending behavior.
+    let format = formats.iter().find(|f| f.format == vk::Format::B8G8R8A8_UNORM)
+        .cloned()
+        .unwrap_or(formats[0]);
     
     let present_mode = if vsync_enabled {
         vk::PresentModeKHR::FIFO

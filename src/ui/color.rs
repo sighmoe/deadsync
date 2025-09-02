@@ -1,9 +1,3 @@
-#[inline(always)]
-pub fn srgb8_to_linear(c: u8) -> f32 {
-    let x = (c as f32) / 255.0;
-    if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
-}
-
 /// Accepts "#rgb", "#rgba", "#rrggbb", "#rrggbbaa" (or without '#').
 /// Panics on invalid input; use only with trusted literals.
 pub fn rgba_hex(s: &str) -> [f32; 4] {
@@ -32,9 +26,9 @@ pub fn rgba_hex(s: &str) -> [f32; 4] {
     };
 
     [
-        srgb8_to_linear(r),
-        srgb8_to_linear(g),
-        srgb8_to_linear(bl),
+        (r as f32) / 255.0,
+        (g as f32) / 255.0,
+        (bl as f32) / 255.0,
         (a as f32) / 255.0,
     ]
 }
