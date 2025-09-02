@@ -2,8 +2,10 @@ mod core;
 mod ui;
 mod screens;
 mod app;
+mod config;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::builder().filter_level(log::LevelFilter::Info).init();
+    config::load();
+    // env_logger is initialized in app::run()
     app::run()
 }

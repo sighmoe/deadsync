@@ -7,6 +7,7 @@ use crate::ui::components::{heart_bg, screen_bar};
 use crate::ui::components::screen_bar::{ScreenBarPosition, ScreenBarTitlePlacement};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use crate::config;
 
 // Native art size of heart.png (for aspect-correct sizing)
 const HEART_NATIVE_W: f32 = 668.0;
@@ -70,6 +71,7 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
     match e.physical_key {
         PhysicalKey::Code(KeyCode::ArrowRight) | PhysicalKey::Code(KeyCode::KeyD) => {
             state.active_color_index += 1;
+            config::update_simply_love_color(state.active_color_index);
             // start a new cross-fade from what's effectively on screen now
             let showing_now = if state.bg_fade_t < BG_FADE_DURATION {
                 let a = (state.bg_fade_t / BG_FADE_DURATION).clamp(0.0, 1.0);
@@ -84,6 +86,7 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
         }
         PhysicalKey::Code(KeyCode::ArrowLeft) | PhysicalKey::Code(KeyCode::KeyA) => {
             state.active_color_index -= 1;
+            config::update_simply_love_color(state.active_color_index);
             let showing_now = if state.bg_fade_t < BG_FADE_DURATION {
                 let a = (state.bg_fade_t / BG_FADE_DURATION).clamp(0.0, 1.0);
                 if (1.0 - a) >= a { state.bg_from_index } else { state.bg_to_index }

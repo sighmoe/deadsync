@@ -1,3 +1,4 @@
+// ===== FILE: src/app.rs =====
 use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList};
 use crate::core::input;
 use crate::core::input::InputState;
@@ -19,80 +20,12 @@ use log::{error, info, warn};
 use image;
 use std::{collections::HashMap, error::Error, path::{Path, PathBuf}, sync::Arc, time::Instant};
 
-const WINDOW_WIDTH: u32 = 1280;
-const WINDOW_HEIGHT: u32 = 800;
-
 /* -------------------- transition timing constants -------------------- */
 const FADE_OUT_DELAY: f32 = 0.1;
 const FADE_OUT_DURATION: f32 = 0.4;
 const FADE_IN_DURATION: f32 = 0.4;
 const MENU_ACTORS_FADE_DURATION: f32 = 0.65;
 const BAR_SQUISH_DURATION: f32 = 0.35;
-
-// ---- args ----
-fn parse_args(args: &[String]) -> (BackendType, bool, bool) {
-    #[inline(always)]
-    fn parse_bool_token(s: &str) -> Option<bool> {
-        match s {
-            "on" | "true" | "1"  => Some(true),
-            "off" | "false" | "0" => Some(false),
-            _ => None,
-        }
-    }
-
-    let mut backend    = BackendType::Vulkan;
-    let mut vsync      = true;
-    let mut fullscreen = false;
-
-    let mut i = 1;
-    while i < args.len() {
-        let a = args[i].as_str();
-        match a {
-            "--opengl"        => backend = BackendType::OpenGL,
-            "--vulkan"        => backend = BackendType::Vulkan,
-
-            "--no-vsync"      => vsync = false,
-            "--vsync"         => {
-                if i + 1 < args.len() {
-                    if let Some(v) = parse_bool_token(args[i + 1].as_str()) {
-                        vsync = v;
-                        i += 1;
-                    } else {
-                        vsync = true;
-                    }
-                } else {
-                    vsync = true;
-                }
-            }
-            _ if a.starts_with("--vsync=") => {
-                let v = &a["--vsync=".len()..];
-                vsync = parse_bool_token(v).unwrap_or(true);
-            }
-
-            "--fullscreen" => {
-                if i + 1 < args.len() {
-                    if let Some(v) = parse_bool_token(args[i + 1].as_str()) {
-                        fullscreen = v;
-                        i += 1;
-                    } else {
-                        fullscreen = true;
-                    }
-                } else {
-                    fullscreen = true;
-                }
-            }
-            "--windowed" => fullscreen = false,
-            _ if a.starts_with("--fullscreen=") => {
-                let v = &a["--fullscreen=".len()..];
-                fullscreen = parse_bool_token(v).unwrap_or(true);
-            }
-
-            _ => {}
-        }
-        i += 1;
-    }
-    (backend, vsync, fullscreen)
-}
 
 /* -------------------- transition state machine -------------------- */
 #[derive(Clone, Copy, Debug)]
@@ -131,19 +64,42 @@ pub struct App {
     select_music_state: select_music::State,
     current_dynamic_banner: Option<(&'static str, PathBuf)>,
     current_density_graph: Option<(&'static str, String)>,
+    display_width: u32,
+    display_height: u32,
 }
 
 impl App {
-    fn new(backend_type: BackendType, vsync_enabled: bool, fullscreen_enabled: bool) -> Self {
+    fn new(
+        backend_type: BackendType,
+        vsync_enabled: bool,
+        fullscreen_enabled: bool,
+        show_overlay: bool,
+        color_index: i32,
+    ) -> Self {
+        let config = crate::config::get();
+        let display_width = config.display_width;
+        let display_height = config.display_height;
+
+        let mut menu_state = menu::init();
+        menu_state.active_color_index = color_index;
+
+        let mut select_color_state = select_color::init();
+        select_color_state.active_color_index = color_index;
+        select_color_state.scroll = color_index as f32;
+        select_color_state.bg_from_index = color_index;
+        select_color_state.bg_to_index = color_index;
+
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
-            current_screen: CurrentScreen::Init, init_state: init::init(), menu_state: menu::init(), gameplay_state: gameplay::init(), options_state: options::init(),
-            select_color_state: select_color::init(), select_music_state: select_music::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
-            start_time: Instant::now(), metrics: space::metrics_for_window(WINDOW_WIDTH, WINDOW_HEIGHT),
-            vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay: false,
+            current_screen: CurrentScreen::Init, init_state: init::init(), menu_state, gameplay_state: gameplay::init(), options_state: options::init(),
+            select_color_state, select_music_state: select_music::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
+            start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
+            vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay,
             last_fps: 0.0, last_vpf: 0, transition: TransitionState::Idle,
             current_dynamic_banner: None,
             current_density_graph: None,
+            display_width,
+            display_height,
         }
     }
 
@@ -450,16 +406,19 @@ impl App {
             .with_title(format!("DeadSync - {:?}", self.backend_type))
             .with_resizable(true);
 
+        let window_width = self.display_width;
+        let window_height = self.display_height;
+
         if self.fullscreen_enabled {
             let fullscreen = if let Some(mon) = event_loop.primary_monitor() {
                 let best_mode = mon.video_modes()
-                    .filter(|m| { let sz = m.size(); sz.width == WINDOW_WIDTH && sz.height == WINDOW_HEIGHT })
+                    .filter(|m| { let sz = m.size(); sz.width == window_width && sz.height == window_height })
                     .max_by_key(|m| m.refresh_rate_millihertz());
                 if let Some(mode) = best_mode {
-                    log::info!("Fullscreen: using EXCLUSIVE {}x{} @ {} mHz", WINDOW_WIDTH, WINDOW_HEIGHT, mode.refresh_rate_millihertz());
+                    log::info!("Fullscreen: using EXCLUSIVE {}x{} @ {} mHz", window_width, window_height, mode.refresh_rate_millihertz());
                     Some(winit::window::Fullscreen::Exclusive(mode))
                 } else {
-                    log::warn!("No exact EXCLUSIVE mode {}x{}; using BORDERLESS.", WINDOW_WIDTH, WINDOW_HEIGHT);
+                    log::warn!("No exact EXCLUSIVE mode {}x{}; using BORDERLESS.", window_width, window_height);
                     Some(winit::window::Fullscreen::Borderless(Some(mon)))
                 }
             } else {
@@ -468,7 +427,7 @@ impl App {
             };
             window_attributes = window_attributes.with_fullscreen(fullscreen);
         } else {
-            window_attributes = window_attributes.with_inner_size(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
+            window_attributes = window_attributes.with_inner_size(PhysicalSize::new(window_width, window_height));
         }
 
         let window = Arc::new(event_loop.create_window(window_attributes)?);
@@ -667,11 +626,16 @@ impl ApplicationHandler for App {
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = env_logger::builder().filter_level(log::LevelFilter::Info).try_init();
-    let args: Vec<String> = std::env::args().collect();
-    let (backend_type, vsync_enabled, fullscreen_enabled) = parse_args(&args);
+    let config = crate::config::get();
+    let backend_type = BackendType::Vulkan; // Using a single backend for now.
+    let vsync_enabled = config.vsync;
+    let fullscreen_enabled = !config.windowed;
+    let show_stats = config.show_stats;
+    let color_index = config.simply_love_color;
+
     song_loading::scan_and_load_songs("songs");
     let event_loop = EventLoop::new()?;
-    let mut app = App::new(backend_type, vsync_enabled, fullscreen_enabled);
+    let mut app = App::new(backend_type, vsync_enabled, fullscreen_enabled, show_stats, color_index);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
