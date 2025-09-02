@@ -180,8 +180,7 @@ fn build_actor_recursive(
                 let sx_abs = sx_raw.abs();
                 let sy_abs = sy_raw.abs();
 
-                // --- Use the actual string's asc/desc for baseline placement ---
-                let (asc, desc) = line_extents_px(fm, content, *px);
+                let (asc, desc) = (asc_fit, desc_fit);
 
                 let origin = place_text_baseline(
                     parent, *align, *offset, *align_text,
