@@ -68,10 +68,14 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
         return ScreenAction::None;
     }
 
+    let num_colors = color::DECORATIVE_HEX.len() as i32;
+
     match e.physical_key {
         PhysicalKey::Code(KeyCode::ArrowRight) | PhysicalKey::Code(KeyCode::KeyD) => {
             state.active_color_index += 1;
-            config::update_simply_love_color(state.active_color_index);
+            // When saving, pass the correctly wrapped value.
+            config::update_simply_love_color(state.active_color_index.rem_euclid(num_colors));
+            
             // start a new cross-fade from what's effectively on screen now
             let showing_now = if state.bg_fade_t < BG_FADE_DURATION {
                 let a = (state.bg_fade_t / BG_FADE_DURATION).clamp(0.0, 1.0);
@@ -86,7 +90,9 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
         }
         PhysicalKey::Code(KeyCode::ArrowLeft) | PhysicalKey::Code(KeyCode::KeyA) => {
             state.active_color_index -= 1;
-            config::update_simply_love_color(state.active_color_index);
+            // When saving, pass the correctly wrapped value.
+            config::update_simply_love_color(state.active_color_index.rem_euclid(num_colors));
+
             let showing_now = if state.bg_fade_t < BG_FADE_DURATION {
                 let a = (state.bg_fade_t / BG_FADE_DURATION).clamp(0.0, 1.0);
                 if (1.0 - a) >= a { state.bg_from_index } else { state.bg_to_index }
@@ -98,7 +104,7 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
             state.bg_fade_t     = 0.0;
             ScreenAction::None
         }
-        PhysicalKey::Code(KeyCode::Enter) => ScreenAction::Navigate(Screen::SelectMusic), // CHANGED
+        PhysicalKey::Code(KeyCode::Enter) => ScreenAction::Navigate(Screen::SelectMusic),
         PhysicalKey::Code(KeyCode::Escape) => ScreenAction::Navigate(Screen::Menu),
         _ => ScreenAction::None,
     }
