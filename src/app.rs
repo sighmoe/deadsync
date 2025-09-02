@@ -33,6 +33,7 @@ enum TransitionState {
     FadingOut { elapsed: f32, target: CurrentScreen },
     FadingIn  { elapsed: f32 },
     BarSquishOut { elapsed: f32, target: CurrentScreen },
+    ActorsFadeOut { elapsed: f32, target: CurrentScreen },
     ActorsFadeIn { elapsed: f32 },
 }
 
@@ -321,9 +322,19 @@ impl App {
         match action {
             ScreenAction::Navigate(screen) => {
                 if matches!(self.transition, TransitionState::Idle) {
-                    if self.current_screen == CurrentScreen::Init && screen == CurrentScreen::Menu {
+                    let from = self.current_screen;
+                    let to = screen;
+
+                    let is_actor_only_fade =
+                        (from == CurrentScreen::Menu && (to == CurrentScreen::Options || to == CurrentScreen::SelectColor)) ||
+                        ((from == CurrentScreen::Options || from == CurrentScreen::SelectColor) && to == CurrentScreen::Menu);
+
+                    if from == CurrentScreen::Init && to == CurrentScreen::Menu {
                         info!("Starting special Init→Menu transition (bar squish; no global fade)");
                         self.transition = TransitionState::BarSquishOut { elapsed: 0.0, target: screen };
+                    } else if is_actor_only_fade {
+                        info!("Starting actor-only fade out to screen: {:?}", screen);
+                        self.transition = TransitionState::ActorsFadeOut { elapsed: 0.0, target: screen };
                     } else {
                         info!("Starting global fade out to screen: {:?}", screen);
                         self.transition = TransitionState::FadingOut { elapsed: 0.0, target: screen };
@@ -346,20 +357,29 @@ impl App {
         crate::ui::compose::build_screen(actors, clear_color, &self.metrics, &self.fonts, total_elapsed)
     }
 
-    fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
+fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
         let mut screen_alpha_multiplier = 1.0;
-        if let TransitionState::ActorsFadeIn { elapsed } = self.transition {
-            if self.current_screen == CurrentScreen::Menu {
-                screen_alpha_multiplier = (elapsed / MENU_ACTORS_FADE_DURATION).clamp(0.0, 1.0);
+
+        let is_actor_fade_screen = matches!(self.current_screen, CurrentScreen::Menu | CurrentScreen::Options | CurrentScreen::SelectColor);
+
+        if is_actor_fade_screen {
+            match self.transition {
+                TransitionState::ActorsFadeIn { elapsed } => {
+                    screen_alpha_multiplier = (elapsed / MENU_ACTORS_FADE_DURATION).clamp(0.0, 1.0);
+                },
+                TransitionState::ActorsFadeOut { elapsed, .. } => {
+                    screen_alpha_multiplier = 1.0 - (elapsed / FADE_OUT_DURATION).clamp(0.0, 1.0);
+                },
+                _ => {},
             }
         }
 
         let mut actors = match self.current_screen {
             CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier),
             CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state),
-            CurrentScreen::Options  => options::get_actors(&self.options_state),
-            CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state),
+            CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
+            CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, screen_alpha_multiplier),
             CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state),
             CurrentScreen::Init     => {
                 if matches!(self.transition, TransitionState::BarSquishOut { .. }) {
@@ -550,6 +570,24 @@ impl ApplicationHandler for App {
                             }
 
                             self.transition = TransitionState::FadingIn { elapsed: 0.0 };
+                            crate::ui::runtime::clear_all();
+                        }
+                    }
+                    TransitionState::ActorsFadeOut { elapsed, target } => {
+                        *elapsed += delta_time;
+                        if *elapsed >= FADE_OUT_DURATION {
+                            let prev = self.current_screen;
+                            self.current_screen = *target;
+
+                            if prev == CurrentScreen::SelectColor {
+                                let idx = self.select_color_state.active_color_index;
+                                self.menu_state.active_color_index = idx;
+                                self.select_music_state.active_color_index = idx;
+                                self.gameplay_state.player_color = color::decorative_rgba(idx);
+                                self.options_state.active_color_index = idx;
+                            }
+
+                            self.transition = TransitionState::ActorsFadeIn { elapsed: 0.0 };
                             crate::ui::runtime::clear_all();
                         }
                     }

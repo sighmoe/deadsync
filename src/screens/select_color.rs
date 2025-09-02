@@ -8,6 +8,7 @@ use crate::ui::components::screen_bar::{ScreenBarPosition, ScreenBarTitlePlaceme
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use crate::config;
+use crate::ui::actors;
 
 // Native art size of heart.png (for aspect-correct sizing)
 const HEART_NATIVE_W: f32 = 668.0;
@@ -112,7 +113,23 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
 
 /* ------------------------------- drawing ------------------------------- */
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
+/// Helper to recursively apply an alpha multiplier to an actor and its children.
+fn apply_alpha_to_actor(actor: &mut Actor, alpha: f32) {
+    match actor {
+        Actor::Sprite { tint, .. } => tint[3] *= alpha,
+        Actor::Text { color, .. } => color[3] *= alpha,
+        Actor::Frame { background, children, .. } => {
+            if let Some(actors::Background::Color(c)) = background {
+                c[3] *= alpha;
+            }
+            for child in children {
+                apply_alpha_to_actor(child, alpha);
+            }
+        }
+    }
+}
+
+pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(64);
 
     // 1) Animated heart background with a short cross-fade between colors.
@@ -141,9 +158,15 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         }));
     }
 
+    if alpha_multiplier <= 0.0 {
+        return actors;
+    }
+
+    let mut ui_actors = Vec::new();
+
     // 2) Bars (top + bottom)
     const FG: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-    actors.push(screen_bar::build(screen_bar::ScreenBarParams {
+    ui_actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "SELECT A COLOR",
         title_placement: ScreenBarTitlePlacement::Left,   // big title on the left
         position: ScreenBarPosition::Top,
@@ -153,7 +176,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         right_text: None,    // later: Some("P1 • READY")
         fg_color: FG,
     }));
-    actors.push(screen_bar::build(screen_bar::ScreenBarParams {
+    ui_actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "EVENT MODE",
         title_placement: ScreenBarTitlePlacement::Center,
         position: ScreenBarPosition::Bottom,
@@ -248,7 +271,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             1.0 - t * t // ease-out
         };
 
-        actors.push(act!(sprite("heart.png"):
+        ui_actors.push(act!(sprite("heart.png"):
             align(0.5, 0.5):
             xy(x, screen_center_y() + y):
             rotationz(rot_deg):
@@ -258,6 +281,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             diffuse(tint[0], tint[1], tint[2], alpha)
         ));
     }
+
+    for actor in &mut ui_actors {
+        apply_alpha_to_actor(actor, alpha_multiplier);
+    }
+    actors.extend(ui_actors);
 
     actors
 }

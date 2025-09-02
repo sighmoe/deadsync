@@ -5,6 +5,7 @@ use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::{heart_bg, screen_bar};
 use crate::ui::components::screen_bar::{ScreenBarPosition, ScreenBarTitlePlacement};
+use crate::ui::actors;
 
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -152,19 +153,40 @@ fn scaled_block_origin_with_margins() -> (f32, f32, f32) {
 
 /* -------------------------------- drawing -------------------------------- */
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
-    let mut v: Vec<Actor> = Vec::with_capacity(320);
+fn apply_alpha_to_actor(actor: &mut Actor, alpha: f32) {
+    match actor {
+        Actor::Sprite { tint, .. } => tint[3] *= alpha,
+        Actor::Text { color, .. } => color[3] *= alpha,
+        Actor::Frame { background, children, .. } => {
+            if let Some(actors::Background::Color(c)) = background {
+                c[3] *= alpha;
+            }
+            for child in children {
+                apply_alpha_to_actor(child, alpha);
+            }
+        }
+    }
+}
+
+pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
+    let mut actors: Vec<Actor> = Vec::with_capacity(320);
 
     /* -------------------------- HEART BACKGROUND -------------------------- */
-    v.extend(state.bg.build(heart_bg::Params {
+    actors.extend(state.bg.build(heart_bg::Params {
         active_color_index: state.active_color_index, // <-- CHANGED
         backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
         alpha_mul: 1.0,
     }));
 
+    if alpha_multiplier <= 0.0 {
+        return actors;
+    }
+
+    let mut ui_actors = Vec::new();
+
     /* ------------------------------ TOP BAR ------------------------------- */
     const FG: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
-    v.push(screen_bar::build(screen_bar::ScreenBarParams {
+    ui_actors.push(screen_bar::build(screen_bar::ScreenBarParams {
         title: "OPTIONS",
         title_placement: ScreenBarTitlePlacement::Left,
         position: ScreenBarPosition::Top,
@@ -203,7 +225,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let desc_h = DESC_H * s;
 
     // Separator immediately to the RIGHT of the rows, aligned to the FIRST row top
-    v.push(act!(quad:
+    ui_actors.push(act!(quad:
         align(0.0, 0.0):
         xy(list_x + list_w, list_y):
         zoomto(sep_w, desc_h):
@@ -212,7 +234,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     // Description box (RIGHT of separator), aligned to the first row top
     let desc_x = list_x + list_w + sep_w;
-    v.push(act!(quad:
+    ui_actors.push(act!(quad:
         align(0.0, 0.0):
         xy(desc_x, list_y):
         zoomto(desc_w, desc_h):
@@ -257,7 +279,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             col_inactive_bg
         };
 
-        v.push(act!(quad:
+        ui_actors.push(act!(quad:
             align(0.0, 0.0):
             xy(list_x, row_y):
             zoomto(row_w, ROW_H * s):
@@ -278,7 +300,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         // Heart sprite (skip for Exit)
         if !is_exit {
             let heart_tint = if is_active { col_active_text } else { col_white };
-            v.push(act!(sprite("heart.png"):
+            ui_actors.push(act!(sprite("heart.png"):
                 align(0.0, 0.5):
                 xy(content_left, row_mid_y):
                 zoomto(heart_w, heart_h):
@@ -306,7 +328,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             col_white
         };
 
-        v.push(act!(text:
+        ui_actors.push(act!(text:
             align(0.0, 0.0):
             xy(text_x, row_mid_y - 0.5 * text_h + TEXT_BASELINE_NUDGE_PX):
             zoomtoheight(text_h):
@@ -326,7 +348,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut cursor_y = list_y + 18.0 * s;
 
     // Title (selected item name)
-    v.push(act!(text:
+    ui_actors.push(act!(text:
         align(0.0, 0.0):
         xy(desc_x + desc_pad_x, cursor_y):
         zoomtoheight(title_px):
@@ -338,7 +360,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     // Help text
     for &line in ITEMS[sel].help {
-        v.push(act!(text:
+        ui_actors.push(act!(text:
             align(0.0, 0.0):
             xy(desc_x + desc_pad_x + 12.0 * s, cursor_y):
             zoomtoheight(body_px):
@@ -349,5 +371,10 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         cursor_y += body_px + 8.0 * s;
     }
 
-    v
+    for actor in &mut ui_actors {
+        apply_alpha_to_actor(actor, alpha_multiplier);
+    }
+    actors.extend(ui_actors);
+
+    actors
 }

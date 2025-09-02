@@ -7,7 +7,7 @@ use crate::ui::components::heart_bg;
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
