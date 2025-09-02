@@ -1,4 +1,5 @@
 /target
 /songs
-prompt.txt
 Cargo.lock
+deadsync.ini
+prompt.txt

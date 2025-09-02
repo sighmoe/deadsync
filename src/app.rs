@@ -1,4 +1,3 @@
-// ===== FILE: src/app.rs =====
 use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList};
 use crate::core::input;
 use crate::core::input::InputState;
@@ -89,9 +88,12 @@ impl App {
         select_color_state.bg_from_index = color_index;
         select_color_state.bg_to_index = color_index;
 
+        let mut options_state = options::init(); // <-- ADDED
+        options_state.active_color_index = color_index; // <-- ADDED
+
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
-            current_screen: CurrentScreen::Init, init_state: init::init(), menu_state, gameplay_state: gameplay::init(), options_state: options::init(),
+            current_screen: CurrentScreen::Init, init_state: init::init(), menu_state, gameplay_state: gameplay::init(), options_state,
             select_color_state, select_music_state: select_music::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay,
@@ -524,20 +526,26 @@ impl ApplicationHandler for App {
                         if *elapsed >= FADE_OUT_DELAY + FADE_OUT_DURATION {
                             let prev = self.current_screen;
                             self.current_screen = *target;
-
-                            if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Gameplay {
+                            
+                            // ---- REFACTORED STATE PROPAGATION ----
+                            // When leaving the color select screen, propagate the chosen color
+                            // to all other relevant screens. This is the new source of truth.
+                            if prev == CurrentScreen::SelectColor {
                                 let idx = self.select_color_state.active_color_index;
+                                self.menu_state.active_color_index = idx;
+                                self.select_music_state.active_color_index = idx;
                                 self.gameplay_state.player_color = color::decorative_rgba(idx);
+                                self.options_state.active_color_index = idx; // <-- ADDED
                             }
-                            if prev == CurrentScreen::SelectColor && *target == CurrentScreen::Menu {
-                                self.menu_state.active_color_index = self.select_color_state.active_color_index;
-                            }
+
+                            // Handle initializations for the target screen.
                             if *target == CurrentScreen::SelectMusic {
+                                // Re-init the screen but preserve the color we just set.
+                                let current_color_index = self.select_music_state.active_color_index;
                                 self.select_music_state = select_music::init();
-                                if prev == CurrentScreen::SelectColor {
-                                    self.select_music_state.active_color_index = self.select_color_state.active_color_index;
-                                }
+                                self.select_music_state.active_color_index = current_color_index;
                             }
+
                             self.transition = TransitionState::FadingIn { elapsed: 0.0 };
                             crate::ui::runtime::clear_all();
                         }

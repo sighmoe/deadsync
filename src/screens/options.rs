@@ -69,11 +69,16 @@ const ITEMS: &[Item] = &[
 
 pub struct State {
     pub selected: usize,
+    pub active_color_index: i32, // <-- ADDED
     bg: heart_bg::State,
 }
 
 pub fn init() -> State {
-    State { selected: 0, bg: heart_bg::State::new() }
+    State {
+        selected: 0,
+        active_color_index: color::DEFAULT_COLOR_INDEX, // <-- ADDED
+        bg: heart_bg::State::new(),
+    }
 }
 
 /* --------------------------------- input --------------------------------- */
@@ -152,7 +157,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     /* -------------------------- HEART BACKGROUND -------------------------- */
     v.extend(state.bg.build(heart_bg::Params {
-        active_color_index: color::DEFAULT_COLOR_INDEX,
+        active_color_index: state.active_color_index, // <-- CHANGED
         backdrop_rgba: [0.0, 0.0, 0.0, 1.0],
         alpha_mul: 1.0,
     }));
@@ -182,8 +187,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let col_white      = [1.0, 1.0, 1.0, 1.0];
     let col_black      = [0.0, 0.0, 0.0, 1.0];
 
-    // Simply Love brand color (same index used by the heart bg).
-    let col_brand_bg   = color::simply_love_rgba(color::DEFAULT_COLOR_INDEX);
+    // Simply Love brand color (now uses the active theme color).
+    let col_brand_bg   = color::simply_love_rgba(state.active_color_index); // <-- CHANGED
 
     // Active text color (for normal rows) – keep using a palette color keyed by selection.
     let col_active_text = color::simply_love_rgba(state.selected as i32);
