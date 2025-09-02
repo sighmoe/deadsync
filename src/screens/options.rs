@@ -9,21 +9,6 @@ use crate::ui::components::screen_bar::{ScreenBarPosition, ScreenBarTitlePlaceme
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-/* =============================================================================
-   Options — rows LEFT, description RIGHT
-   + hearts background + top/bottom bars
-
-   Margins (screen pixels, not scaled):
-   • LEFT  = 25 px from the left edge to the start of the rows
-   • TOP   = 17 px from the content area’s top (just below the top bar) to row #1
-   • RIGHT = 17 px from the screen’s right edge to the *right edge* of the description box
-
-   Layout block (unscaled spec; uniformly scaled by `s` to fit between gutters):
-   • Rows area width: 721 px, 10 visible rows, each 55 px tall, 3 px vertical gap
-   • Separator: 3 px
-   • Description: 484 px wide, **577 px tall** (matches 10×55 + 9×3)
-============================================================================= */
-
 /// Bars in `screen_bar.rs` use 32.0 px height.
 const BAR_H: f32 = 32.0;
 
@@ -346,18 +331,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     ));
     cursor_y += title_px + 12.0 * s;
 
-    // Help bullets
+    // Help text
     for &line in ITEMS[sel].help {
-        // bullet
-        v.push(act!(text:
-            align(0.0, 0.0):
-            xy(desc_x + desc_pad_x, cursor_y):
-            zoomtoheight(body_px):
-            diffuse(1.0, 1.0, 1.0, 1.0):
-            font("miso"): settext("•"):
-            horizalign(left)
-        ));
-        // text
         v.push(act!(text:
             align(0.0, 0.0):
             xy(desc_x + desc_pad_x + 12.0 * s, cursor_y):
