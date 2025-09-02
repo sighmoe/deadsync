@@ -1,7 +1,9 @@
 // ===== FILE: src/config.rs =====
+use crate::core::gfx::BackendType;
 use configparser::ini::Ini;
 use log::{info, warn};
 use once_cell::sync::Lazy;
+use std::str::FromStr;
 use std::sync::Mutex;
 
 const CONFIG_PATH: &str = "deadsync.ini";
@@ -13,6 +15,7 @@ pub struct Config {
     pub show_stats: bool,
     pub display_width: u32,
     pub display_height: u32,
+    pub video_renderer: BackendType,
     pub simply_love_color: i32,
 }
 
@@ -24,6 +27,7 @@ impl Default for Config {
             show_stats: false,
             display_width: 1600,
             display_height: 900,
+            video_renderer: BackendType::Vulkan,
             simply_love_color: 2, // Corresponds to DEFAULT_COLOR_INDEX
         }
     }
@@ -42,6 +46,7 @@ fn create_default_config_file() -> Result<(), std::io::Error> {
     conf.set("Options", "ShowStats", Some((if default.show_stats { "1" } else { "0" }).to_string()));
     conf.set("Options", "DisplayWidth", Some(default.display_width.to_string()));
     conf.set("Options", "DisplayHeight", Some(default.display_height.to_string()));
+    conf.set("Options", "VideoRenderer", Some(default.video_renderer.to_string()));
     conf.set("Theme", "SimplyLoveColor", Some(default.simply_love_color.to_string()));
 
     conf.write(CONFIG_PATH)
@@ -67,6 +72,9 @@ pub fn load() {
             cfg.show_stats = conf.get("Options", "ShowStats").and_then(|v| v.parse::<u8>().ok()).map_or(default.show_stats, |v| v != 0);
             cfg.display_width = conf.get("Options", "DisplayWidth").and_then(|v| v.parse().ok()).unwrap_or(default.display_width);
             cfg.display_height = conf.get("Options", "DisplayHeight").and_then(|v| v.parse().ok()).unwrap_or(default.display_height);
+            cfg.video_renderer = conf.get("Options", "VideoRenderer")
+                .and_then(|s| BackendType::from_str(&s).ok())
+                .unwrap_or(default.video_renderer);
             cfg.simply_love_color = conf.get("Theme", "SimplyLoveColor").and_then(|v| v.parse().ok()).unwrap_or(default.simply_love_color);
             
             info!("Configuration loaded from '{}'.", CONFIG_PATH);
@@ -86,6 +94,7 @@ fn save() {
     conf.set("Options", "ShowStats", Some((if cfg.show_stats { "1" } else { "0" }).to_string()));
     conf.set("Options", "DisplayWidth", Some(cfg.display_width.to_string()));
     conf.set("Options", "DisplayHeight", Some(cfg.display_height.to_string()));
+    conf.set("Options", "VideoRenderer", Some(cfg.video_renderer.to_string()));
     conf.set("Theme", "SimplyLoveColor", Some(cfg.simply_love_color.to_string()));
     
     if let Err(e) = conf.write(CONFIG_PATH) {

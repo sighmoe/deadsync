@@ -4,7 +4,7 @@ use crate::core::gfx::backends::{opengl, vulkan};
 use cgmath::Matrix4;
 use glow::HasContext;
 use image::RgbaImage;
-use std::{collections::HashMap, error::Error, sync::Arc};
+use std::{collections::HashMap, error::Error, sync::Arc, str::FromStr}; // <-- ADD FromStr
 use winit::window::Window;
 
 // --- Public Data Contract ---
@@ -167,5 +167,17 @@ pub fn cleanup(backend: &mut Backend) {
 impl core::fmt::Display for BackendType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self { Self::Vulkan => write!(f, "Vulkan"), Self::OpenGL => write!(f, "OpenGL") }
+    }
+}
+
+impl FromStr for BackendType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "vulkan" => Ok(BackendType::Vulkan),
+            "opengl" => Ok(BackendType::OpenGL),
+            _ => Err(format!("'{}' is not a valid video renderer", s)),
+        }
     }
 }

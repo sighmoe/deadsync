@@ -638,7 +638,7 @@ impl ApplicationHandler for App {
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _ = env_logger::builder().filter_level(log::LevelFilter::Info).try_init();
     let config = crate::config::get();
-    let backend_type = BackendType::Vulkan; // Using a single backend for now.
+    let backend_type = config.video_renderer;
     let vsync_enabled = config.vsync;
     let fullscreen_enabled = !config.windowed;
     let show_stats = config.show_stats;
