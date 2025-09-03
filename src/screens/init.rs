@@ -105,6 +105,19 @@ pub fn build_squish_bar(progress: f32) -> Actor {
     )
 }
 
+pub fn out_transition() -> (Vec<Actor>, f32) {
+    let actor = act!(quad:
+        align(0.5, 0.5):
+        xy(0.5 * screen_width(), screen_center_y()):
+        zoomto(screen_width(), BAR_TARGET_H):
+        diffuse(0.0, 0.0, 0.0, 1.0):
+        z(1200):
+        croptop(0.0): cropbottom(0.0):
+        linear(0.35): croptop(0.5): cropbottom(0.5)
+    );
+    (vec![actor], 0.35)
+}
+
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(32 + ARROW_COUNT);
 

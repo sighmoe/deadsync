@@ -7,6 +7,10 @@ use crate::ui::components::{heart_bg, screen_bar};
 use crate::ui::components::screen_bar::{ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::ui::actors;
 
+/* ---------------------------- transitions ---------------------------- */
+const TRANSITION_IN_DURATION: f32 = 0.4;
+const TRANSITION_OUT_DURATION: f32 = 0.4;
+
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -80,6 +84,29 @@ pub fn init() -> State {
         active_color_index: color::DEFAULT_COLOR_INDEX, // <-- ADDED
         bg: heart_bg::State::new(),
     }
+}
+
+pub fn in_transition() -> (Vec<Actor>, f32) {
+    let actor = act!(quad:
+        align(0.0, 0.0): xy(0.0, 0.0):
+        zoomto(screen_width(), screen_height()):
+        diffuse(0.0, 0.0, 0.0, 1.0):
+        z(1100):
+        linear(TRANSITION_IN_DURATION): alpha(0.0):
+        linear(0.0): visible(false)
+    );
+    (vec![actor], TRANSITION_IN_DURATION)
+}
+
+pub fn out_transition() -> (Vec<Actor>, f32) {
+    let actor = act!(quad:
+        align(0.0, 0.0): xy(0.0, 0.0):
+        zoomto(screen_width(), screen_height()):
+        diffuse(0.0, 0.0, 0.0, 0.0):
+        z(1200):
+        linear(TRANSITION_OUT_DURATION): alpha(1.0)
+    );
+    (vec![actor], TRANSITION_OUT_DURATION)
 }
 
 /* --------------------------------- input --------------------------------- */

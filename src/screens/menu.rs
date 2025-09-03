@@ -13,6 +13,10 @@ use crate::core::song_loading::get_song_cache;
 
 use crate::core::space::globals::*;
 
+/* ---------------------------- transitions ---------------------------- */
+const TRANSITION_IN_DURATION: f32 = 0.5;
+const TRANSITION_OUT_DURATION: f32 = 0.3;
+
 const NORMAL_COLOR_HEX: &str = "#888888";
 
 const OPTION_COUNT: usize = 3;
@@ -69,6 +73,29 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
             ScreenAction::None
         }
     }
+}
+
+pub fn in_transition() -> (Vec<Actor>, f32) {
+    let actor = act!(quad:
+        align(0.0, 0.0): xy(0.0, 0.0):
+        zoomto(screen_width(), screen_height()):
+        diffuse(0.0, 0.0, 0.0, 1.0):
+        z(1100):
+        linear(TRANSITION_IN_DURATION): alpha(0.0):
+        linear(0.0): visible(false)
+    );
+    (vec![actor], TRANSITION_IN_DURATION)
+}
+
+pub fn out_transition() -> (Vec<Actor>, f32) {
+    let actor = act!(quad:
+        align(0.0, 0.0): xy(0.0, 0.0):
+        zoomto(screen_width(), screen_height()):
+        diffuse(0.0, 0.0, 0.0, 0.0):
+        z(1200):
+        linear(TRANSITION_OUT_DURATION): alpha(1.0)
+    );
+    (vec![actor], TRANSITION_OUT_DURATION)
 }
 
 // Signature changed to accept the alpha_multiplier

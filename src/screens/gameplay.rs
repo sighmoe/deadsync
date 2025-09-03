@@ -2,12 +2,14 @@ use crate::core::input::InputState;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::act;
+use crate::core::space::globals::*;
 use cgmath::Vector2;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-// import the globals getters
-use crate::core::space::globals::*;
+/* ---------------------------- transitions ---------------------------- */
+const TRANSITION_IN_DURATION: f32 = 0.4;
+const TRANSITION_OUT_DURATION: f32 = 0.4;
 
 const PLAYER_SPEED: f32 = 250.0;
 
@@ -49,6 +51,29 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) {
     let step = PLAYER_SPEED * delta_time * norm;
     state.player_position.x += dx * step;
     state.player_position.y += dy * step;
+}
+
+pub fn in_transition() -> (Vec<Actor>, f32) {
+    let actor = act!(quad:
+        align(0.0, 0.0): xy(0.0, 0.0):
+        zoomto(screen_width(), screen_height()):
+        diffuse(0.0, 0.0, 0.0, 1.0):
+        z(1100):
+        linear(TRANSITION_IN_DURATION): alpha(0.0):
+        linear(0.0): visible(false)
+    );
+    (vec![actor], TRANSITION_IN_DURATION)
+}
+
+pub fn out_transition() -> (Vec<Actor>, f32) {
+    let actor = act!(quad:
+        align(0.0, 0.0): xy(0.0, 0.0):
+        zoomto(screen_width(), screen_height()):
+        diffuse(0.0, 0.0, 0.0, 0.0):
+        z(1200):
+        linear(TRANSITION_OUT_DURATION): alpha(1.0)
+    );
+    (vec![actor], TRANSITION_OUT_DURATION)
 }
 
 // keep Metrics in the signature (unused), so call sites don't change

@@ -27,11 +27,11 @@ const MENU_ACTORS_FADE_DURATION: f32 = 0.65;
 const BAR_SQUISH_DURATION: f32 = 0.35;
 
 /* -------------------- transition state machine -------------------- */
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 enum TransitionState {
     Idle,
-    FadingOut { elapsed: f32, target: CurrentScreen },
-    FadingIn  { elapsed: f32 },
+    FadingOut { elapsed: f32, duration: f32, target: CurrentScreen, actors: Vec<Actor> },
+    FadingIn  { elapsed: f32, duration: f32, actors: Vec<Actor> },
     BarSquishOut { elapsed: f32, target: CurrentScreen },
     ActorsFadeOut { elapsed: f32, target: CurrentScreen },
     ActorsFadeIn { elapsed: f32 },
@@ -336,8 +336,14 @@ impl App {
                         info!("Starting actor-only fade out to screen: {:?}", screen);
                         self.transition = TransitionState::ActorsFadeOut { elapsed: 0.0, target: screen };
                     } else {
-                        info!("Starting global fade out to screen: {:?}", screen);
-                        self.transition = TransitionState::FadingOut { elapsed: 0.0, target: screen };
+                        info!("Starting global fade out to screen: {:?}", screen);                        
+                        let (out_actors, out_duration) = self.get_out_transition_for_screen(self.current_screen);
+                        self.transition = TransitionState::FadingOut {
+                            elapsed: 0.0,
+                            duration: out_duration,
+                            target: screen,
+                            actors: out_actors,
+                        };
                     }
                 }
             }
@@ -345,7 +351,6 @@ impl App {
                 info!("Exit action received. Shutting down.");
                 event_loop.exit();
             }
-            // Add the missing pattern arm here
             ScreenAction::RequestBanner(_) => {}
             ScreenAction::RequestDensityGraph(_) => {} // This action is handled in RedrawRequested
             ScreenAction::None => {}
@@ -357,7 +362,7 @@ impl App {
         crate::ui::compose::build_screen(actors, clear_color, &self.metrics, &self.fonts, total_elapsed)
     }
 
-fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
+    fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
         let mut screen_alpha_multiplier = 1.0;
 
@@ -395,14 +400,16 @@ fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
             actors.extend(overlay);
         }
 
-        let overlay_alpha = match self.transition {
-            TransitionState::FadingOut { elapsed, .. } => ((elapsed - FADE_OUT_DELAY) / FADE_OUT_DURATION).clamp(0.0, 1.0),
-            TransitionState::FadingIn  { elapsed, .. } => 1.0 - (elapsed / FADE_IN_DURATION).clamp(0.0, 1.0),
-            _ => 0.0,
-        };
-
-        if overlay_alpha > 0.0 {
-            actors.push(crate::ui::components::fade::black(overlay_alpha));
+        // The new tween-based transition actors handle fades.
+        // We add them here from the state.
+        match &self.transition {
+            TransitionState::FadingOut { actors: out_actors, .. } => {
+                actors.extend(out_actors.clone());
+            }
+            TransitionState::FadingIn { actors: in_actors, .. } => {
+                actors.extend(in_actors.clone());
+            }
+            _ => {}
         }
 
         if let TransitionState::BarSquishOut { elapsed, .. } = self.transition {
@@ -411,6 +418,29 @@ fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         }
         (actors, CLEAR)
     }
+    
+    fn get_out_transition_for_screen(&self, screen: CurrentScreen) -> (Vec<Actor>, f32) {
+        match screen {
+            CurrentScreen::Menu => menu::out_transition(),
+            CurrentScreen::Gameplay => gameplay::out_transition(),
+            CurrentScreen::Options => options::out_transition(),
+            CurrentScreen::SelectColor => select_color::out_transition(),
+            CurrentScreen::SelectMusic => select_music::out_transition(),
+            CurrentScreen::Init => init::out_transition(),
+        }
+    }
+
+    fn get_in_transition_for_screen(&self, screen: CurrentScreen) -> (Vec<Actor>, f32) {
+        match screen {
+            CurrentScreen::Menu => menu::in_transition(),
+            CurrentScreen::Gameplay => gameplay::in_transition(),
+            CurrentScreen::Options => options::in_transition(),
+            CurrentScreen::SelectColor => select_color::in_transition(),
+            CurrentScreen::SelectMusic => select_music::in_transition(),
+            CurrentScreen::Init => (vec![], 0.0), // Init screen has no "in" transition
+        }
+    }
+
 
     #[inline(always)]
     fn update_fps_title(&mut self, window: &Window, now: Instant) {
@@ -543,34 +573,16 @@ impl ApplicationHandler for App {
                 let total_elapsed = now.duration_since(self.start_time).as_secs_f32();
                 crate::ui::runtime::tick(delta_time);
 
+                // This value will be populated only when the FadingOut transition finishes.
+                let mut finished_fading_out_to: Option<CurrentScreen> = None;
+
+                // Handle state updates and most transitions within the match.
                 match &mut self.transition {
-                    TransitionState::FadingOut { elapsed, target } => {
+                    TransitionState::FadingOut { elapsed, duration, target, .. } => {
                         *elapsed += delta_time;
-                        if *elapsed >= FADE_OUT_DELAY + FADE_OUT_DURATION {
-                            let prev = self.current_screen;
-                            self.current_screen = *target;
-                            
-                            // ---- REFACTORED STATE PROPAGATION ----
-                            // When leaving the color select screen, propagate the chosen color
-                            // to all other relevant screens. This is the new source of truth.
-                            if prev == CurrentScreen::SelectColor {
-                                let idx = self.select_color_state.active_color_index;
-                                self.menu_state.active_color_index = idx;
-                                self.select_music_state.active_color_index = idx;
-                                self.gameplay_state.player_color = color::decorative_rgba(idx);
-                                self.options_state.active_color_index = idx;
-                            }
-
-                            // Handle initializations for the target screen.
-                            if *target == CurrentScreen::SelectMusic {
-                                // Re-init the screen but preserve the color we just set.
-                                let current_color_index = self.select_music_state.active_color_index;
-                                self.select_music_state = select_music::init();
-                                self.select_music_state.active_color_index = current_color_index;
-                            }
-
-                            self.transition = TransitionState::FadingIn { elapsed: 0.0 };
-                            crate::ui::runtime::clear_all();
+                        if *elapsed >= *duration {
+                            // Defer the creation of the next state to after this match block.
+                            finished_fading_out_to = Some(*target);
                         }
                     }
                     TransitionState::ActorsFadeOut { elapsed, target } => {
@@ -591,9 +603,9 @@ impl ApplicationHandler for App {
                             crate::ui::runtime::clear_all();
                         }
                     }
-                    TransitionState::FadingIn { elapsed } => {
+                    TransitionState::FadingIn { elapsed, duration, .. } => {
                         *elapsed += delta_time;
-                        if *elapsed >= FADE_IN_DURATION {
+                        if *elapsed >= *duration {
                             self.transition = TransitionState::Idle;
                         }
                     }
@@ -632,12 +644,40 @@ impl ApplicationHandler for App {
                                         let key = self.set_density_graph(chart_opt.as_ref());
                                         self.select_music_state.current_graph_key = key;
                                     }
-                                    _ => {}
+                                    _ => { let _ = self.handle_action(action, event_loop); },
                                 }
                             }
                             _ => {}
                         }
                     }
+                }
+
+                // If FadingOut finished, handle the state change now that the mutable borrow is released.
+                if let Some(target) = finished_fading_out_to {
+                    let prev = self.current_screen;
+                    self.current_screen = target;
+                    
+                    if prev == CurrentScreen::SelectColor {
+                        let idx = self.select_color_state.active_color_index;
+                        self.menu_state.active_color_index = idx;
+                        self.select_music_state.active_color_index = idx;
+                        self.gameplay_state.player_color = color::decorative_rgba(idx);
+                        self.options_state.active_color_index = idx;
+                    }
+
+                    if target == CurrentScreen::SelectMusic {
+                        let current_color_index = self.select_music_state.active_color_index;
+                        self.select_music_state = select_music::init();
+                        self.select_music_state.active_color_index = current_color_index;
+                    }
+
+                    let (in_actors, in_duration) = self.get_in_transition_for_screen(target);
+                    self.transition = TransitionState::FadingIn { 
+                        elapsed: 0.0,
+                        duration: in_duration,
+                        actors: in_actors
+                    };
+                    crate::ui::runtime::clear_all();
                 }
 
                 let (actors, clear_color) = self.get_current_actors();

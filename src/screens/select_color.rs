@@ -10,6 +10,10 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use crate::config;
 use crate::ui::actors;
 
+/* ---------------------------- transitions ---------------------------- */
+const TRANSITION_IN_DURATION: f32 = 0.4;
+const TRANSITION_OUT_DURATION: f32 = 0.4;
+
 // Native art size of heart.png (for aspect-correct sizing)
 const HEART_NATIVE_W: f32 = 668.0;
 const HEART_NATIVE_H: f32 = 566.0;
@@ -127,6 +131,29 @@ fn apply_alpha_to_actor(actor: &mut Actor, alpha: f32) {
             }
         }
     }
+}
+
+pub fn in_transition() -> (Vec<Actor>, f32) {
+    let actor = act!(quad:
+        align(0.0, 0.0): xy(0.0, 0.0):
+        zoomto(screen_width(), screen_height()):
+        diffuse(0.0, 0.0, 0.0, 1.0):
+        z(1100):
+        linear(TRANSITION_IN_DURATION): alpha(0.0):
+        linear(0.0): visible(false)
+    );
+    (vec![actor], TRANSITION_IN_DURATION)
+}
+
+pub fn out_transition() -> (Vec<Actor>, f32) {
+    let actor = act!(quad:
+        align(0.0, 0.0): xy(0.0, 0.0):
+        zoomto(screen_width(), screen_height()):
+        diffuse(0.0, 0.0, 0.0, 0.0):
+        z(1200):
+        linear(TRANSITION_OUT_DURATION): alpha(1.0)
+    );
+    (vec![actor], TRANSITION_OUT_DURATION)
 }
 
 pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
