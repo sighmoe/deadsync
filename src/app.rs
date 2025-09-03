@@ -32,7 +32,6 @@ enum TransitionState {
     Idle,
     FadingOut { elapsed: f32, duration: f32, target: CurrentScreen, actors: Vec<Actor> },
     FadingIn  { elapsed: f32, duration: f32, actors: Vec<Actor> },
-    BarSquishOut { elapsed: f32, target: CurrentScreen },
     ActorsFadeOut { elapsed: f32, target: CurrentScreen },
     ActorsFadeIn { elapsed: f32 },
 }
@@ -321,18 +320,25 @@ impl App {
     fn handle_action(&mut self, action: ScreenAction, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn Error>> {
         match action {
             ScreenAction::Navigate(screen) => {
-                if matches!(self.transition, TransitionState::Idle) {
-                    let from = self.current_screen;
-                    let to = screen;
+                let from = self.current_screen;
+                let to = screen;
 
+                // Special case: The Init screen handles its own out-transition (the bar squish).
+                // We just need to switch the screen and start the Menu's in-transition.
+                if from == CurrentScreen::Init && to == CurrentScreen::Menu {
+                    info!("Instant navigation Init→Menu (out-transition handled by Init screen)");
+                    self.current_screen = screen;
+                    self.transition = TransitionState::ActorsFadeIn { elapsed: 0.0 };
+                    crate::ui::runtime::clear_all();
+                    return Ok(());
+                }
+
+                if matches!(self.transition, TransitionState::Idle) {
                     let is_actor_only_fade =
                         (from == CurrentScreen::Menu && (to == CurrentScreen::Options || to == CurrentScreen::SelectColor)) ||
                         ((from == CurrentScreen::Options || from == CurrentScreen::SelectColor) && to == CurrentScreen::Menu);
 
-                    if from == CurrentScreen::Init && to == CurrentScreen::Menu {
-                        info!("Starting special Init→Menu transition (bar squish; no global fade)");
-                        self.transition = TransitionState::BarSquishOut { elapsed: 0.0, target: screen };
-                    } else if is_actor_only_fade {
+                    if is_actor_only_fade {
                         info!("Starting actor-only fade out to screen: {:?}", screen);
                         self.transition = TransitionState::ActorsFadeOut { elapsed: 0.0, target: screen };
                     } else {
@@ -386,13 +392,7 @@ impl App {
             CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
             CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, screen_alpha_multiplier),
             CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state),
-            CurrentScreen::Init     => {
-                if matches!(self.transition, TransitionState::BarSquishOut { .. }) {
-                    init::get_actors_bg_only(&self.init_state)
-                } else {
-                    init::get_actors(&self.init_state)
-                }
-            }
+            CurrentScreen::Init     => init::get_actors(&self.init_state),
         };
 
         if self.show_overlay {
@@ -412,10 +412,6 @@ impl App {
             _ => {}
         }
 
-        if let TransitionState::BarSquishOut { elapsed, .. } = self.transition {
-            let t = (elapsed / BAR_SQUISH_DURATION).clamp(0.0, 1.0);
-            actors.push(crate::screens::init::build_squish_bar(t));
-        }
         (actors, CLEAR)
     }
     
@@ -607,14 +603,6 @@ impl ApplicationHandler for App {
                         *elapsed += delta_time;
                         if *elapsed >= *duration {
                             self.transition = TransitionState::Idle;
-                        }
-                    }
-                    TransitionState::BarSquishOut { elapsed, target } => {
-                        *elapsed += delta_time;
-                        if *elapsed >= BAR_SQUISH_DURATION {
-                            self.current_screen = *target;
-                            self.transition = TransitionState::ActorsFadeIn { elapsed: 0.0 };
-                            crate::ui::runtime::clear_all();
                         }
                     }
                     TransitionState::ActorsFadeIn { elapsed } => {

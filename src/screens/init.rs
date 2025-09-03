@@ -18,23 +18,31 @@ const ARROW_FADE_IN: f32    = 0.75;
 const ARROW_FADE_OUT: f32   = 0.75;
 
 // black bar behind arrows
-const BAR_TARGET_H: f32  = 128.0;
+const BAR_TARGET_H: f32 = 128.0;
 
 const SQUISH_START_DELAY: f32 = 0.50;
 const SQUISH_IN_DURATION: f32 = 0.35;
+pub const BAR_SQUISH_DURATION: f32 = 0.35;
 
 /* ----------------------- auto-advance ----------------------- */
+/// Calculates the time when the final arrow's fade-out animation completes.
 #[inline(always)]
-fn auto_to_menu_at() -> f32 {
+fn arrows_finished_at() -> f32 {
     let last_delay = ARROW_BASE_DELAY + ARROW_STEP_DELAY * (ARROW_COUNT as f32);
-    // wait → unsquish → arrows fade in/out → tiny pad
     SQUISH_START_DELAY + SQUISH_IN_DURATION + last_delay + ARROW_FADE_IN + ARROW_FADE_OUT + 0.05
 }
 
 /* ---------------------------- state ---------------------------- */
 
+#[derive(PartialEq, Eq)]
+enum InitPhase {
+    Playing,
+    FadingOut,
+}
+
 pub struct State {
     elapsed: f32,
+    phase: InitPhase,
     pub active_color_index: i32,
     bg: heart_bg::State,
 }
@@ -42,6 +50,7 @@ pub struct State {
 pub fn init() -> State {
     State {
         elapsed: 0.0,
+        phase: InitPhase::Playing,
         active_color_index: color::DEFAULT_COLOR_INDEX,
         bg: heart_bg::State::new(),
     }
@@ -68,11 +77,20 @@ pub fn handle_key_press(_: &mut State, event: &KeyEvent) -> ScreenAction {
 
 pub fn update(state: &mut State, dt: f32) -> ScreenAction {
     state.elapsed += dt;
-    if state.elapsed >= auto_to_menu_at() {
-        ScreenAction::Navigate(Screen::Menu)
-    } else {
-        ScreenAction::None
+
+    if state.phase == InitPhase::Playing && state.elapsed >= arrows_finished_at() {
+        state.phase = InitPhase::FadingOut;
+        // Pin elapsed to the start of the fade out to drive the squish animation correctly.
+        state.elapsed = arrows_finished_at();
     }
+
+    if state.phase == InitPhase::FadingOut {
+        let fade_elapsed = state.elapsed - arrows_finished_at();
+        if fade_elapsed >= BAR_SQUISH_DURATION {
+            return ScreenAction::Navigate(Screen::Menu);
+        }
+    }
+    ScreenAction::None
 }
 
 /* --------------------------- drawing --------------------------- */
@@ -128,13 +146,20 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         alpha_mul: 1.0,
     }));
 
-    // 2) SQUISH BAR — wait, then unsquish over SQUISH_IN_DURATION
+    // 2) SQUISH BAR — driven by the state's current phase.
     let t = state.elapsed;
-    let progress = if t < SQUISH_START_DELAY {
+    let progress = if state.phase == InitPhase::FadingOut {
+        // Phase 3: Squishing (0 -> 1)
+        let fade_elapsed = t - arrows_finished_at();
+        (fade_elapsed / BAR_SQUISH_DURATION).clamp(0.0, 1.0)
+    } else if t < SQUISH_START_DELAY {
+        // Phase 1: Squished line
         1.0 // fully squished (line)
     } else if t < SQUISH_START_DELAY + SQUISH_IN_DURATION {
+        // Phase 2: Unsquishing (1 -> 0)
         1.0 - ((t - SQUISH_START_DELAY) / SQUISH_IN_DURATION) // 1→0
     } else {
+        // Phase 2.5: Fully open, waiting for arrows to finish
         0.0 // fully open
     };
     actors.push(build_squish_bar(progress));
