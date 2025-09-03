@@ -293,9 +293,10 @@ fn build_sprite_like<'a>(
 }
 
 #[inline(always)]
-pub fn sprite<'a>(tex: &'static str, mods: &[Mod<'a>], f: &'static str, l: u32, c: u32) -> Actor {
+pub fn sprite<'a>(tex: String, mods: &[Mod<'a>], f: &'static str, l: u32, c: u32) -> Actor {
     build_sprite_like(SpriteSource::Texture(tex), mods, f, l, c)
 }
+
 #[inline(always)]
 pub fn quad<'a>(mods: &[Mod<'a>], f: &'static str, l: u32, c: u32) -> Actor {
     build_sprite_like(SpriteSource::Solid, mods, f, l, c)
@@ -425,7 +426,7 @@ macro_rules! act {
         $crate::__dsl_apply!( ($($tail)+) __mods __tw __cur _dummy_site );
         if let ::core::option::Option::Some(seg)=__cur.take(){__tw.push(seg.build());}
         if !__tw.is_empty(){ __mods.push($crate::ui::dsl::Mod::Tween(&__tw)); }
-        $crate::ui::dsl::sprite($tex, &__mods, file!(), line!(), column!())
+        $crate::ui::dsl::sprite(($tex).to_string(), &__mods, file!(), line!(), column!())
     }};
     (quad: $($tail:tt)+) => {{
         let mut __mods = ::std::vec::Vec::new();

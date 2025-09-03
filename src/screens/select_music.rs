@@ -62,9 +62,9 @@ pub struct State {
     pub expanded_pack_name: Option<String>,
     bg: heart_bg::State,
     pub last_requested_banner_path: Option<PathBuf>,
-    pub current_banner_key: &'static str,
+    pub current_banner_key: String,
     pub last_requested_chart_hash: Option<String>,
-    pub current_graph_key: &'static str,
+    pub current_graph_key: String,
     // --- NEW STATE FOR BEHAVIORS ---
     pub active_chord_keys: HashSet<KeyCode>,
     pub last_difficulty_nav_key: Option<KeyCode>,
@@ -159,9 +159,9 @@ pub fn init() -> State {
         expanded_pack_name: None,
         bg: heart_bg::State::new(),
         last_requested_banner_path: None,
-        current_banner_key: "banner1.png",
+        current_banner_key: "banner1.png".to_string(),
         last_requested_chart_hash: None,
-        current_graph_key: "__white",
+        current_graph_key: "__white".to_string(),
         // --- INITIALIZE NEW STATE ---
         active_chord_keys: HashSet::new(),
         last_difficulty_nav_key: None,
@@ -462,7 +462,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0):
         z(z_layer)
     ));
-    actors.push(act!(sprite(state.current_graph_key):
+    actors.push(act!(sprite(state.current_graph_key.as_str()):
         align(0.0, 0.0):
         xy(boxes_left_x, density_graph_top_y):
         zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
@@ -489,8 +489,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let banner_box_left_x = boxes_left_x;
     
     let selected_entry = state.entries.get(state.selected_index);
-    let banner_key_to_draw = state.current_banner_key; // Use the key managed by App, updated in update()
-    actors.push(act!(sprite(banner_key_to_draw): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
+    let banner_key_to_draw = &state.current_banner_key;
+    actors.push(act!(sprite(banner_key_to_draw.clone()): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
 
     let rating_box_left_x = rating_box_right_x - RATING_BOX_W;
     const INNER_BOX_SIZE: f32 = 28.2;

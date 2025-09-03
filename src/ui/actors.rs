@@ -1,3 +1,4 @@
+// FILE: src/ui/actors.rs
 use crate::core::gfx::BlendMode;
 
 #[allow(dead_code)]
@@ -25,9 +26,9 @@ pub enum SizeSpec {
 
 /// A sprite can be sourced from either a texture or a solid color.
 /// For `Solid`, the final color is `tint` (no sampling).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum SpriteSource {
-    Texture(&'static str),
+    Texture(String), // <-- CHANGED
     Solid,
 }
 

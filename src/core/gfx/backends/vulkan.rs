@@ -572,7 +572,7 @@ fn transition_image_layout_cmd(
 pub fn create_texture(
     state: &mut State,
     image: &RgbaImage,
-    srgb: bool,
+    _srgb: bool,
 ) -> Result<Texture, Box<dyn Error>> {
     // Take an owned Arc so we never borrow `state` immutably while we also mutate it.
     let device_arc = state.device.as_ref().unwrap().clone();
@@ -643,10 +643,12 @@ unsafe fn bytes_of<T>(v: &T) -> &[u8] {
     }
 }
 
+// FILE: src/core/gfx/backends/vulkan.rs
+
 pub fn draw(
     state: &mut State,
     render_list: &RenderList,
-    textures: &HashMap<&'static str, RendererTexture>,
+    textures: &HashMap<String, RendererTexture>,
 ) -> Result<u32, Box<dyn Error>> {
     use cgmath::{Matrix4, Vector4};
 
@@ -816,7 +818,7 @@ pub fn draw(
                             }
                         }
 
-                        if let Some(RendererTexture::Vulkan(tex)) = textures.get(texture_id) {
+                        if let Some(RendererTexture::Vulkan(tex)) = textures.get(*texture_id) {
                             bind_pipeline!(state.msdf_pipeline);
                             bind_set!(state.msdf_pipeline_layout, tex.descriptor_set);
                             let first_byte = (start * std::mem::size_of::<GlyphInstance>()) as vk::DeviceSize;

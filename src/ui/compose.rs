@@ -104,44 +104,45 @@ fn build_actor_recursive(
             if !*visible { return; }
             let rect = place_rect(parent, *align, *offset, *size);
 
+            let (is_solid, texture_name) = match source {
+                actors::SpriteSource::Solid => (true, "__white"),
+                actors::SpriteSource::Texture(name) => (false, name.as_str()),
+            };
+            
             // --- Decide which cell to use (static or animated) ---
             let mut chosen_cell = *cell;
             let mut chosen_grid = *grid;
 
-            if uv_rect.is_none() {
-                if let actors::SpriteSource::Texture(tex) = source {
-                    // Prefer explicit grid; otherwise infer from filename suffix "_CxR"
-                    let (cols, rows) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(tex));
-                    let total = cols.saturating_mul(rows).max(1);
+            if !is_solid && uv_rect.is_none() {
+                // Prefer explicit grid; otherwise infer from filename suffix "_CxR"
+                let (cols, rows) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(texture_name));
+                let total = cols.saturating_mul(rows).max(1);
 
-                    // Convert a 2D cell to linear if needed (row-major)
-                    let start_linear: u32 = match *cell {
-                        Some((cx, cy)) if cy != u32::MAX => {
-                            let cx = cx.min(cols.saturating_sub(1));
-                            let cy = cy.min(rows.saturating_sub(1));
-                            cy.saturating_mul(cols).saturating_add(cx)
-                        }
-                        Some((i, _)) => i, // cy == u32::MAX => already linear
-                        None => 0,
-                    };
-
-                    if *animate && *state_delay > 0.0 && total > 1 {
-                        // Loop frames: (start + floor(t / delay)) % total
-                        let steps = (total_elapsed / *state_delay).floor().max(0.0) as u32;
-                        let idx = (start_linear + (steps % total)) % total;
-                        chosen_cell = Some((idx, u32::MAX)); // linear index sentinel
-                        chosen_grid = Some((cols, rows));
-                    } else if chosen_cell.is_none() && total > 1 {
-                        // Multiple states available, default to frame 0
-                        chosen_cell = Some((0, u32::MAX));
-                        chosen_grid = Some((cols, rows));
+                // Convert a 2D cell to linear if needed (row-major)
+                let start_linear: u32 = match *cell {
+                    Some((cx, cy)) if cy != u32::MAX => {
+                        let cx = cx.min(cols.saturating_sub(1));
+                        let cy = cy.min(rows.saturating_sub(1));
+                        cy.saturating_mul(cols).saturating_add(cx)
                     }
+                    Some((i, _)) => i, // cy == u32::MAX => already linear
+                    None => 0,
+                };
+
+                if *animate && *state_delay > 0.0 && total > 1 {
+                    let steps = (total_elapsed / *state_delay).floor().max(0.0) as u32;
+                    let idx = (start_linear + (steps % total)) % total;
+                    chosen_cell = Some((idx, u32::MAX));
+                    chosen_grid = Some((cols, rows));
+                } else if chosen_cell.is_none() && total > 1 {
+                    chosen_cell = Some((0, u32::MAX));
+                    chosen_grid = Some((cols, rows));
                 }
             }
 
             let before = out.len();
             push_sprite(
-                out, rect, m, *source, *tint, *uv_rect, chosen_cell, chosen_grid,
+                out, rect, m, is_solid, texture_name, *tint, *uv_rect, chosen_cell, chosen_grid,
                 *flip_x, *flip_y,
                 *cropleft, *cropright, *croptop, *cropbottom,
                 *fadeleft, *faderight, *fadetop, *fadebottom,
@@ -228,15 +229,13 @@ fn build_actor_recursive(
                         let before = out.len();
                         push_sprite(
                             out, rect, m,
-                            actors::SpriteSource::Solid, *c,
+                            true, "__white", *c,
                             None, None, None,
                             false, false,
-                            0.0, 0.0, 0.0, 0.0,      // crop L/R/T/B
-                            0.0, 0.0, 0.0, 0.0,      // fade L/R/T/B
+                            0.0, 0.0, 0.0, 0.0,
+                            0.0, 0.0, 0.0, 0.0,
                             BlendMode::Alpha,
-                            0.0,                     // rot_z_deg
-                            None,                    // texcoordvelocity
-                            0.0,                     // total_elapsed (use your variable if you have it)
+                            0.0, None, total_elapsed,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
@@ -247,15 +246,13 @@ fn build_actor_recursive(
                         let before = out.len();
                         push_sprite(
                             out, rect, m,
-                            actors::SpriteSource::Texture(*tex), [1.0; 4],
+                            false, tex, [1.0; 4],
                             None, None, None,
                             false, false,
-                            0.0, 0.0, 0.0, 0.0,      // crop L/R/T/B
-                            0.0, 0.0, 0.0, 0.0,      // fade L/R/T/B
+                            0.0, 0.0, 0.0, 0.0,
+                            0.0, 0.0, 0.0, 0.0,
                             BlendMode::Alpha,
-                            0.0,                     // rot_z_deg
-                            None,                    // texcoordvelocity
-                            0.0,                     // total_elapsed (or your variable)
+                            0.0, None, total_elapsed,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
@@ -337,7 +334,7 @@ fn place_rect(parent: SmRect, align: [f32; 2], offset: [f32; 2], size: [SizeSpec
 
 #[inline(always)]
 fn calculate_uvs(
-    texture: &'static str,
+    texture: &str, // <-- CHANGED
     uv_rect: Option<[f32; 4]>,
     cell: Option<(u32, u32)>,
     grid: Option<(u32, u32)>,
@@ -404,7 +401,8 @@ fn push_sprite(
     out: &mut Vec<renderer::RenderObject>,
     rect: SmRect,
     m: &Metrics,
-    source: actors::SpriteSource,
+    is_solid: bool,
+    texture_id: &str,
     tint: [f32; 4],
     uv_rect: Option<[f32; 4]>,
     cell: Option<(u32, u32)>,
@@ -424,47 +422,31 @@ fn push_sprite(
     texcoordvelocity: Option<[f32; 2]>,
     total_elapsed: f32,
 ) {
-    // 0) Trivial reject: fully transparent
-    if tint[3] <= 0.0 {
-        return;
-    }
+    if tint[3] <= 0.0 { return; }
 
-    // 1) Clamp crop once (SM behavior).
     let (cl, cr, ct, cb) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
-
-    // 2) Base world center/size from the *uncropped* rect (pivot already applied by place_rect).
     let (base_center, base_size) = sm_rect_to_world_center_size(rect, m);
+    if base_size.x <= 0.0 || base_size.y <= 0.0 { return; }
 
-    // Trivial reject: zero-sized before/after crop
-    if base_size.x <= 0.0 || base_size.y <= 0.0 {
-        return;
-    }
-
-    // 3) Compute crop scale and local offset (in pre-rot, world units).
     let sx_crop = (1.0 - cl - cr).max(0.0);
     let sy_crop = (1.0 - ct - cb).max(0.0);
     if sx_crop <= 0.0 || sy_crop <= 0.0 { return; }
 
-    // local offset of the cropped sub-rect center, relative to the original center
     let off_local_x = 0.5 * (cl - cr) * base_size.x;
     let off_local_y = 0.5 * (ct - cb) * base_size.y;
     let (off_world_x, off_world_y) = rotate2(off_local_x, off_local_y, rot_z_deg);
 
-    // final world center and size
     let center_x = base_center.x + off_world_x;
     let center_y = base_center.y + off_world_y;
     let size_x = base_size.x * sx_crop;
     let size_y = base_size.y * sy_crop;
 
-    // 4) UVs
-    let (uv_scale, uv_offset) = match source {
-        actors::SpriteSource::Solid => ([1.0, 1.0], [0.0, 0.0]),
-        actors::SpriteSource::Texture(texture) => calculate_uvs(
-            texture, uv_rect, cell, grid, flip_x, flip_y, cl, cr, ct, cb, texcoordvelocity, total_elapsed
-        ),
+    let (uv_scale, uv_offset) = if is_solid {
+        ([1.0, 1.0], [0.0, 0.0])
+    } else {
+        calculate_uvs(texture_id, uv_rect, cell, grid, flip_x, flip_y, cl, cr, ct, cb, texcoordvelocity, total_elapsed)
     };
 
-    // 5) Edge fades
     let fl = fadeleft.clamp(0.0, 1.0);
     let fr = faderight.clamp(0.0, 1.0);
     let ft = fadetop.clamp(0.0, 1.0);
@@ -478,20 +460,16 @@ fn push_sprite(
     if flip_x { std::mem::swap(&mut fl_eff, &mut fr_eff); }
     if flip_y { std::mem::swap(&mut ft_eff, &mut fb_eff); }
 
-    // 6) Compose transform
     let transform =
         Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0)) *
         Matrix4::from_angle_z(Deg(rot_z_deg)) *
         Matrix4::from_nonuniform_scale(size_x, size_y, 1.0);
-
-    let (texture_id, uv_s, uv_o) = match source {
-        actors::SpriteSource::Solid => ("__white", [1.0, 1.0], [0.0, 0.0]),
-        actors::SpriteSource::Texture(texture) => (texture, uv_scale, uv_offset),
-    };
+    
+    let final_texture_id = if is_solid { "__white".to_string() } else { texture_id.to_string() };
 
     out.push(renderer::RenderObject {
         object_type: renderer::ObjectType::Sprite {
-            texture_id, tint, uv_scale: uv_s, uv_offset: uv_o, edge_fade: [fl_eff, fr_eff, ft_eff, fb_eff],
+            texture_id: final_texture_id, tint, uv_scale, uv_offset, edge_fade: [fl_eff, fr_eff, ft_eff, fb_eff],
         },
         transform,
         blend,

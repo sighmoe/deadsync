@@ -1,10 +1,11 @@
+// FILE: src/core/gfx/mod.rs
 mod backends;
 
 use crate::core::gfx::backends::{opengl, vulkan};
 use cgmath::Matrix4;
 use glow::HasContext;
 use image::RgbaImage;
-use std::{collections::HashMap, error::Error, sync::Arc, str::FromStr}; // <-- ADD FromStr
+use std::{collections::HashMap, error::Error, str::FromStr, sync::Arc};
 use winit::window::Window;
 
 // --- Public Data Contract ---
@@ -30,7 +31,7 @@ pub struct RenderObject {
 #[derive(Clone)]
 pub enum ObjectType {
     Sprite {
-        texture_id: &'static str,
+        texture_id: String, // <-- THIS IS THE KEY CHANGE
         tint: [f32; 4],
         uv_scale: [f32; 2],
         uv_offset: [f32; 2],
@@ -114,7 +115,7 @@ pub fn create_texture(
 }
 
 /// Disposes of all textures currently in the texture manager.
-pub fn dispose_textures(backend: &mut Backend, textures: &mut HashMap<&'static str, Texture>) {
+pub fn dispose_textures(backend: &mut Backend, textures: &mut HashMap<String, Texture>) {
     match backend {
         Backend::Vulkan(state) => {
             unsafe {
@@ -140,7 +141,7 @@ pub fn dispose_textures(backend: &mut Backend, textures: &mut HashMap<&'static s
 pub fn draw(
     backend: &mut Backend,
     render_list: &RenderList,
-    textures: &HashMap<&'static str, Texture>,
+    textures: &HashMap<String, Texture>,
 ) -> Result<u32, Box<dyn Error>> {
     match backend {
         Backend::Vulkan(state) => vulkan::draw(state, render_list, textures),

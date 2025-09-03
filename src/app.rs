@@ -40,7 +40,7 @@ pub struct App {
     window: Option<Arc<Window>>,
     backend: Option<renderer::Backend>,
     backend_type: BackendType,
-    texture_manager: HashMap<&'static str, renderer::Texture>,
+    texture_manager: HashMap<String, renderer::Texture>,
     current_screen: CurrentScreen,
     menu_state: menu::State,
     gameplay_state: gameplay::State,
@@ -61,8 +61,8 @@ pub struct App {
     init_state: init::State,
     select_color_state: select_color::State,
     select_music_state: select_music::State,
-    current_dynamic_banner: Option<(&'static str, PathBuf)>,
-    current_density_graph: Option<(&'static str, String)>,
+    current_dynamic_banner: Option<(String, PathBuf)>,
+    current_density_graph: Option<(String, String)>,
     display_width: u32,
     display_height: u32,
 }
@@ -124,7 +124,7 @@ impl App {
         {
             let white = image::RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255]).unwrap();
             let white_tex = renderer::create_texture(backend, &white, renderer::TextureColorSpace::Srgb)?;
-            self.texture_manager.insert("__white", white_tex);
+            self.texture_manager.insert("__white".to_string(), white_tex);
             info!("Loaded built-in texture: __white");
         }
 
@@ -138,6 +138,9 @@ impl App {
             ("banner8.png", "_fallback/banner8.png"), ("banner9.png", "_fallback/banner9.png"),
             ("banner10.png", "_fallback/banner10.png"), ("banner11.png", "_fallback/banner11.png"),
             ("banner12.png", "_fallback/banner12.png"),
+            ("noteskins/bar/tex_notes.png", "noteskins/bar/tex_notes.png"),
+            ("noteskins/bar/tex_receptors.png", "noteskins/bar/tex_receptors.png"),
+            ("noteskins/bar/tex_glow.png", "noteskins/bar/tex_glow.png"),
         ];
 
         let mut handles = Vec::with_capacity(textures_to_load.len());
@@ -156,15 +159,22 @@ impl App {
             match h.join().expect("texture decode thread panicked") {
                 Ok((key, rgba)) => {
                     let texture = renderer::create_texture(backend, &rgba, renderer::TextureColorSpace::Srgb)?;
-                    self.texture_manager.insert(key, texture);
+                    self.texture_manager.insert(key.to_string(), texture);
                     info!("Loaded texture: {}", key);
                 }
                 Err((key, msg)) => {
                     warn!("Failed to load texture for key '{}': {}. Using fallback.", key, msg);
                     let texture = renderer::create_texture(backend, &fallback_image, renderer::TextureColorSpace::Srgb)?;
-                    self.texture_manager.insert(key, texture);
+                    self.texture_manager.insert(key.to_string(), texture);
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
+        for &name in &["wendy", "miso"] {
+            self.load_font_asset(name)?;
         }
         Ok(())
     }
@@ -178,18 +188,11 @@ impl App {
         let image_data = image::open(&png_path)?.to_rgba8();
 
         let texture = renderer::create_texture(backend, &image_data, renderer::TextureColorSpace::Linear)?;
-        self.texture_manager.insert(name, texture);
+        self.texture_manager.insert(name.to_string(), texture);
 
         let font = msdf::load_font(&json_data, name, 4.0);
         self.fonts.insert(name, font);
         info!("Loaded font '{}'", name);
-        Ok(())
-    }
-
-    fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
-        for &name in &["wendy", "miso"] {
-            self.load_font_asset(name)?;
-        }
         Ok(())
     }
 
@@ -202,10 +205,7 @@ impl App {
                     }
                 }
             }
-            self.texture_manager.remove(key);
-            unsafe {
-                let _ = Box::from_raw(key as *const str as *mut str);
-            }
+            self.texture_manager.remove(&key);
         }
     }
 
@@ -218,24 +218,21 @@ impl App {
                     }
                 }
             }
-            self.texture_manager.remove(key);
-            unsafe {
-                let _ = Box::from_raw(key as *const str as *mut str);
-            }
+            self.texture_manager.remove(&key);
         }
     }
 
-    fn set_dynamic_banner(&mut self, path_opt: Option<PathBuf>) -> &'static str {
+    fn set_dynamic_banner(&mut self, path_opt: Option<PathBuf>) -> String {
         if let Some(path) = path_opt {
             if self.current_dynamic_banner.as_ref().map_or(false, |(_, p)| p == &path) {
-                return self.current_dynamic_banner.as_ref().unwrap().0;
+                return self.current_dynamic_banner.as_ref().unwrap().0.clone();
             }
 
             self.destroy_current_dynamic_banner();
 
             let backend = match self.backend.as_mut() {
                 Some(b) => b,
-                None => return "banner1.png",
+                None => return "banner1.png".to_string(),
             };
 
             match image::open(&path) {
@@ -243,77 +240,72 @@ impl App {
                     let rgba = img.to_rgba8();
                     match renderer::create_texture(backend, &rgba, renderer::TextureColorSpace::Srgb) {
                         Ok(texture) => {
-                            let key: &'static str = Box::leak(path.to_string_lossy().into_owned().into_boxed_str());
-                            self.texture_manager.insert(key, texture);
-                            self.current_dynamic_banner = Some((key, path));
+                            let key = path.to_string_lossy().into_owned();
+                            self.texture_manager.insert(key.clone(), texture);
+                            self.current_dynamic_banner = Some((key.clone(), path));
                             key
                         }
                         Err(e) => {
                             warn!("Failed to create GPU texture for {:?}: {}. Using fallback.", path, e);
-                            "banner1.png"
+                            "banner1.png".to_string()
                         }
                     }
                 }
                 Err(e) => {
                     warn!("Failed to open banner image {:?}: {}. Using fallback.", path, e);
-                    "banner1.png"
+                    "banner1.png".to_string()
                 }
             }
         } else {
             self.destroy_current_dynamic_banner();
-            "banner1.png"
+            "banner1.png".to_string()
         }
     }
 
 
-    fn set_density_graph(&mut self, chart_opt: Option<&ChartData>) -> &'static str {
-        const FALLBACK_KEY: &'static str = "__white";
+    fn set_density_graph(&mut self, chart_opt: Option<&ChartData>) -> String {
+        const FALLBACK_KEY: &str = "__white";
 
         if let Some(chart) = chart_opt {
-            // If the graph for this chart's hash is already the active one, do nothing.
             if self.current_density_graph.as_ref().map_or(false, |(_, h)| h == &chart.short_hash) {
-                return self.current_density_graph.as_ref().unwrap().0;
+                return self.current_density_graph.as_ref().unwrap().0.clone();
             }
 
-            // It's a new chart, so destroy the old graph texture.
             self.destroy_current_density_graph();
             
             if let Some(graph_data) = &chart.density_graph {
                 let backend = match self.backend.as_mut() {
                     Some(b) => b,
-                    None => return FALLBACK_KEY,
+                    None => return FALLBACK_KEY.to_string(),
                 };
 
-                // This is where the engine takes on the dependency to create an image object.
                 let rgba_image = match image::RgbaImage::from_raw(graph_data.width, graph_data.height, graph_data.data.clone()) {
                     Some(img) => img,
                     None => {
                         warn!("Failed to create RgbaImage from raw graph data for chart hash '{}'. Using fallback.", chart.short_hash);
-                        return FALLBACK_KEY;
+                        return FALLBACK_KEY.to_string();
                     }
                 };
 
                 match renderer::create_texture(backend, &rgba_image, renderer::TextureColorSpace::Srgb) {
                     Ok(texture) => {
-                        let key: &'static str = Box::leak(chart.short_hash.clone().into_boxed_str());
-                        self.texture_manager.insert(key, texture);
-                        self.current_density_graph = Some((key, chart.short_hash.clone()));
+                        let key = chart.short_hash.clone();
+                        self.texture_manager.insert(key.clone(), texture);
+                        self.current_density_graph = Some((key.clone(), chart.short_hash.clone()));
                         key
                     }
                     Err(e) => {
                         warn!("Failed to create GPU texture for density graph ('{}'): {}. Using fallback.", chart.short_hash, e);
-                        FALLBACK_KEY
+                        FALLBACK_KEY.to_string()
                     }
                 }
             } else {
-                // The chart exists, but has no graph data.
                 self.destroy_current_density_graph();
-                FALLBACK_KEY
+                FALLBACK_KEY.to_string()
             }
         } else {
-            // No chart is selected (e.g., a pack header is selected).
             self.destroy_current_density_graph();
-            FALLBACK_KEY
+            FALLBACK_KEY.to_string()
         }
     }
 
@@ -694,6 +686,7 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.destroy_current_dynamic_banner();
+        self.destroy_current_density_graph();
         if let Some(backend) = &mut self.backend {
             renderer::dispose_textures(backend, &mut self.texture_manager);
             renderer::cleanup(backend);
