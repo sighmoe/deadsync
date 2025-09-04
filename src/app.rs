@@ -138,14 +138,18 @@ impl App {
             ("banner8.png", "_fallback/banner8.png"), ("banner9.png", "_fallback/banner9.png"),
             ("banner10.png", "_fallback/banner10.png"), ("banner11.png", "_fallback/banner11.png"),
             ("banner12.png", "_fallback/banner12.png"),
-            ("noteskins/bar/tex_notes.png", "noteskins/bar/tex_notes.png"),
-            ("noteskins/bar/tex_receptors.png", "noteskins/bar/tex_receptors.png"),
-            ("noteskins/bar/tex_glow.png", "noteskins/bar/tex_glow.png"),
+            ("noteskins/bar/tex notes.png", "noteskins/bar/tex notes.png"),
+            ("noteskins/bar/tex receptors.png", "noteskins/bar/tex receptors.png"),
+            ("noteskins/bar/tex glow.png", "noteskins/bar/tex glow.png"),
         ];
 
         let mut handles = Vec::with_capacity(textures_to_load.len());
         for &(key, relative_path) in &textures_to_load {
-            let path = Path::new("assets/graphics").join(relative_path);
+            let path = if relative_path.starts_with("noteskins/") {
+                Path::new("assets").join(relative_path)
+            } else {
+                Path::new("assets/graphics").join(relative_path)
+            };
             handles.push(std::thread::spawn(move || {
                 match image::open(&path) {
                     Ok(img) => Ok::<(&'static str, image::RgbaImage), (&'static str, String)>((key, img.to_rgba8())),

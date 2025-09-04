@@ -24,10 +24,11 @@ pub struct State {
 
 pub fn init() -> State {
     let style = Style { num_cols: 4, num_players: 1 };
-    let mut noteskin = noteskin::load(Path::new("assets/noteskins/bar/dance-single.txt"), &style).ok();
+    let mut noteskin = noteskin::load(Path::new("assets/noteskins/bar/dance-single.txt"), &style).ok()
+        .or_else(|| noteskin::load(Path::new("assets/noteskins/bar/all-styles.txt"), &style).ok());
 
     if let Some(ns) = &mut noteskin {
-        let base_path = Path::new("assets/graphics");
+        let base_path = Path::new("assets");
         ns.tex_notes_dims = image::image_dimensions(base_path.join(&ns.tex_notes_path)).unwrap_or((256, 256));
         ns.tex_receptors_dims = image::image_dimensions(base_path.join(&ns.tex_receptors_path)).unwrap_or((128, 64));
         ns.tex_glow_dims = image::image_dimensions(base_path.join(&ns.tex_glow_path)).unwrap_or((96, 96));
