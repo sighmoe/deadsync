@@ -4,3 +4,4 @@ pub mod space;
 pub mod song_loading;
 pub mod noteskin;
 pub mod timing;
+pub mod parsing;

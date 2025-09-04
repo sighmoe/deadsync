@@ -36,7 +36,7 @@ const SONG_TEXT_LEFT_PADDING: f32 = 66.0;
 const PACK_COUNT_RIGHT_PADDING: f32 = 11.0;
 const PACK_COUNT_TEXT_TARGET_PX: f32 = 14.0;
 static DIFFICULTY_DISPLAY_INNER_BOX_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#0f0f0f"));
-const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
+pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
 
 // --- NEW CONSTANTS FOR BEHAVIORS ---
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);

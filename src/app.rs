@@ -6,7 +6,7 @@ use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, Screen as CurrentScreen, ScreenAction};
-use crate::core::song_loading::{self, ChartData};
+use crate::core::song_loading::{self, ChartData, SongData};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -43,7 +43,7 @@ pub struct App {
     texture_manager: HashMap<String, renderer::Texture>,
     current_screen: CurrentScreen,
     menu_state: menu::State,
-    gameplay_state: gameplay::State,
+    gameplay_state: Option<gameplay::State>,
     options_state: options::State,
     input_state: InputState,
     frame_count: u32,
@@ -96,7 +96,7 @@ impl App {
 
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
-            current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: gameplay::init(), options_state,
+            current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: None, options_state,
             select_color_state, select_music_state: select_music::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay,
@@ -384,7 +384,11 @@ impl App {
 
         let mut actors = match self.current_screen {
             CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier),
-            CurrentScreen::Gameplay => gameplay::get_actors(&self.gameplay_state),
+            CurrentScreen::Gameplay => {
+                if let Some(gs) = &self.gameplay_state {
+                    gameplay::get_actors(gs)
+                } else { vec![] }
+            },
             CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
             CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, screen_alpha_multiplier),
             CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state),
@@ -547,7 +551,11 @@ impl ApplicationHandler for App {
 
                 let action = match self.current_screen {
                     CurrentScreen::Menu     => menu::handle_key_press(&mut self.menu_state, &key_event),
-                    CurrentScreen::Gameplay => gameplay::handle_key_press(&mut self.gameplay_state, &key_event),
+                    CurrentScreen::Gameplay => {
+                        if let Some(gs) = &mut self.gameplay_state {
+                            gameplay::handle_key_press(gs, &key_event)
+                        } else { ScreenAction::None }
+                    },
                     CurrentScreen::Options  => options::handle_key_press(&mut self.options_state, &key_event),
                     CurrentScreen::SelectColor => select_color::handle_key_press(&mut self.select_color_state, &key_event),
                     CurrentScreen::SelectMusic => select_music::handle_key_press(&mut self.select_music_state, &key_event),
@@ -573,7 +581,6 @@ impl ApplicationHandler for App {
                     TransitionState::FadingOut { elapsed, duration, target, .. } => {
                         *elapsed += delta_time;
                         if *elapsed >= *duration {
-                            // Defer the creation of the next state to after this match block.
                             finished_fading_out_to = Some(*target);
                         }
                     }
@@ -587,7 +594,9 @@ impl ApplicationHandler for App {
                                 let idx = self.select_color_state.active_color_index;
                                 self.menu_state.active_color_index = idx;
                                 self.select_music_state.active_color_index = idx;
-                                self.gameplay_state.player_color = color::decorative_rgba(idx);
+                                if let Some(gs) = self.gameplay_state.as_mut() {
+                                    gs.player_color = color::decorative_rgba(idx);
+                                }
                                 self.options_state.active_color_index = idx;
                             }
 
@@ -609,7 +618,9 @@ impl ApplicationHandler for App {
                     }
                     TransitionState::Idle => {
                         match self.current_screen {
-                            CurrentScreen::Gameplay => gameplay::update(&mut self.gameplay_state, &self.input_state, delta_time),
+                            CurrentScreen::Gameplay => if let Some(gs) = &mut self.gameplay_state {
+                                gameplay::update(gs, &self.input_state, delta_time)
+                            },
                             CurrentScreen::Init => {
                                 let action = init::update(&mut self.init_state, delta_time);
                                 if let ScreenAction::Navigate(_) | ScreenAction::Exit = action.clone() {
@@ -636,7 +647,6 @@ impl ApplicationHandler for App {
                     }
                 }
 
-                // If FadingOut finished, handle the state change now that the mutable borrow is released.
                 if let Some(target) = finished_fading_out_to {
                     let prev = self.current_screen;
                     self.current_screen = target;
@@ -645,8 +655,24 @@ impl ApplicationHandler for App {
                         let idx = self.select_color_state.active_color_index;
                         self.menu_state.active_color_index = idx;
                         self.select_music_state.active_color_index = idx;
-                        self.gameplay_state.player_color = color::decorative_rgba(idx);
                         self.options_state.active_color_index = idx;
+                    }
+
+                    if target == CurrentScreen::Gameplay {
+                        let (song_arc, chart) = {
+                            let sm_state = &self.select_music_state;
+                            let entry = sm_state.entries.get(sm_state.selected_index).unwrap();
+                            let song = match entry {
+                                select_music::MusicWheelEntry::Song(s) => s,
+                                _ => panic!("Cannot start gameplay on a pack header"),
+                            };
+                            let difficulty_name = select_music::DIFFICULTY_NAMES[sm_state.selected_difficulty_index];
+                            let chart_ref = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).unwrap();
+                            (song.clone(), Arc::new(chart_ref.clone()))
+                        };
+                        
+                        self.gameplay_state = Some(gameplay::init(song_arc, chart));
+                        self.gameplay_state.as_mut().unwrap().player_color = color::decorative_rgba(self.menu_state.active_color_index);
                     }
 
                     if target == CurrentScreen::SelectMusic {

@@ -1,3 +1,4 @@
+// ===== FILE: src/core/song_loading.rs =====
 use log::{info, warn};
 use rssp::{analyze, AnalysisOptions};
 use rssp::graph::GraphImageData;
@@ -26,7 +27,7 @@ pub struct ChartData {
     pub difficulty: String,
     pub meter: u32,
     pub step_artist: String,
-    pub notes: Vec<u8>,
+    pub notes: Vec<u8>, // This is the minimized raw data we will parse
     pub density_graph: Option<GraphImageData>,
     pub short_hash: String,
 }
@@ -110,16 +111,24 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
 
     let summary = analyze(&simfile_data, extension, options)?;
 
-    let charts = summary
+    let charts: Vec<ChartData> = summary
         .charts
         .into_iter()
-        .map(|c| ChartData {
-            difficulty: c.difficulty_str,
-            meter: c.rating_str.parse().unwrap_or(0),
-            step_artist: c.step_artist_str.join(", "),
-            notes: c.notes,
-            density_graph: c.density_graph,
-            short_hash: c.short_hash,
+        .map(|c| {
+            info!(
+                "  Chart '{}' [{}] loaded with {} bytes of note data.",
+                c.difficulty_str,
+                c.rating_str,
+                c.notes.len()
+            );
+            ChartData {
+                difficulty: c.difficulty_str,
+                meter: c.rating_str.parse().unwrap_or(0),
+                step_artist: c.step_artist_str.join(", "),
+                notes: c.minimized_note_data,
+                density_graph: c.density_graph,
+                short_hash: c.short_hash,
+            }
         })
         .collect();
 
