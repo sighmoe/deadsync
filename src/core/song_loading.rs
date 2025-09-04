@@ -15,6 +15,8 @@ pub struct SongData {
     pub banner_path: Option<PathBuf>,
     pub background_path: Option<PathBuf>,
     pub music_path: Option<PathBuf>,
+    pub offset: f32,
+    pub normalized_bpms: String,
     pub total_length_seconds: i32,
     pub charts: Vec<ChartData>,
 }
@@ -146,6 +148,8 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
         artist: summary.artist_str,
         banner_path,
         background_path,
+        offset: summary.offset as f32,
+        normalized_bpms: summary.normalized_bpms,
         music_path,
         total_length_seconds: summary.total_length,
         charts,
