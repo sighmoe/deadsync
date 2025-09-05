@@ -1,4 +1,3 @@
-// ===== FILE: src/screens/gameplay.rs =====
 use crate::core::input::InputState;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
@@ -57,8 +56,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>) -> State {
     info!("Loaded song '{}' and chart '{}'", song.title, chart.difficulty);
 
     let style = Style { num_cols: 4, num_players: 1 };
-    let mut noteskin = noteskin::load(Path::new("assets/noteskins/bar/dance-single.txt"), &style).ok()
-        .or_else(|| noteskin::load(Path::new("assets/noteskins/bar/all-styles.txt"), &style).ok());
+    let mut noteskin = noteskin::load(Path::new("assets/noteskins/metal/dance-single.txt"), &style).ok()
+        .or_else(|| noteskin::load(Path::new("assets/noteskins/metal/all-styles.txt"), &style).ok());
 
     if let Some(ns) = &mut noteskin {
         let base_path = Path::new("assets");
@@ -191,6 +190,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 align(0.5, 0.5):
                 xy(cx + *col_x_offset as f32, receptor_y):
                 zoomto(receptor_def.size[0] as f32, receptor_def.size[1] as f32):
+                rotationz(-receptor_def.rotation_deg as f32): // <-- Add a minus sign here
                 customtexturerect(uv[0], uv[1], uv[2], uv[3])
             ));
         }
@@ -227,6 +227,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                         align(0.5, 0.5):
                         xy(cx + col_x_offset as f32, y_pos):
                         zoomto(note_def.size[0] as f32, note_def.size[1] as f32):
+                        rotationz(-note_def.rotation_deg as f32): // <-- And add a minus sign here
                         customtexturerect(uv[0], uv[1], uv[2], uv[3])
                     ));
                 }

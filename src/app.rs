@@ -138,9 +138,9 @@ impl App {
             ("banner8.png", "_fallback/banner8.png"), ("banner9.png", "_fallback/banner9.png"),
             ("banner10.png", "_fallback/banner10.png"), ("banner11.png", "_fallback/banner11.png"),
             ("banner12.png", "_fallback/banner12.png"),
-            ("noteskins/bar/tex notes.png", "noteskins/bar/tex notes.png"),
-            ("noteskins/bar/tex receptors.png", "noteskins/bar/tex receptors.png"),
-            ("noteskins/bar/tex glow.png", "noteskins/bar/tex glow.png"),
+            ("noteskins/metal/tex notes.png", "noteskins/metal/tex notes.png"),
+            ("noteskins/metal/tex receptors.png", "noteskins/metal/tex receptors.png"),
+            ("noteskins/metal/tex glow.png", "noteskins/metal/tex glow.png"),
         ];
 
         let mut handles = Vec::with_capacity(textures_to_load.len());

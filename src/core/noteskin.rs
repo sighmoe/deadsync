@@ -138,40 +138,37 @@ pub fn load(path: &Path, style: &Style) -> Result<Noteskin, String> {
 }
 
 fn parse_sprite_rule<'a>(tag: &'a str, props: &HashMap<&str, &str>, style: &Style, ns: &mut Noteskin, defaults: &mut HashMap<String, SpriteDefinition>) {
-    let mut def = defaults.get(tag).cloned().unwrap_or_default();
-    
-    if let Some(src_str) = props.get("src") {
-        if let Some((x_str, y_str)) = src_str.split_once(',') {
-            def.src = [x_str.parse().unwrap_or(0), y_str.parse().unwrap_or(0)];
-        }
-    }
-    if let Some(size_str) = props.get("size") {
-        if let Some((w_str, h_str)) = size_str.split_once(',') {
-            def.size = [w_str.parse().unwrap_or(0), h_str.parse().unwrap_or(0)];
-        }
-    }
-    if let Some(rot_str) = props.get("rot") { def.rotation_deg = rot_str.parse().unwrap_or(0); }
-    if let Some(mirror_str) = props.get("mirror") {
-        def.mirror_h = mirror_str.contains('h');
-        def.mirror_v = mirror_str.contains('v');
-    }
-
-    let has_range_spec = props.contains_key("row") || props.contains_key("col") || props.contains_key("player");
-
-    if !has_range_spec {
-        defaults.insert(tag.to_string(), def);
-    }
-
-    let apply_to = |target_vec: &mut Vec<SpriteDefinition>, index: usize| {
-        if index < target_vec.len() {
-            if !has_range_spec {
-                for item in target_vec.iter_mut() { *item = def; }
-            } else {
-                target_vec[index] = def;
+    // A helper closure to apply properties from the current rule (`props`) to a sprite definition.
+    // It only modifies fields that are explicitly present in the `props` map.
+    let apply_properties = |def: &mut SpriteDefinition| {
+        if let Some(src_str) = props.get("src") {
+            if let Some((x_str, y_str)) = src_str.split_once(',') {
+                def.src = [x_str.parse().unwrap_or(0), y_str.parse().unwrap_or(0)];
             }
         }
+        if let Some(size_str) = props.get("size") {
+            if let Some((w_str, h_str)) = size_str.split_once(',') {
+                def.size = [w_str.parse().unwrap_or(0), h_str.parse().unwrap_or(0)];
+            }
+        }
+        if let Some(rot_str) = props.get("rot") { def.rotation_deg = rot_str.parse().unwrap_or(0); }
+        if let Some(mirror_str) = props.get("mirror") {
+            def.mirror_h = mirror_str.contains('h');
+            def.mirror_v = mirror_str.contains('v');
+        }
     };
+
+    // Determine which sprites this rule applies to.
+    let has_range_spec = props.contains_key("row") || props.contains_key("col") || props.contains_key("player");
+
+    // If it's a global/default rule, update the defaults map first.
+    if !has_range_spec {
+        let mut def = defaults.get(tag).cloned().unwrap_or_default();
+        apply_properties(&mut def);
+        defaults.insert(tag.to_string(), def);
+    }
     
+    // Determine the iteration ranges. If a specifier isn't present, iterate over all possibilities.
     let rows = props.get("row").and_then(|s| s.parse().ok()).map(|r| vec![r]).unwrap_or_else(|| (0..=192).collect());
     let cols = props.get("col").and_then(|s| s.parse().ok()).map(|c| vec![c]).unwrap_or_else(|| (0..style.num_cols as u32).collect());
     let players = props.get("player").and_then(|s| s.parse().ok()).map(|p| vec![p]).unwrap_or_else(|| (0..style.num_players as u32).collect());
@@ -180,23 +177,29 @@ fn parse_sprite_rule<'a>(tag: &'a str, props: &HashMap<&str, &str>, style: &Styl
         for c in &cols {
             if *p >= style.num_players as u32 || *c >= style.num_cols as u32 { continue; }
 
+            // Apply properties to the relevant sprite definitions.
             match tag {
                 "Note" => {
                     for r in &rows {
                         if let Some(q) = Quantization::from_row(*r) {
                             let idx = (*p as usize * style.num_cols + *c as usize) * NUM_QUANTIZATIONS + q as usize;
-                            apply_to(&mut ns.notes, idx);
+                            if idx < ns.notes.len() {
+                                apply_properties(&mut ns.notes[idx]);
+                            }
                         }
                     }
                 }
-                "Mine" => apply_to(&mut ns.mines, *p as usize * style.num_cols + *c as usize),
-                "Receptor-on" => apply_to(&mut ns.receptor_on, *c as usize),
-                "Receptor-off" => apply_to(&mut ns.receptor_off, *c as usize),
-                "Receptor-glow" => apply_to(&mut ns.receptor_glow, *c as usize),
-                "Hold-body" => apply_to(&mut ns.hold_bodies[0], *c as usize),
-                "Hold-tail" => apply_to(&mut ns.hold_tails[0], *c as usize),
-                "Roll-body" => apply_to(&mut ns.hold_bodies[1], *c as usize),
-                "Roll-tail" => apply_to(&mut ns.hold_tails[1], *c as usize),
+                "Mine" => {
+                    let idx = *p as usize * style.num_cols + *c as usize;
+                    if idx < ns.mines.len() { apply_properties(&mut ns.mines[idx]); }
+                }
+                "Receptor-on" => if (*c as usize) < ns.receptor_on.len() { apply_properties(&mut ns.receptor_on[*c as usize]); },
+                "Receptor-off" => if (*c as usize) < ns.receptor_off.len() { apply_properties(&mut ns.receptor_off[*c as usize]); },
+                "Receptor-glow" => if (*c as usize) < ns.receptor_glow.len() { apply_properties(&mut ns.receptor_glow[*c as usize]); },
+                "Hold-body" => if (*c as usize) < ns.hold_bodies[0].len() { apply_properties(&mut ns.hold_bodies[0][*c as usize]); },
+                "Hold-tail" => if (*c as usize) < ns.hold_tails[0].len() { apply_properties(&mut ns.hold_tails[0][*c as usize]); },
+                "Roll-body" => if (*c as usize) < ns.hold_bodies[1].len() { apply_properties(&mut ns.hold_bodies[1][*c as usize]); },
+                "Roll-tail" => if (*c as usize) < ns.hold_tails[1].len() { apply_properties(&mut ns.hold_tails[1][*c as usize]); },
                 "Receptor" => if let Some(x_str) = props.get("x") { ns.column_xs[*c as usize] = x_str.parse().unwrap_or(0); },
                 _ => {},
             }
