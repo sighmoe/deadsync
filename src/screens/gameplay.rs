@@ -18,7 +18,7 @@ use log::info;
 const TRANSITION_IN_DURATION: f32 = 0.4;
 const TRANSITION_OUT_DURATION: f32 = 0.4;
 
-const SCROLL_SPEED_SECONDS: f32 = 1.0;
+const SCROLL_SPEED_SECONDS: f32 = 0.75;
 const RECEPTOR_Y_FRAC: f32 = 0.15;
 
 #[derive(Clone, Debug)]
