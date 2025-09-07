@@ -38,9 +38,6 @@ pub enum Mod<'a> {
     ZoomToWidth(f32),
     ZoomToHeight(f32),
 
-    // misc
-    Flip(bool),
-
     // cropping (fractions 0..1)
     CropLeft(f32),
     CropRight(f32),
@@ -159,7 +156,6 @@ fn build_sprite_like<'a>(
                 }
             }
 
-            Mod::Flip(v) => { fx = *v; }
             Mod::CropLeft(v)   => { cl = *v; }
             Mod::CropRight(v)  => { cr = *v; }
             Mod::CropTop(v)    => { ct = *v; }
@@ -650,11 +646,6 @@ macro_rules! __dsl_apply_one {
     // --- SM/ITG Sprite: explicit UVs (normalized, top-left origin) ---
     (customtexturerect ($u0:expr, $v0:expr, $u1:expr, $v1:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::UvRect([($u0) as f32, ($v0) as f32, ($u1) as f32, ($v1) as f32]));
-    }};
-
-    // flip (horizontal)
-    (flip ($v:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        $mods.push($crate::ui::dsl::Mod::Flip(($v) as bool));
     }};
 
     // --- visibility (immediate or inside a tween) ---
