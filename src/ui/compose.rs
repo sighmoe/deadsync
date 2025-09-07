@@ -424,29 +424,40 @@ fn push_sprite(
 ) {
     if tint[3] <= 0.0 { return; }
 
+    // Clamp crops independently (SM-like).
     let (cl, cr, ct, cb) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
+
+    // Base world metrics for the *uncropped* rect.
     let (base_center, base_size) = sm_rect_to_world_center_size(rect, m);
     if base_size.x <= 0.0 || base_size.y <= 0.0 { return; }
 
+    // Visible fractions after crop.
     let sx_crop = (1.0 - cl - cr).max(0.0);
     let sy_crop = (1.0 - ct - cb).max(0.0);
     if sx_crop <= 0.0 || sy_crop <= 0.0 { return; }
 
-    let off_local_x = 0.5 * (cl - cr) * base_size.x;
-    let off_local_y = 0.5 * (ct - cb) * base_size.y;
-    let (off_world_x, off_world_y) = rotate2(off_local_x, off_local_y, rot_z_deg);
+    // --- Minimal fix: keep world center at the uncropped rect center.
+    //     (Remove crop-based recentering that caused sliding.)
+    let center_x = base_center.x;
+    let center_y = base_center.y;
 
-    let center_x = base_center.x + off_world_x;
-    let center_y = base_center.y + off_world_y;
+    // Geometry shrinks; pivot/world position stays the same.
     let size_x = base_size.x * sx_crop;
     let size_y = base_size.y * sy_crop;
 
+    // UVs: apply crop/flip/velocity as before.
     let (uv_scale, uv_offset) = if is_solid {
         ([1.0, 1.0], [0.0, 0.0])
     } else {
-        calculate_uvs(texture_id, uv_rect, cell, grid, flip_x, flip_y, cl, cr, ct, cb, texcoordvelocity, total_elapsed)
+        calculate_uvs(
+            texture_id, uv_rect, cell, grid,
+            flip_x, flip_y,
+            cl, cr, ct, cb,
+            texcoordvelocity, total_elapsed,
+        )
     };
 
+    // Edge fades: compute effective widths in the *visible* sub-rect, then swap if flipped.
     let fl = fadeleft.clamp(0.0, 1.0);
     let fr = faderight.clamp(0.0, 1.0);
     let ft = fadetop.clamp(0.0, 1.0);
@@ -460,16 +471,21 @@ fn push_sprite(
     if flip_x { std::mem::swap(&mut fl_eff, &mut fr_eff); }
     if flip_y { std::mem::swap(&mut ft_eff, &mut fb_eff); }
 
+    // Transform: S -> R -> T (same as before).
     let transform =
         Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0)) *
         Matrix4::from_angle_z(Deg(rot_z_deg)) *
         Matrix4::from_nonuniform_scale(size_x, size_y, 1.0);
-    
+
     let final_texture_id = if is_solid { "__white".to_string() } else { texture_id.to_string() };
 
     out.push(renderer::RenderObject {
         object_type: renderer::ObjectType::Sprite {
-            texture_id: final_texture_id, tint, uv_scale, uv_offset, edge_fade: [fl_eff, fr_eff, ft_eff, fb_eff],
+            texture_id: final_texture_id,
+            tint,
+            uv_scale,
+            uv_offset,
+            edge_fade: [fl_eff, fr_eff, ft_eff, fb_eff],
         },
         transform,
         blend,
