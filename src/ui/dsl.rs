@@ -213,14 +213,20 @@ fn build_sprite_like<'a>(
             let mut h = 0xcbf29ce484222325u64;
             #[inline(always)] fn mix(h:&mut u64, v:u64){ *h ^= v.wrapping_mul(0x9E3779B97F4A7C15); *h = h.rotate_left(27) ^ (*h >> 33); }
             #[inline(always)] fn f32b(f:f32)->u64{ f.to_bits() as u64 }
-
-            // texture identity
-            match src {
-                SpriteSource::Texture(key) => { mix(&mut h, (*key).as_ptr() as usize as u64); mix(&mut h, (*key).len() as u64); }
-                SpriteSource::Solid       => { mix(&mut h, 0x5EED5EED); }
+            #[inline(always)] fn hash_bytes64(bs: &[u8]) -> u64 {
+                // FNV-1a 64-bit
+                let mut x = 0xcbf29ce484222325u64;
+                for &b in bs { x ^= b as u64; x = x.wrapping_mul(0x100000001b3); }
+                x
             }
 
-            // initial state
+            // texture identity (stable)
+            match src {
+                SpriteSource::Texture(key) => { mix(&mut h, 0x54455854); mix(&mut h, hash_bytes64(key.as_bytes())); } // 'TEXT'
+                SpriteSource::Solid       => { mix(&mut h, 0x534F4C49); } // 'SOLI'
+            }
+
+            // initial state (includes x/y which differ per arrow, keeping salts unique per arrow)
             mix(&mut h, f32b(init.x)); mix(&mut h, f32b(init.y));
             mix(&mut h, f32b(init.w)); mix(&mut h, f32b(init.h));
             mix(&mut h, f32b(init.hx)); mix(&mut h, f32b(init.vy));
