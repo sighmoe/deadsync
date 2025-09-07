@@ -1,4 +1,3 @@
-// ===== FILE: src/core/song_loading.rs =====
 use log::{info, warn};
 use rssp::{analyze, AnalysisOptions};
 use rssp::graph::GraphImageData;
@@ -17,6 +16,8 @@ pub struct SongData {
     pub background_path: Option<PathBuf>,
     pub music_path: Option<PathBuf>,
     pub offset: f32,
+    pub sample_start: Option<f32>,
+    pub sample_length: Option<f32>,
     pub normalized_bpms: String,
     pub total_length_seconds: i32,
     pub charts: Vec<ChartData>,
@@ -158,6 +159,8 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
         banner_path,
         background_path,
         offset: summary.offset as f32,
+        sample_start: if summary.sample_start > 0.0 { Some(summary.sample_start as f32) } else { None },
+        sample_length: if summary.sample_length > 0.0 { Some(summary.sample_length as f32) } else { None },
         normalized_bpms: summary.normalized_bpms,
         music_path,
         total_length_seconds: summary.total_length,

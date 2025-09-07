@@ -651,6 +651,10 @@ impl ApplicationHandler for App {
                     let prev = self.current_screen;
                     self.current_screen = target;
                     
+                    if prev == CurrentScreen::SelectMusic {
+                        crate::core::audio::stop_music();
+                    }
+
                     if prev == CurrentScreen::SelectColor {
                         let idx = self.select_color_state.active_color_index;
                         self.menu_state.active_color_index = idx;

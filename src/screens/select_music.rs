@@ -1,4 +1,5 @@
 use crate::act;
+use crate::core::audio;
 use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
@@ -72,6 +73,7 @@ pub struct State {
     pub nav_key_held_direction: Option<NavDirection>,
     pub nav_key_held_since: Option<Instant>,
     pub nav_key_last_scrolled_at: Option<Instant>,
+    pub currently_playing_preview_path: Option<PathBuf>,
 }
 
 /// Helper function to check if a specific difficulty index has a playable chart
@@ -169,6 +171,7 @@ pub fn init() -> State {
         nav_key_held_direction: None,
         nav_key_held_since: None,
         nav_key_last_scrolled_at: None,
+        currently_playing_preview_path: None,
     };
 
     rebuild_displayed_entries(&mut state);
@@ -337,7 +340,6 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         }
     }
 
-
     let (selected_song, selected_pack) = if let Some(entry) = state.entries.get(state.selected_index) {
         match entry {
             MusicWheelEntry::Song(song) => (Some(song.clone()), None),
@@ -346,6 +348,28 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
     } else {
         (None, None)
     };
+
+    // --- MUSIC PREVIEW LOGIC ---
+    let music_path_for_preview = selected_song.as_ref().and_then(|s| s.music_path.clone());
+    if state.currently_playing_preview_path != music_path_for_preview {
+        state.currently_playing_preview_path = music_path_for_preview;
+
+        let mut played = false;
+        if let Some(song) = &selected_song {
+            if let (Some(path), Some(start), Some(length)) = (&song.music_path, song.sample_start, song.sample_length) {
+                if length > 0.0 {
+                    info!("Playing preview for '{}' at {:.2}s for {:.2}s", song.title, start, length);
+                    let cut = audio::Cut { start_sec: start as f64, length_sec: length as f64 };
+                    audio::play_music(path.clone(), cut);
+                    played = true;
+                }
+            }
+        }
+        if !played {
+            audio::stop_music();
+        }
+    }
+
 
     // Auto-adjust difficulty
     if let Some(song) = &selected_song {
