@@ -24,6 +24,10 @@ glow = "0.16.0"
 glutin = "0.32.3"
 raw-window-handle = "0.6.2"
 
+# Audio
+cpal = "0.16"
+lewton = "0.10.2"
+
 rssp = { path = "src/extern/rssp" }
 
 [build-dependencies]

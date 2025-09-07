@@ -51,11 +51,14 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     if event.state != ElementState::Pressed { return ScreenAction::None; }
 
     match event.physical_key {
-        PhysicalKey::Code(KeyCode::Enter) => match state.selected_index {
-            0 => ScreenAction::Navigate(Screen::SelectColor),
-            1 => ScreenAction::Navigate(Screen::Options),
-            2 => ScreenAction::Exit,
-            _ => ScreenAction::None,
+        PhysicalKey::Code(KeyCode::Enter) => {
+            crate::core::audio::play_sfx("assets/sounds/start.ogg");
+            match state.selected_index {
+                0 => ScreenAction::Navigate(Screen::SelectColor),
+                1 => ScreenAction::Navigate(Screen::Options),
+                2 => ScreenAction::Exit,
+                _ => ScreenAction::None,
+            }
         },
         // Escape is now handled globally in app.rs but we can leave this for clarity
         PhysicalKey::Code(KeyCode::Escape) => ScreenAction::Exit,
@@ -66,6 +69,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                 _ => 0,
             };
             if delta != 0 {
+                crate::core::audio::play_sfx("assets/sounds/change.ogg");
                 let n = OPTION_COUNT as isize;
                 let cur = state.selected_index as isize;
                 state.selected_index = ((cur + delta + n) % n) as usize;
