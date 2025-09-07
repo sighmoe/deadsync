@@ -110,7 +110,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>) -> State {
 pub fn handle_key_press(_state: &mut State, event: &KeyEvent) -> ScreenAction {
     if let PhysicalKey::Code(KeyCode::Escape) = event.physical_key {
         if event.state == ElementState::Pressed {
-            return ScreenAction::Navigate(Screen::Menu);
+            return ScreenAction::Navigate(Screen::SelectMusic);
         }
     }
     ScreenAction::None

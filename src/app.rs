@@ -651,6 +651,10 @@ impl ApplicationHandler for App {
                     let prev = self.current_screen;
                     self.current_screen = target;
                     
+                    if prev == CurrentScreen::Gameplay {
+                        crate::core::audio::stop_music();
+                    }
+
                     if prev == CurrentScreen::SelectMusic {
                         crate::core::audio::stop_music();
                     }
@@ -679,7 +683,7 @@ impl ApplicationHandler for App {
                         self.gameplay_state.as_mut().unwrap().player_color = color::decorative_rgba(self.menu_state.active_color_index);
                     }
 
-                    if target == CurrentScreen::SelectMusic {
+                    if target == CurrentScreen::SelectMusic && prev == CurrentScreen::Menu {
                         let current_color_index = self.select_music_state.active_color_index;
                         self.select_music_state = select_music::init();
                         self.select_music_state.active_color_index = current_color_index;
