@@ -1,6 +1,7 @@
 use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;
+use crate::core::assets;
 use crate::ui::actors::{self, Actor, SizeSpec};
 use crate::ui::msdf;
 use cgmath::{Deg, Matrix4, Vector2, Vector3};
@@ -100,32 +101,30 @@ fn build_actor_recursive(
             cropleft, cropright, croptop, cropbottom, blend,
             fadeleft, faderight, fadetop, fadebottom,
             rot_z_deg, texcoordvelocity, animate, state_delay,
+            scale, // NEW
         } => {
             if !*visible { return; }
-            let rect = place_rect(parent, *align, *offset, *size);
 
             let (is_solid, texture_name) = match source {
                 actors::SpriteSource::Solid => (true, "__white"),
                 actors::SpriteSource::Texture(name) => (false, name.as_str()),
             };
-            
-            // --- Decide which cell to use (static or animated) ---
+
+            // --- decide frame (unchanged, but kept before size resolve) ---
             let mut chosen_cell = *cell;
             let mut chosen_grid = *grid;
 
             if !is_solid && uv_rect.is_none() {
-                // Prefer explicit grid; otherwise infer from filename suffix "_CxR"
                 let (cols, rows) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(texture_name));
                 let total = cols.saturating_mul(rows).max(1);
 
-                // Convert a 2D cell to linear if needed (row-major)
                 let start_linear: u32 = match *cell {
                     Some((cx, cy)) if cy != u32::MAX => {
                         let cx = cx.min(cols.saturating_sub(1));
                         let cy = cy.min(rows.saturating_sub(1));
                         cy.saturating_mul(cols).saturating_add(cx)
                     }
-                    Some((i, _)) => i, // cy == u32::MAX => already linear
+                    Some((i, _)) => i,
                     None => 0,
                 };
 
@@ -139,6 +138,13 @@ fn build_actor_recursive(
                     chosen_grid = Some((cols, rows));
                 }
             }
+
+            // --- NEW: resolve size exactly like SM/ITG ---
+            let resolved_size = resolve_sprite_size_like_sm(
+                *size, is_solid, texture_name, *uv_rect, chosen_cell, chosen_grid, *scale
+            );
+
+            let rect = place_rect(parent, *align, *offset, resolved_size);
 
             let before = out.len();
             push_sprite(
@@ -299,6 +305,59 @@ fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
         }
     }
     (1, 1)
+}
+
+#[inline(always)]
+fn resolve_sprite_size_like_sm(
+    size: [SizeSpec; 2],
+    is_solid: bool,
+    texture_name: &str,
+    uv_rect: Option<[f32; 4]>,
+    cell: Option<(u32, u32)>,
+    grid: Option<(u32, u32)>,
+    scale: [f32; 2],
+) -> [SizeSpec; 2] {
+    use SizeSpec::Px;
+
+    #[inline(always)]
+    fn native_dims(
+        is_solid: bool, texture_name: &str, uv: Option<[f32; 4]>, cell: Option<(u32, u32)>, grid: Option<(u32, u32)>
+    ) -> (f32, f32) {
+        if is_solid { return (1.0, 1.0); }
+        let Some(meta) = assets::texture_dims(texture_name) else { return (0.0, 0.0); };
+        let (mut tw, mut th) = (meta.w as f32, meta.h as f32);
+        if let Some([u0, v0, u1, v1]) = uv {
+            tw *= (u1 - u0).abs().max(1e-6);
+            th *= (v1 - v0).abs().max(1e-6);
+        } else if cell.is_some() {
+            let (gc, gr) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(texture_name));
+            let cols = gc.max(1);
+            let rows = gr.max(1);
+            tw /= cols as f32;
+            th /= rows as f32;
+        }
+        (tw, th)
+    }
+
+    let (nw, nh) = native_dims(is_solid, texture_name, uv_rect, cell, grid);
+    let aspect = if nw > 0.0 && nh > 0.0 { nh / nw } else { 1.0 };
+
+    match (size[0], size[1]) {
+        (Px(w), Px(h)) if w == 0.0 && h == 0.0 => {
+            // Default: native pixels * zoom/scale (SM parity)
+            [Px(nw * scale[0]), Px(nh * scale[1])]
+        }
+        (Px(w), Px(h)) if w > 0.0 && h == 0.0 => {
+            // zoomtowidth: preserve native aspect
+            [Px(w), Px(w * aspect)]
+        }
+        (Px(w), Px(h)) if w == 0.0 && h > 0.0 => {
+            // zoomtoheight: preserve native aspect
+            let inv_aspect = if aspect > 0.0 { 1.0 / aspect } else { 1.0 };
+            [Px(h * inv_aspect), Px(h)]
+        }
+        _ => size,
+    }
 }
 
 #[inline(always)]

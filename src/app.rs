@@ -2,10 +2,11 @@ use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList
 use crate::core::input;
 use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
+use crate::core::assets;
 use crate::ui::actors::Actor;
 use crate::ui::msdf;
 use crate::ui::color;
-use crate::screens::{gameplay, menu, options, init, select_color, select_music, Screen as CurrentScreen, ScreenAction};
+use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, Screen as CurrentScreen, ScreenAction};
 use crate::core::song_loading::{self, ChartData, SongData};
 use winit::{
     application::ApplicationHandler,
@@ -61,6 +62,7 @@ pub struct App {
     init_state: init::State,
     select_color_state: select_color::State,
     select_music_state: select_music::State,
+    sandbox_state: sandbox::State,
     current_dynamic_banner: Option<(String, PathBuf)>,
     current_density_graph: Option<(String, String)>,
     display_width: u32,
@@ -97,7 +99,7 @@ impl App {
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
             current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: None, options_state,
-            select_color_state, select_music_state: select_music::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
+            select_color_state, select_music_state: select_music::init(), sandbox_state: sandbox::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
             vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay,
             last_fps: 0.0, last_vpf: 0, transition: TransitionState::Idle,
@@ -125,6 +127,7 @@ impl App {
             let white = image::RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255]).unwrap();
             let white_tex = renderer::create_texture(backend, &white, renderer::TextureColorSpace::Srgb)?;
             self.texture_manager.insert("__white".to_string(), white_tex);
+            assets::register_texture_dims("__white", 1, 1); // NEW
             info!("Loaded built-in texture: __white");
         }
 
@@ -164,12 +167,14 @@ impl App {
                 Ok((key, rgba)) => {
                     let texture = renderer::create_texture(backend, &rgba, renderer::TextureColorSpace::Srgb)?;
                     self.texture_manager.insert(key.to_string(), texture);
+                    assets::register_texture_dims(key, rgba.width(), rgba.height()); // NEW
                     info!("Loaded texture: {}", key);
                 }
                 Err((key, msg)) => {
                     warn!("Failed to load texture for key '{}': {}. Using fallback.", key, msg);
                     let texture = renderer::create_texture(backend, &fallback_image, renderer::TextureColorSpace::Srgb)?;
                     self.texture_manager.insert(key.to_string(), texture);
+                    assets::register_texture_dims(key, fallback_image.width(), fallback_image.height()); // NEW
                 }
             }
         }
@@ -246,6 +251,7 @@ impl App {
                         Ok(texture) => {
                             let key = path.to_string_lossy().into_owned();
                             self.texture_manager.insert(key.clone(), texture);
+                            assets::register_texture_dims(&key, rgba.width(), rgba.height()); // NEW
                             self.current_dynamic_banner = Some((key.clone(), path));
                             key
                         }
@@ -265,7 +271,6 @@ impl App {
             "banner1.png".to_string()
         }
     }
-
 
     fn set_density_graph(&mut self, chart_opt: Option<&ChartData>) -> String {
         const FALLBACK_KEY: &str = "__white";
@@ -295,6 +300,7 @@ impl App {
                     Ok(texture) => {
                         let key = chart.short_hash.clone();
                         self.texture_manager.insert(key.clone(), texture);
+                        assets::register_texture_dims(&key, rgba_image.width(), rgba_image.height()); // NEW
                         self.current_density_graph = Some((key.clone(), chart.short_hash.clone()));
                         key
                     }
@@ -392,6 +398,7 @@ impl App {
             CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
             CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, screen_alpha_multiplier),
             CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state),
+            CurrentScreen::Sandbox  => sandbox::get_actors(&self.sandbox_state),
             CurrentScreen::Init     => init::get_actors(&self.init_state),
         };
 
@@ -422,6 +429,7 @@ impl App {
             CurrentScreen::Options => options::out_transition(),
             CurrentScreen::SelectColor => select_color::out_transition(),
             CurrentScreen::SelectMusic => select_music::out_transition(),
+            CurrentScreen::Sandbox => sandbox::out_transition(),
             CurrentScreen::Init => init::out_transition(),
         }
     }
@@ -433,6 +441,7 @@ impl App {
             CurrentScreen::Options => options::in_transition(),
             CurrentScreen::SelectColor => select_color::in_transition(),
             CurrentScreen::SelectMusic => select_music::in_transition(),
+            CurrentScreen::Sandbox => sandbox::in_transition(),
             CurrentScreen::Init => (vec![], 0.0), // Init screen has no "in" transition
         }
     }
@@ -536,6 +545,12 @@ impl ApplicationHandler for App {
                         self.show_overlay = !self.show_overlay;
                         info!("Overlay {}", if self.show_overlay { "ON" } else { "OFF" });
                     }
+                    if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F4) = key_event.physical_key {
+                        if self.current_screen == CurrentScreen::Menu {
+                            let _ = self.handle_action(ScreenAction::Navigate(CurrentScreen::Sandbox), event_loop);
+                            return;
+                        }
+                    }
                     if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) = key_event.physical_key {
                         if self.current_screen == CurrentScreen::Menu {
                             if let Err(e) = self.handle_action(ScreenAction::Exit, event_loop) {
@@ -558,6 +573,7 @@ impl ApplicationHandler for App {
                     },
                     CurrentScreen::Options  => options::handle_key_press(&mut self.options_state, &key_event),
                     CurrentScreen::SelectColor => select_color::handle_key_press(&mut self.select_color_state, &key_event),
+                    CurrentScreen::Sandbox => sandbox::handle_key_press(&mut self.sandbox_state, &key_event),
                     CurrentScreen::SelectMusic => select_music::handle_key_press(&mut self.select_music_state, &key_event),
                     CurrentScreen::Init     => init::handle_key_press(&mut self.init_state, &key_event),
                 };
@@ -627,6 +643,7 @@ impl ApplicationHandler for App {
                                     if self.handle_action(action, event_loop).is_err() {}
                                 }
                             }
+                            CurrentScreen::Sandbox => sandbox::update(&mut self.sandbox_state, delta_time),
                             CurrentScreen::SelectColor => select_color::update(&mut self.select_color_state, delta_time),
                             CurrentScreen::SelectMusic => {
                                 let action = select_music::update(&mut self.select_music_state, delta_time);

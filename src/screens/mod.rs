@@ -4,6 +4,7 @@ pub mod options;
 pub mod init;
 pub mod select_color;
 pub mod select_music;
+pub mod sandbox;
 use std::path::PathBuf;
 
 use crate::core::song_loading::ChartData;
@@ -25,4 +26,5 @@ pub enum Screen {
     Init,
     SelectColor,
     SelectMusic,
+    Sandbox,
 }

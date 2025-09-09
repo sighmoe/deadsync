@@ -106,8 +106,10 @@ fn build_sprite_like<'a>(
     let mut state_delay = 0.1_f32;
     let (mut tw, _site_ignored): (Option<&[anim::Step]>, u64) = (None, 0);
 
-    // StepMania zoom (scale factors) — allow negatives (we’ll fold to flips)
+    // StepMania zoom (scale factors). Keep signs until we fold to flips.
     let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
+    // NEW: if size remains unknown, we pass this to compose.
+    let mut scale_carry = [1.0_f32, 1.0_f32];
 
     // fold mods in order
     for m in mods {
@@ -129,7 +131,7 @@ fn build_sprite_like<'a>(
 
             Mod::SizePx(a, b) => { w = *a; h = *b; }
 
-            // StepMania zoom semantics (scale factors). Keep signs for now.
+            // StepMania zoom semantics (scale factors)
             Mod::Zoom(f)     => { sx = *f; sy = *f; }
             Mod::ZoomX(a)    => { sx = *a; }
             Mod::ZoomY(b)    => { sy = *b; }
@@ -176,14 +178,13 @@ fn build_sprite_like<'a>(
             Mod::Font(_) | Mod::Content(_) | Mod::TAlign(_) => {}
             Mod::Tween(steps) => { tw = Some(steps); }
             Mod::State(i) => {
-                // sentinel (i, u32::MAX) = linear frame index; grid inferred from file name (_CxR)
                 cell = Some((*i, u32::MAX));
-                grid = None; // let filename inference choose cols/rows
-                uv   = None; // state selection overrides any custom UV rect
+                grid = None;
+                uv   = None;
             }
             Mod::UvRect(r) => {
-                uv   = Some(*r); // normalized TL-origin [u0,v0,u1,v1]
-                cell = None;     // explicit rect overrides grid/cell
+                uv   = Some(*r);
+                cell = None;
                 grid = None;
             }
             Mod::Animate(v) => { anim_enable = *v; }
@@ -191,7 +192,7 @@ fn build_sprite_like<'a>(
         }
     }
 
-    // tween (optional)
+    // tween (optional) — unchanged ...
     if let Some(steps) = tw {
         let mut init = anim::TweenState::default();
         init.x = x; init.y = y; init.w = w; init.h = h;
@@ -200,29 +201,22 @@ fn build_sprite_like<'a>(
         init.visible = vis; init.flip_x = fx; init.flip_y = fy;
         init.rot_z = rot;
         init.fade_l = fl; init.fade_r = fr; init.fade_t = ft; init.fade_b = fb;
-        // tweened crops override static ones if present
         init.crop_l = cl; init.crop_r = cr; init.crop_t = ct; init.crop_b = cb;
 
-        // --- NEW: automatic salt so duplicates from the same callsite don't collide
         #[inline(always)]
         fn auto_salt(src: &SpriteSource, init: &anim::TweenState, steps: &[anim::Step]) -> u64 {
             let mut h = 0xcbf29ce484222325u64;
             #[inline(always)] fn mix(h:&mut u64, v:u64){ *h ^= v.wrapping_mul(0x9E3779B97F4A7C15); *h = h.rotate_left(27) ^ (*h >> 33); }
             #[inline(always)] fn f32b(f:f32)->u64{ f.to_bits() as u64 }
             #[inline(always)] fn hash_bytes64(bs: &[u8]) -> u64 {
-                // FNV-1a 64-bit
                 let mut x = 0xcbf29ce484222325u64;
                 for &b in bs { x ^= b as u64; x = x.wrapping_mul(0x100000001b3); }
                 x
             }
-
-            // texture identity (stable)
             match src {
-                SpriteSource::Texture(key) => { mix(&mut h, 0x54455854); mix(&mut h, hash_bytes64(key.as_bytes())); } // 'TEXT'
-                SpriteSource::Solid       => { mix(&mut h, 0x534F4C49); } // 'SOLI'
+                SpriteSource::Texture(key) => { mix(&mut h, 0x54455854); mix(&mut h, hash_bytes64(key.as_bytes())); }
+                SpriteSource::Solid       => { mix(&mut h, 0x534F4C49); }
             }
-
-            // initial state (includes x/y which differ per arrow, keeping salts unique per arrow)
             mix(&mut h, f32b(init.x)); mix(&mut h, f32b(init.y));
             mix(&mut h, f32b(init.w)); mix(&mut h, f32b(init.h));
             mix(&mut h, f32b(init.hx)); mix(&mut h, f32b(init.vy));
@@ -235,8 +229,6 @@ fn build_sprite_like<'a>(
             mix(&mut h, f32b(init.fade_t)); mix(&mut h, f32b(init.fade_b));
             mix(&mut h, f32b(init.crop_l)); mix(&mut h, f32b(init.crop_r));
             mix(&mut h, f32b(init.crop_t)); mix(&mut h, f32b(init.crop_b));
-
-            // steps fingerprint(s)
             for s in steps { mix(&mut h, s.fingerprint64()); }
             h
         }
@@ -250,19 +242,20 @@ fn build_sprite_like<'a>(
         tint = s.tint; vis = s.visible; fx = s.flip_x; fy = s.flip_y;
         rot = s.rot_z;
         fl = s.fade_l; fr = s.fade_r; ft = s.fade_t; fb = s.fade_b;
-        // tweened crops override static ones if present
         cl = s.crop_l; cr = s.crop_r; ct = s.crop_t; cb = s.crop_b;
     }
 
-    // --- SM/ITG semantics: negative zoom flips, not negative geometry ---
-    // Convert sign of zoom into flip flags, keep positive magnitudes.
+    // SM semantics: negative zoom => flips, keep positive magnitudes
     if sx < 0.0 { fx = !fx; sx = -sx; }
     if sy < 0.0 { fy = !fy; sy = -sy; }
 
-    // apply zoom last
+    // If size is already known, apply zoom now. Else, carry to compose.
     if w != 0.0 || h != 0.0 {
         w *= sx;
         h *= sy;
+        scale_carry = [1.0, 1.0];
+    } else {
+        scale_carry = [sx, sy];
     }
 
     Actor::Sprite {
@@ -291,6 +284,7 @@ fn build_sprite_like<'a>(
         texcoordvelocity: texv,
         animate: anim_enable,
         state_delay,
+        scale: scale_carry, // NEW
     }
 }
 
