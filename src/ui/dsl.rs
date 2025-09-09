@@ -503,6 +503,50 @@ macro_rules! __dsl_apply_one {
         else { $mods.push($crate::ui::dsl::Mod::AddY(($dy) as f32)); }
     }};
 
+    // --- screen-centering helpers (SM parity) ----------------------------
+    // Center()  → set x,y to SCREEN_CENTER_X/Y
+    (Center () $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let cx = $crate::core::space::globals::screen_center_x();
+        let cy = $crate::core::space::globals::screen_center_y();
+        if let ::core::option::Option::Some(mut seg) = $cur.take() {
+            seg = seg.xy(cx, cy);
+            $cur = ::core::option::Option::Some(seg);
+        } else {
+            $mods.push($crate::ui::dsl::Mod::Xy(cx, cy));
+        }
+    }};
+    // CenterX() → set x to SCREEN_CENTER_X
+    (CenterX () $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let cx = $crate::core::space::globals::screen_center_x();
+        if let ::core::option::Option::Some(mut seg) = $cur.take() {
+            seg = seg.x(cx);
+            $cur = ::core::option::Option::Some(seg);
+        } else {
+            $mods.push($crate::ui::dsl::Mod::SetX(cx));
+        }
+    }};
+    // CenterY() → set y to SCREEN_CENTER_Y
+    (CenterY () $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        let cy = $crate::core::space::globals::screen_center_y();
+        if let ::core::option::Option::Some(mut seg) = $cur.take() {
+            seg = seg.y(cy);
+            $cur = ::core::option::Option::Some(seg);
+        } else {
+            $mods.push($crate::ui::dsl::Mod::SetY(cy));
+        }
+    }};
+
+    // Lowercase aliases (so both Center() and center() work)
+    (center ()  $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $crate::__dsl_apply_one!(Center() $mods $tw $cur $site)
+    }};
+    (centerx () $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $crate::__dsl_apply_one!(CenterX() $mods $tw $cur $site)
+    }};
+    (centery () $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $crate::__dsl_apply_one!(CenterY() $mods $tw $cur $site)
+    }};
+
     // --- color (present both for sprite & text) ---
     (diffuse ($r:expr,$g:expr,$b:expr,$a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         if let ::core::option::Option::Some(mut seg) = $cur.take() {

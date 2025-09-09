@@ -93,9 +93,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     //));
 
     actors.push(act!(sprite("logo.png"):
-        align(0.5, 0.5):
-        xy(screen_center_x(), screen_center_y()):
-        zoom(0.10)
+        Center(): setsize(300,180)
     ));
 
     actors
