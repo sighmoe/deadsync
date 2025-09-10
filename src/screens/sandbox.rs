@@ -67,10 +67,10 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         align(0.5, 0.0): xy(cx, 60.0):
         zoomtoheight(15.0): font("miso"): settext("Press ESC or F4 to return to Menu"): horizalign(center)
     ));
-    actors.push(act!(text:
-        align(1.0, 1.0): xy(screen_width() - 10.0, screen_height() - 10.0):
-        zoomtoheight(15.0): font("miso"): settext(format!("Elapsed: {:.2}", state.elapsed)): horizalign(right)
-    ));
+    //actors.push(act!(text:
+    //    align(1.0, 1.0): xy(screen_width() - 10.0, screen_height() - 10.0):
+    //    zoomtoheight(15.0): font("miso"): settext(format!("Elapsed: {:.2}", state.elapsed)): horizalign(right)
+    //));
 
     // Test 1
     //actors.push(act!(quad:
@@ -92,8 +92,24 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     //    zoom(2.0)
     //));
 
+    // S1 - using Center
+    //actors.push(act!(sprite("logo.png"):
+    //    Center(): setsize(300,180)
+    //));
+
+    //C1 - using align and xy
+    //actors.push(act!(sprite("logo.png"):
+    //    align(0.5,0.5): xy(cx, cy): setsize(300,180)
+    //));
+
+    // C2 - using align and x and y
+    // actors.push(act!(sprite("logo.png"):
+    //    align(0.5,0.5): x(cx): y(cy): setsize(300,180)
+    //));
+
+    // C3 - using align and x and y
     actors.push(act!(sprite("logo.png"):
-        Center(): setsize(300,180)
+        CenterX(): CenterY(): setsize(300,180)
     ));
 
     actors
