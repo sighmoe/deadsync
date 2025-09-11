@@ -114,7 +114,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     // T1 - Test text in center with miso
     actors.push(act!(text:
-        font("miso"): Center(): settext("Test")
+        zoom(1.0): font("miso"): Center(): settext("Test")
     ));
 
 

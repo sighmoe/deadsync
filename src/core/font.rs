@@ -6,6 +6,7 @@
 //! - SM extra-pixels quirk (+1/+1, left forced even) to avoid stroke clipping
 //! - Canonical texture keys (assets-relative, forward slashes) so lookups match
 //! - Parses "(res WxH)" from sheet filenames and scales INI-authored metrics like StepMania
+//! - Applies inverse draw scale so on-screen size matches StepMania's authored size
 //! - No regex/glob/configparser/once_cell; pure std + image + log
 //! - VERBOSE TRACE logging for troubleshooting: enable with RUST_LOG=new_engine::core::font=trace
 
@@ -25,18 +26,18 @@ const FONT_DEFAULT_CHAR: char = '\u{F8FF}'; // SM default glyph (private use)
 #[derive(Debug, Clone)]
 pub struct Glyph {
     pub texture_key: String,
-    pub tex_rect: [f32; 4],   // px: [x0, y0, x1, y1]
-    pub size: [f32; 2],       // px: [w, h]
-    pub offset: [f32; 2],     // px: [x_off_from_pen, y_off_from_baseline]
-    pub advance: f32,         // px: pen advance
+    pub tex_rect: [f32; 4],   // px: [x0, y0, x1, y1] (texture space)
+    pub size: [f32; 2],       // draw units (SM authored units)
+    pub offset: [f32; 2],     // draw units: [x_off_from_pen, y_off_from_baseline]
+    pub advance: f32,         // draw units: pen advance
 }
 
 #[derive(Debug, Clone)]
 pub struct Font {
     pub glyph_map: HashMap<char, Glyph>,
     pub default_glyph: Option<Glyph>,
-    pub line_spacing: i32, // from main/default page
-    pub height: i32,       // baseline - top
+    pub line_spacing: i32, // draw units (from main/default page)
+    pub height: i32,       // draw units (baseline - top)
 }
 
 pub struct FontLoadData {
@@ -54,7 +55,7 @@ struct FontPageSettings {
     top: i32,                  // -1 = “center – line_spacing/2”
     baseline: i32,             // -1 = “center + line_spacing/2”
     default_width: i32,        // -1 = “use frame width”
-    advance_extra_pixels: i32, // StepMania default is 0; INI may override (you already read it later).
+    advance_extra_pixels: i32, // SM default is 0
     glyph_widths: HashMap<usize, i32>,
 }
 
@@ -97,7 +98,7 @@ fn as_lower(s: &str) -> String { s.to_ascii_lowercase() }
 #[inline(always)]
 fn parse_section_header(raw: &str) -> Option<String> {
     let t = raw.trim();
-    if t.len() >= 2 && t.as_bytes()[0] == b'[' && t.as_bytes()[t.len().saturating_sub(1)] == b']' {
+    if t.len() >= 2 && t.starts_with('[') && t.ends_with(']') {
         let name = &t[1..t.len() - 1];
         Some(name.trim().to_string())
     } else {
@@ -363,9 +364,15 @@ fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
 }
 
 /// Compute StepMania-style sheet scaling from real texture size and "(res WxH)".
-/// Also applies SM's "doubleres" rule by halving the base source size if present.
+/// Returns:
+///   (sx, sy) = metric scale (authored -> texture)
+///   (dx, dy) = draw scale    (texture -> logical/authored)
 #[inline(always)]
-fn compute_font_sheet_scale(texture_key: &str, tex_w: u32, tex_h: u32) -> (f32, f32) {
+fn compute_font_sheet_scale(
+    texture_key: &str,
+    tex_w: u32,
+    tex_h: u32,
+) -> (f32, f32, f32, f32) {
     let (cols, rows) = parse_sheet_dims_from_filename(texture_key);
     let cols = cols.max(1);
     let rows = rows.max(1);
@@ -382,19 +389,105 @@ fn compute_font_sheet_scale(texture_key: &str, tex_w: u32, tex_h: u32) -> (f32, 
 
         let base_cell_w = (base_w as f32) / (cols as f32);
         let base_cell_h = (base_h as f32) / (rows as f32);
+
+        // Metric scale (authored -> texture)
         let sx = if base_cell_w > 0.0 { frame_w / base_cell_w } else { 1.0 };
         let sy = if base_cell_h > 0.0 { frame_h / base_cell_h } else { 1.0 };
-        (sx, sy)
+
+        // Draw scale (texture -> authored/logical)
+        let dx = if sx != 0.0 { 1.0 / sx } else { 1.0 };
+        let dy = if sy != 0.0 { 1.0 / sy } else { 1.0 };
+
+        (sx, sy, dx, dy)
     } else {
-        // No (res): no logical scaling.
-        (1.0, 1.0)
+        (1.0, 1.0, 1.0, 1.0)
     }
+}
+
+#[inline(always)]
+fn log_page_scale_summary(
+    page_name: &str,
+    texture_key: &str,
+    cols: u32,
+    rows: u32,
+    frame_w_i: i32,
+    frame_h_i: i32,
+    sx: f32,
+    sy: f32,
+    dx: f32,
+    dy: f32,
+) {
+    info!(
+        "  Page '{}', Texture: '{}', Grid: {}x{} (frame {}x{} px) \
+         | metric scale {:.3}x{:.3} -> draw scale {:.3}x{:.3}",
+        page_name, texture_key, cols, rows, frame_w_i, frame_h_i, sx, sy, dx, dy
+    );
+    trace!(
+        "    Detail: sx=frame_w/base_cell_w, sy=frame_h/base_cell_h; dx=1/sx, dy=1/sy."
+    );
+}
+
+/// Compute vertical metrics in texture px, then convert height & line_spacing to draw units.
+/// Returns:
+/// (line_spacing_tex, baseline_tex, top_tex, height_draw, line_spacing_draw, vshift_tex, vshift_draw)
+#[inline(always)]
+fn compute_vertical_metrics_draw(
+    frame_h_i: i32,
+    settings: &FontPageSettings,
+    dy: f32,
+) -> (i32, i32, i32, i32, i32, f32, f32) {
+    let frame_h_f = frame_h_i as f32;
+
+    let line_spacing_tex = if settings.line_spacing != -1 {
+        settings.line_spacing
+    } else {
+        frame_h_i
+    };
+
+    let baseline_tex = if settings.baseline != -1 {
+        settings.baseline
+    } else {
+        // SM uses int(center + lineSpacing/2); cast truncates toward zero.
+        (frame_h_f * 0.5 + line_spacing_tex as f32 * 0.5) as i32
+    };
+
+    let top_tex = if settings.top != -1 {
+        settings.top
+    } else {
+        // SM uses int(center - lineSpacing/2)
+        (frame_h_f * 0.5 - line_spacing_tex as f32 * 0.5) as i32
+    };
+
+    let height_tex = baseline_tex - top_tex;
+
+    // Convert stored font metrics to logical (draw) units
+    let height_draw       = round_half_to_even_i32((height_tex as f32)       * dy);
+    let line_spacing_draw = round_half_to_even_i32((line_spacing_tex as f32) * dy);
+
+    // vshift (offset.y) stored per-glyph; keep both forms
+    let vshift_tex  = -(baseline_tex as f32);
+    let vshift_draw = vshift_tex * dy;
+
+    trace!(
+        "    VMetrics: tex(line_spacing={}, baseline={}, top={}, height={}) -> draw(height={}, line_spacing={}), vshift_tex={:.1}, vshift_draw={:.3}",
+        line_spacing_tex, baseline_tex, top_tex, height_tex,
+        height_draw, line_spacing_draw, vshift_tex, vshift_draw
+    );
+
+    (
+        line_spacing_tex,
+        baseline_tex,
+        top_tex,
+        height_draw,
+        line_spacing_draw,
+        vshift_tex,
+        vshift_draw,
+    )
 }
 
 /// Round-to-nearest with ties-to-even (banker's rounding), like C's lrint with FE_TONEAREST.
 #[inline(always)]
 fn round_half_to_even_i32(v: f32) -> i32 {
-    // Handle NaN/inf gracefully:
     if !v.is_finite() { return 0; }
     let floor = v.floor();
     let frac = v - floor;
@@ -403,15 +496,13 @@ fn round_half_to_even_i32(v: f32) -> i32 {
     } else if frac > 0.5 {
         (floor + 1.0) as i32
     } else {
-        // exactly halfway: pick the even integer
         let f = floor as i32;
         if (f & 1) == 0 { f } else { f + 1 }
     }
 }
 
 /// Scale authored metrics from source px -> texture px using (sx, sy).
-/// SM parity: DO NOT apply ScaleAllWidthsBy here; it's applied to per-glyph widths later.
-/// We DO scale extras by (sx) because our engine works in texture pixels.
+/// SM parity: DO NOT apply ScaleAllWidthsBy here; it's applied later per glyph with lrint().
 #[inline(always)]
 fn apply_stepmania_metric_scaling(settings: &mut FontPageSettings, sx: f32, sy: f32) {
     // horizontals to texture px (source->texture)
@@ -436,9 +527,33 @@ fn apply_stepmania_metric_scaling(settings: &mut FontPageSettings, sx: f32, sy: 
     if settings.baseline != -1 {
         settings.baseline = (settings.baseline as f32 * sy).round() as i32;
     }
+}
 
-    // IMPORTANT: do NOT apply settings.scale_all_widths_by here.
-    // SM applies it later to per-glyph widths (aiFrameWidths[i]) with lrint().
+/// Convert glyph size/offset/advance from texture px to draw units (authored).
+#[inline(always)]
+fn draw_scale_glyph_metrics(
+    glyph_size_tex: [f32; 2],
+    glyph_offset_tex: [f32; 2],
+    advance_tex: f32,
+    dx: f32,
+    dy: f32,
+) -> ([f32; 2], [f32; 2], f32) {
+    let size   = [glyph_size_tex[0] * dx, glyph_size_tex[1] * dy];
+    let offset = [glyph_offset_tex[0] * dx, glyph_offset_tex[1] * dy];
+    let advance = advance_tex * dx;
+
+    trace!(
+        "      Glyph metrics: tex(size=[{:.1},{:.1}] off=[{:.1},{:.1}] adv={:.1}) \
+         -> draw(size=[{:.3},{:.3}] off=[{:.3},{:.3}] adv={:.3})",
+        glyph_size_tex[0], glyph_size_tex[1],
+        glyph_offset_tex[0], glyph_offset_tex[1],
+        advance_tex,
+        size[0], size[1],
+        offset[0], offset[1],
+        advance
+    );
+
+    (size, offset, advance)
 }
 
 /* ======================= RANGE APPLY ======================= */
@@ -522,7 +637,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
     let mut required_textures = Vec::new();
     let mut all_glyphs: HashMap<char, Glyph> = HashMap::new();
-    let mut default_page_metrics = (0, 0); // (height, line_spacing)
+    let mut default_page_metrics = (0, 0); // (height_draw, line_spacing_draw)
 
     for (page_idx, tex_path) in texture_paths.iter().enumerate() {
         let page_name = get_page_name_from_path(tex_path);
@@ -534,18 +649,21 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         let (num_frames_wide, num_frames_high) = parse_sheet_dims_from_filename(&texture_key);
         let total_frames = (num_frames_wide * num_frames_high) as usize;
 
-        // --- SM parity: integer cell size for metrics *and* UVs ---
+        // SM parity: integer cell size for metrics *and* UVs
         let frame_w_i = (tex_dims.0 / num_frames_wide) as i32;
         let frame_h_i = (tex_dims.1 / num_frames_high) as i32;
-        let frame_w_f = frame_w_i as f32;
-        let frame_h_f = frame_h_i as f32;
 
         // NEW: compute StepMania per-sheet scale from "(res WxH)"
-        let (sx, sy) = compute_font_sheet_scale(&texture_key, tex_dims.0, tex_dims.1);
+        let (sx, sy, dx, dy) = compute_font_sheet_scale(&texture_key, tex_dims.0, tex_dims.1);
 
-        info!(
-            "  Page '{}', Texture: '{}', Grid: {}x{} (frame {}x{} px, scale {:.3} x {:.3})",
-            page_name, texture_key, num_frames_wide, num_frames_high, frame_w_i, frame_h_i, sx, sy
+        log_page_scale_summary(
+            &page_name,
+            &texture_key,
+            num_frames_wide,
+            num_frames_high,
+            frame_w_i,
+            frame_h_i,
+            sx, sy, dx, dy,
         );
 
         // ------------ Settings (SM defaults honored) -------------
@@ -582,12 +700,12 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             }
         }
 
-        // --- NEW: scale all authored metrics to texture pixels (SM parity) ---
+        // --- Scale authored metrics to texture pixels (SM parity) ---
         apply_stepmania_metric_scaling(&mut settings, sx, sy);
 
         // Trace page settings and grid
         trace!(
-            "Page '{}' settings(px): draw_extra_pixels L={} R={}, add_to_all_widths={}, scale_all_widths_by={:.3}, \
+            "  [{}] settings(px): draw_extra L={} R={}, add_to_all_widths={}, scale_all_widths_by={:.3}, \
              line_spacing={}, top={}, baseline={}, default_width={}, advance_extra_pixels={}",
             page_name,
             settings.draw_extra_pixels_left,
@@ -601,43 +719,29 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             settings.advance_extra_pixels,
         );
         trace!(
-            "Page '{}' frames: {}x{} (frame_w={} frame_h={}), total_frames={}",
+            "  [{}] frames: {}x{} (frame_w={} frame_h={}), total_frames={}",
             page_name, num_frames_wide, num_frames_high, frame_w_i, frame_h_i, total_frames
         );
 
-        // ------------- Vertical metrics --------------
-        let line_spacing = if settings.line_spacing != -1 {
-            settings.line_spacing
-        } else {
-            frame_h_i
-        };
-
-        let baseline = if settings.baseline != -1 {
-            settings.baseline
-        } else {
-            // SM uses int(center + lineSpacing/2); cast truncates toward zero.
-            (frame_h_f * 0.5 + line_spacing as f32 * 0.5) as i32
-        };
-
-        let top = if settings.top != -1 {
-            settings.top
-        } else {
-            // SM uses int(center - lineSpacing/2)
-            (frame_h_f * 0.5 - line_spacing as f32 * 0.5) as i32
-        };
-
-        let height = baseline - top;
+        // ------------- Vertical metrics (compute + store in draw units) --------------
+        let (
+            _line_spacing_tex,
+            baseline_tex,
+            _top_tex,
+            height_draw,
+            line_spacing_draw,
+            vshift_tex,
+            _vshift_draw,
+        ) = compute_vertical_metrics_draw(frame_h_i, &settings, dy);
 
         if page_idx == 0 || page_name == "main" {
-            default_page_metrics = (height, line_spacing);
+            default_page_metrics = (height_draw, line_spacing_draw);
         }
 
-        let vshift = -(baseline as f32);
-
-        if line_spacing <= 0 || height <= 0 {
+        if line_spacing_draw <= 0 || height_draw <= 0 {
             warn!(
-                "Page '{}' suspicious metrics: line_spacing={}, height={}, frame_h={}",
-                page_name, line_spacing, height, frame_h_i
+                "Page '{}' suspicious metrics: draw_line_spacing={}, draw_height={}, frame_h={}",
+                page_name, line_spacing_draw, height_draw, frame_h_i
             );
         }
 
@@ -659,7 +763,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                                 continue;
                             }
                             let first_frame = row * num_frames_wide;
-                            // Prefer the raw value (keeps leading spaces). Fall back to trimmed.
                             let line_val = if let Some(raw) = raw_line_map.get(&(sec_lc.clone(), row)) {
                                 raw.as_str()
                             } else {
@@ -707,7 +810,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                                     );
                                 }
                             } else {
-                                // keep strict behavior; require quoted strings or U+XXXX
                                 warn!("Unsupported MAP alias key '{}'", spec);
                             }
                         }
@@ -789,7 +891,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             total_frames
         );
 
-        // ------------- GLYPHS (pure integer math like StepMania) -------------
+        // ------------- GLYPHS (integer math like StepMania; draw-scaled) -------------
         // SM quirk: +1/+1 extra pixels; left forced even
         let mut draw_left = settings.draw_extra_pixels_left + 1;
         let mut draw_right = settings.draw_extra_pixels_right + 1;
@@ -809,12 +911,11 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
             // Integer hadvance (SM)
             let hadvance_px: i32 = base_w_px + settings.advance_extra_pixels;
-            let advance = hadvance_px as f32;
 
             // Integer chop and width fixup (odd chop -> widen by 1, make chop even)
             let mut width_i = base_w_px;
             let mut chop_i = frame_w_i - width_i;
-            if chop_i < 0 { chop_i = 0; } // don’t allow negative pad
+            if chop_i < 0 { chop_i = 0; }
             if (chop_i & 1) != 0 {
                 chop_i -= 1;
                 width_i += 1;
@@ -825,21 +926,20 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             let extra_left_i  = draw_left.min(pad_i);
             let extra_right_i = draw_right.min(pad_i);
 
-            // Final on-screen quad size (px)
-            let glyph_size = [
+            // Texture-space metrics
+            let glyph_size_tex   = [
                 (width_i + extra_left_i + extra_right_i) as f32,
                 frame_h_i as f32,
             ];
-            // Offset from pen (px)
-            let glyph_offset = [-(extra_left_i as f32), vshift];
+            let glyph_offset_tex = [-(extra_left_i as f32), vshift_tex];
+            let advance_tex      = hadvance_px as f32;
 
-            // Integer texel rect for this frame
+            // Integer texel rect for this frame (trim inside the frame by (pad - extra))
             let col = (i as u32 % num_frames_wide) as i32;
             let row = (i as u32 / num_frames_wide) as i32;
             let tex_x_i = col * frame_w_i;
             let tex_y_i = row * frame_h_i;
 
-            // Trim inside the frame by (pad - extra) on each side
             let left_trim  = (pad_i - extra_left_i).max(0);
             let right_trim = (pad_i - extra_right_i).max(0);
 
@@ -849,6 +949,10 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 (tex_x_i + frame_w_i - right_trim) as f32,
                 (tex_y_i + frame_h_i) as f32,
             ];
+
+            // Convert to logical (draw) units (SM end result)
+            let (glyph_size, glyph_offset, advance) =
+                draw_scale_glyph_metrics(glyph_size_tex, glyph_offset_tex, advance_tex, dx, dy);
 
             let glyph = Glyph {
                 texture_key: texture_key.clone(),
@@ -867,8 +971,8 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                         );
                     }
                     trace!(
-                        "  [{}] GLYPH {} -> frame {} | base_w={} hadv={} chop={} extraL={} extraR={} \
-                         size=[{:.0}x{:.0}] offset=[{:.0},{:.0}] vshift={:.0} \
+                        "  [{}] GLYPH {} -> frame {} | base_w={} hadv_tex={} chop={} extraL={} extraR={} \
+                         draw_size=[{:.3}x{:.3}] draw_offset=[{:.3},{:.3}] adv_draw={:.3} \
                          tex_rect=[{:.0},{:.0},{:.0},{:.0}]",
                         page_name,
                         fmt_char(ch),
@@ -878,11 +982,11 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                         chop_i,
                         extra_left_i,
                         extra_right_i,
-                        glyph_size[0],
-                        glyph_size[1],
-                        glyph_offset[0],
-                        glyph_offset[1],
-                        vshift,
+                        glyph.size[0],
+                        glyph.size[1],
+                        glyph.offset[0],
+                        glyph.offset[1],
+                        glyph.advance,
                         tex_rect[0],
                         tex_rect[1],
                         tex_rect[2],
@@ -892,7 +996,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 }
             }
 
-            // Insert default glyph only from the first page's frame 0 (SM parity: main/default page)
+            // Insert default glyph only from the first page's frame 0
             if page_idx == 0 && i == 0 {
                 all_glyphs.entry(FONT_DEFAULT_CHAR).or_insert_with(|| glyph.clone());
             }
@@ -911,7 +1015,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
     if !font.glyph_map.contains_key(&' ') {
         let adv = font.default_glyph.as_ref().map(|g| g.advance).unwrap_or(0.0);
         warn!(
-            "Font '{}' is missing SPACE (U+0020). Falling back to default glyph (advance {:.1}px). \
+            "Font '{}' is missing SPACE (U+0020). Falling back to default glyph (advance {:.1}). \
              Consider adding a SPACE mapping in the INI.",
             ini_path_str, adv
         );
@@ -923,10 +1027,10 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         }
     } else if let Some(g) = font.glyph_map.get(&' ') {
         trace!(
-            "SPACE metrics: advance={:.1} size=[{:.1}x{:.1}] offset=[{:.1},{:.1}]",
+            "SPACE metrics (draw): advance={:.3} size=[{:.3}x{:.3}] offset=[{:.3},{:.3}]",
             g.advance, g.size[0], g.size[1], g.offset[0], g.offset[1]
         );
-        debug!("SPACE mapped: advance {:.1}px (texture='{}')", g.advance, g.texture_key);
+        debug!("SPACE mapped: draw advance {:.3} (texture='{}')", g.advance, g.texture_key);
     }
 
     info!(
@@ -941,7 +1045,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
 /* ======================= API ======================= */
 
-/// Functional helper (pure): compute total advance for a line.
+/// Functional helper (pure): compute total advance for a line (draw units).
 #[inline(always)]
 pub fn measure_line_width(font: &Font, text: &str) -> f32 {
     text.chars()
@@ -957,7 +1061,7 @@ impl Font {
     }
 }
 
-/* ======================= LAYOUT HELPERS USED BY UI (unchanged) ======================= */
+/* ======================= LAYOUT HELPERS USED BY UI ======================= */
 
 #[inline(always)]
 pub fn line_width_px_sm(font: &Font, text: &str, scale_x: f32) -> i32 {
@@ -973,7 +1077,7 @@ pub fn line_width_px_sm(font: &Font, text: &str, scale_x: f32) -> i32 {
         let mapped = font.glyph_map.get(&ch);
         let g = match mapped.or(font.default_glyph.as_ref()) {
             Some(g) => g,
-            None => continue, // unmapped and no default: skip
+            None => continue,
         };
 
         // SM quirk: if SPACE is unmapped, advance only; don't draw a quad.
