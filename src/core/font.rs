@@ -135,29 +135,78 @@ fn parse_line_entry_raw(raw: &str) -> Option<(u32, &str)> {
     Some((row, rhs))
 }
 
-/// FIRST `WxH` pair scanning left-to-right in a filename (ASCII only).
+/// Return the frame grid (cols, rows) from filename, ignoring any "(res WxH)" hints.
+/// Strategy: collect all WxH pairs, drop those inside a "(res ...)" span (case-insensitive),
+/// then pick the **last** remaining pair (matches common SM naming like "... 16x16.png").
 #[inline(always)]
 pub fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
-    let bytes = filename.as_bytes();
-    let len = bytes.len();
+    let s = filename;
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+
+    // 1) Find spans covered by "(res ...)" to exclude their WxH.
+    let lower = s.to_ascii_lowercase();
+    let lb = lower.as_bytes();
+    let mut res_spans: Vec<(usize, usize)> = Vec::new();
     let mut i = 0usize;
-    while i < len {
-        if bytes[i] == b'x' || bytes[i] == b'X' {
-            let mut l = i;
-            while l > 0 && bytes[l - 1].is_ascii_digit() { l -= 1; }
-            let mut r = i + 1;
-            while r < len && bytes[r].is_ascii_digit() { r += 1; }
-            if l < i && i + 1 < r {
-                let w = std::str::from_utf8(&bytes[l..i]).ok()
-                    .and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-                let h = std::str::from_utf8(&bytes[i + 1..r]).ok()
-                    .and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-                if w > 0 && h > 0 { return (w, h); }
+    while i < n {
+        if lb[i] == b'(' && i + 4 <= n && &lb[i..i + 4] == b"(res" {
+            // find closing ')'
+            let mut j = i + 4;
+            while j < n && lb[j] != b')' { j += 1; }
+            if j < n && lb[j] == b')' {
+                res_spans.push((i, j)); // inclusive
+                i = j + 1;
+                continue;
             }
         }
         i += 1;
     }
+    let in_res = |idx: usize| -> bool {
+        for (a, b) in &res_spans {
+            if idx >= *a && idx <= *b { return true; }
+        }
+        false
+    };
+
+    // 2) Collect all WxH candidates.
+    let mut pairs: Vec<(usize, u32, u32)> = Vec::new(); // (pos, W, H)
+    i = 0;
+    while i < n {
+        if bytes[i] == b'x' || bytes[i] == b'X' {
+            // scan left for W
+            let mut l = i;
+            while l > 0 && bytes[l - 1].is_ascii_digit() { l -= 1; }
+            // scan right for H
+            let mut r = i + 1;
+            while r < n && bytes[r].is_ascii_digit() { r += 1; }
+            if l < i && i + 1 < r {
+                if let (Ok(ws), Ok(hs)) = (
+                    std::str::from_utf8(&bytes[l..i]),
+                    std::str::from_utf8(&bytes[i + 1..r]),
+                ) {
+                    if let (Ok(w), Ok(h)) = (ws.parse::<u32>(), hs.parse::<u32>()) {
+                        if w > 0 && h > 0 {
+                            pairs.push((l, w, h));
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+
+    // 3) Choose the last WxH not inside "(res ...)".
+    for (pos, w, h) in pairs.into_iter().rev() {
+        if !in_res(pos) { return (w, h); }
+    }
+
     (1, 1)
+}
+
+#[inline(always)]
+fn is_doubleres_in_name(name: &str) -> bool {
+    name.to_ascii_lowercase().contains("doubleres")
 }
 
 /// `[section]->{key->val}` (both section/key lowercased, value trimmed). Only std.
@@ -313,7 +362,8 @@ fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
     None
 }
 
-/// Compute StepMania sheet scaling factors from real texture size and "(res WxH)".
+/// Compute StepMania-style sheet scaling from real texture size and "(res WxH)".
+/// Also applies SM's "doubleres" rule by halving the base source size if present.
 #[inline(always)]
 fn compute_font_sheet_scale(texture_key: &str, tex_w: u32, tex_h: u32) -> (f32, f32) {
     let (cols, rows) = parse_sheet_dims_from_filename(texture_key);
@@ -323,57 +373,72 @@ fn compute_font_sheet_scale(texture_key: &str, tex_w: u32, tex_h: u32) -> (f32, 
     let frame_w = (tex_w / cols) as f32;
     let frame_h = (tex_h / rows) as f32;
 
-    if let Some((base_w, base_h)) = parse_base_res_from_filename(texture_key) {
+    if let Some((mut base_w, mut base_h)) = parse_base_res_from_filename(texture_key) {
+        // SM parity: doubleres halves logical source size after reading (res WxH)
+        if is_doubleres_in_name(texture_key) {
+            base_w = (base_w / 2).max(1);
+            base_h = (base_h / 2).max(1);
+        }
+
         let base_cell_w = (base_w as f32) / (cols as f32);
         let base_cell_h = (base_h as f32) / (rows as f32);
         let sx = if base_cell_w > 0.0 { frame_w / base_cell_w } else { 1.0 };
         let sy = if base_cell_h > 0.0 { frame_h / base_cell_h } else { 1.0 };
         (sx, sy)
     } else {
+        // No (res): no logical scaling.
         (1.0, 1.0)
     }
 }
 
-/// Scale authored metrics into texture pixels (SM parity), then apply ScaleAllWidthsBy.
+/// Round-to-nearest with ties-to-even (banker's rounding), like C's lrint with FE_TONEAREST.
+#[inline(always)]
+fn round_half_to_even_i32(v: f32) -> i32 {
+    // Handle NaN/inf gracefully:
+    if !v.is_finite() { return 0; }
+    let floor = v.floor();
+    let frac = v - floor;
+    if frac < 0.5 {
+        floor as i32
+    } else if frac > 0.5 {
+        (floor + 1.0) as i32
+    } else {
+        // exactly halfway: pick the even integer
+        let f = floor as i32;
+        if (f & 1) == 0 { f } else { f + 1 }
+    }
+}
+
+/// Scale authored metrics from source px -> texture px using (sx, sy).
+/// SM parity: DO NOT apply ScaleAllWidthsBy here; it's applied to per-glyph widths later.
+/// We DO scale extras by (sx) because our engine works in texture pixels.
 #[inline(always)]
 fn apply_stepmania_metric_scaling(settings: &mut FontPageSettings, sx: f32, sy: f32) {
-    // horizontals to texture px
+    // horizontals to texture px (source->texture)
     if settings.default_width != -1 {
-        settings.default_width = round_i(settings.default_width as f32 * sx);
+        settings.default_width = (settings.default_width as f32 * sx).round() as i32;
     }
-    settings.add_to_all_widths     = round_i(settings.add_to_all_widths as f32 * sx);
-    settings.advance_extra_pixels  = round_i(settings.advance_extra_pixels as f32 * sx);
-    settings.draw_extra_pixels_left  = round_i(settings.draw_extra_pixels_left as f32 * sx);
-    settings.draw_extra_pixels_right = round_i(settings.draw_extra_pixels_right as f32 * sx);
+    settings.add_to_all_widths     = (settings.add_to_all_widths as f32 * sx).round() as i32;
+    settings.advance_extra_pixels  = (settings.advance_extra_pixels as f32 * sx).round() as i32;
+    settings.draw_extra_pixels_left  = (settings.draw_extra_pixels_left as f32 * sx).round() as i32;
+    settings.draw_extra_pixels_right = (settings.draw_extra_pixels_right as f32 * sx).round() as i32;
     for w in settings.glyph_widths.values_mut() {
-        *w = round_i(*w as f32 * sx);
+        *w = (*w as f32 * sx).round() as i32;
     }
 
     // verticals to texture px
     if settings.line_spacing != -1 {
-        settings.line_spacing = round_i(settings.line_spacing as f32 * sy);
+        settings.line_spacing = (settings.line_spacing as f32 * sy).round() as i32;
     }
     if settings.top != -1 {
-        settings.top = round_i(settings.top as f32 * sy);
+        settings.top = (settings.top as f32 * sy).round() as i32;
     }
     if settings.baseline != -1 {
-        settings.baseline = round_i(settings.baseline as f32 * sy);
+        settings.baseline = (settings.baseline as f32 * sy).round() as i32;
     }
 
-    // author width scaling applied after base conversion
-    if (settings.scale_all_widths_by - 1.0).abs() > f32::EPSILON {
-        let s = settings.scale_all_widths_by;
-        if settings.default_width != -1 {
-            settings.default_width = round_i(settings.default_width as f32 * s);
-        }
-        settings.add_to_all_widths    = round_i(settings.add_to_all_widths as f32 * s);
-        settings.advance_extra_pixels = round_i(settings.advance_extra_pixels as f32 * s);
-        settings.draw_extra_pixels_left  = round_i(settings.draw_extra_pixels_left as f32 * s);
-        settings.draw_extra_pixels_right = round_i(settings.draw_extra_pixels_right as f32 * s);
-        for w in settings.glyph_widths.values_mut() {
-            *w = round_i(*w as f32 * s);
-        }
-    }
+    // IMPORTANT: do NOT apply settings.scale_all_widths_by here.
+    // SM applies it later to per-glyph widths (aiFrameWidths[i]) with lrint().
 }
 
 /* ======================= RANGE APPLY ======================= */
@@ -550,13 +615,15 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         let baseline = if settings.baseline != -1 {
             settings.baseline
         } else {
-            (frame_h_f * 0.5 + line_spacing as f32 * 0.5).round() as i32
+            // SM uses int(center + lineSpacing/2); cast truncates toward zero.
+            (frame_h_f * 0.5 + line_spacing as f32 * 0.5) as i32
         };
 
         let top = if settings.top != -1 {
             settings.top
         } else {
-            (frame_h_f * 0.5 - line_spacing as f32 * 0.5).round() as i32
+            // SM uses int(center - lineSpacing/2)
+            (frame_h_f * 0.5 - line_spacing as f32 * 0.5) as i32
         };
 
         let height = baseline - top;
@@ -738,7 +805,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 frame_w_i
             };
             base_w_px += settings.add_to_all_widths;
-            base_w_px = ((base_w_px as f32) * settings.scale_all_widths_by).round() as i32;
+            base_w_px = round_half_to_even_i32((base_w_px as f32) * settings.scale_all_widths_by);
 
             // Integer hadvance (SM)
             let hadvance_px: i32 = base_w_px + settings.advance_extra_pixels;
