@@ -112,9 +112,12 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     //    CenterX(): CenterY(): setsize(300,180)
     //));
 
+    // T1 - Test text in center with miso
     actors.push(act!(text:
-        align(0.5, 0.5): Center(): font("miso"): settext("Test")
+        font("miso"): Center(): settext("Test")
     ));
+
+
 
     actors
 }

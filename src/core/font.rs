@@ -54,7 +54,7 @@ struct FontPageSettings {
     top: i32,                  // -1 = “center – line_spacing/2”
     baseline: i32,             // -1 = “center + line_spacing/2”
     default_width: i32,        // -1 = “use frame width”
-    advance_extra_pixels: i32, // SM default 1
+    advance_extra_pixels: i32, // StepMania default is 0; INI may override (you already read it later).
     glyph_widths: HashMap<usize, i32>,
 }
 
@@ -70,7 +70,7 @@ impl Default for FontPageSettings {
             top: -1,
             baseline: -1,
             default_width: -1,
-            advance_extra_pixels: 1, // SM default
+            advance_extra_pixels: 0, // SM default
             glyph_widths: HashMap::new(),
         }
     }
@@ -960,8 +960,12 @@ impl Font {
 /* ======================= LAYOUT HELPERS USED BY UI (unchanged) ======================= */
 
 #[inline(always)]
-fn line_width_no_overlap_px(font: &Font, text: &str, scale_x: f32) -> i32 {
-    // simulate the renderer with a "no-overlap" pen
+pub fn line_width_px_sm(font: &Font, text: &str, scale_x: f32) -> i32 {
+    // StepMania behavior:
+    // - draw_x = round(pen + offset_x * scale_x)
+    // - right  = draw_x + size_x * scale_x
+    // - pen   += advance * scale_x
+    // - allow overlap; do NOT bump pen to avoid crossing
     let mut pen = 0.0f32;
     let mut last_right = f32::NEG_INFINITY;
 
@@ -969,17 +973,13 @@ fn line_width_no_overlap_px(font: &Font, text: &str, scale_x: f32) -> i32 {
         let mapped = font.glyph_map.get(&ch);
         let g = match mapped.or(font.default_glyph.as_ref()) {
             Some(g) => g,
-            None => continue, // completely unmapped and no default: skip
+            None => continue, // unmapped and no default: skip
         };
 
-        // StepMania parity for missing SPACE: advance only; no quad
-        let should_draw_quad = !(ch == ' ' && mapped.is_none());
+        // SM quirk: if SPACE is unmapped, advance only; don't draw a quad.
+        let draw_quad = !(ch == ' ' && mapped.is_none());
 
-        if should_draw_quad {
-            // ensure that the snapped left edge of this quad won't cross the previous right edge
-            let need_pen = (last_right - g.offset[0] * scale_x - 0.5).ceil();
-            if pen < need_pen { pen = need_pen; }
-
+        if draw_quad {
             let draw_x = (pen + g.offset[0] * scale_x).round();
             let right  = draw_x + g.size[0] * scale_x;
             if right > last_right { last_right = right; }

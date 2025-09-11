@@ -4,6 +4,7 @@ use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;
 use crate::core::{assets, font};
+use crate::core::font::line_width_px_sm;
 use crate::ui::actors::{self, Actor, SizeSpec};
 use cgmath::{Deg, Matrix4, Vector2, Vector3};
 
@@ -451,63 +452,10 @@ fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) 
     )
 }
 
-#[inline(always)]
-fn line_width_no_overlap_px(font: &font::Font, text: &str, scale_x: f32) -> i32 {
-    // simulate the renderer with a "no-overlap" pen
-    let mut pen = 0.0f32;
-    let mut last_right = f32::NEG_INFINITY;
-
-    for ch in text.chars() {
-        let mapped = font.glyph_map.get(&ch);
-        let g = match mapped.or(font.default_glyph.as_ref()) {
-            Some(g) => g,
-            None => continue, // completely unmapped and no default: skip
-        };
-
-        // StepMania parity for missing SPACE: advance only; no quad
-        let should_draw_quad = !(ch == ' ' && mapped.is_none());
-
-        if should_draw_quad {
-            // ensure that the snapped left edge of this quad won't cross the previous right edge
-            // pen must be large enough that round(pen + off) >= last_right
-            let need_pen = (last_right - g.offset[0] * scale_x - 0.5).ceil();
-            if pen < need_pen { pen = need_pen; }
-
-            // snapped draw position, like the renderer
-            let draw_x = (pen + g.offset[0] * scale_x).round();
-            let right  = draw_x + g.size[0] * scale_x;
-            if right > last_right { last_right = right; }
-        }
-
-        // logical advance (always applied)
-        pen += g.advance * scale_x;
-    }
-
-    // true visible width is the max of where the pen ended and the furthest drawn pixel
-    last_right.max(pen).round() as i32
-}
-
-#[inline(always)]
-fn place_no_overlap_and_get_draw_x(
-    pen_x: &mut f32,
-    last_right: &mut f32,
-    g: &font::Glyph,
-    scale_x: f32,
-) -> f32 {
-    // bump pen so that after snapping, left edge >= last_right
-    let need_pen = (*last_right - g.offset[0] * scale_x - 0.5).ceil();
-    if *pen_x < need_pen { *pen_x = need_pen; }
-
-    let draw_x = (*pen_x + g.offset[0] * scale_x).round();
-    let right  = draw_x + g.size[0] * scale_x;
-    if right > *last_right { *last_right = right; }
-    draw_x
-}
-
 fn layout_text(
     font: &font::Font,
     text: &str,
-    _px_size: f32, // intentionally unused; bitmap font is intrinsic + scale
+    _px_size: f32,            // bitmap font is intrinsic + scale
     scale: [f32; 2],
     fit_width: Option<f32>,
     fit_height: Option<f32>,
@@ -519,13 +467,13 @@ fn layout_text(
 ) -> Vec<RenderObject> {
     if text.is_empty() { return vec![]; }
 
-    // 1) split
+    // 1) split lines
     let lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() { return vec![]; }
 
-    // 2) measure *unscaled logical* widths (for fit calc, like SM)
+    // 2) measure unscaled logical widths for fit calc (SM-style width)
     let logical_line_widths: Vec<f32> =
-        lines.iter().map(|l| line_width_no_overlap_px(font, l, 1.0) as f32).collect();
+        lines.iter().map(|l| line_width_px_sm(font, l, 1.0) as f32).collect();
     let max_logical_width = logical_line_widths.iter().fold(0.0f32, |a, &b| a.max(b));
 
     // Vertical metrics (SM: cap height = baseline - top from main page)
@@ -537,7 +485,7 @@ fn layout_text(
         cap_height
     };
 
-    // 3) fit scale (uniform; min of width/height constraints)
+    // 3) fit scale (uniform)
     use std::f32::INFINITY;
     let s_w = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
     let s_h = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
@@ -547,9 +495,9 @@ fn layout_text(
     let final_scale_y = scale[1] * fit_s;
     if final_scale_x.abs() < 1e-6 || final_scale_y.abs() < 1e-6 { return vec![]; }
 
-    // 4) measure widths in *screen pixels* with cumulative (float) advance; snap once
+    // 4) actual pixel widths (SM-style)
     let line_widths_px: Vec<i32> =
-        lines.iter().map(|l| line_width_no_overlap_px(font, l, final_scale_x)).collect();
+        lines.iter().map(|l| line_width_px_sm(font, l, final_scale_x)).collect();
     let max_line_width_px = *line_widths_px.iter().max().unwrap_or(&0);
 
     // 5) place the text block
@@ -562,22 +510,19 @@ fn layout_text(
     // First baseline at cap height; pixel-aligned
     let mut current_baseline_sm_y = (block_top_sm_y + cap_height * final_scale_y).round();
 
-    // 6) build render objects
+    // 6) build objects (SM placement: allow overlap; snap draw pos)
     let mut objects = Vec::new();
 
     for (i, line) in lines.iter().enumerate() {
         let line_w_px = line_widths_px[i] as f32;
 
-        // Start pen based on actual pixel width of this line; pixel-aligned
         let pen_start_x = match text_align {
             actors::TextAlign::Left   => block_left_sm_x,
             actors::TextAlign::Center => block_left_sm_x + 0.5 * (scaled_block_width - line_w_px),
             actors::TextAlign::Right  => block_left_sm_x + (scaled_block_width - line_w_px),
         }.round();
 
-        // Accumulate in float (SM behavior)
         let mut pen_x_sm = pen_start_x;
-        let mut last_right_edge_sm = f32::NEG_INFINITY;
 
         for c in line.chars() {
             let mapped = font.glyph_map.get(&c);
@@ -586,59 +531,55 @@ fn layout_text(
                 None => continue,
             };
 
-            let should_draw_quad = !(c == ' ' && mapped.is_none());
+            // draw sizes
+            let quad_w = glyph.size[0] * final_scale_x;
+            let quad_h = glyph.size[1] * final_scale_y;
 
-            if should_draw_quad {
-                // sizes (unchanged)
-                let quad_w = glyph.size[0] * final_scale_x;
-                let quad_h = glyph.size[1] * final_scale_y;
+            // SM: if SPACE is unmapped, just advance; do not push a quad
+            let draw_quad = !(c == ' ' && mapped.is_none());
 
-                if quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
-                    // NEW: get a non-overlapping, pixel-snapped x
-                    let quad_x_sm = place_no_overlap_and_get_draw_x(
-                        &mut pen_x_sm, &mut last_right_edge_sm, glyph, final_scale_x
-                    );
-                    let quad_y_sm = (current_baseline_sm_y + glyph.offset[1] * final_scale_y).round();
+            if draw_quad && quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
+                let quad_x_sm = (pen_x_sm + glyph.offset[0] * final_scale_x).round();
+                let quad_y_sm = (current_baseline_sm_y + glyph.offset[1] * final_scale_y).round();
 
-                    let center_x = m.left + quad_x_sm + quad_w * 0.5;
-                    let center_y = m.top  - (quad_y_sm + quad_h * 0.5);
+                let center_x = m.left + quad_x_sm + quad_w * 0.5;
+                let center_y = m.top  - (quad_y_sm + quad_h * 0.5);
 
-                    let transform = Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0))
-                                * Matrix4::from_nonuniform_scale(quad_w, quad_h, 1.0);
+                let transform = Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0))
+                              * Matrix4::from_nonuniform_scale(quad_w, quad_h, 1.0);
 
-                    let (tex_w, tex_h) = assets::texture_dims(&glyph.texture_key)
-                        .map_or((1.0, 1.0), |meta| (meta.w as f32, meta.h as f32));
+                let (tex_w, tex_h) = assets::texture_dims(&glyph.texture_key)
+                    .map_or((1.0, 1.0), |meta| (meta.w as f32, meta.h as f32));
 
-                    let uv_scale = [
-                        (glyph.tex_rect[2] - glyph.tex_rect[0]) / tex_w,
-                        (glyph.tex_rect[3] - glyph.tex_rect[1]) / tex_h,
-                    ];
-                    let uv_offset = [
-                        glyph.tex_rect[0] / tex_w,
-                        glyph.tex_rect[1] / tex_h,
-                    ];
+                let uv_scale = [
+                    (glyph.tex_rect[2] - glyph.tex_rect[0]) / tex_w,
+                    (glyph.tex_rect[3] - glyph.tex_rect[1]) / tex_h,
+                ];
+                let uv_offset = [
+                    glyph.tex_rect[0] / tex_w,
+                    glyph.tex_rect[1] / tex_h,
+                ];
 
-                    objects.push(RenderObject {
-                        object_type: renderer::ObjectType::Sprite {
-                            texture_id: glyph.texture_key.clone(),
-                            tint: [1.0; 4],
-                            uv_scale,
-                            uv_offset,
-                            edge_fade: [0.0; 4],
-                        },
-                        transform,
-                        blend: BlendMode::Alpha,
-                        z: 0,
-                        order: 0,
-                    });
-                }
+                objects.push(RenderObject {
+                    object_type: renderer::ObjectType::Sprite {
+                        texture_id: glyph.texture_key.clone(),
+                        tint: [1.0; 4],
+                        uv_scale,
+                        uv_offset,
+                        edge_fade: [0.0; 4],
+                    },
+                    transform,
+                    blend: BlendMode::Alpha,
+                    z: 0,
+                    order: 0,
+                });
             }
 
-            // advance pen (always), like before
+            // SM: advance pen (always), with no “anti-overlap” adjustment
             pen_x_sm += glyph.advance * final_scale_x;
         }
 
-        // Next line (pixel-aligned)
+        // next baseline (pixel aligned, SM-like)
         current_baseline_sm_y += (font.line_spacing as f32 * final_scale_y).round();
     }
 
