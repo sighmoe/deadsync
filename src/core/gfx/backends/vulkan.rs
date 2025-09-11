@@ -1,4 +1,6 @@
-use crate::core::gfx::{ObjectType, RenderList, Texture as RendererTexture, BlendMode};
+// FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/new-engine/src/core/gfx/backends/vulkan.rs
+
+use crate::core::gfx::{BlendMode, ObjectType, RenderList, Texture as RendererTexture};
 use crate::core::space::ortho_for_window;
 use ash::{
     khr::{surface, swapchain},
@@ -25,16 +27,7 @@ struct SpritePush {
     tint: [f32; 4],
     uv_scale: [f32; 2],
     uv_offset: [f32; 2],
-    edge_fade: [f32; 4], 
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct GlyphInstance {
-    center:   [f32; 2],
-    size:     [f32; 2],
-    uv_scale: [f32; 2],
-    uv_offset:[f32; 2],
+    edge_fade: [f32; 4],
 }
 
 struct PipelinePair {
@@ -43,20 +36,18 @@ struct PipelinePair {
 }
 
 // A handle to a Vulkan texture on the GPU.
-// It bundles the image, its memory, its view, and the descriptor set that links it to the shader.
 pub struct Texture {
-    device: Arc<Device>, // For automatic cleanup on Drop
+    device: Arc<Device>,
     image: vk::Image,
     memory: vk::DeviceMemory,
     view: vk::ImageView,
     pub descriptor_set: vk::DescriptorSet,
-    pool: vk::DescriptorPool, // To free the descriptor set in Drop
+    pool: vk::DescriptorPool,
 }
 
 impl Drop for Texture {
     fn drop(&mut self) {
         unsafe {
-            // Free the descriptor set before destroying the view/image
             let _ = self.device.free_descriptor_sets(self.pool, &[self.descriptor_set]);
             self.device.destroy_image_view(self.view, None);
             self.device.destroy_image(self.image, None);
@@ -80,15 +71,7 @@ struct SwapchainResources {
     format: vk::SurfaceFormatKHR,
 }
 
-#[repr(C)]
-struct MsdfPush {
-    mvp: Matrix4<f32>,
-    color: [f32;4],
-    px_range: f32,
-    _pad: [f32;3],
-}
-
-// The main Vulkan state struct, now with resources for two pipelines and texturing.
+// The main Vulkan state struct, now simplified.
 pub struct State {
     _entry: Entry,
     instance: Instance,
@@ -106,8 +89,6 @@ pub struct State {
     sprite_pipeline: vk::Pipeline,
     vertex_buffer: Option<BufferResource>,
     index_buffer: Option<BufferResource>,
-    // This field is removed, as we now draw a single static quad per object.
-    // object_draw_info: Vec<ObjectDrawInfo>,
     pub descriptor_set_layout: vk::DescriptorSetLayout,
     pub descriptor_pool: vk::DescriptorPool,
     pub sampler: vk::Sampler,
@@ -120,10 +101,6 @@ pub struct State {
     window_size: PhysicalSize<u32>,
     vsync_enabled: bool,
     projection: Matrix4<f32>,
-    msdf_pipeline_layout: vk::PipelineLayout,
-    msdf_pipeline: vk::Pipeline,
-    instance_buffers: Vec<Option<BufferResource>>,
-    instance_caps: Vec<usize>, // capacity in instances per frame
 }
 
 // --- Main Procedural Functions ---
@@ -159,17 +136,8 @@ pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error
     let descriptor_set_layout = create_descriptor_set_layout(device.as_ref().unwrap())?;
     let descriptor_pool = create_descriptor_pool(device.as_ref().unwrap())?;
 
-    // Only sprite + msdf pipelines
     let PipelinePair { layout: sprite_pipeline_layout, pipe: sprite_pipeline } =
         create_sprite_pipeline(
-            device.as_ref().unwrap(),
-            render_pass,
-            descriptor_set_layout,
-            BlendMode::Alpha,
-        )?;
-
-    let PipelinePair { layout: msdf_pipeline_layout, pipe: msdf_pipeline } =
-        create_msdf_pipeline(
             device.as_ref().unwrap(),
             render_pass,
             descriptor_set_layout,
@@ -213,10 +181,6 @@ pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error
         window_size: initial_size,
         vsync_enabled,
         projection,
-        msdf_pipeline_layout,
-        msdf_pipeline,
-        instance_buffers: Vec::new(),
-        instance_caps: Vec::new(),
     };
 
     // Static unit quad buffers
@@ -238,20 +202,15 @@ pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error
         vk::BufferUsageFlags::INDEX_BUFFER, vk::MemoryPropertyFlags::DEVICE_LOCAL, Some(&indices)
     )?);
 
-    state.instance_buffers = (0..MAX_FRAMES_IN_FLIGHT).map(|_| None).collect();
-    state.instance_caps    = vec![0; MAX_FRAMES_IN_FLIGHT];
-
     info!("Vulkan backend initialized successfully.");
     Ok(state)
 }
 
-// Creates a sampler to tell shaders how to read textures (e.g., with linear filtering).
 fn create_sampler(device: &Device) -> Result<vk::Sampler, vk::Result> {
     let sampler_info = vk::SamplerCreateInfo::default()
         .mag_filter(vk::Filter::LINEAR)
         .min_filter(vk::Filter::LINEAR)
         .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-        // CHANGED: Use REPEAT for texcoordvelocity to work as expected
         .address_mode_u(vk::SamplerAddressMode::REPEAT)
         .address_mode_v(vk::SamplerAddressMode::REPEAT)
         .address_mode_w(vk::SamplerAddressMode::REPEAT)
@@ -263,13 +222,12 @@ fn create_sampler(device: &Device) -> Result<vk::Sampler, vk::Result> {
     unsafe { device.create_sampler(&sampler_info, None) }
 }
 
-// Creates a layout that describes to the GPU what resources a shader will bind (e.g., "binding 0 is a texture").
 fn create_descriptor_set_layout(device: &Device) -> Result<vk::DescriptorSetLayout, vk::Result> {
     let sampler_layout_binding = vk::DescriptorSetLayoutBinding::default()
         .binding(0)
         .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
         .descriptor_count(1)
-        .stage_flags(vk::ShaderStageFlags::FRAGMENT); // The fragment shader uses the texture
+        .stage_flags(vk::ShaderStageFlags::FRAGMENT);
 
     let layout_info = vk::DescriptorSetLayoutCreateInfo::default()
         .bindings(std::slice::from_ref(&sampler_layout_binding));
@@ -277,9 +235,7 @@ fn create_descriptor_set_layout(device: &Device) -> Result<vk::DescriptorSetLayo
     unsafe { device.create_descriptor_set_layout(&layout_info, None) }
 }
 
-// Creates a pool from which we can allocate descriptor sets.
 fn create_descriptor_pool(device: &Device) -> Result<vk::DescriptorPool, vk::Result> {
-    // We'll allow for up to 100 textures to be allocated.
     let pool_size = vk::DescriptorPoolSize::default()
         .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
         .descriptor_count(100);
@@ -291,8 +247,6 @@ fn create_descriptor_pool(device: &Device) -> Result<vk::DescriptorPool, vk::Res
 
     unsafe { device.create_descriptor_pool(&pool_info, None) }
 }
-
-// --- PIPELINE CREATION FUNCTIONS ---
 
 fn create_sprite_pipeline(
     device: &Device,
@@ -345,7 +299,6 @@ fn create_sprite_pipeline(
     let dynamic_state =
         vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
 
-    // Must match SpritePush (mvp, tint, uv_scale, uv_offset)
     let push_constant_range = vk::PushConstantRange::default()
         .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
         .offset(0)
@@ -384,146 +337,6 @@ fn create_sprite_pipeline(
     Ok(PipelinePair { layout, pipe })
 }
 
-fn create_msdf_pipeline(
-    device: &Device,
-    render_pass: vk::RenderPass,
-    set_layout: vk::DescriptorSetLayout,
-    mode: BlendMode,
-) -> Result<PipelinePair, Box<dyn Error>> {
-    let vert = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_msdf.vert.spv"));
-    let frag = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_msdf.frag.spv"));
-    let vert_module = create_shader_module(device, vert)?;
-    let frag_module = create_shader_module(device, frag)?;
-    let main = std::ffi::CStr::from_bytes_with_nul(b"main\0")?;
-
-    let stages = [
-        vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::VERTEX).module(vert_module).name(main),
-        vk::PipelineShaderStageCreateInfo::default().stage(vk::ShaderStageFlags::FRAGMENT).module(frag_module).name(main),
-    ];
-
-    // Binding 0: per-vertex [x,y,u,v]
-    let binding0 = vk::VertexInputBindingDescription::default()
-        .binding(0)
-        .stride(std::mem::size_of::<[f32;4]>() as u32)
-        .input_rate(vk::VertexInputRate::VERTEX);
-
-    // Binding 1: per-instance GlyphInstance
-    let binding1 = vk::VertexInputBindingDescription::default()
-        .binding(1)
-        .stride(std::mem::size_of::<GlyphInstance>() as u32)
-        .input_rate(vk::VertexInputRate::INSTANCE);
-
-    // Attributes:
-    let a_pos = vk::VertexInputAttributeDescription::default()
-        .binding(0).location(0).format(vk::Format::R32G32_SFLOAT).offset(0);
-    let a_uv  = vk::VertexInputAttributeDescription::default()
-        .binding(0).location(1).format(vk::Format::R32G32_SFLOAT).offset(8);
-
-    let a_center   = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(2).format(vk::Format::R32G32_SFLOAT).offset(0);
-    let a_size     = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(3).format(vk::Format::R32G32_SFLOAT).offset(8);
-    let a_uv_scale = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(4).format(vk::Format::R32G32_SFLOAT).offset(16);
-    let a_uv_off   = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(5).format(vk::Format::R32G32_SFLOAT).offset(24);
-
-    let bindings = [binding0, binding1];
-    let attributes = [a_pos, a_uv, a_center, a_size, a_uv_scale, a_uv_off];
-
-    let vi = vk::PipelineVertexInputStateCreateInfo::default()
-        .vertex_binding_descriptions(&bindings)
-        .vertex_attribute_descriptions(&attributes);
-
-    let ia = vk::PipelineInputAssemblyStateCreateInfo::default()
-        .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
-
-    let vp = vk::PipelineViewportStateCreateInfo::default()
-        .viewport_count(1)
-        .scissor_count(1);
-
-    let rs = vk::PipelineRasterizationStateCreateInfo::default()
-        .polygon_mode(vk::PolygonMode::FILL)
-        .cull_mode(vk::CullModeFlags::BACK)
-        .front_face(vk::FrontFace::COUNTER_CLOCKWISE)
-        .line_width(1.0);
-
-    let ms = vk::PipelineMultisampleStateCreateInfo::default()
-        .rasterization_samples(vk::SampleCountFlags::TYPE_1);
-
-    let blend_att = color_blend_for(mode);
-    let blend = vk::PipelineColorBlendStateCreateInfo::default()
-        .attachments(std::slice::from_ref(&blend_att));
-
-    let dyns = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-    let dyn_state = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dyns);
-
-    // Push: mvp + color + px_range
-    let range = vk::PushConstantRange::default()
-        .stage_flags(vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT)
-        .offset(0)
-        .size(std::mem::size_of::<MsdfPush>() as u32);
-
-    let layout_info = vk::PipelineLayoutCreateInfo::default()
-        .set_layouts(std::slice::from_ref(&set_layout))
-        .push_constant_ranges(std::slice::from_ref(&range));
-
-    let layout = unsafe { device.create_pipeline_layout(&layout_info, None)? };
-
-    let info = vk::GraphicsPipelineCreateInfo::default()
-        .stages(&stages)
-        .vertex_input_state(&vi)
-        .input_assembly_state(&ia)
-        .viewport_state(&vp)
-        .rasterization_state(&rs)
-        .multisample_state(&ms)
-        .color_blend_state(&blend)
-        .dynamic_state(&dyn_state)
-        .layout(layout)
-        .render_pass(render_pass)
-        .subpass(0);
-
-    let pipe = unsafe {
-        device
-            .create_graphics_pipelines(vk::PipelineCache::null(), &[info], None)
-            .map_err(|e| e.1)?[0]
-    };
-
-    unsafe {
-        device.destroy_shader_module(vert_module, None);
-        device.destroy_shader_module(frag_module, None);
-    }
-    Ok(PipelinePair { layout, pipe })
-}
-
-fn ensure_instance_buffer(state: &mut State, frame: usize, needed_instances: usize) -> Result<(), Box<dyn Error>> {
-    let cap = state.instance_caps[frame];
-    let needs_new = match &state.instance_buffers[frame] {
-        None => true,
-        Some(_) if cap < needed_instances => true,
-        _ => false,
-    };
-    if needs_new {
-        if let Some(buf) = state.instance_buffers[frame].take() {
-            destroy_buffer(state.device.as_ref().unwrap(), &buf);
-        }
-        // round up capacity (power-of-two growth)
-        let mut new_cap = cap.max(128);
-        while new_cap < needed_instances { new_cap *= 2; }
-        let bytes = (new_cap * std::mem::size_of::<GlyphInstance>()) as vk::DeviceSize;
-
-        let (buffer, memory) = create_gpu_buffer(
-            &state.instance, state.device.as_ref().unwrap(), state.pdevice,
-            bytes,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-        state.instance_buffers[frame] = Some(BufferResource { buffer, memory });
-        state.instance_caps[frame] = new_cap;
-    }
-    Ok(())
-}
-
 fn transition_image_layout_cmd(
     device: &Device,
     cmd: vk::CommandBuffer,
@@ -544,7 +357,7 @@ fn transition_image_layout_cmd(
             vk::PipelineStageFlags::TRANSFER,
             vk::PipelineStageFlags::FRAGMENT_SHADER,
         ),
-        _ => panic!("Unsupported layout transition!"), // Or return an error
+        _ => panic!("Unsupported layout transition!"),
     };
 
     let barrier = vk::ImageMemoryBarrier::default()
@@ -574,7 +387,6 @@ pub fn create_texture(
     image: &RgbaImage,
     _srgb: bool,
 ) -> Result<Texture, Box<dyn Error>> {
-    // Take an owned Arc so we never borrow `state` immutably while we also mutate it.
     let device_arc = state.device.as_ref().unwrap().clone();
     let device = device_arc.as_ref();
 
@@ -588,20 +400,17 @@ pub fn create_texture(
         Some(image_data),
     )?;
 
-    let fmt = vk::Format::R8G8B8A8_UNORM; // Always use non-sRGB format for legacy blending
+    let fmt = vk::Format::R8G8B8A8_UNORM;
     let (tex_image, tex_mem) = create_image(
         state, width, height, fmt, vk::ImageTiling::OPTIMAL,
         vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED,
         vk::MemoryPropertyFlags::DEVICE_LOCAL,
     )?;
 
-    // --- Batched copy & transitions ---
     let cmd = begin_single_time_commands(device, state.command_pool)?;
 
-    // 1) UNDEFINED -> TRANSFER_DST
     transition_image_layout_cmd(device, cmd, tex_image, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
 
-    // 2) Copy staging -> image
     let region = vk::BufferImageCopy::default()
         .image_subresource(vk::ImageSubresourceLayers {
             aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -615,19 +424,16 @@ pub fn create_texture(
         device.cmd_copy_buffer_to_image(cmd, staging.buffer, tex_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &[region]);
     }
 
-    // 3) TRANSFER_DST -> SHADER_READ_ONLY
     transition_image_layout_cmd(device, cmd, tex_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
 
-    // 4) Submit once
     end_single_time_commands(device, state.command_pool, state.queue, cmd)?;
-    // --- end batched ---
 
     destroy_buffer(device, &staging);
     let view = create_image_view(device, tex_image, fmt)?;
     let set  = create_texture_descriptor_set(state, view, state.sampler)?;
 
     Ok(Texture {
-        device: device_arc.clone(), // <-- store Arc<Device>, not Device
+        device: device_arc.clone(),
         image: tex_image,
         memory: tex_mem,
         view,
@@ -638,30 +444,14 @@ pub fn create_texture(
 
 #[inline(always)]
 unsafe fn bytes_of<T>(v: &T) -> &[u8] {
-    unsafe {
-        std::slice::from_raw_parts((v as *const T) as *const u8, std::mem::size_of::<T>())
-    }
+    std::slice::from_raw_parts((v as *const T) as *const u8, std::mem::size_of::<T>())
 }
-
-// FILE: src/core/gfx/backends/vulkan.rs
 
 pub fn draw(
     state: &mut State,
     render_list: &RenderList,
     textures: &HashMap<String, RendererTexture>,
 ) -> Result<u32, Box<dyn Error>> {
-    use cgmath::{Matrix4, Vector4};
-
-    #[inline(always)]
-    fn extract_center_size(t: Matrix4<f32>) -> ([f32;2], [f32;2]) {
-        let c = t * Vector4::new(0.0, 0.0, 0.0, 1.0);
-        let dx = t * Vector4::new(0.5, 0.0, 0.0, 0.0);
-        let dy = t * Vector4::new(0.0, 0.5, 0.0, 0.0);
-        let sx = 2.0 * (dx.x*dx.x + dx.y*dx.y).sqrt();
-        let sy = 2.0 * (dy.x*dy.x + dy.y*dy.y).sqrt();
-        ([c.x, c.y], [sx, sy])
-    }
-
     if state.window_size.width == 0 || state.window_size.height == 0 {
         return Ok(0);
     }
@@ -732,56 +522,28 @@ pub fn draw(
             device.cmd_bind_vertex_buffers(cmd, 0, &[vb_buf], &[0]);
             device.cmd_bind_index_buffer(cmd, ib_buf, 0, vk::IndexType::UINT16);
 
-            let mut current_pipeline = vk::Pipeline::null();
+            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline);
+
             let mut last_set = vk::DescriptorSet::null();
             let proj = state.projection;
 
-            macro_rules! bind_pipeline {
-                ($pipe:expr) => {
-                    if current_pipeline != $pipe {
-                        device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, $pipe);
-                        current_pipeline = $pipe;
-                        last_set = vk::DescriptorSet::null();
-                    }
-                };
-            }
-            macro_rules! bind_set {
-                ($layout:expr, $set:expr) => {
-                    if last_set != $set {
-                        device.cmd_bind_descriptor_sets(
-                            cmd,
-                            vk::PipelineBindPoint::GRAPHICS,
-                            $layout,
-                            0,
-                            &[$set],
-                            &[],
-                        );
-                        last_set = $set;
-                    }
-                };
-            }
-
-            let total_glyphs = render_list.objects.iter().filter(|o| matches!(o.object_type, ObjectType::MsdfGlyph{..})).count();
-            ensure_instance_buffer(state, state.current_frame, total_glyphs)?;
-
-            let (instance_buf, instance_mem) = {
-                let b = state.instance_buffers[state.current_frame].as_ref().unwrap();
-                (b.buffer, b.memory)
-            };
-            let mut write_cursor: usize = 0;
-            let mapped = if total_glyphs > 0 {
-                device.map_memory(instance_mem, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty())?
-            } else { std::ptr::null_mut() };
-
-            let mut i = 0;
-            while i < render_list.objects.len() {
-                match &render_list.objects[i].object_type {
+            for obj in &render_list.objects {
+                match &obj.object_type {
                     ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset, edge_fade } => {
                         if let Some(RendererTexture::Vulkan(tex)) = textures.get(texture_id) {
-                            bind_pipeline!(state.sprite_pipeline);
-                            bind_set!(state.sprite_pipeline_layout, tex.descriptor_set);
+                            if last_set != tex.descriptor_set {
+                                device.cmd_bind_descriptor_sets(
+                                    cmd,
+                                    vk::PipelineBindPoint::GRAPHICS,
+                                    state.sprite_pipeline_layout,
+                                    0,
+                                    &[tex.descriptor_set],
+                                    &[],
+                                );
+                                last_set = tex.descriptor_set;
+                            }
                             let pc = SpritePush {
-                                mvp: proj * render_list.objects[i].transform,
+                                mvp: proj * obj.transform,
                                 tint: *tint,
                                 uv_scale: *uv_scale,
                                 uv_offset: *uv_offset,
@@ -797,44 +559,9 @@ pub fn draw(
                             device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
                             vertices += 4;
                         }
-                        i += 1;
-                    }
-                    ObjectType::MsdfGlyph { texture_id, color, px_range, .. } => {
-                        let mut count = 0usize;
-                        let start = write_cursor;
-                        let mut j = i;
-                        while j < render_list.objects.len() {
-                            match &render_list.objects[j].object_type {
-                                ObjectType::MsdfGlyph { texture_id: tid2, uv_scale: s2, uv_offset: o2, color: c2, px_range: pr2 }
-                                    if tid2 == texture_id && c2 == color && pr2 == px_range =>
-                                {
-                                    let (center, size) = extract_center_size(render_list.objects[j].transform);
-                                    let inst = GlyphInstance { center, size, uv_scale: *s2, uv_offset: *o2 };
-                                    let dst = (mapped as *mut GlyphInstance).add(write_cursor);
-                                    std::ptr::copy_nonoverlapping(&inst as *const GlyphInstance, dst, 1);
-                                    write_cursor += 1; count += 1; j += 1;
-                                }
-                                _ => break,
-                            }
-                        }
-
-                        if let Some(RendererTexture::Vulkan(tex)) = textures.get(*texture_id) {
-                            bind_pipeline!(state.msdf_pipeline);
-                            bind_set!(state.msdf_pipeline_layout, tex.descriptor_set);
-                            let first_byte = (start * std::mem::size_of::<GlyphInstance>()) as vk::DeviceSize;
-                            let bufs = [vb_buf, instance_buf]; let offs = [0u64, first_byte];
-                            device.cmd_bind_vertex_buffers(cmd, 0, &bufs, &offs);
-                            let pc = MsdfPush { mvp: proj, color: *color, px_range: *px_range, _pad: [0.0;3] };
-                            device.cmd_push_constants(cmd, state.msdf_pipeline_layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytes_of(&pc));
-                            device.cmd_draw_indexed(cmd, 6, count as u32, 0, 0, 0);
-                            vertices += 4 * (count as u32);
-                            device.cmd_bind_vertex_buffers(cmd, 0, &[vb_buf], &[0]);
-                        }
-                        i = j;
                     }
                 }
             }
-            if !mapped.is_null() { device.unmap_memory(instance_mem); }
         }
 
         device.cmd_end_render_pass(cmd);
@@ -874,13 +601,6 @@ pub fn cleanup(state: &mut State) {
         }
     }
 
-    for buf_opt in state.instance_buffers.iter_mut() {
-        if let Some(buf) = buf_opt.take() {
-            destroy_buffer(state.device.as_ref().unwrap(), &buf);
-        }
-    }
-    state.instance_caps.clear();
-
     unsafe {
         cleanup_swapchain_and_dependents(state);
 
@@ -901,11 +621,8 @@ pub fn cleanup(state: &mut State) {
         state.device.as_ref().unwrap().destroy_descriptor_pool(state.descriptor_pool, None);
         state.device.as_ref().unwrap().destroy_descriptor_set_layout(state.descriptor_set_layout, None);
 
-        // REMOVED: solid pipeline + layout
         state.device.as_ref().unwrap().destroy_pipeline(state.sprite_pipeline, None);
         state.device.as_ref().unwrap().destroy_pipeline_layout(state.sprite_pipeline_layout, None);
-        state.device.as_ref().unwrap().destroy_pipeline(state.msdf_pipeline, None);
-        state.device.as_ref().unwrap().destroy_pipeline_layout(state.msdf_pipeline_layout, None);
 
         state.device.as_ref().unwrap().destroy_render_pass(state.render_pass, None);
         state.device.as_ref().unwrap().destroy_command_pool(state.command_pool, None);
@@ -928,7 +645,6 @@ pub fn resize(state: &mut State, width: u32, height: u32) {
     info!("Vulkan resize requested to {}x{}", width, height);
     state.window_size = PhysicalSize::new(width, height);
     if width > 0 && height > 0 {
-        // Keep projection in sync with window size
         state.projection = ortho_for_window(width, height);
         if let Err(e) = recreate_swapchain_and_dependents(state) {
             error!("Failed to recreate swapchain: {}", e);
@@ -937,8 +653,6 @@ pub fn resize(state: &mut State, width: u32, height: u32) {
 }
 
 // --- ALL HELPER FUNCTIONS ---
-
-// --- Image & Texture Helpers ---
 
 fn create_image_view(device: &Device, image: vk::Image, format: vk::Format) -> Result<vk::ImageView, vk::Result> {
     let view_info = vk::ImageViewCreateInfo::default()
@@ -995,7 +709,6 @@ fn color_blend_for(mode: BlendMode) -> vk::PipelineColorBlendAttachmentState {
             .src_alpha_blend_factor(vk::BlendFactor::ONE)
             .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
             .alpha_blend_op(vk::BlendOp::ADD),
-
         BlendMode::Add => vk::PipelineColorBlendAttachmentState::default()
             .color_write_mask(vk::ColorComponentFlags::RGBA)
             .blend_enable(true)
@@ -1005,7 +718,6 @@ fn color_blend_for(mode: BlendMode) -> vk::PipelineColorBlendAttachmentState {
             .src_alpha_blend_factor(vk::BlendFactor::ONE)
             .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
             .alpha_blend_op(vk::BlendOp::ADD),
-
         BlendMode::Multiply => vk::PipelineColorBlendAttachmentState::default()
             .color_write_mask(vk::ColorComponentFlags::RGBA)
             .blend_enable(true)
@@ -1015,11 +727,9 @@ fn color_blend_for(mode: BlendMode) -> vk::PipelineColorBlendAttachmentState {
             .src_alpha_blend_factor(vk::BlendFactor::ONE)
             .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
             .alpha_blend_op(vk::BlendOp::ADD),
-
         BlendMode::Subtract => vk::PipelineColorBlendAttachmentState::default()
             .color_write_mask(vk::ColorComponentFlags::RGBA)
             .blend_enable(true)
-            // REVERSE_SUBTRACT with (ONE, ONE) = D - S
             .src_color_blend_factor(vk::BlendFactor::ONE)
             .dst_color_blend_factor(vk::BlendFactor::ONE)
             .color_blend_op(vk::BlendOp::REVERSE_SUBTRACT)
@@ -1030,7 +740,7 @@ fn color_blend_for(mode: BlendMode) -> vk::PipelineColorBlendAttachmentState {
 }
 
 fn create_texture_descriptor_set(
-    state: &State, // <-- The fix: changed from &mut State
+    state: &State,
     texture_image_view: vk::ImageView,
     sampler: vk::Sampler,
 ) -> Result<vk::DescriptorSet, vk::Result> {
@@ -1083,8 +793,6 @@ fn vertex_input_descriptions_textured() -> (
     ([binding], [position, uv])
 }
 
-// --- Buffer & Command Helpers ---
-
 fn begin_single_time_commands(device: &Device, pool: vk::CommandPool) -> Result<vk::CommandBuffer, vk::Result> {
     let alloc_info = vk::CommandBufferAllocateInfo::default()
         .level(vk::CommandBufferLevel::PRIMARY)
@@ -1123,26 +831,21 @@ fn create_buffer<T: Copy>(
     let buffer_size = (mem::size_of::<T>() * data.map_or(1, |d| d.len())) as vk::DeviceSize;
 
     if let Some(slice) = data {
-        // Create a temporary staging buffer
         let staging_usage = vk::BufferUsageFlags::TRANSFER_SRC;
         let staging_props = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
         let (staging_buffer, staging_memory) = create_gpu_buffer(instance, device, pdevice, buffer_size, staging_usage, staging_props)?;
         
-        // Copy data into staging buffer
         unsafe {
             let mapped = device.map_memory(staging_memory, 0, buffer_size, vk::MemoryMapFlags::empty())?;
             std::ptr::copy_nonoverlapping(slice.as_ptr(), mapped as *mut T, slice.len());
             device.unmap_memory(staging_memory);
         }
 
-        // Create the final device-local buffer
         let final_usage = usage | vk::BufferUsageFlags::TRANSFER_DST;
         let (device_buffer, device_memory) = create_gpu_buffer(instance, device, pdevice, buffer_size, final_usage, vk::MemoryPropertyFlags::DEVICE_LOCAL)?;
         
-        // Copy from staging to device-local
         copy_buffer(device, pool, queue, staging_buffer, device_buffer, buffer_size)?;
 
-        // Clean up staging resources
         unsafe {
             device.destroy_buffer(staging_buffer, None);
             device.free_memory(staging_memory, None);
@@ -1150,7 +853,6 @@ fn create_buffer<T: Copy>(
         
         Ok(BufferResource { buffer: device_buffer, memory: device_memory })
     } else {
-        // No data provided, just create the buffer with specified properties
         let (buffer, memory) = create_gpu_buffer(instance, device, pdevice, buffer_size, usage, properties)?;
         Ok(BufferResource { buffer, memory })
     }
@@ -1210,14 +912,12 @@ fn find_memory_type(
         .expect("Failed to find suitable memory type!")
 }
 
-// --- Original Base Helpers ---
-
 fn create_instance(entry: &Entry, window: &Window) -> Result<Instance, Box<dyn Error>> {
-    let app_name = ffi::CStr::from_bytes_with_nul(b"Simple Renderer\0")?;
+    let app_name = ffi::CStr::from_bytes_with_nul(b"DeadSync\0")?;
     let app_info = vk::ApplicationInfo::default()
         .application_name(app_name)
         .application_version(vk::make_api_version(0, 1, 0, 0))
-        .engine_name(ffi::CStr::from_bytes_with_nul(b"No Engine\0")?)
+        .engine_name(ffi::CStr::from_bytes_with_nul(b"DeadSync Engine\0")?)
         .engine_version(vk::make_api_version(0, 1, 0, 0))
         .api_version(vk::API_VERSION_1_3);
 
@@ -1266,7 +966,6 @@ fn setup_debug_messenger(
     if !cfg!(debug_assertions) { return Ok((None, None)); }
     let create_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
         .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::WARNING | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR)
-        // FIX: Use bitwise OR for flags
         .message_type(
             vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
                 | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
@@ -1365,13 +1064,12 @@ fn create_swapchain(
     surface_loader: &surface::Instance,
     window_size: PhysicalSize<u32>,
     old_swapchain: Option<vk::SwapchainKHR>,
-    vsync_enabled: bool, // New parameter
+    vsync_enabled: bool,
 ) -> Result<SwapchainResources, Box<dyn Error>> {
     let capabilities = unsafe { surface_loader.get_physical_device_surface_capabilities(pdevice, surface)? };
     let formats = unsafe { surface_loader.get_physical_device_surface_formats(pdevice, surface)? };
     let present_modes = unsafe { surface_loader.get_physical_device_surface_present_modes(pdevice, surface)? };
 
-    // Force a non-sRGB format to match legacy blending behavior.
     let format = formats.iter().find(|f| f.format == vk::Format::B8G8R8A8_UNORM)
         .cloned()
         .unwrap_or(formats[0]);
@@ -1386,7 +1084,6 @@ fn create_swapchain(
         vk::PresentModeKHR::FIFO
     };
 
-    // choose image count
     let desired_images =
         if present_mode == vk::PresentModeKHR::MAILBOX { 3 } else { capabilities.min_image_count + 1 };
 
@@ -1425,7 +1122,6 @@ fn recreate_framebuffers(
     render_pass: vk::RenderPass,
 ) -> Result<(), vk::Result> {
     swapchain_resources.framebuffers = swapchain_resources.image_views.iter().map(|view| {
-        // FIX: Create binding to extend lifetime of slice
         let attachments = [*view];
         let create_info = vk::FramebufferCreateInfo::default()
             .render_pass(render_pass)
@@ -1512,13 +1208,10 @@ fn recreate_swapchain_and_dependents(state: &mut State) -> Result<(), Box<dyn Er
     debug!("Recreating swapchain...");
     let device = state.device.as_ref().unwrap();
 
-    // Ensure GPU is quiescent but keep old swapchain alive for `oldSwapchain` reuse.
     unsafe { device.device_wait_idle()?; }
 
-    // Keep handle for oldSwapchain hint.
     let old_swapchain = state.swapchain_resources.swapchain;
 
-    // Create the new swapchain referencing the old one (driver can recycle).
     let new_resources = create_swapchain(
         &state.instance,
         device,
@@ -1530,13 +1223,10 @@ fn recreate_swapchain_and_dependents(state: &mut State) -> Result<(), Box<dyn Er
         state.vsync_enabled,
     )?;
 
-    // Swap in the new resources and take ownership of the old without cloning.
     let old = std::mem::replace(&mut state.swapchain_resources, new_resources);
 
-    // Build framebuffers for the new images.
     recreate_framebuffers(device, &mut state.swapchain_resources, state.render_pass)?;
 
-    // Now it is safe to tear down the old resources.
     unsafe {
         for fb in old.framebuffers {
             device.destroy_framebuffer(fb, None);
@@ -1547,7 +1237,6 @@ fn recreate_swapchain_and_dependents(state: &mut State) -> Result<(), Box<dyn Er
         old.swapchain_loader.destroy_swapchain(old.swapchain, None);
     }
 
-    // Reset tracking for images-in-flight to the new swapchain length.
     state.images_in_flight = vec![vk::Fence::null(); state.swapchain_resources._images.len()];
     debug!("Swapchain recreated.");
     Ok(())

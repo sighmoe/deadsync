@@ -7,3 +7,4 @@ pub mod timing;
 pub mod parsing;
 pub mod audio;
 pub mod assets;
+pub mod font;

@@ -37,13 +37,6 @@ pub enum ObjectType {
         uv_offset: [f32; 2],
         edge_fade: [f32; 4],
     },
-    MsdfGlyph {
-        texture_id: &'static str,
-        uv_scale: [f32; 2],
-        uv_offset: [f32; 2],
-        color: [f32; 4],
-        px_range: f32,
-    },
 }
 
 /// Specifies how an object's color should be blended with the background.

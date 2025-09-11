@@ -28,6 +28,9 @@ raw-window-handle = "0.6.2"
 cpal = "0.16"
 lewton = "0.10.2"
 
+# Fonts
+regex = "1.11.2"
+
 rssp = { path = "src/extern/rssp" }
 
 [build-dependencies]

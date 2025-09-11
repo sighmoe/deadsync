@@ -3,8 +3,8 @@ use crate::core::input;
 use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
 use crate::core::assets;
+use crate::core::font;
 use crate::ui::actors::Actor;
-use crate::ui::msdf;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, Screen as CurrentScreen, ScreenAction};
 use crate::core::song_loading::{self, ChartData, SongData};
@@ -53,7 +53,7 @@ pub struct App {
     start_time: Instant,
     vsync_enabled: bool,
     fullscreen_enabled: bool,
-    fonts: HashMap<&'static str, msdf::Font>,
+    fonts: HashMap<&'static str, font::Font>,
     metrics: Metrics,
     last_fps: f32,
     last_vpf: u32,
@@ -188,20 +188,32 @@ impl App {
         Ok(())
     }
 
-    fn load_font_asset(&mut self, name: &'static str) -> Result<(), Box<dyn Error>> {
+    fn load_font_asset(&mut self, name: &'static str) -> Result<(), Box<dyn std::error::Error>> {
+        let ini_path_str = match name {
+            "wendy" => "assets/fonts/wendy/_wendy small.ini".to_string(),
+            "miso"  => "assets/fonts/miso/_miso light.ini".to_string(),
+            _ => return Err(format!("Unknown font name: {}", name).into()),
+        };
+
+        let load_data = font::parse(&ini_path_str)?;
         let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
-        let json_path = format!("assets/fonts/{}.json", name);
-        let png_path  = format!("assets/fonts/{}.png",  name);
 
-        let json_data  = std::fs::read(&json_path)?;
-        let image_data = image::open(&png_path)?.to_rgba8();
+        for tex_path in &load_data.required_textures {
+            // Must match font::parse: use canonical key
+            let key = crate::core::assets::canonical_texture_key(tex_path);
 
-        let texture = renderer::create_texture(backend, &image_data, renderer::TextureColorSpace::Linear)?;
-        self.texture_manager.insert(name.to_string(), texture);
+            if !self.texture_manager.contains_key(&key) {
+                let image_data = image::open(tex_path)?.to_rgba8();
+                // Fonts: linear sampling (no sRGB conversion)
+                let texture = renderer::create_texture(backend, &image_data, renderer::TextureColorSpace::Linear)?;
+                crate::core::assets::register_texture_dims(&key, image_data.width(), image_data.height());
+                self.texture_manager.insert(key.clone(), texture);
+                log::info!("Loaded font texture: {}", key);
+            }
+        }
 
-        let font = msdf::load_font(&json_data, name, 4.0);
-        self.fonts.insert(name, font);
-        info!("Loaded font '{}'", name);
+        self.fonts.insert(name, load_data.font);
+        log::info!("Loaded font '{}' from '{}'", name, ini_path_str);
         Ok(())
     }
 

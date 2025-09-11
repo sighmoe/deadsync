@@ -1,9 +1,10 @@
+// FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/new-engine/src/ui/compose.rs
+
 use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;
-use crate::core::assets;
+use crate::core::{assets, font};
 use crate::ui::actors::{self, Actor, SizeSpec};
-use crate::ui::msdf;
 use cgmath::{Deg, Matrix4, Vector2, Vector3};
 
 /* ======================= RENDERER SCREEN BUILDER ======================= */
@@ -13,7 +14,7 @@ pub fn build_screen(
     actors: &[actors::Actor],
     clear_color: [f32; 4],
     m: &Metrics,
-    fonts: &std::collections::HashMap<&'static str, msdf::Font>,
+    fonts: &std::collections::HashMap<&'static str, font::Font>,
     total_elapsed: f32,
 ) -> RenderList {
     let mut objects = Vec::with_capacity(estimate_object_count(actors, fonts));
@@ -35,7 +36,7 @@ pub fn build_screen(
 #[inline(always)]
 fn estimate_object_count(
     actors: &[Actor],
-    fonts: &std::collections::HashMap<&'static str, msdf::Font>,
+    fonts: &std::collections::HashMap<&'static str, font::Font>,
 ) -> usize {
     let mut stack: Vec<&Actor> = Vec::with_capacity(actors.len());
     stack.extend(actors.iter());
@@ -44,26 +45,19 @@ fn estimate_object_count(
     while let Some(a) = stack.pop() {
         match a {
             Actor::Sprite { visible, tint, .. } => {
-                // Count only visible sprites with non-zero alpha
                 if *visible && tint[3] > 0.0 {
                     total += 1;
                 }
             }
             Actor::Text { content, font, .. } => {
-                // If we have the font, count only glyphs that will emit quads.
                 if let Some(fm) = fonts.get(font) {
-                    let mut n = 0usize;
-                    for ch in content.chars() {
-                        if ch == '\n' { continue; }
-                        if let Some(g) = fm.glyphs.get(&ch) {
-                            if g.plane_w > 0.0 && g.plane_h > 0.0 {
-                                n += 1;
-                            }
-                        }
-                    }
-                    total += n;
+                    total += content.chars().filter(|&c| {
+                        if c == '\n' { return false; }
+                        let mapped = fm.glyph_map.contains_key(&c);
+                        if c == ' ' && !mapped { return false; } // skip unmapped spaces
+                        mapped || fm.default_glyph.is_some()
+                    }).count();
                 } else {
-                    // Fallback: old heuristic (skip newlines)
                     total += content.chars().filter(|&ch| ch != '\n').count();
                 }
             }
@@ -88,7 +82,7 @@ fn build_actor_recursive(
     actor: &actors::Actor,
     parent: SmRect,
     m: &Metrics,
-    fonts: &std::collections::HashMap<&'static str, msdf::Font>,
+    fonts: &std::collections::HashMap<&'static str, font::Font>,
     base_z: i16,
     order_counter: &mut u32,
     out: &mut Vec<RenderObject>,
@@ -101,7 +95,7 @@ fn build_actor_recursive(
             cropleft, cropright, croptop, cropbottom, blend,
             fadeleft, faderight, fadetop, fadebottom,
             rot_z_deg, texcoordvelocity, animate, state_delay,
-            scale, // NEW
+            scale,
         } => {
             if !*visible { return; }
 
@@ -110,12 +104,11 @@ fn build_actor_recursive(
                 actors::SpriteSource::Texture(name) => (false, name.as_str()),
             };
 
-            // --- decide frame (unchanged, but kept before size resolve) ---
             let mut chosen_cell = *cell;
             let mut chosen_grid = *grid;
 
             if !is_solid && uv_rect.is_none() {
-                let (cols, rows) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(texture_name));
+                let (cols, rows) = grid.unwrap_or_else(|| font::parse_sheet_dims_from_filename(texture_name));
                 let total = cols.saturating_mul(rows).max(1);
 
                 let start_linear: u32 = match *cell {
@@ -139,7 +132,6 @@ fn build_actor_recursive(
                 }
             }
 
-            // --- NEW: resolve size exactly like SM/ITG ---
             let resolved_size = resolve_sprite_size_like_sm(
                 *size, is_solid, texture_name, *uv_rect, chosen_cell, chosen_grid, *scale
             );
@@ -166,61 +158,21 @@ fn build_actor_recursive(
             fit_width, fit_height, blend,
         } => {
             if let Some(fm) = fonts.get(font) {
-                // Base metrics at requested px (before any zoom/fit)
-                let measured_w = fm.measure_line_width(content, *px);
-                // --- Use a stable reference box for fitting so zoomtoheight is consistent ---
-                let (asc_fit, desc_fit) = line_extents_px(fm, "Hg", *px);
-                let line_h_px = asc_fit + desc_fit;
-
-                // Fit scalar: prefer explicit width, else height; uniform to preserve aspect.
-                let fit_s = if let Some(w_target) = *fit_width {
-                    if measured_w > 0.0 { (w_target / measured_w).max(0.0) } else { 1.0 }
-                } else if let Some(h_target) = *fit_height {
-                    if line_h_px > 0.0 { (h_target / line_h_px).max(0.0) } else { 1.0 }
-                } else {
-                    1.0
-                };
-
-                // SM semantics for negative zoom: keep sign for rendering, abs for alignment math.
-                let sx_raw = scale[0] * fit_s;
-                let sy_raw = scale[1] * fit_s;
-                let sx_abs = sx_raw.abs();
-                let sy_abs = sy_raw.abs();
-
-                let (asc, desc) = (asc_fit, desc_fit);
-
-                let origin = place_text_baseline(
-                    parent, *align, *offset, *align_text,
-                    measured_w, asc, desc, sx_abs, sy_abs, m
+                let mut objects = layout_text(
+                    fm, content, *px, *scale, *fit_width, *fit_height, 
+                    parent, *align, *offset, *align_text, m
                 );
-
+                
                 let layer = base_z.saturating_add(*z);
-
-                // Layout at unscaled px, then apply signed scaling about the origin.
-                for g in msdf::layout_line(fm, content, *px, origin) {
-                    let cx = origin.x + (g.center.x - origin.x) * sx_raw;
-                    let cy = origin.y + (g.center.y - origin.y) * sy_raw;
-
-                    let size_x = g.size.x * sx_raw;
-                    let size_y = g.size.y * sy_raw;
-
-                    let t = Matrix4::from_translation(Vector3::new(cx, cy, 0.0))
-                          * Matrix4::from_nonuniform_scale(size_x, size_y, 1.0);
-
-                    out.push(RenderObject {
-                        object_type: renderer::ObjectType::MsdfGlyph {
-                            texture_id: fm.atlas_tex_key,
-                            uv_scale: g.uv_scale,
-                            uv_offset: g.uv_offset,
-                            color: *color,
-                            px_range: fm.px_range,
-                        },
-                        transform: t,
-                        blend: *blend,
-                        z: layer,
-                        order: { let o = *order_counter; *order_counter += 1; o },
-                    });
+                for obj in &mut objects {
+                    obj.z = layer;
+                    obj.order = { let o = *order_counter; *order_counter += 1; o };
+                    obj.blend = *blend;
+                    if let renderer::ObjectType::Sprite { tint, .. } = &mut obj.object_type {
+                        *tint = *color;
+                    }
                 }
+                out.extend(objects);
             }
         }
 
@@ -276,37 +228,6 @@ fn build_actor_recursive(
 
 /* ======================= LAYOUT HELPERS ======================= */
 
-/// Parses sheet dimensions from a filename like "name_4x4.png" -> (4, 4).
-/// Returns (1, 1) on failure to parse.
-#[inline(always)]
-fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
-    #[inline(always)] fn to_u32(bs: &[u8]) -> Option<u32> {
-        if bs.is_empty() { return None; }
-        let mut acc: u32 = 0;
-        for &b in bs { if !b.is_ascii_digit() { return None; } acc = acc.checked_mul(10)?.checked_add((b - b'0') as u32)?; }
-        Some(acc)
-    }
-
-    let name = filename.rsplit_once('.').map(|(n, _)| n).unwrap_or(filename);
-    let bytes = name.as_bytes();
-
-    // Search from the end for "...<digits>[xX]<digits>..."
-    for i in (0..bytes.len()).rev() {
-        let b = bytes[i];
-        if b == b'x' || b == b'X' {
-            // expand left/right
-            let mut l = i; while l > 0 && bytes[l - 1].is_ascii_digit() { l -= 1; }
-            let mut r = i + 1; while r < bytes.len() && bytes[r].is_ascii_digit() { r += 1; }
-            if l < i && r > i + 1 {
-                let cols = to_u32(&bytes[l..i]).unwrap_or(1).max(1);
-                let rows = to_u32(&bytes[i + 1..r]).unwrap_or(1).max(1);
-                if cols > 0 && rows > 0 { return (cols, rows); }
-            }
-        }
-    }
-    (1, 1)
-}
-
 #[inline(always)]
 fn resolve_sprite_size_like_sm(
     size: [SizeSpec; 2],
@@ -330,7 +251,7 @@ fn resolve_sprite_size_like_sm(
             tw *= (u1 - u0).abs().max(1e-6);
             th *= (v1 - v0).abs().max(1e-6);
         } else if cell.is_some() {
-            let (gc, gr) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(texture_name));
+            let (gc, gr) = grid.unwrap_or_else(|| font::parse_sheet_dims_from_filename(texture_name));
             let cols = gc.max(1);
             let rows = gr.max(1);
             tw /= cols as f32;
@@ -344,15 +265,12 @@ fn resolve_sprite_size_like_sm(
 
     match (size[0], size[1]) {
         (Px(w), Px(h)) if w == 0.0 && h == 0.0 => {
-            // Default: native pixels * zoom/scale (SM parity)
             [Px(nw * scale[0]), Px(nh * scale[1])]
         }
         (Px(w), Px(h)) if w > 0.0 && h == 0.0 => {
-            // zoomtowidth: preserve native aspect
             [Px(w), Px(w * aspect)]
         }
         (Px(w), Px(h)) if w == 0.0 && h > 0.0 => {
-            // zoomtoheight: preserve native aspect
             let inv_aspect = if aspect > 0.0 { 1.0 / aspect } else { 1.0 };
             [Px(h * inv_aspect), Px(h)]
         }
@@ -362,9 +280,6 @@ fn resolve_sprite_size_like_sm(
 
 #[inline(always)]
 fn place_rect(parent: SmRect, align: [f32; 2], offset: [f32; 2], size: [SizeSpec; 2]) -> SmRect {
-    // StepMania semantics:
-    // - `offset` (xy) is in the parent's local top-left space.
-    // - `align` only affects the pivot inside *this* rect.
     let w = match size[0] {
         SizeSpec::Px(w) => w,
         SizeSpec::Fill  => parent.w,
@@ -373,17 +288,12 @@ fn place_rect(parent: SmRect, align: [f32; 2], offset: [f32; 2], size: [SizeSpec
         SizeSpec::Px(h) => h,
         SizeSpec::Fill  => parent.h,
     };
-
-    // Parent reference is ALWAYS its top-left.
     let rx = parent.x;
     let ry = parent.y;
-
-    // Actor's internal pivot from align (0..1 inside its own rect).
     let ax = align[0];
     let ay = align[1];
 
     SmRect {
-        // Put the actor's pivot at (rx + offset.x, ry + offset.y)
         x: rx + offset[0] - ax * w,
         y: ry + offset[1] - ay * h,
         w,
@@ -393,24 +303,22 @@ fn place_rect(parent: SmRect, align: [f32; 2], offset: [f32; 2], size: [SizeSpec
 
 #[inline(always)]
 fn calculate_uvs(
-    texture: &str, // <-- CHANGED
+    texture: &str,
     uv_rect: Option<[f32; 4]>,
     cell: Option<(u32, u32)>,
     grid: Option<(u32, u32)>,
     flip_x: bool,
     flip_y: bool,
-    cl: f32, cr: f32, ct: f32, cb: f32, // Expects pre-clamped fractions
+    cl: f32, cr: f32, ct: f32, cb: f32,
     texcoordvelocity: Option<[f32; 2]>,
     total_elapsed: f32,
 ) -> ([f32; 2], [f32; 2]) {
-    // 1) Determine base UV subrect (from explicit rect, cell, or full texture)
     let (mut uv_scale, mut uv_offset) = if let Some([u0, v0, u1, v1]) = uv_rect {
         let du = (u1 - u0).abs().max(1e-6);
         let dv = (v1 - v0).abs().max(1e-6);
         ([du, dv], [u0.min(u1), v0.min(v1)])
     } else if let Some((cx, cy)) = cell {
-        // support for setstate(linearIndex) via sentinel cy == u32::MAX
-        let (gc, gr) = grid.unwrap_or_else(|| parse_sheet_dims_from_filename(texture));
+        let (gc, gr) = grid.unwrap_or_else(|| font::parse_sheet_dims_from_filename(texture));
         let cols = gc.max(1);
         let rows = gr.max(1);
 
@@ -428,31 +336,20 @@ fn calculate_uvs(
         ([1.0, 1.0], [0.0, 0.0])
     };
 
-    // 2) Apply pre-clamped crop to the base UVs
     uv_offset[0] += uv_scale[0] * cl;
     uv_offset[1] += uv_scale[1] * ct;
     uv_scale[0] *= (1.0 - cl - cr).max(0.0);
     uv_scale[1] *= (1.0 - ct - cb).max(0.0);
 
-    // 3) Apply flips
     if flip_x { uv_offset[0] += uv_scale[0]; uv_scale[0] = -uv_scale[0]; }
     if flip_y { uv_offset[1] += uv_scale[1]; uv_scale[1] = -uv_scale[1]; }
     
-    // 4) Apply velocity (after all other calculations)
     if let Some(vel) = texcoordvelocity {
         uv_offset[0] += vel[0] * total_elapsed;
         uv_offset[1] += vel[1] * total_elapsed;
     }
 
     (uv_scale, uv_offset)
-}
-
-#[inline(always)]
-fn rotate2(vx: f32, vy: f32, deg: f32) -> (f32, f32) {
-    if deg == 0.0 { return (vx, vy); }
-    let r = deg.to_radians();
-    let (s, c) = r.sin_cos();
-    (vx * c - vy * s, vx * s + vy * c)
 }
 
 #[inline(always)]
@@ -483,28 +380,21 @@ fn push_sprite(
 ) {
     if tint[3] <= 0.0 { return; }
 
-    // Clamp crops independently (SM-like).
     let (cl, cr, ct, cb) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
 
-    // Base world metrics for the *uncropped* rect.
     let (base_center, base_size) = sm_rect_to_world_center_size(rect, m);
     if base_size.x <= 0.0 || base_size.y <= 0.0 { return; }
 
-    // Visible fractions after crop.
     let sx_crop = (1.0 - cl - cr).max(0.0);
     let sy_crop = (1.0 - ct - cb).max(0.0);
     if sx_crop <= 0.0 || sy_crop <= 0.0 { return; }
 
-    // --- Minimal fix: keep world center at the uncropped rect center.
-    //     (Remove crop-based recentering that caused sliding.)
     let center_x = base_center.x;
     let center_y = base_center.y;
 
-    // Geometry shrinks; pivot/world position stays the same.
     let size_x = base_size.x * sx_crop;
     let size_y = base_size.y * sy_crop;
 
-    // UVs: apply crop/flip/velocity as before.
     let (uv_scale, uv_offset) = if is_solid {
         ([1.0, 1.0], [0.0, 0.0])
     } else {
@@ -516,7 +406,6 @@ fn push_sprite(
         )
     };
 
-    // Edge fades: compute effective widths in the *visible* sub-rect, then swap if flipped.
     let fl = fadeleft.clamp(0.0, 1.0);
     let fr = faderight.clamp(0.0, 1.0);
     let ft = fadetop.clamp(0.0, 1.0);
@@ -530,7 +419,6 @@ fn push_sprite(
     if flip_x { std::mem::swap(&mut fl_eff, &mut fr_eff); }
     if flip_y { std::mem::swap(&mut ft_eff, &mut fb_eff); }
 
-    // Transform: S -> R -> T (same as before).
     let transform =
         Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0)) *
         Matrix4::from_angle_z(Deg(rot_z_deg)) *
@@ -555,9 +443,6 @@ fn push_sprite(
 
 #[inline(always)]
 fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) {
-    // StepMania semantics: clamp each edge independently to [0,1].
-    // If l+r >= 1 or t+b >= 1 the geometry collapses to zero on that axis.
-    // Do NOT renormalize proportionally (that changes which side wins).
     (
         l.clamp(0.0, 1.0),
         r.clamp(0.0, 1.0),
@@ -567,68 +452,208 @@ fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) 
 }
 
 #[inline(always)]
-fn place_text_baseline(
-    parent: SmRect,
-    actor_align: [f32; 2],          // halign/valign pivot inside the line box
-    offset: [f32; 2],               // parent TL space
-    talign: actors::TextAlign,      // horizalign: left/center/right
-    measured_width_px: f32,         // at the provided px (pre-scale)
-    asc_px: f32,                    // at the provided px (pre-scale)
-    desc_px: f32,                   // at the provided px (pre-scale)
-    sx: f32,                        // final X scale (fit * zoomx)
-    sy: f32,                        // final Y scale (fit * zoomy)
-    m: &Metrics,
-) -> Vector2<f32> {
-    // Parent reference is ALWAYS its top-left in SM.
-    let rx = parent.x;
-    let ry = parent.y;
+fn line_width_no_overlap_px(font: &font::Font, text: &str, scale_x: f32) -> i32 {
+    // simulate the renderer with a "no-overlap" pen
+    let mut pen = 0.0f32;
+    let mut last_right = f32::NEG_INFINITY;
 
-    // Horizontal offset uses the *scaled* width so center/right anchor correctly under zoom.
-    let width_scaled = measured_width_px * sx;
-    let align_offset_x = match talign {
-        actors::TextAlign::Left   => 0.0,
-        actors::TextAlign::Center => -0.5 * width_scaled,
-        actors::TextAlign::Right  => -width_scaled,
-    };
+    for ch in text.chars() {
+        let mapped = font.glyph_map.get(&ch);
+        let g = match mapped.or(font.default_glyph.as_ref()) {
+            Some(g) => g,
+            None => continue, // completely unmapped and no default: skip
+        };
 
-    // Vertical: compute baseline so the chosen pivot inside the (scaled) line box stays put.
-    let asc_s   = asc_px * sy;
-    let line_hs = (asc_px + desc_px) * sy;
-    let ay      = actor_align[1]; // 0=top, .5=middle, 1=bottom
+        // StepMania parity for missing SPACE: advance only; no quad
+        let should_draw_quad = !(ch == ' ' && mapped.is_none());
 
-    let text_top_sm_y = ry + offset[1] - ay * line_hs;
-    let baseline_sm_y = text_top_sm_y + asc_s;
+        if should_draw_quad {
+            // ensure that the snapped left edge of this quad won't cross the previous right edge
+            // pen must be large enough that round(pen + off) >= last_right
+            let need_pen = (last_right - g.offset[0] * scale_x - 0.5).ceil();
+            if pen < need_pen { pen = need_pen; }
 
-    // Convert SM top-left "px" to world
-    let world_x = m.left + (rx + offset[0] + align_offset_x);
-    let world_y = m.top  - baseline_sm_y;
+            // snapped draw position, like the renderer
+            let draw_x = (pen + g.offset[0] * scale_x).round();
+            let right  = draw_x + g.size[0] * scale_x;
+            if right > last_right { last_right = right; }
+        }
 
-    Vector2::new(world_x, world_y)
+        // logical advance (always applied)
+        pen += g.advance * scale_x;
+    }
+
+    // true visible width is the max of where the pen ended and the furthest drawn pixel
+    last_right.max(pen).round() as i32
 }
 
 #[inline(always)]
-fn line_extents_px(font: &msdf::Font, text: &str, pixel_height: f32) -> (f32, f32) {
-    if pixel_height <= 0.0 || font.line_h == 0.0 || text.is_empty() {
-        return (0.0, 0.0);
-    }
-    let s = pixel_height / font.line_h;
-    let (mut any, mut min_top, mut max_bottom) = (false, 0.0f32, 0.0f32);
+fn place_no_overlap_and_get_draw_x(
+    pen_x: &mut f32,
+    last_right: &mut f32,
+    g: &font::Glyph,
+    scale_x: f32,
+) -> f32 {
+    // bump pen so that after snapping, left edge >= last_right
+    let need_pen = (*last_right - g.offset[0] * scale_x - 0.5).ceil();
+    if *pen_x < need_pen { *pen_x = need_pen; }
 
-    for g in text.chars().filter_map(|ch| font.glyphs.get(&ch)) {
-        let top_rel_down = g.yoff * s;
-        let bottom_rel_down = top_rel_down + g.plane_h * s;
-        if !any {
-            min_top = top_rel_down;
-            max_bottom = bottom_rel_down;
-            any = true;
-        } else {
-            if top_rel_down < min_top { min_top = top_rel_down; }
-            if bottom_rel_down > max_bottom { max_bottom = bottom_rel_down; }
+    let draw_x = (*pen_x + g.offset[0] * scale_x).round();
+    let right  = draw_x + g.size[0] * scale_x;
+    if right > *last_right { *last_right = right; }
+    draw_x
+}
+
+fn layout_text(
+    font: &font::Font,
+    text: &str,
+    _px_size: f32, // intentionally unused; bitmap font is intrinsic + scale
+    scale: [f32; 2],
+    fit_width: Option<f32>,
+    fit_height: Option<f32>,
+    parent: SmRect,
+    align: [f32; 2],
+    offset: [f32; 2],
+    text_align: actors::TextAlign,
+    m: &Metrics,
+) -> Vec<RenderObject> {
+    if text.is_empty() { return vec![]; }
+
+    // 1) split
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.is_empty() { return vec![]; }
+
+    // 2) measure *unscaled logical* widths (for fit calc, like SM)
+    let logical_line_widths: Vec<f32> =
+        lines.iter().map(|l| line_width_no_overlap_px(font, l, 1.0) as f32).collect();
+    let max_logical_width = logical_line_widths.iter().fold(0.0f32, |a, &b| a.max(b));
+
+    // Vertical metrics (SM: cap height = baseline - top from main page)
+    let cap_height = if font.height > 0 { font.height as f32 } else { font.line_spacing as f32 };
+    let num_lines = lines.len();
+    let unscaled_block_height = if num_lines > 1 {
+        cap_height + ((num_lines - 1) as f32 * font.line_spacing as f32)
+    } else {
+        cap_height
+    };
+
+    // 3) fit scale (uniform; min of width/height constraints)
+    use std::f32::INFINITY;
+    let s_w = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
+    let s_h = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
+    let fit_s = if s_w.is_infinite() && s_h.is_infinite() { 1.0 } else { s_w.min(s_h).max(0.0) };
+
+    let final_scale_x = scale[0] * fit_s;
+    let final_scale_y = scale[1] * fit_s;
+    if final_scale_x.abs() < 1e-6 || final_scale_y.abs() < 1e-6 { return vec![]; }
+
+    // 4) measure widths in *screen pixels* with cumulative (float) advance; snap once
+    let line_widths_px: Vec<i32> =
+        lines.iter().map(|l| line_width_no_overlap_px(font, l, final_scale_x)).collect();
+    let max_line_width_px = *line_widths_px.iter().max().unwrap_or(&0);
+
+    // 5) place the text block
+    let scaled_block_width  = max_line_width_px as f32;
+    let scaled_block_height = unscaled_block_height * final_scale_y;
+
+    let block_top_sm_y  = parent.y + offset[1] - align[1] * scaled_block_height;
+    let block_left_sm_x = parent.x + offset[0] - align[0] * scaled_block_width;
+
+    // First baseline at cap height; pixel-aligned
+    let mut current_baseline_sm_y = (block_top_sm_y + cap_height * final_scale_y).round();
+
+    // 6) build render objects
+    let mut objects = Vec::new();
+
+    for (i, line) in lines.iter().enumerate() {
+        let line_w_px = line_widths_px[i] as f32;
+
+        // Start pen based on actual pixel width of this line; pixel-aligned
+        let pen_start_x = match text_align {
+            actors::TextAlign::Left   => block_left_sm_x,
+            actors::TextAlign::Center => block_left_sm_x + 0.5 * (scaled_block_width - line_w_px),
+            actors::TextAlign::Right  => block_left_sm_x + (scaled_block_width - line_w_px),
+        }.round();
+
+        // Accumulate in float (SM behavior)
+        let mut pen_x_sm = pen_start_x;
+        let mut last_right_edge_sm = f32::NEG_INFINITY;
+
+        for c in line.chars() {
+            let mapped = font.glyph_map.get(&c);
+            let glyph = match mapped.or(font.default_glyph.as_ref()) {
+                Some(g) => g,
+                None => continue,
+            };
+
+            let should_draw_quad = !(c == ' ' && mapped.is_none());
+
+            if should_draw_quad {
+                // sizes (unchanged)
+                let quad_w = glyph.size[0] * final_scale_x;
+                let quad_h = glyph.size[1] * final_scale_y;
+
+                if quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
+                    // NEW: get a non-overlapping, pixel-snapped x
+                    let quad_x_sm = place_no_overlap_and_get_draw_x(
+                        &mut pen_x_sm, &mut last_right_edge_sm, glyph, final_scale_x
+                    );
+                    let quad_y_sm = (current_baseline_sm_y + glyph.offset[1] * final_scale_y).round();
+
+                    let center_x = m.left + quad_x_sm + quad_w * 0.5;
+                    let center_y = m.top  - (quad_y_sm + quad_h * 0.5);
+
+                    let transform = Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0))
+                                * Matrix4::from_nonuniform_scale(quad_w, quad_h, 1.0);
+
+                    let (tex_w, tex_h) = assets::texture_dims(&glyph.texture_key)
+                        .map_or((1.0, 1.0), |meta| (meta.w as f32, meta.h as f32));
+
+                    let uv_scale = [
+                        (glyph.tex_rect[2] - glyph.tex_rect[0]) / tex_w,
+                        (glyph.tex_rect[3] - glyph.tex_rect[1]) / tex_h,
+                    ];
+                    let uv_offset = [
+                        glyph.tex_rect[0] / tex_w,
+                        glyph.tex_rect[1] / tex_h,
+                    ];
+
+                    objects.push(RenderObject {
+                        object_type: renderer::ObjectType::Sprite {
+                            texture_id: glyph.texture_key.clone(),
+                            tint: [1.0; 4],
+                            uv_scale,
+                            uv_offset,
+                            edge_fade: [0.0; 4],
+                        },
+                        transform,
+                        blend: BlendMode::Alpha,
+                        z: 0,
+                        order: 0,
+                    });
+                }
+            }
+
+            // advance pen (always), like before
+            pen_x_sm += glyph.advance * final_scale_x;
+        }
+
+        // Next line (pixel-aligned)
+        current_baseline_sm_y += (font.line_spacing as f32 * final_scale_y).round();
+    }
+
+    objects
+}
+
+#[inline(always)]
+fn measure_line_width_px(font: &font::Font, text: &str, scale_x: f32) -> i32 {
+    let mut pen = 0.0f32;
+    for ch in text.chars() {
+        if let Some(g) = font.glyph_map.get(&ch).or(font.default_glyph.as_ref()) {
+            pen += g.advance * scale_x; // accumulate in float
         }
     }
-
-    if !any { return (0.0, 0.0) }
-    ((-min_top).max(0.0), max_bottom.max(0.0))
+    pen.round() as i32 // snap once for layout math
 }
 
 #[inline(always)]

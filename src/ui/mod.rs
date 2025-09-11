@@ -1,5 +1,4 @@
 pub mod components;
-pub mod msdf;
 pub mod compose;
 pub mod actors;
 pub mod color;

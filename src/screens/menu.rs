@@ -139,7 +139,7 @@ pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
 
     actors.push(act!(text:
         align(0.5, 0.0): xy(screen_center_x(), info1_y_tl):
-        zoomtoheight(INFO_PX): font("miso"): settext("DeadSync 0.2.261"): horizalign(center):
+        font("miso"): settext("DeadSync 0.2.261"): horizalign(center):
         diffuse(info_color[0], info_color[1], info_color[2], info_color[3])
     ));
 
@@ -151,7 +151,7 @@ pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
 
     actors.push(act!(text:
         align(0.5, 0.0): xy(screen_center_x(), info2_y_tl):
-        zoomtoheight(INFO_PX): font("miso"): settext(song_info_text): horizalign(center):
+        font("miso"): settext(song_info_text): horizalign(center):
         diffuse(info_color[0], info_color[1], info_color[2], info_color[3])
     ));
 

@@ -61,7 +61,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     actors.push(act!(text:
         align(0.5, 0.0): xy(cx, 20.0):
-        zoomtoheight(30.0): font("wendy"): settext("Actor System Sandbox"): horizalign(center)
+        zoomtoheight(15.0): font("wendy"): settext("Actor System Sandbox"): horizalign(center)
     ));
     actors.push(act!(text:
         align(0.5, 0.0): xy(cx, 60.0):
@@ -108,8 +108,12 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     //));
 
     // C3 - using align and x and y
-    actors.push(act!(sprite("logo.png"):
-        CenterX(): CenterY(): setsize(300,180)
+    //actors.push(act!(sprite("logo.png"):
+    //    CenterX(): CenterY(): setsize(300,180)
+    //));
+
+    actors.push(act!(text:
+        align(0.5, 0.5): Center(): font("miso"): settext("Test")
     ));
 
     actors
