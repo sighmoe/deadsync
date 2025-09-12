@@ -27,13 +27,16 @@ struct ProjPush {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct InstanceData {
-    // mat4 as four vec4 columns for attribute locations 2..5
-    model: [[f32; 4]; 4], // 64 bytes
-    tint: [f32; 4],       // +16 = 80
-    uv_scale: [f32; 2],   // +8  = 88
-    uv_offset: [f32; 2],  // +8  = 96
-    edge_fade: [f32; 4],  // +16 = 112 bytes total
+    // 72 bytes total
+    center:     [f32; 2], // offset 0
+    size:       [f32; 2], // offset 8
+    rot_sin_cos:[f32; 2], // offset 16  (sin, cos)
+    tint:       [f32; 4], // offset 24
+    uv_scale:   [f32; 2], // offset 40
+    uv_offset:  [f32; 2], // offset 48
+    edge_fade:  [f32; 4], // offset 56
 }
 
 struct PipelinePair {
@@ -107,8 +110,10 @@ pub struct State {
     window_size: PhysicalSize<u32>,
     vsync_enabled: bool,
     projection: Matrix4<f32>,
-    instance_buffers: Vec<Option<BufferResource>>, // per-frame
-    instance_buffer_bytes: Vec<vk::DeviceSize>,    // per-frame capacities
+    instance_ring: Option<BufferResource>,       // one big VB for all frames
+    instance_ring_ptr: *mut InstanceData,        // persistently mapped pointer
+    instance_capacity_instances: usize,          // total instances across ring
+    per_frame_stride_instances: usize,           // instances reserved per frame
 }
 
 // --- Main Procedural Functions ---
@@ -189,8 +194,10 @@ pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error
         window_size: initial_size,
         vsync_enabled,
         projection,
-        instance_buffers: (0..MAX_FRAMES_IN_FLIGHT).map(|_| None).collect(),
-        instance_buffer_bytes: vec![0; MAX_FRAMES_IN_FLIGHT],
+        instance_ring: None,
+        instance_ring_ptr: std::ptr::null_mut(),
+        instance_capacity_instances: 0,
+        per_frame_stride_instances: 0,
     };
 
     // Static unit quad buffers
@@ -264,7 +271,7 @@ fn create_sprite_pipeline(
     set_layout: vk::DescriptorSetLayout,
     mode: BlendMode,
 ) -> Result<PipelinePair, Box<dyn Error>> {
-    // Shaders
+    // Shaders (recompiled SPIR-V with compact instance layout)
     let vert_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_shader.vert.spv"));
     let frag_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_shader.frag.spv"));
     let vert_module = create_shader_module(device, vert_shader_code)?;
@@ -282,18 +289,17 @@ fn create_sprite_pipeline(
             .name(main_name),
     ];
 
-    // Vertex inputs: binding 0 (unit quad), binding 1 (per-instance payload)
+    // Vertex inputs: binding 0 (unit quad), binding 1 (compact per-instance)
     let (binding_descriptions, attribute_descriptions) = vertex_input_descriptions_textured_instanced();
     let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::default()
         .vertex_binding_descriptions(&binding_descriptions)
         .vertex_attribute_descriptions(&attribute_descriptions);
 
-    // Fixed-function
     let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
 
-    let viewport_state =
-        vk::PipelineViewportStateCreateInfo::default().viewport_count(1).scissor_count(1);
+    let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+        .viewport_count(1).scissor_count(1);
 
     let rasterizer = vk::PipelineRasterizationStateCreateInfo::default()
         .polygon_mode(vk::PolygonMode::FILL)
@@ -309,23 +315,23 @@ fn create_sprite_pipeline(
         .attachments(std::slice::from_ref(&color_blend_attachment));
 
     let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-    let dynamic_state =
-        vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic_states);
+    let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
+        .dynamic_states(&dynamic_states);
 
-    // Push constant: projection matrix only
+    // Push constant: projection only
+    #[repr(C)]
+    struct ProjPush { proj: Matrix4<f32> }
     let push_constant_range = vk::PushConstantRange::default()
         .stage_flags(vk::ShaderStageFlags::VERTEX)
         .offset(0)
         .size(std::mem::size_of::<ProjPush>() as u32);
 
-    // Layout
     let pipeline_layout_info = vk::PipelineLayoutCreateInfo::default()
         .set_layouts(std::slice::from_ref(&set_layout))
         .push_constant_ranges(std::slice::from_ref(&push_constant_range));
 
     let layout = unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
 
-    // Pipeline
     let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
         .stages(&shader_stages)
         .vertex_input_state(&vertex_input_info)
@@ -351,6 +357,73 @@ fn create_sprite_pipeline(
     }
 
     Ok(PipelinePair { layout, pipe })
+}
+
+#[inline(always)]
+fn next_pow2_usize(x: usize) -> usize {
+    let mut v = if x == 0 { 1 } else { x - 1 };
+    v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v |= v >> 16;
+    if std::mem::size_of::<usize>() == 8 { v |= v >> 32; }
+    v + 1
+}
+
+fn ensure_instance_ring_capacity(
+    state: &mut State,
+    needed_instances: usize,
+) -> Result<u32, Box<dyn Error>> {
+    // Request at least 1 instance, round to next power of two.
+    let requested_stride = next_pow2_usize(needed_instances.max(1));
+
+    // Grow-only policy: never shrink the ring to avoid frequent realloc + stalls.
+    let stride = if state.per_frame_stride_instances == 0 {
+        requested_stride
+    } else {
+        state.per_frame_stride_instances.max(requested_stride)
+    };
+
+    let need_total_instances = stride * MAX_FRAMES_IN_FLIGHT;
+    let bytes_per_instance = std::mem::size_of::<InstanceData>() as vk::DeviceSize;
+    let need_bytes = (need_total_instances as u64) * (bytes_per_instance as u64);
+
+    let dev = state.device.as_ref().unwrap();
+
+    // Reallocate only if missing or too small.
+    if state.instance_ring.is_none() || state.instance_capacity_instances < need_total_instances {
+        // Safety: the old ring buffer may be referenced by in-flight command buffers.
+        // Wait for the GPU to finish BEFORE destroying it.
+        if let Some(old) = state.instance_ring.take() {
+            unsafe {
+                // Full idle here is fine — this path runs only when we *grow*.
+                dev.device_wait_idle()?;
+                if !state.instance_ring_ptr.is_null() {
+                    dev.unmap_memory(old.memory);
+                }
+            }
+            destroy_buffer(dev, &old);
+            state.instance_ring_ptr = std::ptr::null_mut();
+        }
+
+        // Create a new HOST_VISIBLE | HOST_COHERENT VB and keep it persistently mapped.
+        let (buf, mem) = create_gpu_buffer(
+            &state.instance, dev, state.pdevice,
+            need_bytes,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        )?;
+
+        let mapped = unsafe { dev.map_memory(mem, 0, need_bytes, vk::MemoryMapFlags::empty())? };
+
+        state.instance_ring = Some(BufferResource { buffer: buf, memory: mem });
+        state.instance_ring_ptr = mapped as *mut InstanceData;
+        state.instance_capacity_instances = need_total_instances;
+        state.per_frame_stride_instances = stride;
+    } else if state.per_frame_stride_instances != stride {
+        // We decided to grow-only; keep the bigger existing stride.
+        state.per_frame_stride_instances = stride;
+    }
+
+    // Base "firstInstance" for this frame’s slice of the ring.
+    Ok((state.current_frame * state.per_frame_stride_instances) as u32)
 }
 
 fn transition_image_layout_cmd(
@@ -477,11 +550,135 @@ pub fn draw(
         return Ok(0);
     }
 
+    #[inline(always)]
+    fn decompose_2d(m: [[f32; 4]; 4]) -> ([f32; 2], [f32; 2], [f32; 2]) {
+        // column-major: m[col][row]
+        let center = [m[3][0], m[3][1]];
+        let c0 = [m[0][0], m[0][1]];
+        let c1 = [m[1][0], m[1][1]];
+        let sx = (c0[0]*c0[0] + c0[1]*c0[1]).sqrt().max(1e-12);
+        let sy = (c1[0]*c1[0] + c1[1]*c1[1]).sqrt().max(1e-12);
+        let cos_t = c0[0] / sx;
+        let sin_t = c0[1] / sx;
+        (center, [sx, sy], [sin_t, cos_t])
+    }
+
+    struct Run { set: vk::DescriptorSet, start: u32, count: u32, blend: BlendMode }
+
+    let mut instances: Vec<InstanceData> = Vec::with_capacity(render_list.objects.len());
+    let mut runs: Vec<Run> = Vec::new();
+
+    for obj in &render_list.objects {
+        if let ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset, edge_fade } = &obj.object_type {
+            let set_opt = textures.get(texture_id).and_then(|t| match t {
+                RendererTexture::Vulkan(tex) => Some(tex.descriptor_set),
+                _ => None,
+            });
+            let set = match set_opt { Some(s) => s, None => continue };
+
+            let model: [[f32;4];4] = obj.transform.into();
+            let (center, size, sincos) = decompose_2d(model);
+
+            instances.push(InstanceData {
+                center,
+                size,
+                rot_sin_cos: sincos,
+                tint: *tint,
+                uv_scale: *uv_scale,
+                uv_offset: *uv_offset,
+                edge_fade: *edge_fade,
+            });
+
+            let idx = (instances.len() - 1) as u32;
+            if let Some(last) = runs.last_mut() {
+                if last.set == set && last.blend == obj.blend {
+                    last.count += 1;
+                } else {
+                    runs.push(Run { set, start: idx, count: 1, blend: obj.blend });
+                }
+            } else {
+                runs.push(Run { set, start: idx, count: 1, blend: obj.blend });
+            }
+        }
+    }
+
+    // Early clear-only path
+    if instances.is_empty() {
+        unsafe {
+            let device = state.device.as_ref().unwrap();
+            let fence = state.in_flight_fences[state.current_frame];
+            device.wait_for_fences(&[fence], true, u64::MAX)?;
+
+            let (image_index, acquired_suboptimal) =
+                match state.swapchain_resources.swapchain_loader.acquire_next_image(
+                    state.swapchain_resources.swapchain,
+                    u64::MAX,
+                    state.image_available_semaphores[state.current_frame],
+                    vk::Fence::null(),
+                ) {
+                    Ok(pair) => pair,
+                    Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => { recreate_swapchain_and_dependents(state)?; return Ok(0); }
+                    Err(e) => return Err(e.into()),
+                };
+
+            let in_flight = state.images_in_flight[image_index as usize];
+            if in_flight != vk::Fence::null() {
+                device.wait_for_fences(&[in_flight], true, u64::MAX)?;
+            }
+            state.images_in_flight[image_index as usize] = fence;
+
+            device.reset_fences(&[fence])?;
+            let cmd = state.command_buffers[state.current_frame];
+            device.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
+
+            device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::default()
+                .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT))?;
+
+            let c = render_list.clear_color;
+            let clear_value = vk::ClearValue { color: vk::ClearColorValue { float32: [c[0], c[1], c[2], c[3]] } };
+            let rp_info = vk::RenderPassBeginInfo::default()
+                .render_pass(state.render_pass)
+                .framebuffer(state.swapchain_resources.framebuffers[image_index as usize])
+                .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent })
+                .clear_values(std::slice::from_ref(&clear_value));
+            device.cmd_begin_render_pass(cmd, &rp_info, vk::SubpassContents::INLINE);
+            device.cmd_end_render_pass(cmd);
+            device.end_command_buffer(cmd)?;
+
+            let wait = [state.image_available_semaphores[state.current_frame]];
+            let sig  = [state.render_finished_semaphores[state.current_frame]];
+            let stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+            let submit = vk::SubmitInfo::default()
+                .wait_semaphores(&wait).wait_dst_stage_mask(&stages)
+                .command_buffers(std::slice::from_ref(&cmd)).signal_semaphores(&sig);
+            device.queue_submit(state.queue, &[submit], fence)?;
+
+            let present_info = vk::PresentInfoKHR::default()
+                .wait_semaphores(&sig)
+                .swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain))
+                .image_indices(std::slice::from_ref(&image_index));
+
+            match state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present_info) {
+                Ok(suboptimal) if suboptimal || acquired_suboptimal => recreate_swapchain_and_dependents(state)?,
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => recreate_swapchain_and_dependents(state)?,
+                Ok(_) => {},
+                Err(e) => return Err(e.into()),
+            }
+            state.current_frame = (state.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+        }
+        return Ok(0);
+    }
+
+    // Reserve per-frame ring space and copy instances into our mapped region
+    let base_first_instance = ensure_instance_ring_capacity(state, instances.len())?;
     unsafe {
         let device_arc = state.device.as_ref().unwrap().clone();
         let device = device_arc.as_ref();
 
-        // Fences & acquire
+        let dst = state.instance_ring_ptr.add(base_first_instance as usize); // <- no extra parens
+        std::ptr::copy_nonoverlapping(instances.as_ptr(), dst, instances.len());
+
+        // --- Record & submit (unchanged below) ---
         let fence = state.in_flight_fences[state.current_frame];
         device.wait_for_fences(&[fence], true, u64::MAX)?;
 
@@ -493,10 +690,7 @@ pub fn draw(
                 vk::Fence::null(),
             ) {
                 Ok(pair) => pair,
-                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
-                    recreate_swapchain_and_dependents(state)?;
-                    return Ok(0);
-                }
+                Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => { recreate_swapchain_and_dependents(state)?; return Ok(0); }
                 Err(e) => return Err(e.into()),
             };
 
@@ -509,13 +703,9 @@ pub fn draw(
         device.reset_fences(&[fence])?;
         let cmd = state.command_buffers[state.current_frame];
         device.reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())?;
+        device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::default()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT))?;
 
-        device.begin_command_buffer(
-            cmd,
-            &vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-        )?;
-
-        // Begin render pass
         let c = render_list.clear_color;
         let clear_value = vk::ClearValue { color: vk::ClearColorValue { float32: [c[0], c[1], c[2], c[3]] } };
         let rp_info = vk::RenderPassBeginInfo::default()
@@ -525,7 +715,6 @@ pub fn draw(
             .clear_values(std::slice::from_ref(&clear_value));
         device.cmd_begin_render_pass(cmd, &rp_info, vk::SubpassContents::INLINE);
 
-        // Viewport / scissor
         let vp = vk::Viewport {
             x: 0.0, y: state.swapchain_resources.extent.height as f32,
             width: state.swapchain_resources.extent.width as f32,
@@ -536,10 +725,7 @@ pub fn draw(
         let sc = vk::Rect2D { offset: vk::Offset2D::default(), extent: state.swapchain_resources.extent };
         device.cmd_set_scissor(cmd, 0, &[sc]);
 
-        // Bind pipeline
         device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, state.sprite_pipeline);
-
-        // Push projection
         let pc = ProjPush { proj: state.projection };
         device.cmd_push_constants(
             cmd,
@@ -549,130 +735,47 @@ pub fn draw(
             bytes_of(&pc),
         );
 
-        // Bind static buffers (unit quad + indices)
-        if state.vertex_buffer.is_some() && state.index_buffer.is_some() {
-            let vb = state.vertex_buffer.as_ref().unwrap().buffer;
-            let ib = state.index_buffer.as_ref().unwrap().buffer;
+        let vb0 = state.vertex_buffer.as_ref().unwrap().buffer;
+        let inst_buf = state.instance_ring.as_ref().unwrap().buffer;
+        let bufs = [vb0, inst_buf];
+        let offs = [0u64, 0u64];
+        device.cmd_bind_vertex_buffers(cmd, 0, &bufs, &offs);
 
-            // ---- Build instances and runs (contiguous same-texture) ----
-            struct Run { set: vk::DescriptorSet, start: u32, count: u32 }
+        let ib = state.index_buffer.as_ref().unwrap().buffer;
+        device.cmd_bind_index_buffer(cmd, ib, 0, vk::IndexType::UINT16);
 
-            let mut instances: Vec<InstanceData> = Vec::with_capacity(render_list.objects.len());
-            let mut runs: Vec<Run> = Vec::new();
-
-            for obj in &render_list.objects {
-                let ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset, edge_fade } = &obj.object_type;
-                    let set_opt = textures.get(texture_id).and_then(|t| match t {
-                        RendererTexture::Vulkan(tex) => Some(tex.descriptor_set),
-                        _ => None,
-                    });
-                    let set = match set_opt { Some(s) => s, None => continue };
-
-                    let model: [[f32;4];4] = obj.transform.into();
-                    instances.push(InstanceData {
-                        model,
-                        tint: *tint,
-                        uv_scale: *uv_scale,
-                        uv_offset: *uv_offset,
-                        edge_fade: *edge_fade,
-                    });
-
-                    let idx = (instances.len() - 1) as u32;
-                    if let Some(last) = runs.last_mut() {
-                        if last.set == set {
-                            last.count += 1;
-                        } else {
-                            runs.push(Run { set, start: idx, count: 1 });
-                        }
-                    } else {
-                        runs.push(Run { set, start: idx, count: 1 });
-                    }
-                
+        let mut last_set = vk::DescriptorSet::null();
+        let mut vertices_drawn: u32 = 0;
+        for run in runs {
+            if last_set != run.set {
+                device.cmd_bind_descriptor_sets(
+                    cmd,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    state.sprite_pipeline_layout,
+                    0,
+                    &[run.set],
+                    &[],
+                );
+                last_set = run.set;
             }
-
-            // Upload instance data if any
-            let have_instances = !instances.is_empty();
-            if have_instances {
-                ensure_instance_buffer_for_frame(state, state.current_frame, instances.len())?;
-                let inst_buf_ref = state.instance_buffers[state.current_frame].as_ref().unwrap();
-                map_write_instances(device, inst_buf_ref, &instances)?;
-
-                // Bind vertex buffers: binding 0 = unit quad, binding 1 = instance payload
-                let bufs = [vb, inst_buf_ref.buffer];
-                let offs = [0u64, 0u64];
-                device.cmd_bind_vertex_buffers(cmd, 0, &bufs, &offs);
-            } else {
-                // Bind only unit quad; no instance draws will be issued
-                device.cmd_bind_vertex_buffers(cmd, 0, &[vb], &[0]);
-            }
-
-            device.cmd_bind_index_buffer(cmd, ib, 0, vk::IndexType::UINT16);
-
-            // Issue one draw per run
-            let mut vertices_drawn: u32 = 0;
-            let mut last_set = vk::DescriptorSet::null();
-            if have_instances {
-                for run in runs {
-                    if last_set != run.set {
-                        device.cmd_bind_descriptor_sets(
-                            cmd,
-                            vk::PipelineBindPoint::GRAPHICS,
-                            state.sprite_pipeline_layout,
-                            0,
-                            &[run.set],
-                            &[],
-                        );
-                        last_set = run.set;
-                    }
-                    device.cmd_draw_indexed(cmd, 6, run.count, 0, 0, run.start);
-                    vertices_drawn = vertices_drawn.saturating_add(4 * run.count);
-                }
-            }
-
-            // End render pass
-            device.cmd_end_render_pass(cmd);
-            device.end_command_buffer(cmd)?;
-
-            // Submit
-            let wait_semaphores = [state.image_available_semaphores[state.current_frame]];
-            let signal_semaphores = [state.render_finished_semaphores[state.current_frame]];
-            let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-            let submit = vk::SubmitInfo::default()
-                .wait_semaphores(&wait_semaphores).wait_dst_stage_mask(&wait_stages)
-                .command_buffers(std::slice::from_ref(&cmd)).signal_semaphores(&signal_semaphores);
-            device.queue_submit(state.queue, &[submit], fence)?;
-
-            // Present
-            let present_info = vk::PresentInfoKHR::default()
-                .wait_semaphores(&signal_semaphores)
-                .swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain))
-                .image_indices(std::slice::from_ref(&image_index));
-
-            match state.swapchain_resources.swapchain_loader.queue_present(state.queue, &present_info) {
-                Ok(suboptimal) if suboptimal || acquired_suboptimal => recreate_swapchain_and_dependents(state)?,
-                Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => recreate_swapchain_and_dependents(state)?,
-                Ok(_) => {},
-                Err(e) => return Err(e.into()),
-            }
-
-            state.current_frame = (state.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-            return Ok(vertices_drawn);
+            let first_instance = base_first_instance + run.start;
+            device.cmd_draw_indexed(cmd, 6, run.count, 0, 0, first_instance);
+            vertices_drawn = vertices_drawn.saturating_add(4 * run.count);
         }
 
-        // Fallback: no VB/IB — still close the pass and present a clear
         device.cmd_end_render_pass(cmd);
         device.end_command_buffer(cmd)?;
 
-        let wait_semaphores = [state.image_available_semaphores[state.current_frame]];
-        let signal_semaphores = [state.render_finished_semaphores[state.current_frame]];
-        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+        let wait = [state.image_available_semaphores[state.current_frame]];
+        let sig  = [state.render_finished_semaphores[state.current_frame]];
+        let stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let submit = vk::SubmitInfo::default()
-            .wait_semaphores(&wait_semaphores).wait_dst_stage_mask(&wait_stages)
-            .command_buffers(std::slice::from_ref(&cmd)).signal_semaphores(&signal_semaphores);
+            .wait_semaphores(&wait).wait_dst_stage_mask(&stages)
+            .command_buffers(std::slice::from_ref(&cmd)).signal_semaphores(&sig);
         device.queue_submit(state.queue, &[submit], fence)?;
 
         let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(&signal_semaphores)
+            .wait_semaphores(&sig)
             .swapchains(std::slice::from_ref(&state.swapchain_resources.swapchain))
             .image_indices(std::slice::from_ref(&image_index));
 
@@ -684,7 +787,7 @@ pub fn draw(
         }
 
         state.current_frame = (state.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
-        Ok(0)
+        Ok(vertices_drawn)
     }
 }
 
@@ -697,17 +800,14 @@ pub fn cleanup(state: &mut State) {
     }
 
     unsafe {
-        // Swapchain & friends
         cleanup_swapchain_and_dependents(state);
 
-        // Sync objects
         for i in 0..MAX_FRAMES_IN_FLIGHT {
             state.device.as_ref().unwrap().destroy_semaphore(state.render_finished_semaphores[i], None);
             state.device.as_ref().unwrap().destroy_semaphore(state.image_available_semaphores[i], None);
             state.device.as_ref().unwrap().destroy_fence(state.in_flight_fences[i], None);
         }
 
-        // Static vertex/index buffers
         if let Some(buffer) = state.vertex_buffer.take() {
             destroy_buffer(state.device.as_ref().unwrap(), &buffer);
         }
@@ -715,38 +815,32 @@ pub fn cleanup(state: &mut State) {
             destroy_buffer(state.device.as_ref().unwrap(), &buffer);
         }
 
-        // Per-frame instance buffers (instancing)
-        for buf in state.instance_buffers.iter_mut() {
-            if let Some(b) = buf.take() {
-                destroy_buffer(state.device.as_ref().unwrap(), &b);
+        // Persistently-mapped ring buffer
+        if let Some(ring) = state.instance_ring.take() {
+            if !state.instance_ring_ptr.is_null() {
+                state.device.as_ref().unwrap().unmap_memory(ring.memory);
+                state.instance_ring_ptr = std::ptr::null_mut();
             }
+            destroy_buffer(state.device.as_ref().unwrap(), &ring);
         }
 
-        // Descriptors & sampler
         state.device.as_ref().unwrap().destroy_sampler(state.sampler, None);
         state.device.as_ref().unwrap().destroy_descriptor_pool(state.descriptor_pool, None);
         state.device.as_ref().unwrap().destroy_descriptor_set_layout(state.descriptor_set_layout, None);
-
-        // Pipeline
         state.device.as_ref().unwrap().destroy_pipeline(state.sprite_pipeline, None);
         state.device.as_ref().unwrap().destroy_pipeline_layout(state.sprite_pipeline_layout, None);
-
-        // Render pass & command pool
         state.device.as_ref().unwrap().destroy_render_pass(state.render_pass, None);
         state.device.as_ref().unwrap().destroy_command_pool(state.command_pool, None);
-
-        // Surface
         state.surface_loader.destroy_surface(state.surface, None);
 
-        // Debug
         if let (Some(loader), Some(messenger)) = (state.debug_loader.take(), state.debug_messenger.take()) {
             loader.destroy_debug_utils_messenger(messenger, None);
         }
 
-        // Device & instance
         if let Some(device_arc) = state.device.take() {
             device_arc.destroy_device(None);
         }
+
         state.instance.destroy_instance(None);
     }
     info!("Vulkan resources cleaned up.");
@@ -882,7 +976,7 @@ fn create_texture_descriptor_set(
 #[inline(always)]
 fn vertex_input_descriptions_textured_instanced() -> (
     [vk::VertexInputBindingDescription; 2],
-    [vk::VertexInputAttributeDescription; 10],
+    [vk::VertexInputAttributeDescription; 9],
 ) {
     // binding 0: unit quad [x,y,u,v]
     let b0 = vk::VertexInputBindingDescription::default()
@@ -890,58 +984,35 @@ fn vertex_input_descriptions_textured_instanced() -> (
         .stride(std::mem::size_of::<[f32; 4]>() as u32)
         .input_rate(vk::VertexInputRate::VERTEX);
 
-    // binding 1: per-instance payload
+    // binding 1: compact per-instance payload
     let b1 = vk::VertexInputBindingDescription::default()
         .binding(1)
-        .stride(std::mem::size_of::<InstanceData>() as u32) // 112
+        .stride(std::mem::size_of::<InstanceData>() as u32) // 72
         .input_rate(vk::VertexInputRate::INSTANCE);
 
-    // location 0..1: per-vertex
+    // per-vertex
     let a0 = vk::VertexInputAttributeDescription::default()
-        .binding(0).location(0)
-        .format(vk::Format::R32G32_SFLOAT) // position
-        .offset(0);
-
+        .binding(0).location(0).format(vk::Format::R32G32_SFLOAT).offset(0);  // pos
     let a1 = vk::VertexInputAttributeDescription::default()
-        .binding(0).location(1)
-        .format(vk::Format::R32G32_SFLOAT) // uv
-        .offset(8);
+        .binding(0).location(1).format(vk::Format::R32G32_SFLOAT).offset(8);  // uv
 
-    // locations 2..5: mat4 columns
-    let a2 = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(2)
-        .format(vk::Format::R32G32B32A32_SFLOAT).offset(0);
-    let a3 = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(3)
-        .format(vk::Format::R32G32B32A32_SFLOAT).offset(16);
-    let a4 = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(4)
-        .format(vk::Format::R32G32B32A32_SFLOAT).offset(32);
-    let a5 = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(5)
-        .format(vk::Format::R32G32B32A32_SFLOAT).offset(48);
+    // per-instance
+    let i_center = vk::VertexInputAttributeDescription::default()
+        .binding(1).location(2).format(vk::Format::R32G32_SFLOAT).offset(0);
+    let i_size = vk::VertexInputAttributeDescription::default()
+        .binding(1).location(3).format(vk::Format::R32G32_SFLOAT).offset(8);
+    let i_rot = vk::VertexInputAttributeDescription::default()
+        .binding(1).location(4).format(vk::Format::R32G32_SFLOAT).offset(16);
+    let i_tint = vk::VertexInputAttributeDescription::default()
+        .binding(1).location(5).format(vk::Format::R32G32B32A32_SFLOAT).offset(24);
+    let i_uvs = vk::VertexInputAttributeDescription::default()
+        .binding(1).location(6).format(vk::Format::R32G32_SFLOAT).offset(40);
+    let i_uvo = vk::VertexInputAttributeDescription::default()
+        .binding(1).location(7).format(vk::Format::R32G32_SFLOAT).offset(48);
+    let i_fade = vk::VertexInputAttributeDescription::default()
+        .binding(1).location(8).format(vk::Format::R32G32B32A32_SFLOAT).offset(56);
 
-    // location 6: tint
-    let a6 = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(6)
-        .format(vk::Format::R32G32B32A32_SFLOAT).offset(64);
-
-    // location 7: uv_scale
-    let a7 = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(7)
-        .format(vk::Format::R32G32_SFLOAT).offset(80);
-
-    // location 8: uv_offset
-    let a8 = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(8)
-        .format(vk::Format::R32G32_SFLOAT).offset(88);
-
-    // location 9: edge_fade
-    let a9 = vk::VertexInputAttributeDescription::default()
-        .binding(1).location(9)
-        .format(vk::Format::R32G32B32A32_SFLOAT).offset(96);
-
-    ([b0, b1], [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9])
+    ([b0, b1], [a0, a1, i_center, i_size, i_rot, i_tint, i_uvs, i_uvo, i_fade])
 }
 
 fn begin_single_time_commands(device: &Device, pool: vk::CommandPool) -> Result<vk::CommandBuffer, vk::Result> {
@@ -1390,54 +1461,5 @@ fn recreate_swapchain_and_dependents(state: &mut State) -> Result<(), Box<dyn Er
 
     state.images_in_flight = vec![vk::Fence::null(); state.swapchain_resources._images.len()];
     debug!("Swapchain recreated.");
-    Ok(())
-}
-
-#[inline(always)]
-fn needed_bytes_for_instances(n: usize) -> vk::DeviceSize {
-    (std::mem::size_of::<InstanceData>() * n) as vk::DeviceSize
-}
-
-fn ensure_instance_buffer_for_frame(
-    state: &mut State,
-    frame: usize,
-    needed_instances: usize,
-) -> Result<(), Box<dyn Error>> {
-    let device = state.device.as_ref().unwrap();
-    let need = needed_bytes_for_instances(needed_instances);
-    if need == 0 { return Ok(()); }
-
-    if state.instance_buffer_bytes[frame] < need {
-        // (re)allocate host-visible, coherent vertex buffer for instances
-        if let Some(old) = state.instance_buffers[frame].take() {
-            destroy_buffer(device, &old);
-        }
-        let (buf, mem) = create_gpu_buffer(
-            &state.instance, device, state.pdevice, need,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-        state.instance_buffers[frame] = Some(BufferResource { buffer: buf, memory: mem });
-        state.instance_buffer_bytes[frame] = need;
-    }
-    Ok(())
-}
-
-fn map_write_instances(
-    device: &Device,
-    dst: &BufferResource,
-    instances: &[InstanceData],
-) -> Result<(), Box<dyn Error>> {
-    if instances.is_empty() { return Ok(()); }
-    let bytes = needed_bytes_for_instances(instances.len());
-    unsafe {
-        let ptr = device.map_memory(dst.memory, 0, bytes, vk::MemoryMapFlags::empty())?;
-        std::ptr::copy_nonoverlapping(
-            instances.as_ptr(),
-            ptr as *mut InstanceData,
-            instances.len(),
-        );
-        device.unmap_memory(dst.memory);
-    }
     Ok(())
 }
