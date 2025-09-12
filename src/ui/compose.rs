@@ -467,89 +467,95 @@ fn layout_text(
 ) -> Vec<RenderObject> {
     if text.is_empty() { return vec![]; }
 
-    // 1) split lines
+    // 1) lines + logical widths (unscaled, SM-style)
     let lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() { return vec![]; }
 
-    // 2) measure unscaled logical widths for fit calc (SM-style width)
     let logical_line_widths: Vec<f32> =
         lines.iter().map(|l| line_width_px_sm(font, l, 1.0) as f32).collect();
     let max_logical_width = logical_line_widths.iter().fold(0.0f32, |a, &b| a.max(b));
 
-    // Vertical metrics (SM: cap height = baseline - top from main page)
+    // Vertical metrics (SM: cap height = baseline - top)
     let cap_height = if font.height > 0 { font.height as f32 } else { font.line_spacing as f32 };
     let num_lines = lines.len();
     let unscaled_block_height = if num_lines > 1 {
         cap_height + ((num_lines - 1) as f32 * font.line_spacing as f32)
-    } else {
-        cap_height
-    };
+    } else { cap_height };
 
-    // 3) fit scale (uniform)
+    // 2) uniform fit scale
     use std::f32::INFINITY;
     let s_w = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
     let s_h = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
     let fit_s = if s_w.is_infinite() && s_h.is_infinite() { 1.0 } else { s_w.min(s_h).max(0.0) };
 
-    let final_scale_x = scale[0] * fit_s;
-    let final_scale_y = scale[1] * fit_s;
-    if final_scale_x.abs() < 1e-6 || final_scale_y.abs() < 1e-6 { return vec![]; }
+    let sx = scale[0] * fit_s;
+    let sy = scale[1] * fit_s;
+    if sx.abs() < 1e-6 || sy.abs() < 1e-6 { return vec![]; }
 
-    // 4) actual pixel widths (SM-style)
-    let line_widths_px: Vec<i32> =
-        lines.iter().map(|l| line_width_px_sm(font, l, final_scale_x)).collect();
+    // 3) measure actual line widths (pixel-snapped, SM-style)
+    let line_widths_px: Vec<i32> = lines.iter().map(|l| line_width_px_sm(font, l, sx)).collect();
     let max_line_width_px = *line_widths_px.iter().max().unwrap_or(&0);
 
-    // 5) place the text block
-    let scaled_block_width  = max_line_width_px as f32;
-    let scaled_block_height = unscaled_block_height * final_scale_y;
+    // 4) place text block in SM space
+    let block_w  = max_line_width_px as f32;
+    let block_h  = unscaled_block_height * sy;
 
-    let block_top_sm_y  = parent.y + offset[1] - align[1] * scaled_block_height;
-    let block_left_sm_x = parent.x + offset[0] - align[0] * scaled_block_width;
+    let block_top_sm  = parent.y + offset[1] - align[1] * block_h;
+    let block_left_sm = parent.x + offset[0] - align[0] * block_w;
 
     // First baseline at cap height; pixel-aligned
-    let mut current_baseline_sm_y = (block_top_sm_y + cap_height * final_scale_y).round();
+    let mut baseline_sm = (block_top_sm + cap_height * sy).round();
 
-    // 6) build objects (SM placement: allow overlap; snap draw pos)
+    // 5) cache atlas dims per texture key to avoid repeated lookups
+    use std::collections::HashMap;
+    let mut dims_cache: HashMap<&str, (f32, f32)> = HashMap::new();
+    #[inline(always)]
+    fn atlas_dims<'a>(cache: &mut HashMap<&'a str, (f32, f32)>, key: &'a str) -> (f32, f32) {
+        if let Some(&d) = cache.get(key) { return d; }
+        let d = crate::core::assets::texture_dims(key)
+            .map_or((1.0_f32, 1.0_f32), |meta| (meta.w as f32, meta.h as f32));
+        cache.insert(key, d);
+        d
+    }
+
+    // 6) build glyph quads
     let mut objects = Vec::new();
-
     for (i, line) in lines.iter().enumerate() {
         let line_w_px = line_widths_px[i] as f32;
-
         let pen_start_x = match text_align {
-            actors::TextAlign::Left   => block_left_sm_x,
-            actors::TextAlign::Center => block_left_sm_x + 0.5 * (scaled_block_width - line_w_px),
-            actors::TextAlign::Right  => block_left_sm_x + (scaled_block_width - line_w_px),
+            actors::TextAlign::Left   => block_left_sm,
+            actors::TextAlign::Center => block_left_sm + 0.5 * (block_w - line_w_px),
+            actors::TextAlign::Right  => block_left_sm + (block_w - line_w_px),
         }.round();
 
-        let mut pen_x_sm = pen_start_x;
+        let mut pen_x = pen_start_x;
 
-        for c in line.chars() {
-            let mapped = font.glyph_map.get(&c);
+        for ch in line.chars() {
+            let mapped = font.glyph_map.get(&ch);
             let glyph = match mapped.or(font.default_glyph.as_ref()) {
                 Some(g) => g,
                 None => continue,
             };
 
             // draw sizes
-            let quad_w = glyph.size[0] * final_scale_x;
-            let quad_h = glyph.size[1] * final_scale_y;
+            let quad_w = glyph.size[0] * sx;
+            let quad_h = glyph.size[1] * sy;
 
-            // SM: if SPACE is unmapped, just advance; do not push a quad
-            let draw_quad = !(c == ' ' && mapped.is_none());
+            // Unmapped SPACE still advances but does not draw
+            let draw_quad = !(ch == ' ' && mapped.is_none());
 
             if draw_quad && quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
-                let quad_x_sm = (pen_x_sm + glyph.offset[0] * final_scale_x).round();
-                let quad_y_sm = (current_baseline_sm_y + glyph.offset[1] * final_scale_y).round();
+                let quad_x_sm = (pen_x + glyph.offset[0] * sx).round();
+                let quad_y_sm = (baseline_sm + glyph.offset[1] * sy).round();
 
                 let center_x = m.left + quad_x_sm + quad_w * 0.5;
                 let center_y = m.top  - (quad_y_sm + quad_h * 0.5);
 
-                let transform = Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0))
-                              * Matrix4::from_nonuniform_scale(quad_w, quad_h, 1.0);
+                let transform =
+                    Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0)) *
+                    Matrix4::from_nonuniform_scale(quad_w, quad_h, 1.0);
 
-                let (tex_w, tex_h) = assets::texture_dims(&glyph.texture_key)
-                    .map_or((1.0, 1.0), |meta| (meta.w as f32, meta.h as f32));
+                let (tex_w, tex_h) = atlas_dims(&mut dims_cache, &glyph.texture_key);
 
                 let uv_scale = [
                     (glyph.tex_rect[2] - glyph.tex_rect[0]) / tex_w,
@@ -575,12 +581,11 @@ fn layout_text(
                 });
             }
 
-            // SM: advance pen (always), with no “anti-overlap” adjustment
-            pen_x_sm += glyph.advance * final_scale_x;
+            // advance pen
+            pen_x += glyph.advance * sx;
         }
 
-        // next baseline (pixel aligned, SM-like)
-        current_baseline_sm_y += (font.line_spacing as f32 * final_scale_y).round();
+        baseline_sm += (font.line_spacing as f32 * sy).round();
     }
 
     objects

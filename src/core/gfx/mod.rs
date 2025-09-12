@@ -109,25 +109,26 @@ pub fn create_texture(
 
 /// Disposes of all textures currently in the texture manager.
 pub fn dispose_textures(backend: &mut Backend, textures: &mut HashMap<String, Texture>) {
+    // Take ownership so we drop after explicit GL deletes without borrowing issues.
+    let old = std::mem::take(textures);
+
     match backend {
-        Backend::Vulkan(state) => {
-            unsafe {
-                if let Some(device) = &state.device {
-                    let _ = device.device_wait_idle();
-                }
-            }
+        Backend::Vulkan(_state) => {
+            // Vulkan: no device-wide stall here. Dropping the textures will run their Drop impls
+            // (free descriptor sets, views, images, memory). Global idle is done at cleanup().
+            drop(old);
         }
         Backend::OpenGL(state) => {
             unsafe {
-                for tex in textures.values() {
+                for tex in old.values() {
                     if let Texture::OpenGL(opengl::Texture(handle)) = tex {
                         state.gl.delete_texture(*handle);
                     }
                 }
             }
+            // HashMap contents dropped here; no GPU stall required.
         }
     }
-    textures.clear();
 }
 
 /// Draws a single frame to the screen using the provided `RenderList`.
