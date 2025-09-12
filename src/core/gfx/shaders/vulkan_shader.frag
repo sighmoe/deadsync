@@ -1,17 +1,12 @@
 #version 450
-layout(location = 0) in  vec2 in_uv;
-layout(location = 1) in  vec2 in_quad;
-layout(location = 0) out vec4 out_frag_color;
+layout(location=0) in  vec2 in_uv;
+layout(location=1) in  vec2 in_quad;
+layout(location=2) flat in vec4 in_tint;
+layout(location=3) flat in vec4 in_edge_fade;
+
+layout(location=0) out vec4 out_frag_color;
 
 layout(set = 0, binding = 0) uniform sampler2D tex_sampler;
-
-layout(push_constant) uniform PC {
-    mat4 mvp;
-    vec4 tint;
-    vec2 uv_scale;
-    vec2 uv_offset;
-    vec4 edge_fade; // (left, right, top, bottom)
-} pc;
 
 float edge_fade_factor(vec2 q, vec4 e) {
     float f = 1.0;
@@ -24,7 +19,6 @@ float edge_fade_factor(vec2 q, vec4 e) {
 
 void main() {
     vec4 tex = texture(tex_sampler, in_uv);
-    float f = edge_fade_factor(in_quad, pc.edge_fade);
-    tex.a *= f;
-    out_frag_color = tex * pc.tint;
+    tex.a *= edge_fade_factor(in_quad, in_edge_fade);
+    out_frag_color = tex * in_tint;
 }
