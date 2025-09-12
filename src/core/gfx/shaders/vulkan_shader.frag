@@ -1,24 +1,29 @@
 #version 450
-layout(location=0) in  vec2 in_uv;
-layout(location=1) in  vec2 in_quad;
-layout(location=2) flat in vec4 in_tint;
-layout(location=3) flat in vec4 in_edge_fade;
 
-layout(location=0) out vec4 out_frag_color;
+layout(set = 0, binding = 0) uniform sampler2D u_tex;
 
-layout(set = 0, binding = 0) uniform sampler2D tex_sampler;
+layout(location = 0) in vec2 v_uv;
+layout(location = 1) flat in vec4 v_tint;
+layout(location = 2) flat in vec4 v_edgeFade; // (left, right, bottom, top) in UV units
 
-float edge_fade_factor(vec2 q, vec4 e) {
-    float f = 1.0;
-    if (e.x > 0.0) f *= clamp(q.x / e.x, 0.0, 1.0);
-    if (e.y > 0.0) f *= clamp((1.0 - q.x) / e.y, 0.0, 1.0);
-    if (e.z > 0.0) f *= clamp(q.y / e.z, 0.0, 1.0);
-    if (e.w > 0.0) f *= clamp((1.0 - q.y) / e.w, 0.0, 1.0);
-    return f;
+layout(location = 0) out vec4 outColor;
+
+// Returns a fade factor in [0,1] along one axis given UV coord `t` in [0,1]
+float edgeFactor1D(float t, float featherLeft, float featherRight) {
+    float fL = 1.0;
+    float fR = 1.0;
+    if (featherLeft  > 0.0) fL = clamp((t      - 0.0) / featherLeft, 0.0, 1.0);
+    if (featherRight > 0.0) fR = clamp((1.0 - t)      / featherRight, 0.0, 1.0);
+    return min(fL, fR);
 }
 
 void main() {
-    vec4 tex = texture(tex_sampler, in_uv);
-    tex.a *= edge_fade_factor(in_quad, in_edge_fade);
-    out_frag_color = tex * in_tint;
+    vec4 texel = texture(u_tex, v_uv);
+
+    float fadeX = edgeFactor1D(v_uv.x, v_edgeFade.x, v_edgeFade.y);
+    float fadeY = edgeFactor1D(v_uv.y, v_edgeFade.z, v_edgeFade.w);
+    float fade  = min(fadeX, fadeY);
+
+    outColor = texel * v_tint;
+    outColor.a *= fade;
 }
