@@ -363,10 +363,6 @@ fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
     None
 }
 
-/// Compute StepMania-style sheet scaling from real texture size and "(res WxH)".
-/// Returns:
-///   (sx, sy) = metric scale (authored -> texture)
-///   (dx, dy) = draw scale    (texture -> logical/authored)
 #[inline(always)]
 fn compute_font_sheet_scale(
     texture_key: &str,
@@ -380,9 +376,23 @@ fn compute_font_sheet_scale(
     let frame_w = (tex_w / cols) as f32;
     let frame_h = (tex_h / rows) as f32;
 
-    if let Some((mut base_w, mut base_h)) = parse_base_res_from_filename(texture_key) {
-        // SM parity: doubleres halves logical source size after reading (res WxH)
-        if is_doubleres_in_name(texture_key) {
+    let has_doubleres = is_doubleres_in_name(texture_key);
+    let mut base_res = parse_base_res_from_filename(texture_key);
+
+    // NEW: if there's no (res WxH) but filename has "(doubleres)",
+    // synthesize a base resolution of half the actual texture size.
+    if base_res.is_none() && has_doubleres {
+        base_res = Some((tex_w / 2, tex_h / 2));
+        trace!(
+            "    '(doubleres)' without '(res)': synthesizing base_res={}x{} from texture/2",
+            tex_w / 2,
+            tex_h / 2
+        );
+    }
+
+    if let Some((mut base_w, mut base_h)) = base_res {
+        // If BOTH (res) and (doubleres) exist, SM halves after reading (res).
+        if has_doubleres && parse_base_res_from_filename(texture_key).is_some() {
             base_w = (base_w / 2).max(1);
             base_h = (base_h / 2).max(1);
         }
@@ -390,11 +400,8 @@ fn compute_font_sheet_scale(
         let base_cell_w = (base_w as f32) / (cols as f32);
         let base_cell_h = (base_h as f32) / (rows as f32);
 
-        // Metric scale (authored -> texture)
         let sx = if base_cell_w > 0.0 { frame_w / base_cell_w } else { 1.0 };
         let sy = if base_cell_h > 0.0 { frame_h / base_cell_h } else { 1.0 };
-
-        // Draw scale (texture -> authored/logical)
         let dx = if sx != 0.0 { 1.0 / sx } else { 1.0 };
         let dy = if sy != 0.0 { 1.0 / sy } else { 1.0 };
 
