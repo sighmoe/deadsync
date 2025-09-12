@@ -159,7 +159,7 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage, srgb: bool) -> Resu
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_BASE_LEVEL, 0);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
 
-        let internal = if srgb { glow::SRGB8_ALPHA8 } else { glow::RGBA8 };
+        let internal = glow::RGBA8;
         let w = image.width() as i32;
         let h = image.height() as i32;
         let raw = image.as_raw();
