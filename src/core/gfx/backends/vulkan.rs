@@ -254,8 +254,8 @@ fn create_sprite_pipeline(
     set_layout: vk::DescriptorSetLayout,
     mode: BlendMode,
 ) -> Result<PipelinePair, Box<dyn Error>> {
-    let vert_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_sprite.vert.spv"));
-    let frag_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_sprite.frag.spv"));
+    let vert_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_shader.vert.spv"));
+    let frag_shader_code = include_bytes!(concat!(env!("OUT_DIR"), "/vulkan_shader.frag.spv"));
     let vert_module = create_shader_module(device, vert_shader_code)?;
     let frag_module = create_shader_module(device, frag_shader_code)?;
     let main_name = ffi::CStr::from_bytes_with_nul(b"main\0")?;
