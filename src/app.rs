@@ -21,11 +21,9 @@ use image;
 use std::{collections::HashMap, error::Error, path::{Path, PathBuf}, sync::Arc, time::Instant};
 
 /* -------------------- transition timing constants -------------------- */
-const FADE_OUT_DELAY: f32 = 0.1;
 const FADE_OUT_DURATION: f32 = 0.4;
-const FADE_IN_DURATION: f32 = 0.4;
 const MENU_ACTORS_FADE_DURATION: f32 = 0.65;
-const BAR_SQUISH_DURATION: f32 = 0.35;
+
 
 /* -------------------- transition state machine -------------------- */
 #[derive(Debug)]
