@@ -842,10 +842,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             }
         }
 
-        // If ' ' is mapped and NBSP isn't, map NBSP to the same frame.
-        if let Some(&space_idx) = char_to_frame.get(&' ') {
-            char_to_frame.entry('\u{00A0}').or_insert(space_idx);
-        }
+        apply_space_nbsp_symmetry(&mut char_to_frame);
 
         // Warn for the default page if SPACE is missing
         let is_default_page = page_idx == 0 || page_name.eq_ignore_ascii_case("main");
@@ -1010,6 +1007,8 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         }
     }
 
+    synthesize_space_from_nbsp(&mut all_glyphs);
+
     let default_glyph = all_glyphs.get(&FONT_DEFAULT_CHAR).cloned();
     let font = Font {
         glyph_map: all_glyphs,
@@ -1100,4 +1099,26 @@ pub fn line_width_px_sm(font: &Font, text: &str, scale_x: f32) -> i32 {
     }
 
     last_right.max(pen).round() as i32
+}
+
+#[inline(always)]
+fn apply_space_nbsp_symmetry(char_to_frame: &mut std::collections::HashMap<char, usize>) {
+    // If SPACE exists but NBSP doesn't, map NBSP -> SPACE frame.
+    if let Some(&space_idx) = char_to_frame.get(&' ') {
+        char_to_frame.entry('\u{00A0}').or_insert(space_idx);
+    }
+    // If NBSP exists but SPACE doesn't, map SPACE -> NBSP frame. (Wendy relies on this)
+    if let Some(&nbsp_idx) = char_to_frame.get(&'\u{00A0}') {
+        char_to_frame.entry(' ').or_insert(nbsp_idx);
+    }
+}
+
+#[inline(always)]
+fn synthesize_space_from_nbsp(all_glyphs: &mut std::collections::HashMap<char, Glyph>) {
+    if !all_glyphs.contains_key(&' ') {
+        if let Some(nbsp) = all_glyphs.get(&'\u{00A0}').cloned() {
+            all_glyphs.insert(' ', nbsp);
+            debug!("SPACE synthesized from NBSP glyph at font level (SM parity).");
+        }
+    }
 }
