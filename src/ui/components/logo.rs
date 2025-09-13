@@ -1,12 +1,7 @@
 use crate::ui::actors::Actor;
 use crate::act;
 use crate::core::space::globals::*;
-
-/// Native image sizes (only used for aspect).
-const LOGO_NATIVE_W: f32 = 752.0;
-const LOGO_NATIVE_H: f32 = 634.0;
-const DANCE_NATIVE_W: f32 = 1360.0;
-const DANCE_NATIVE_H: f32 = 164.0;
+use crate::core::assets;
 
 /// Parameters to tweak the layout easily.
 #[derive(Clone, Copy, Debug)]
@@ -26,35 +21,34 @@ impl Default for LogoParams {
 /// Build the “banner inside logo” stack with the actor DSL.
 /// Returns a `Vec<Actor>` to be included in a screen's actor list.
 pub fn build_logo(params: LogoParams) -> Vec<Actor> {
-    // Pull from globals (no screen param needed).
-    let screen_width = screen_width();
-
-    // Logo size from target height
-    let logo_aspect = LOGO_NATIVE_W / LOGO_NATIVE_H;
+    // Get logo's native dimensions from the asset system, with a safe fallback.
+    let logo_dims = assets::texture_dims("logo.png").unwrap_or(assets::TexMeta { w: 1, h: 1 });
+    let logo_aspect = if logo_dims.h > 0 { logo_dims.w as f32 / logo_dims.h as f32 } else { 1.0 };
+    
+    // Calculate the final display width of the logo based on the target height and true aspect ratio.
     let logo_h = params.target_h;
     let logo_w = logo_h * logo_aspect;
 
-    // Center horizontally in SM top-left space
-    let logo_x_tl = 0.5 * (screen_width - logo_w);
-    let logo_y_tl = params.top_margin;
-
-    // Banner (same width as logo, centered inside)
-    let dance_aspect = DANCE_NATIVE_W / DANCE_NATIVE_H;
-    let dance_w = logo_w;
-    let dance_h = dance_w / dance_aspect;
-    let dance_x_tl = logo_x_tl;
-    let dance_y_tl = logo_y_tl + 0.5 * (logo_h - dance_h) - params.banner_y_offset_inside;
+    // Center both components horizontally.
+    let center_x = screen_center_x();
+    let logo_top_y = params.top_margin;
+    // The dance banner will be centered vertically within the logo's final height.
+    let dance_center_y = logo_top_y + 0.5 * logo_h - params.banner_y_offset_inside;
 
     vec![
+        // The dance banner's width is constrained to the logo's width.
+        // `zoomtowidth` will automatically calculate its height while preserving its aspect ratio.
         act!(sprite("dance.png"):
-            align(0.0, 0.0):
-            xy(dance_x_tl, dance_y_tl):
-            zoomto(dance_w, dance_h)
+            align(0.5, 0.5):
+            xy(center_x, dance_center_y):
+            zoomtowidth(logo_w)
         ),
+        // The logo's height is set directly.
+        // `zoomtoheight` will automatically calculate its width while preserving its aspect ratio.
         act!(sprite("logo.png"):
-            align(0.0, 0.0):
-            xy(logo_x_tl, logo_y_tl):
-            zoomto(logo_w, logo_h)
+            align(0.5, 0.0):
+            xy(center_x, logo_top_y):
+            zoomtoheight(logo_h)
         ),
     ]
 }
