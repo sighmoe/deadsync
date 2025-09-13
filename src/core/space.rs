@@ -72,3 +72,11 @@ pub fn ortho_for_window(width: u32, height: u32) -> Matrix4<f32> {
     let m = metrics_for_window(width, height);
     cgmath::ortho(m.left, m.right, m.bottom, m.top, -1.0, 1.0)
 }
+
+#[inline(always)]
+pub fn is_wide() -> bool {
+    let w = globals::screen_width();
+    let h = globals::screen_height();
+    if h <= 0.0 { return true; } // Avoid div by zero; default to wide
+    (w / h) >= 1.6
+}
