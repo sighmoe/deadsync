@@ -503,8 +503,8 @@ fn layout_text(
     let block_top_sm  = parent.y + offset[1] - align[1] * block_h;
     let block_left_sm = parent.x + offset[0] - align[0] * block_w;
 
-    // First baseline at cap height; pixel-aligned
-    let mut baseline_sm = (block_top_sm + cap_height * sy).round();
+    // First baseline at cap height; StepMania: no pre-round, snap per glyph
+    let mut baseline_sm = block_top_sm + cap_height * sy;
 
     // 5) cache atlas dims per texture key to avoid repeated lookups
     use std::collections::HashMap;
@@ -526,7 +526,7 @@ fn layout_text(
             actors::TextAlign::Left   => block_left_sm,
             actors::TextAlign::Center => block_left_sm + 0.5 * (block_w - line_w_px),
             actors::TextAlign::Right  => block_left_sm + (block_w - line_w_px),
-        }.round();
+        };
 
         let mut pen_x = pen_start_x;
 
@@ -545,6 +545,7 @@ fn layout_text(
             let draw_quad = !(ch == ' ' && mapped.is_none());
 
             if draw_quad && quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
+                // StepMania: snap *here* at draw time
                 let quad_x_sm = (pen_x + glyph.offset[0] * sx).round();
                 let quad_y_sm = (baseline_sm + glyph.offset[1] * sy).round();
 
@@ -585,7 +586,8 @@ fn layout_text(
             pen_x += glyph.advance * sx;
         }
 
-        baseline_sm += (font.line_spacing as f32 * sy).round();
+        // StepMania: advance baseline without pre-round; each glyph snaps itself
+        baseline_sm += font.line_spacing as f32 * sy;
     }
 
     objects

@@ -927,8 +927,13 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
             // Integer padding capacity and extra pixel clamp
             let pad_i = (chop_i / 2).max(0);
-            let extra_left_i  = draw_left.min(pad_i);
-            let extra_right_i = draw_right.min(pad_i);
+            let mut extra_left_i  = draw_left.min(pad_i);
+            let mut extra_right_i = draw_right.min(pad_i);
+            // SM parity: do not expand zero-width glyphs (e.g., U+200B)
+            if width_i <= 0 {
+                extra_left_i = 0;
+                extra_right_i = 0;
+            }
 
             // Texture-space metrics
             let glyph_size_tex   = [
