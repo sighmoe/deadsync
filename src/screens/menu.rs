@@ -137,21 +137,18 @@ pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
     let mut info_color = [1.0, 1.0, 1.0, 1.0];
     info_color[3] *= alpha_multiplier;
 
-    actors.push(act!(text:
-        align(0.5, 0.0): xy(screen_center_x(), info1_y_tl): zoom(0.8):
-        font("miso"): settext("DeadSync 0.2.261"): horizalign(center):
-        diffuse(info_color[0], info_color[1], info_color[2], info_color[3])
-    ));
-
     // --- DYNAMICALLY CALCULATE AND DISPLAY SONG/PACK COUNT ---
     let song_cache = get_song_cache();
     let num_packs = song_cache.len();
     let num_songs: usize = song_cache.iter().map(|pack| pack.songs.len()).sum();
     let song_info_text = format!("{} songs in {} groups, X courses", num_songs, num_packs);
 
+    // --- Create a single multi-line string and pass it to one text actor ---
+    let combined_text = format!("DeadSync 0.2.261\n{}", song_info_text);
+
     actors.push(act!(text:
-        align(0.5, 0.0): xy(screen_center_x(), info2_y_tl): zoom(0.8):
-        font("miso"): settext(song_info_text): horizalign(center):
+        align(0.5, 0.0): xy(screen_center_x(), info1_y_tl): zoom(0.8):
+        font("miso"): settext(combined_text): horizalign(center):
         diffuse(info_color[0], info_color[1], info_color[2], info_color[3])
     ));
 
