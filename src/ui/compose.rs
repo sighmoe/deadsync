@@ -1,10 +1,10 @@
-// FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/new-engine/src/ui/compose.rs
+// FILE: src/ui/compose.rs
 
 use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;
 use crate::core::{assets, font};
-use crate::core::font::line_width_px_sm;
+// FIX: Removed unused `line_width_px_sm` import
 use crate::ui::actors::{self, Actor, SizeSpec};
 use cgmath::{Deg, Matrix4, Vector2, Vector3};
 
@@ -228,6 +228,18 @@ fn build_actor_recursive(
 }
 
 /* ======================= LAYOUT HELPERS ======================= */
+
+/// StepMania parity: calculates the logical width of a line by summing the integer advances.
+#[inline(always)]
+// FIX: Changed `&Font` to `&font::Font` to match the usage in layout_text
+fn measure_line_width_logical(font: &font::Font, text: &str) -> i32 {
+    text.chars()
+        .map(|c| {
+            let g = font.glyph_map.get(&c).or(font.default_glyph.as_ref());
+            g.map_or(0, |glyph| glyph.advance.round() as i32)
+        })
+        .sum()
+}
 
 #[inline(always)]
 fn resolve_sprite_size_like_sm(
@@ -455,7 +467,7 @@ fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) 
 fn layout_text(
     font: &font::Font,
     text: &str,
-    _px_size: f32,            // bitmap font is intrinsic + scale
+    _px_size: f32,
     scale: [f32; 2],
     fit_width: Option<f32>,
     fit_height: Option<f32>,
@@ -467,22 +479,19 @@ fn layout_text(
 ) -> Vec<RenderObject> {
     if text.is_empty() { return vec![]; }
 
-    // 1) lines + logical widths (unscaled, SM-style)
     let lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() { return vec![]; }
 
     let logical_line_widths: Vec<f32> =
-        lines.iter().map(|l| line_width_px_sm(font, l, 1.0) as f32).collect();
+        lines.iter().map(|l| measure_line_width_logical(font, l) as f32).collect();
     let max_logical_width = logical_line_widths.iter().fold(0.0f32, |a, &b| a.max(b));
 
-    // Vertical metrics (SM: cap height = baseline - top)
     let cap_height = if font.height > 0 { font.height as f32 } else { font.line_spacing as f32 };
     let num_lines = lines.len();
     let unscaled_block_height = if num_lines > 1 {
         cap_height + ((num_lines - 1) as f32 * font.line_spacing as f32)
     } else { cap_height };
 
-    // 2) uniform fit scale
     use std::f32::INFINITY;
     let s_w = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
     let s_h = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
@@ -492,21 +501,17 @@ fn layout_text(
     let sy = scale[1] * fit_s;
     if sx.abs() < 1e-6 || sy.abs() < 1e-6 { return vec![]; }
 
-    // 3) measure actual line widths (pixel-snapped, SM-style)
-    let line_widths_px: Vec<i32> = lines.iter().map(|l| line_width_px_sm(font, l, sx)).collect();
-    let max_line_width_px = *line_widths_px.iter().max().unwrap_or(&0);
+    let line_widths_px: Vec<f32> = logical_line_widths.iter().map(|w| (w * sx).round()).collect();
+    let max_line_width_px: f32 = if line_widths_px.is_empty() { 0.0 } else { line_widths_px.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)) };
 
-    // 4) place text block in SM space
-    let block_w  = max_line_width_px as f32;
+    let block_w  = max_line_width_px;
     let block_h  = unscaled_block_height * sy;
-
+    
     let block_top_sm  = parent.y + offset[1] - align[1] * block_h;
     let block_left_sm = parent.x + offset[0] - align[0] * block_w;
 
-    // First baseline at cap height; StepMania: no pre-round, snap per glyph
     let mut baseline_sm = block_top_sm + cap_height * sy;
 
-    // 5) cache atlas dims per texture key to avoid repeated lookups
     use std::collections::HashMap;
     let mut dims_cache: HashMap<&str, (f32, f32)> = HashMap::new();
     #[inline(always)]
@@ -518,14 +523,13 @@ fn layout_text(
         d
     }
 
-    // 6) build glyph quads
     let mut objects = Vec::new();
     for (i, line) in lines.iter().enumerate() {
-        let line_w_px = line_widths_px[i] as f32;
+        let line_w_px = line_widths_px[i];
         let pen_start_x = match text_align {
             actors::TextAlign::Left   => block_left_sm,
-            actors::TextAlign::Center => block_left_sm + 0.5 * (block_w - line_w_px),
-            actors::TextAlign::Right  => block_left_sm + (block_w - line_w_px),
+            actors::TextAlign::Center => (block_left_sm + 0.5 * (block_w - line_w_px)).round(),
+            actors::TextAlign::Right  => (block_left_sm + (block_w - line_w_px)).round(),
         };
 
         let mut pen_x = pen_start_x;
@@ -537,15 +541,12 @@ fn layout_text(
                 None => continue,
             };
 
-            // draw sizes
             let quad_w = glyph.size[0] * sx;
             let quad_h = glyph.size[1] * sy;
 
-            // Unmapped SPACE still advances but does not draw
             let draw_quad = !(ch == ' ' && mapped.is_none());
 
             if draw_quad && quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
-                // StepMania: snap *here* at draw time
                 let quad_x_sm = (pen_x + glyph.offset[0] * sx).round();
                 let quad_y_sm = (baseline_sm + glyph.offset[1] * sy).round();
 
@@ -582,26 +583,12 @@ fn layout_text(
                 });
             }
 
-            // advance pen
             pen_x += glyph.advance * sx;
         }
-
-        // StepMania: advance baseline without pre-round; each glyph snaps itself
         baseline_sm += font.line_spacing as f32 * sy;
     }
 
     objects
-}
-
-#[inline(always)]
-fn measure_line_width_px(font: &font::Font, text: &str, scale_x: f32) -> i32 {
-    let mut pen = 0.0f32;
-    for ch in text.chars() {
-        if let Some(g) = font.glyph_map.get(&ch).or(font.default_glyph.as_ref()) {
-            pen += g.advance * scale_x; // accumulate in float
-        }
-    }
-    pen.round() as i32 // snap once for layout math
 }
 
 #[inline(always)]
