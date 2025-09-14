@@ -71,7 +71,7 @@ impl Default for FontPageSettings {
             top: -1,
             baseline: -1,
             default_width: -1,
-            advance_extra_pixels: 0, // SM default
+            advance_extra_pixels: 1, // SM default
             glyph_widths: HashMap::new(),
         }
     }
@@ -363,77 +363,6 @@ fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
     None
 }
 
-#[inline(always)]
-fn compute_font_sheet_scale(
-    texture_key: &str,
-    tex_w: u32,
-    tex_h: u32,
-) -> (f32, f32, f32, f32) {
-    let (cols, rows) = parse_sheet_dims_from_filename(texture_key);
-    let cols = cols.max(1);
-    let rows = rows.max(1);
-
-    let frame_w = (tex_w / cols) as f32;
-    let frame_h = (tex_h / rows) as f32;
-
-    let has_doubleres = is_doubleres_in_name(texture_key);
-    let mut base_res = parse_base_res_from_filename(texture_key);
-
-    // NEW: if there's no (res WxH) but filename has "(doubleres)",
-    // synthesize a base resolution of half the actual texture size.
-    if base_res.is_none() && has_doubleres {
-        base_res = Some((tex_w / 2, tex_h / 2));
-        trace!(
-            "    '(doubleres)' without '(res)': synthesizing base_res={}x{} from texture/2",
-            tex_w / 2,
-            tex_h / 2
-        );
-    }
-
-    if let Some((mut base_w, mut base_h)) = base_res {
-        // If BOTH (res) and (doubleres) exist, SM halves after reading (res).
-        if has_doubleres && parse_base_res_from_filename(texture_key).is_some() {
-            base_w = (base_w / 2).max(1);
-            base_h = (base_h / 2).max(1);
-        }
-
-        let base_cell_w = (base_w as f32) / (cols as f32);
-        let base_cell_h = (base_h as f32) / (rows as f32);
-
-        let sx = if base_cell_w > 0.0 { frame_w / base_cell_w } else { 1.0 };
-        let sy = if base_cell_h > 0.0 { frame_h / base_cell_h } else { 1.0 };
-        let dx = if sx != 0.0 { 1.0 / sx } else { 1.0 };
-        let dy = if sy != 0.0 { 1.0 / sy } else { 1.0 };
-
-        (sx, sy, dx, dy)
-    } else {
-        (1.0, 1.0, 1.0, 1.0)
-    }
-}
-
-#[inline(always)]
-fn log_page_scale_summary(
-    page_name: &str,
-    texture_key: &str,
-    cols: u32,
-    rows: u32,
-    frame_w_i: i32,
-    frame_h_i: i32,
-    sx: f32,
-    sy: f32,
-    dx: f32,
-    dy: f32,
-) {
-    info!(
-        "  Page '{}', Texture: '{}', Grid: {}x{} (frame {}x{} px) \
-         | metric scale {:.3}x{:.3} -> draw scale {:.3}x{:.3}",
-        page_name, texture_key, cols, rows, frame_w_i, frame_h_i, sx, sy, dx, dy
-    );
-    trace!(
-        "    Detail: sx=frame_w/base_cell_w, sy=frame_h/base_cell_h; dx=1/sx, dy=1/sy."
-    );
-}
-
 /// Compute vertical metrics in texture px, then convert height & line_spacing to draw units.
 /// Returns:
 /// (line_spacing_tex, baseline_tex, top_tex, height_draw, line_spacing_draw, vshift_tex, vshift_draw)
@@ -508,61 +437,6 @@ fn round_half_to_even_i32(v: f32) -> i32 {
     }
 }
 
-/// Scale authored metrics from source px -> texture px using (sx, sy).
-/// SM parity: DO NOT apply ScaleAllWidthsBy here; it's applied later per glyph with lrint().
-#[inline(always)]
-fn apply_stepmania_metric_scaling(settings: &mut FontPageSettings, sx: f32, sy: f32) {
-    // horizontals to texture px (source->texture)
-    if settings.default_width != -1 {
-        settings.default_width = (settings.default_width as f32 * sx).round() as i32;
-    }
-    settings.add_to_all_widths     = (settings.add_to_all_widths as f32 * sx).round() as i32;
-    settings.advance_extra_pixels  = (settings.advance_extra_pixels as f32 * sx).round() as i32;
-    settings.draw_extra_pixels_left  = (settings.draw_extra_pixels_left as f32 * sx).round() as i32;
-    settings.draw_extra_pixels_right = (settings.draw_extra_pixels_right as f32 * sx).round() as i32;
-    for w in settings.glyph_widths.values_mut() {
-        *w = (*w as f32 * sx).round() as i32;
-    }
-
-    // verticals to texture px
-    if settings.line_spacing != -1 {
-        settings.line_spacing = (settings.line_spacing as f32 * sy).round() as i32;
-    }
-    if settings.top != -1 {
-        settings.top = (settings.top as f32 * sy).round() as i32;
-    }
-    if settings.baseline != -1 {
-        settings.baseline = (settings.baseline as f32 * sy).round() as i32;
-    }
-}
-
-/// Convert glyph size/offset/advance from texture px to draw units (authored).
-#[inline(always)]
-fn draw_scale_glyph_metrics(
-    glyph_size_tex: [f32; 2],
-    glyph_offset_tex: [f32; 2],
-    advance_tex: f32,
-    dx: f32,
-    dy: f32,
-) -> ([f32; 2], [f32; 2], f32) {
-    let size   = [glyph_size_tex[0] * dx, glyph_size_tex[1] * dy];
-    let offset = [glyph_offset_tex[0] * dx, glyph_offset_tex[1] * dy];
-    let advance = advance_tex * dx;
-
-    trace!(
-        "      Glyph metrics: tex(size=[{:.1},{:.1}] off=[{:.1},{:.1}] adv={:.1}) \
-         -> draw(size=[{:.3},{:.3}] off=[{:.3},{:.3}] adv={:.3})",
-        glyph_size_tex[0], glyph_size_tex[1],
-        glyph_offset_tex[0], glyph_offset_tex[1],
-        advance_tex,
-        size[0], size[1],
-        offset[0], offset[1],
-        advance
-    );
-
-    (size, offset, advance)
-}
-
 /* ======================= RANGE APPLY ======================= */
 
 #[inline(always)]
@@ -621,7 +495,6 @@ fn apply_range_mapping(
 }
 
 /* ======================= PARSE ======================= */
-
 pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Error>> {
     let ini_path = Path::new(ini_path_str);
     let font_dir = ini_path.parent().ok_or("Could not find font directory")?;
@@ -644,7 +517,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
     let mut required_textures = Vec::new();
     let mut all_glyphs: HashMap<char, Glyph> = HashMap::new();
-    let mut default_page_metrics = (0, 0); // (height_draw, line_spacing_draw)
+    let mut default_page_metrics = (0, 0); // (height_authored, line_spacing_authored)
 
     for (page_idx, tex_path) in texture_paths.iter().enumerate() {
         let page_name = get_page_name_from_path(tex_path);
@@ -653,24 +526,31 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
         required_textures.push(tex_path.to_path_buf());
 
+        // ============================ REVISED PARITY LOGIC START ============================
+
+        // 1. Calculate AUTHORED frame dimensions, just like SM's texture manager would report.
         let (num_frames_wide, num_frames_high) = parse_sheet_dims_from_filename(&texture_key);
+        let has_doubleres = is_doubleres_in_name(&texture_key);
         let total_frames = (num_frames_wide * num_frames_high) as usize;
+        
+        // Emulate SM's texture manager behavior: `(res)` overrides texture size, then `doubleres` halves it.
+        // This gives us the "authored" dimensions that the INI metrics are relative to.
+        let (base_tex_w, base_tex_h) = parse_base_res_from_filename(&texture_key)
+            .unwrap_or((tex_dims.0, tex_dims.1));
 
-        // SM parity: integer cell size for metrics *and* UVs
-        let frame_w_i = (tex_dims.0 / num_frames_wide) as i32;
-        let frame_h_i = (tex_dims.1 / num_frames_high) as i32;
+        let mut authored_tex_w = base_tex_w;
+        let mut authored_tex_h = base_tex_h;
+        if has_doubleres {
+            authored_tex_w = (authored_tex_w / 2).max(1);
+            authored_tex_h = (authored_tex_h / 2).max(1);
+        }
 
-        // NEW: compute StepMania per-sheet scale from "(res WxH)"
-        let (sx, sy, dx, dy) = compute_font_sheet_scale(&texture_key, tex_dims.0, tex_dims.1);
+        let frame_w_i = (authored_tex_w / num_frames_wide) as i32;
+        let frame_h_i = (authored_tex_h / num_frames_high) as i32;
 
-        log_page_scale_summary(
-            &page_name,
-            &texture_key,
-            num_frames_wide,
-            num_frames_high,
-            frame_w_i,
-            frame_h_i,
-            sx, sy, dx, dy,
+        info!(
+            "  Page '{}', Texture: '{}' -> Authored Grid: {}x{} (frame {}x{} px)",
+            page_name, texture_key, num_frames_wide, num_frames_high, frame_w_i, frame_h_i
         );
 
         // ------------ Settings (SM defaults honored) -------------
@@ -696,7 +576,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 if let Some(n) = get_int("defaultwidth")          { settings.default_width = n; }
                 if let Some(n) = get_int("advanceextrapixels")    { settings.advance_extra_pixels = n; }
 
-                // Numeric keys are per-frame width overrides
                 for (key, val) in map {
                     if let Ok(frame_idx) = key.parse::<usize>() {
                         if let Ok(w) = val.parse::<i32>() {
@@ -706,13 +585,12 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 }
             }
         }
-
-        // --- Scale authored metrics to texture pixels (SM parity) ---
-        apply_stepmania_metric_scaling(&mut settings, sx, sy);
+        
+        // NO SCALING OF METRICS. They are already in authored space.
 
         // Trace page settings and grid
         trace!(
-            "  [{}] settings(px): draw_extra L={} R={}, add_to_all_widths={}, scale_all_widths_by={:.3}, \
+            "  [{}] settings(authored): draw_extra L={} R={}, add_to_all_widths={}, scale_all_widths_by={:.3}, \
              line_spacing={}, top={}, baseline={}, default_width={}, advance_extra_pixels={}",
             page_name,
             settings.draw_extra_pixels_left,
@@ -730,27 +608,30 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             page_name, num_frames_wide, num_frames_high, frame_w_i, frame_h_i, total_frames
         );
 
-        // ------------- Vertical metrics (compute + store in draw units) --------------
-        let (
-            _line_spacing_tex,
-            baseline_tex,
-            _top_tex,
-            height_draw,
-            line_spacing_draw,
-            vshift_tex,
-            _vshift_draw,
-        ) = compute_vertical_metrics_draw(frame_h_i, &settings, dy);
+        // ------------- Vertical metrics (all in authored units) --------------
+        let line_spacing_authored = if settings.line_spacing != -1 { settings.line_spacing } else { frame_h_i };
+        let baseline_authored = if settings.baseline != -1 {
+            settings.baseline
+        } else {
+            (frame_h_i as f32 * 0.5 + line_spacing_authored as f32 * 0.5) as i32
+        };
+        let top_authored = if settings.top != -1 {
+            settings.top
+        } else {
+            (frame_h_i as f32 * 0.5 - line_spacing_authored as f32 * 0.5) as i32
+        };
+
+        let height_authored = baseline_authored - top_authored;
+        let vshift_authored = -(baseline_authored as f32);
 
         if page_idx == 0 || page_name == "main" {
-            default_page_metrics = (height_draw, line_spacing_draw);
+            default_page_metrics = (height_authored, line_spacing_authored);
         }
-
-        if line_spacing_draw <= 0 || height_draw <= 0 {
-            warn!(
-                "Page '{}' suspicious metrics: draw_line_spacing={}, draw_height={}, frame_h={}",
-                page_name, line_spacing_draw, height_draw, frame_h_i
-            );
-        }
+        
+        trace!(
+            "    VMetrics(authored): line_spacing={}, baseline={}, top={}, height={}, vshift={:.1}",
+            line_spacing_authored, baseline_authored, top_authored, height_authored, vshift_authored
+        );
 
         // ------------- Build character -> frame mapping -----------
         let mut char_to_frame: HashMap<char, usize> = HashMap::new();
@@ -762,7 +643,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 for (raw_key_lc, val_str) in map {
                     let key_lc = raw_key_lc.as_str();
 
-                    // LINE row (prefer RAW, untrimmed value if available)
                     if key_lc.starts_with("line ") {
                         if let Ok(row) = key_lc[5..].trim().parse::<u32>() {
                             if row >= num_frames_high {
@@ -793,7 +673,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                         continue;
                     }
 
-                    // MAP U+XXXX or map "X"
                     if key_lc.starts_with("map ") {
                         if let Ok(frame_index) = val_str.parse::<usize>() {
                             let spec = raw_key_lc[4..].trim(); // after "map "
@@ -822,8 +701,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                         }
                         continue;
                     }
-
-                    // RANGE codeset
+                    
                     if key_lc.starts_with("range ") {
                         if let Ok(first_frame) = val_str.parse::<usize>() {
                             if let Some((codeset, hex)) = parse_range_key(raw_key_lc) {
@@ -844,9 +722,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
         apply_space_nbsp_symmetry(&mut char_to_frame);
 
-        // Warn for the default page if SPACE is missing
-        let is_default_page = page_idx == 0 || page_name.eq_ignore_ascii_case("main");
-        if is_default_page && !char_to_frame.contains_key(&' ') {
+        if (page_idx == 0 || page_name.eq_ignore_ascii_case("main")) && !char_to_frame.contains_key(&' ') {
             warn!(
                 "Font page '{}' has no mapping for SPACE (U+0020). \
                  (Check raw LINE values; leading spaces must be preserved.)",
@@ -854,31 +730,24 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             );
         }
 
-        // SM defaults if a non-common page has no explicit mapping
         if page_name != "common" && char_to_frame.is_empty() {
-            match total_frames {
+             match total_frames {
                 128 => {
                     for (i, cp) in (0u32..=0x7F).enumerate() {
-                        if let Some(ch) = char::from_u32(cp) {
-                            char_to_frame.insert(ch, i);
-                        }
+                        if let Some(ch) = char::from_u32(cp) { char_to_frame.insert(ch, i); }
                     }
                     debug!("Page '{}' defaulted to ASCII mapping (128 frames).", page_name);
                 }
                 256 => {
                     for (i, cp) in (0u32..=0xFF).enumerate() {
-                        if let Some(ch) = char::from_u32(cp) {
-                            char_to_frame.insert(ch, i);
-                        }
+                        if let Some(ch) = char::from_u32(cp) { char_to_frame.insert(ch, i); }
                     }
                     debug!("Page '{}' defaulted to CP1252 mapping (256 frames).", page_name);
                 }
                 15 | 16 => {
                     let digits = "0123456789";
                     for (i, ch) in digits.chars().enumerate() {
-                        if i < total_frames {
-                            char_to_frame.insert(ch, i);
-                        }
+                        if i < total_frames { char_to_frame.insert(ch, i); }
                     }
                     debug!("Page '{}' defaulted to simple numbers mapping ({} frames).", page_name, total_frames);
                 }
@@ -887,7 +756,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 }
             }
         }
-
+        
         debug!(
             "Page '{}' mapped {} chars (frames={}).",
             page_name,
@@ -895,29 +764,25 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             total_frames
         );
 
-        // ------------- GLYPHS (integer math like StepMania; draw-scaled) -------------
-        // SM quirk: +1/+1 extra pixels; left forced even
+        // ------------- GLYPHS (integer math in authored units, like StepMania) -------------
         let mut draw_left = settings.draw_extra_pixels_left + 1;
         let mut draw_right = settings.draw_extra_pixels_right + 1;
         if draw_left % 2 != 0 { draw_left += 1; }
 
         for i in 0..total_frames {
-            // Base width (int), plus tweaks (already scaled to texture px)
-            let mut base_w_px: i32 = if let Some(&w) = settings.glyph_widths.get(&i) {
+            let mut base_w = if let Some(&w) = settings.glyph_widths.get(&i) {
                 w
             } else if settings.default_width != -1 {
                 settings.default_width
             } else {
                 frame_w_i
             };
-            base_w_px += settings.add_to_all_widths;
-            base_w_px = round_half_to_even_i32((base_w_px as f32) * settings.scale_all_widths_by);
+            base_w += settings.add_to_all_widths;
+            base_w = round_half_to_even_i32((base_w as f32) * settings.scale_all_widths_by);
+            
+            let hadvance = base_w + settings.advance_extra_pixels;
 
-            // Integer hadvance (SM)
-            let hadvance_px: i32 = base_w_px + settings.advance_extra_pixels;
-
-            // Integer chop and width fixup (odd chop -> widen by 1, make chop even)
-            let mut width_i = base_w_px;
+            let mut width_i = base_w;
             let mut chop_i = frame_w_i - width_i;
             if chop_i < 0 { chop_i = 0; }
             if (chop_i & 1) != 0 {
@@ -925,43 +790,42 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 width_i += 1;
             }
 
-            // Integer padding capacity and extra pixel clamp
             let pad_i = (chop_i / 2).max(0);
             let mut extra_left_i  = draw_left.min(pad_i);
             let mut extra_right_i = draw_right.min(pad_i);
-            // SM parity: do not expand zero-width glyphs (e.g., U+200B)
             if width_i <= 0 {
                 extra_left_i = 0;
                 extra_right_i = 0;
             }
 
-            // Texture-space metrics
-            let glyph_size_tex   = [
-                (width_i + extra_left_i + extra_right_i) as f32,
-                frame_h_i as f32,
-            ];
-            let glyph_offset_tex = [-(extra_left_i as f32), vshift_tex];
-            let advance_tex      = hadvance_px as f32;
+            // Final draw metrics are in authored units
+            let glyph_size   = [(width_i + extra_left_i + extra_right_i) as f32, frame_h_i as f32];
+            let glyph_offset = [-(extra_left_i as f32), vshift_authored];
+            let advance      = hadvance as f32;
+            
+            // Texture rect must be calculated against the REAL (full-res) texture dimensions
+            let actual_frame_w = (tex_dims.0 / num_frames_wide) as f32;
+            let actual_frame_h = (tex_dims.1 / num_frames_high) as f32;
+            // This ratio maps authored pixels to actual texture pixels
+            let authored_to_actual_ratio = (tex_dims.0 as f32) / (authored_tex_w as f32);
 
-            // Integer texel rect for this frame (trim inside the frame by (pad - extra))
-            let col = (i as u32 % num_frames_wide) as i32;
-            let row = (i as u32 / num_frames_wide) as i32;
-            let tex_x_i = col * frame_w_i;
-            let tex_y_i = row * frame_h_i;
+            let col = (i as u32 % num_frames_wide) as f32;
+            let row = (i as u32 / num_frames_wide) as f32;
 
-            let left_trim  = (pad_i - extra_left_i).max(0);
-            let right_trim = (pad_i - extra_right_i).max(0);
+            // Convert authored-space trimming back to real texture pixel space
+            let tex_chop_off = (chop_i as f32) * authored_to_actual_ratio;
+            let tex_extra_left = (extra_left_i as f32) * authored_to_actual_ratio;
+            let tex_extra_right = (extra_right_i as f32) * authored_to_actual_ratio;
+            
+            let tex_rect_left = (col * actual_frame_w) + tex_chop_off / 2.0 - tex_extra_left;
+            let tex_rect_right = ((col + 1.0) * actual_frame_w) - tex_chop_off / 2.0 + tex_extra_right;
 
             let tex_rect = [
-                (tex_x_i + left_trim) as f32,
-                (tex_y_i) as f32,
-                (tex_x_i + frame_w_i - right_trim) as f32,
-                (tex_y_i + frame_h_i) as f32,
+                tex_rect_left,
+                (row * actual_frame_h),
+                tex_rect_right,
+                ((row + 1.0) * actual_frame_h),
             ];
-
-            // Convert to logical (draw) units (SM end result)
-            let (glyph_size, glyph_offset, advance) =
-                draw_scale_glyph_metrics(glyph_size_tex, glyph_offset_tex, advance_tex, dx, dy);
 
             let glyph = Glyph {
                 texture_key: texture_key.clone(),
@@ -973,21 +837,15 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
             for (&ch, &frame_idx) in &char_to_frame {
                 if frame_idx == i {
-                    if advance <= 0.5 {
-                        debug!(
-                            "Glyph '{}' on page '{}' has very small advance ({:.2})",
-                            ch, page_name, advance
-                        );
-                    }
                     trace!(
-                        "  [{}] GLYPH {} -> frame {} | base_w={} hadv_tex={} chop={} extraL={} extraR={} \
-                         draw_size=[{:.3}x{:.3}] draw_offset=[{:.3},{:.3}] adv_draw={:.3} \
-                         tex_rect=[{:.0},{:.0},{:.0},{:.0}]",
+                        "  [{}] GLYPH {} -> frame {} | base_w={} hadv={} chop={} extraL={} extraR={} \
+                         size=[{:.3}x{:.3}] offset=[{:.3},{:.3}] advance={:.3} \
+                         tex_rect=[{:.1},{:.1},{:.1},{:.1}]",
                         page_name,
                         fmt_char(ch),
                         i,
-                        base_w_px,
-                        hadvance_px,
+                        base_w,
+                        hadvance,
                         chop_i,
                         extra_left_i,
                         extra_right_i,
@@ -1005,7 +863,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 }
             }
 
-            // Insert default glyph only from the first page's frame 0
             if page_idx == 0 && i == 0 {
                 all_glyphs.entry(FONT_DEFAULT_CHAR).or_insert_with(|| glyph.clone());
             }
@@ -1022,7 +879,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         line_spacing: default_page_metrics.1,
     };
 
-    // Whole-font SPACE check + trace summary
     if !font.glyph_map.contains_key(&' ') {
         let adv = font.default_glyph.as_ref().map(|g| g.advance).unwrap_or(0.0);
         warn!(
