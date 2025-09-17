@@ -231,12 +231,12 @@ fn build_actor_recursive(
 
 /// StepMania parity: calculates the logical width of a line by summing the integer advances.
 #[inline(always)]
-// FIX: Changed `&Font` to `&font::Font` to match the usage in layout_text
 fn measure_line_width_logical(font: &font::Font, text: &str) -> i32 {
     text.chars()
         .map(|c| {
             let g = font.glyph_map.get(&c).or(font.default_glyph.as_ref());
-            g.map_or(0, |glyph| glyph.advance.round() as i32)
+            // truncate; SM advances are ints already
+            g.map_or(0, |glyph| glyph.advance as i32)
         })
         .sum()
 }
@@ -464,6 +464,23 @@ fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) 
     )
 }
 
+#[inline(always)]
+fn lrint_ties_even(v: f32) -> f32 {
+    let floor = v.floor();
+    let frac = v - floor;
+    if frac < 0.5 { floor }
+    else if frac > 0.5 { floor + 1.0 }
+    else { if ((floor as i32) & 1) == 0 { floor } else { floor + 1.0 } }
+}
+
+#[inline(always)]
+fn quantize_up_even_px(v: f32) -> f32 {
+    // SM: QuantizeUp(m_size.x, 2) in *pixel* space
+    let mut n = v.ceil() as i32;
+    if (n & 1) != 0 { n += 1; }
+    n as f32
+}
+
 fn layout_text(
     font: &font::Font,
     text: &str,
@@ -482,16 +499,19 @@ fn layout_text(
     let lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() { return vec![]; }
 
-    let logical_line_widths: Vec<f32> =
-        lines.iter().map(|l| measure_line_width_logical(font, l) as f32).collect();
-    let max_logical_width = logical_line_widths.iter().fold(0.0f32, |a, &b| a.max(b));
+    // 1) Logical (integer) widths like SM
+    let logical_line_widths: Vec<i32> =
+        lines.iter().map(|l| measure_line_width_logical(font, l)).collect();
+    let max_logical_width = logical_line_widths.iter().copied().max().unwrap_or(0) as f32;
 
+    // 2) Unscaled block height in logical units
     let cap_height = if font.height > 0 { font.height as f32 } else { font.line_spacing as f32 };
     let num_lines = lines.len();
-    let unscaled_block_height = if num_lines > 1 {
-        cap_height + ((num_lines - 1) as f32 * font.line_spacing as f32)
-    } else { cap_height };
+    let unscaled_block_height =
+        if num_lines > 1 { cap_height + ((num_lines - 1) as f32 * font.line_spacing as f32) }
+        else { cap_height };
 
+    // 3) Fit scaling (if any)
     use std::f32::INFINITY;
     let s_w = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
     let s_h = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
@@ -501,17 +521,33 @@ fn layout_text(
     let sy = scale[1] * fit_s;
     if sx.abs() < 1e-6 || sy.abs() < 1e-6 { return vec![]; }
 
-    let line_widths_px: Vec<f32> = logical_line_widths.iter().map(|w| (w * sx).round()).collect();
-    let max_line_width_px: f32 = if line_widths_px.is_empty() { 0.0 } else { line_widths_px.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)) };
+    // 4) Pixel widths (post-scale), then SM’s QuantizeUp-even in *pixels*
+    let line_widths_px: Vec<f32> = logical_line_widths.iter().map(|w| ((*w as f32) * sx).round()).collect();
+    let max_line_width_px = line_widths_px.iter().fold(0.0_f32, |a, &b| a.max(b));
+    let block_w_px = quantize_up_even_px(max_line_width_px);
+    let block_h_px = unscaled_block_height * sy;
 
-    let block_w  = max_line_width_px;
-    let block_h  = unscaled_block_height * sy;
-    
-    let block_top_sm  = parent.y + offset[1] - align[1] * block_h;
-    let block_left_sm = parent.x + offset[0] - align[0] * block_w;
+    // 5) Place the block and compute baseline from block center (SM order)
+    let block_left_sm   = parent.x + offset[0] - align[0] * block_w_px;
+    let block_top_sm    = parent.y + offset[1] - align[1] * block_h_px;
+    let block_center_x  = block_left_sm + 0.5 * block_w_px;
+    let block_center_y  = block_top_sm  + 0.5 * block_h_px;
 
-    let mut baseline_sm = block_top_sm + cap_height * sy;
+    // iY = lrint(-block_h/2); baseline = iY + height
+    let iY0 = lrint_ties_even(-block_h_px * 0.5);
+    let mut baseline_sm = lrint_ties_even(block_center_y + (iY0 + (font.height as f32) * sy));
 
+    // 6) Start-X in *pixel* space (SM snaps here), not per-glyph
+    #[inline(always)]
+    fn start_x_px(align: actors::TextAlign, block_left_px: f32, block_w_px: f32, line_w_px: f32) -> f32 {
+        match align {
+            actors::TextAlign::Left   => block_left_px,
+            actors::TextAlign::Center => lrint_ties_even(block_left_px + 0.5 * (block_w_px - line_w_px)),
+            actors::TextAlign::Right  => lrint_ties_even(block_left_px + (block_w_px - line_w_px)),
+        }
+    }
+
+    // atlas dims cache
     use std::collections::HashMap;
     let mut dims_cache: HashMap<&str, (f32, f32)> = HashMap::new();
     #[inline(always)]
@@ -524,15 +560,13 @@ fn layout_text(
     }
 
     let mut objects = Vec::new();
+
     for (i, line) in lines.iter().enumerate() {
         let line_w_px = line_widths_px[i];
-        let pen_start_x = match text_align {
-            actors::TextAlign::Left   => block_left_sm,
-            actors::TextAlign::Center => (block_left_sm + 0.5 * (block_w - line_w_px)).round(),
-            actors::TextAlign::Right  => (block_left_sm + (block_w - line_w_px)).round(),
-        };
+        let pen_start_x = start_x_px(text_align, block_left_sm, block_w_px, line_w_px);
 
-        let mut pen_x = pen_start_x;
+        // Integer logical pen (unscaled); SM advances in logical units
+        let mut pen_ux: i32 = 0;
 
         for ch in line.chars() {
             let mapped = font.glyph_map.get(&ch);
@@ -543,12 +577,15 @@ fn layout_text(
 
             let quad_w = glyph.size[0] * sx;
             let quad_h = glyph.size[1] * sy;
-
             let draw_quad = !(ch == ' ' && mapped.is_none());
 
+            // Draw pen = snapped pixel start + scaled integer logical advance
+            let pen_x_draw = pen_start_x + (pen_ux as f32) * sx;
+
             if draw_quad && quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
-                let quad_x_sm = (pen_x + glyph.offset[0] * sx).round();
-                let quad_y_sm = (baseline_sm + glyph.offset[1] * sy).round();
+                // No per-glyph X rounding; keep Y rounded
+                let quad_x_sm = pen_x_draw + glyph.offset[0] * sx;
+                let quad_y_sm = (baseline_sm  + glyph.offset[1] * sy).round();
 
                 let center_x = m.left + quad_x_sm + quad_w * 0.5;
                 let center_y = m.top  - (quad_y_sm + quad_h * 0.5);
@@ -558,7 +595,6 @@ fn layout_text(
                     Matrix4::from_nonuniform_scale(quad_w, quad_h, 1.0);
 
                 let (tex_w, tex_h) = atlas_dims(&mut dims_cache, &glyph.texture_key);
-
                 let uv_scale = [
                     (glyph.tex_rect[2] - glyph.tex_rect[0]) / tex_w,
                     (glyph.tex_rect[3] - glyph.tex_rect[1]) / tex_h,
@@ -583,9 +619,12 @@ fn layout_text(
                 });
             }
 
-            pen_x += glyph.advance * sx;
+            // integer logical advance
+            pen_ux += glyph.advance as i32;
         }
-        baseline_sm += font.line_spacing as f32 * sy;
+
+        // next line baseline
+        baseline_sm = lrint_ties_even(baseline_sm + (font.line_spacing as f32) * sy);
     }
 
     objects

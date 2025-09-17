@@ -496,6 +496,49 @@ fn apply_range_mapping(
 
 /* ======================= PARSE ======================= */
 pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Error>> {
+    use std::collections::{HashMap, HashSet};
+
+    fn resolve_import_path(base_ini: &Path, spec: &str) -> Option<PathBuf> {
+        // Accept either "Folder/Name" or ".../Name.ini"
+        let mut rel = PathBuf::from(spec);
+        if rel.extension().is_none() {
+            rel.set_extension("ini");
+        }
+        // Try Fonts root (parent of the font dir), then sibling of current ini
+        let font_dir = base_ini.parent()?;
+        let fonts_root = font_dir.parent();
+        let candidates = [
+            fonts_root.map(|r| r.join(&rel)),
+            Some(font_dir.join(&rel)),
+        ];
+        for c in candidates.iter().flatten() {
+            if c.is_file() { return Some(c.clone()); }
+        }
+        None
+    }
+
+    fn gather_import_specs(ini_map_lower: &HashMap<String, HashMap<String, String>>) -> Vec<String> {
+        let mut specs: Vec<String> = Vec::new();
+        for (_sec, map) in ini_map_lower {
+            if let Some(v) = map.get("import") {
+                // allow comma/semicolon separated or single value
+                for s in v.split(&[',',';'][..]).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                    specs.push(s.to_string());
+                }
+            }
+            if let Some(v) = map.get("_imports") {
+                for s in v.split(&[',',';'][..]).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                    specs.push(s.to_string());
+                }
+            }
+        }
+        // SM also seeds "Common default" at top level; if your repo doesn’t ship it, ignore.
+        // You can uncomment to mimic SM’s list seeding:
+        // specs.insert(0, "Common default".to_string());
+        specs
+    }
+
+    // ---- original parse begins
     let ini_path = Path::new(ini_path_str);
     let font_dir = ini_path.parent().ok_or("Could not find font directory")?;
 
@@ -511,10 +554,37 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         return Err(format!("No texture pages found for font '{}'", ini_path_str).into());
     }
 
-    let mut required_textures = Vec::new();
+    // ---- NEW: import merge (before local pages)
+    let mut required_textures: Vec<PathBuf> = Vec::new();
     let mut all_glyphs: HashMap<char, Glyph> = HashMap::new();
+    let mut imported_once: HashSet<String> = HashSet::new();
+
+    for spec in gather_import_specs(&ini_map_lower) {
+        if !imported_once.insert(spec.clone()) { continue; }
+        if let Some(import_ini) = resolve_import_path(ini_path, &spec) {
+            match parse(import_ini.to_string_lossy().as_ref()) {
+                Ok(imported) => {
+                    // Merge textures
+                    required_textures.extend(imported.required_textures.into_iter());
+                    // Merge glyphs: imported -> base; local pages will override later
+                    for (ch, g) in imported.font.glyph_map.into_iter() {
+                        all_glyphs.entry(ch).or_insert(g);
+                    }
+                    debug!("Imported font '{}' merged.", spec);
+                }
+                Err(e) => {
+                    warn!("Failed to import font '{}': {}", spec, e);
+                }
+            }
+        } else {
+            warn!("Import '{}' not found relative to '{}'", spec, ini_path_str);
+        }
+    }
+
+    // Keep track of default metrics from our main/first page (not from imports)
     let mut default_page_metrics = (0, 0);
 
+    // ---- local pages loop (unchanged logic; our pages override imported glyphs)
     for (page_idx, tex_path) in texture_paths.iter().enumerate() {
         let page_name = get_page_name_from_path(tex_path);
         let tex_dims = image::image_dimensions(tex_path)?;
@@ -529,6 +599,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         let (base_tex_w, base_tex_h) = parse_base_res_from_filename(&texture_key)
             .unwrap_or((tex_dims.0, tex_dims.1));
 
+        // authored metrics parity w/ StepMania
         let mut authored_tex_w = base_tex_w;
         let mut authored_tex_h = base_tex_h;
         if has_doubleres {
@@ -544,6 +615,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             page_name, texture_key, num_frames_wide, num_frames_high, frame_w_i, frame_h_i
         );
 
+        // settings: common → page → legacy
         let mut settings = FontPageSettings::default();
         let mut sections_to_check = vec!["common".to_string(), page_name.clone()];
         if page_name == "main" {
@@ -574,7 +646,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 }
             }
         }
-        
+
         trace!(
             "  [{}] settings(authored): draw_extra L={} R={}, add_to_all_widths={}, scale_all_widths_by={:.3}, \
              line_spacing={}, top={}, baseline={}, default_width={}, advance_extra_pixels={}",
@@ -587,6 +659,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             page_name, num_frames_wide, num_frames_high, frame_w_i, frame_h_i, total_frames
         );
 
+        // vertical metrics (authored)
         let line_spacing_authored = if settings.line_spacing != -1 { settings.line_spacing } else { frame_h_i };
         let baseline_authored = if settings.baseline != -1 {
             settings.baseline
@@ -604,27 +677,30 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         if page_idx == 0 || page_name == "main" {
             default_page_metrics = (height_authored, line_spacing_authored);
         }
-        
+
         trace!(
             "    VMetrics(authored): line_spacing={}, baseline={}, top={}, height={}, vshift={:.1}",
             line_spacing_authored, baseline_authored, top_authored, height_authored, vshift_authored
         );
 
+        // mapping char → frame (SM spill across row up to total_frames)
         let mut char_to_frame: HashMap<char, usize> = HashMap::new();
         for section_name in &sections_to_check {
             let sec_lc = section_name.to_string();
             if let Some(map) = ini_map_lower.get(&sec_lc) {
                 for (raw_key_lc, val_str) in map {
                     let key_lc = raw_key_lc.as_str();
+
                     if key_lc.starts_with("line ") {
                         if let Ok(row) = key_lc[5..].trim().parse::<u32>() {
                             if row >= num_frames_high { continue; }
-                            let first_frame = row * num_frames_wide;
-                            let line_val = raw_line_map.get(&(sec_lc.clone(), row)).map_or(val_str.as_str(), |s| s.as_str());
+                            let first_frame = (row * num_frames_wide) as usize;
+                            let line_val = raw_line_map
+                                .get(&(sec_lc.clone(), row))
+                                .map_or(val_str.as_str(), |s| s.as_str());
                             for (i, ch) in line_val.chars().enumerate() {
-                                if (i as u32) < num_frames_wide {
-                                    char_to_frame.insert(ch, (first_frame as usize) + i);
-                                } else { break; }
+                                let idx = first_frame + i;
+                                if idx < total_frames { char_to_frame.insert(ch, idx); } else { break; }
                             }
                         }
                     } else if key_lc.starts_with("map ") {
@@ -632,10 +708,14 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                             let spec = raw_key_lc[4..].trim();
                             if let Some(hex) = spec.strip_prefix("U+").or_else(|| spec.strip_prefix("u+")) {
                                 if let Ok(cp) = u32::from_str_radix(hex, 16) {
-                                    if let Some(ch) = char::from_u32(cp) { char_to_frame.insert(ch, frame_index); }
+                                    if let Some(ch) = char::from_u32(cp) {
+                                        if frame_index < total_frames { char_to_frame.insert(ch, frame_index); }
+                                    }
                                 }
                             } else if spec.starts_with('"') && spec.ends_with('"') && spec.len() >= 2 {
-                                for ch in spec[1..spec.len() - 1].chars() { char_to_frame.insert(ch, frame_index); }
+                                for ch in spec[1..spec.len() - 1].chars() {
+                                    if frame_index < total_frames { char_to_frame.insert(ch, frame_index); }
+                                }
                             }
                         }
                     } else if key_lc.starts_with("range ") {
@@ -649,77 +729,72 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             }
         }
         apply_space_nbsp_symmetry(&mut char_to_frame);
-        
+
         if page_name != "common" && char_to_frame.is_empty() {
             match total_frames {
                 128 => apply_range_mapping(&mut char_to_frame, "ascii", None, 0),
                 256 => apply_range_mapping(&mut char_to_frame, "cp1252", None, 0),
                 15 | 16 => apply_range_mapping(&mut char_to_frame, "numbers", None, 0),
-                _ => {},
+                _ => {}
             }
         }
-        
+
         debug!("Page '{}' mapped {} chars (frames={}).", page_name, char_to_frame.len(), total_frames);
 
+        // SM extra pixels (+1/+1, left forced even)
         let mut draw_left = settings.draw_extra_pixels_left + 1;
         let mut draw_right = settings.draw_extra_pixels_right + 1;
         if draw_left % 2 != 0 { draw_left += 1; }
 
         for i in 0..total_frames {
-            let base_w = if let Some(&w) = settings.glyph_widths.get(&i) {
+            let base_w_ini = if let Some(&w) = settings.glyph_widths.get(&i) {
                 w
             } else if settings.default_width != -1 {
                 settings.default_width
             } else {
                 frame_w_i
             };
-            let base_w = base_w + settings.add_to_all_widths;
-            let base_w = round_half_to_even_i32((base_w as f32) * settings.scale_all_widths_by);
-            
-            // Per SM, advance is based on the width *before* the odd chop fix.
-            let hadvance = base_w + settings.advance_extra_pixels;
+            let base_w_scaled = round_half_to_even_i32((base_w_ini + settings.add_to_all_widths) as f32 * settings.scale_all_widths_by);
 
-            // This is the visual width, which may be modified by the odd chop quirk.
-            let mut width_i = base_w;
+            let hadvance = base_w_scaled + settings.advance_extra_pixels;
+
+            let mut width_i = base_w_scaled;
             let mut chop_i = frame_w_i - width_i;
             if chop_i < 0 { chop_i = 0; }
             if (chop_i & 1) != 0 {
                 chop_i -= 1;
-                width_i += 1; // The "Odd Chop" quirk!
+                width_i += 1; // odd-chop quirk
             }
 
             let pad_i = (chop_i / 2).max(0);
             let mut extra_left_i  = draw_left.min(pad_i);
             let mut extra_right_i = draw_right.min(pad_i);
             if width_i <= 0 {
-                extra_left_i = 0;
-                extra_right_i = 0;
+                extra_left_i = 0; extra_right_i = 0;
             }
 
             let glyph_size   = [(width_i + extra_left_i + extra_right_i) as f32, frame_h_i as f32];
             let glyph_offset = [-(extra_left_i as f32), vshift_authored];
             let advance      = hadvance as f32;
-            
+
+            // texture rect in actual pixels
             let actual_frame_w_i = (tex_dims.0 / num_frames_wide) as i32;
             let actual_frame_h_i = (tex_dims.1 / num_frames_high) as i32;
             let col_i = (i as u32 % num_frames_wide) as i32;
             let row_i = (i as u32 / num_frames_wide) as i32;
 
-            let authored_to_actual_ratio = if frame_w_i > 0 {
-                actual_frame_w_i as f32 / frame_w_i as f32
-            } else { 1.0 };
-            
-            // This logic now precisely mirrors the C++ code's integer math steps.
-            let tex_chop_off_i = (chop_i as f32 * authored_to_actual_ratio).round() as i32;
-            let tex_extra_left_i = (extra_left_i as f32 * authored_to_actual_ratio).round() as i32;
-            let tex_extra_right_i = (extra_right_i as f32 * authored_to_actual_ratio).round() as i32;
-            
-            let left_padding = tex_chop_off_i / 2;
+            let authored_to_actual_ratio =
+                if frame_w_i > 0 { actual_frame_w_i as f32 / frame_w_i as f32 } else { 1.0 };
+            let tex_chop_off_i   = (chop_i as f32        * authored_to_actual_ratio).round() as i32;
+            let tex_extra_left_i = (extra_left_i as f32  * authored_to_actual_ratio).round() as i32;
+            let tex_extra_right_i= (extra_right_i as f32 * authored_to_actual_ratio).round() as i32;
+
+            let left_padding  = tex_chop_off_i / 2;
             let right_padding = tex_chop_off_i - left_padding;
-            
+
             let frame_left_px = col_i * actual_frame_w_i;
-            
-            let tex_rect_left = frame_left_px + left_padding - tex_extra_left_i;
+
+            let tex_rect_left  = frame_left_px + left_padding - tex_extra_left_i;
             let tex_rect_right = (col_i + 1) * actual_frame_w_i - right_padding + tex_extra_right_i;
 
             let tex_rect = [
@@ -739,7 +814,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
             for (&ch, &frame_idx) in &char_to_frame {
                 if frame_idx == i {
-                    // FIX: Log the final modified width_i, not the initial base_w.
                     trace!(
                         "  [{}] GLYPH {} -> frame {} | width_i={} hadv={} chop={} extraL={} extraR={} \
                          size=[{:.3}x{:.3}] offset=[{:.3},{:.3}] advance={:.3} \
@@ -748,10 +822,12 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                         glyph.size[0], glyph.size[1], glyph.offset[0], glyph.offset[1], glyph.advance,
                         tex_rect[0], tex_rect[1], tex_rect[2], tex_rect[3],
                     );
+                    // local page overrides any previously-imported glyph
                     all_glyphs.insert(ch, glyph.clone());
                 }
             }
 
+            // default glyph from our first page only (not from imports)
             if page_idx == 0 && i == 0 {
                 all_glyphs.entry(FONT_DEFAULT_CHAR).or_insert_with(|| glyph.clone());
             }
