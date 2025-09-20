@@ -22,10 +22,12 @@ const NORMAL_COLOR_HEX: &str = "#888888";
 const OPTION_COUNT: usize = 3;
 const MENU_OPTIONS: [&str; OPTION_COUNT] = ["GAMEPLAY", "OPTIONS", "EXIT"];
 
-const MENU_SELECTED_PX: f32 = 23.0;
-const MENU_NORMAL_PX: f32 = 19.0;
-const MENU_BELOW_LOGO: f32 = 25.0;
-const MENU_ROW_SPACING: f32 = 23.0;
+// --- CONSTANTS UPDATED FOR NEW ANIMATION-DRIVEN LAYOUT ---
+//const MENU_BELOW_LOGO: f32 = 25.0;
+//const MENU_ROW_SPACING: f32 = 23.0;
+
+const MENU_BELOW_LOGO: f32 = 29.0;
+const MENU_ROW_SPACING: f32 = 28.0;
 
 const INFO_PX: f32 = 15.0;
 const INFO_GAP: f32 = 5.0;
@@ -159,13 +161,12 @@ pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
     selected[3] *= alpha_multiplier;
     normal[3] *= alpha_multiplier;
 
+    // --- UPDATED PARAMS FOR THE NEW MENU LIST BUILDER ---
     let params = menu_list::MenuParams {
         options: &MENU_OPTIONS,
         selected_index: state.selected_index,
-        start_center_y: base_y + 0.5 * MENU_NORMAL_PX,
+        start_center_y: base_y,
         row_spacing: MENU_ROW_SPACING,
-        selected_px: MENU_SELECTED_PX,
-        normal_px: MENU_NORMAL_PX,
         selected_color: selected,
         normal_color: normal,
         font: "wendy",
