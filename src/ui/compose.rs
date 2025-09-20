@@ -658,25 +658,35 @@ fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) 
 #[inline(always)]
 #[must_use]
 fn lrint_ties_even(v: f32) -> f32 {
+    if !v.is_finite() {
+        return 0.0;
+    }
+    // Fast path: already an integer (including -0.0)
+    if v.fract() == 0.0 {
+        return v;
+    }
+
     let floor = v.floor();
     let frac = v - floor;
+
     if frac < 0.5 {
         floor
     } else if frac > 0.5 {
         floor + 1.0
     } else {
-        if ((floor as i32) & 1) == 0 {
-            floor
-        } else {
-            floor + 1.0
-        }
+        // frac == 0.5 exactly: ties-to-even
+        // Use i64 for parity check to avoid edge overflow on extreme values.
+        let f_even = ((floor as i64) & 1) == 0;
+        if f_even { floor } else { floor + 1.0 }
     }
 }
 
 #[inline(always)]
 #[must_use]
 fn quantize_up_even_px(v: f32) -> f32 {
-    // SM: QuantizeUp(m_size.x, 2) in *pixel* space
+    if !v.is_finite() || v <= 0.0 {
+        return 0.0;
+    }
     let mut n = v.ceil() as i32;
     if (n & 1) != 0 {
         n += 1;
@@ -705,19 +715,23 @@ fn layout_text(
         return vec![];
     }
 
-    // 1) Logical (integer) widths like SM
-    let logical_line_widths: Vec<i32> = lines
-        .iter()
-        .map(|l| measure_line_width_logical(font, l))
-        .collect();
+    // 1) Logical (integer) widths like SM: sum integer advances (default glyph if unmapped).
+    #[inline(always)]
+    fn measure_line_width_logical(font: &font::Font, s: &str) -> i32 {
+        s.chars()
+            .map(|c| {
+                font.glyph_map
+                    .get(&c)
+                    .or(font.default_glyph.as_ref())
+                    .map_or(0, |g| g.advance as i32)
+            })
+            .sum()
+    }
+    let logical_line_widths: Vec<i32> = lines.iter().map(|l| measure_line_width_logical(font, l)).collect();
     let max_logical_width = logical_line_widths.iter().copied().max().unwrap_or(0) as f32;
 
-    // 2) Unscaled block height in logical units
-    let cap_height = if font.height > 0 {
-        font.height as f32
-    } else {
-        font.line_spacing as f32
-    };
+    // 2) Unscaled block cap height + line spacing stack in logical units
+    let cap_height = if font.height > 0 { font.height as f32 } else { font.line_spacing as f32 };
     let num_lines = lines.len();
     let unscaled_block_height = if num_lines > 1 {
         cap_height + ((num_lines - 1) as f32 * font.line_spacing as f32)
@@ -725,52 +739,42 @@ fn layout_text(
         cap_height
     };
 
-    // 3) Fit scaling (if any)
+    // 3) Fit scaling (min of width/height fits; SM-style “don’t blow up infinity” handling)
     use std::f32::INFINITY;
     let s_w = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
     let s_h = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
-    let fit_s = if s_w.is_infinite() && s_h.is_infinite() {
-        1.0
-    } else {
-        s_w.min(s_h).max(0.0)
-    };
+    let fit_s = if s_w.is_infinite() && s_h.is_infinite() { 1.0 } else { s_w.min(s_h).max(0.0) };
+
     let sx = scale[0] * fit_s;
     let sy = scale[1] * fit_s;
     if sx.abs() < 1e-6 || sy.abs() < 1e-6 {
         return vec![];
     }
 
-    // 4) Pixel widths (post-scale), then SM’s QuantizeUp-even in *pixels*
-    let line_widths_px: Vec<f32> = logical_line_widths
-        .iter()
-        .map(|w| lrint_ties_even((*w as f32) * sx))
-        .collect();
+    // 4) Pixel widths (post-scale) rounded with ties-to-even, then block width quantized up to even pixels.
+    let line_widths_px: Vec<f32> = logical_line_widths.iter().map(|w| lrint_ties_even((*w as f32) * sx)).collect();
     let max_line_width_px = line_widths_px.iter().fold(0.0_f32, |a, &b| a.max(b));
     let block_w_px = quantize_up_even_px(max_line_width_px);
     let block_h_px = unscaled_block_height * sy;
 
-    // 5) Place the block and compute baseline from block center (SM order)
+    // 5) Place the block in SM space (origin at top-left in your world mapping) and compute baseline.
+    //    Parity-critical ordering: iY0 = lrint(-block_h/2); baseline_local = iY0 + height*sy; baseline = lrint(centerY + baseline_local)
     let block_left_sm = parent.x + offset[0] - align[0] * block_w_px;
-    let block_top_sm = parent.y + offset[1] - align[1] * block_h_px;
+    let block_top_sm  = parent.y + offset[1] - align[1] * block_h_px;
     let block_center_x = block_left_sm + 0.5 * block_w_px;
-    let block_center_y = block_top_sm + 0.5 * block_h_px;
+    let block_center_y = block_top_sm  + 0.5 * block_h_px;
 
-    // iY = lrint(-block_h/2); baseline = iY + height
     let iY0 = lrint_ties_even(-block_h_px * 0.5);
-    let mut baseline_sm = lrint_ties_even(block_center_y + (iY0 + (font.height as f32) * sy));
+    let baseline_local = iY0 + (font.height as f32) * sy; // cap-height baseline from block center
+    let mut baseline_sm = lrint_ties_even(block_center_y + baseline_local);
 
-    // 6) Start-X in *pixel* space (SM snaps here), not per-glyph
+    // 6) Line start X in *pixel* space (SM snaps whole line, not per-glyph).
     #[inline(always)]
-    fn start_x_px(
-        align: actors::TextAlign,
-        block_left_px: f32,
-        block_w_px: f32,
-        line_w_px: f32,
-    ) -> f32 {
+    fn start_x_px(align: actors::TextAlign, block_left_px: f32, block_w_px: f32, line_w_px: f32) -> f32 {
         match align {
-            actors::TextAlign::Left => block_left_px,
+            actors::TextAlign::Left   => block_left_px,
             actors::TextAlign::Center => lrint_ties_even(block_left_px + 0.5 * (block_w_px - line_w_px)),
-            actors::TextAlign::Right => lrint_ties_even(block_left_px + (block_w_px - line_w_px)),
+            actors::TextAlign::Right  => lrint_ties_even(block_left_px + (block_w_px - line_w_px)),
         }
     }
 
@@ -779,10 +783,7 @@ fn layout_text(
     let mut dims_cache: HashMap<&str, (f32, f32)> = HashMap::new();
 
     #[inline(always)]
-    fn atlas_dims<'a>(
-        cache: &mut HashMap<&'a str, (f32, f32)>,
-        key: &'a str,
-    ) -> (f32, f32) {
+    fn atlas_dims<'a>(cache: &mut HashMap<&'a str, (f32, f32)>, key: &'a str) -> (f32, f32) {
         if let Some(&d) = cache.get(key) {
             return d;
         }
@@ -798,35 +799,39 @@ fn layout_text(
         let line_w_px = line_widths_px[i];
         let pen_start_x = start_x_px(text_align, block_left_sm, block_w_px, line_w_px);
 
-        // Integer logical pen (unscaled); SM advances in logical units
+        // Integer logical pen (unscaled); SM advances in logical units only.
         let mut pen_ux: i32 = 0;
 
         for ch in line.chars() {
             let mapped = font.glyph_map.get(&ch);
             let glyph = match mapped.or(font.default_glyph.as_ref()) {
                 Some(g) => g,
-                None => continue,
+                None => continue, // no glyph and no default; skip entirely
             };
 
+            // Scaled quad size
             let quad_w = glyph.size[0] * sx;
             let quad_h = glyph.size[1] * sy;
 
+            // SM: do not draw a quad for SPACE when unmapped (but still advance).
             let draw_quad = !(ch == ' ' && mapped.is_none());
 
-            // Draw pen = snapped pixel start + scaled integer logical advance
+            // Draw pen in pixel space: snapped start + integer logical advance * scale.
+            // No per-glyph X rounding; only Y is rounded.
             let pen_x_draw = pen_start_x + (pen_ux as f32) * sx;
 
             if draw_quad && quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
-                // No per-glyph X rounding; keep Y rounded using ties-to-even
                 let quad_x_sm = pen_x_draw + glyph.offset[0] * sx;
-                let quad_y_sm = lrint_ties_even(baseline_sm + glyph.offset[1] * sy);
+                let quad_y_sm = lrint_ties_even(baseline_sm + glyph.offset[1] * sy); // Y ties-to-even only
 
+                // Convert SM-space rect center/size to world
                 let center_x = m.left + quad_x_sm + quad_w * 0.5;
-                let center_y = m.top - (quad_y_sm + quad_h * 0.5);
+                let center_y = m.top  - (quad_y_sm + quad_h * 0.5);
 
                 let transform = Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0))
                     * Matrix4::from_nonuniform_scale(quad_w, quad_h, 1.0);
 
+                // UVs from authored tex rect
                 let (tex_w, tex_h) = atlas_dims(&mut dims_cache, &glyph.texture_key);
                 let uv_scale = [
                     (glyph.tex_rect[2] - glyph.tex_rect[0]) / tex_w,
@@ -849,11 +854,11 @@ fn layout_text(
                 });
             }
 
-            // integer logical advance
+            // Integer logical advance only (parity with SM).
             pen_ux += glyph.advance as i32;
         }
 
-        // next line baseline
+        // Next line baseline: add line spacing*sy, then snap ties-to-even (SM order).
         baseline_sm = lrint_ties_even(baseline_sm + (font.line_spacing as f32) * sy);
     }
 
