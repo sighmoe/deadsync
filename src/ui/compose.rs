@@ -4,7 +4,7 @@ use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;
 use crate::core::{assets, font};
-// FIX: Removed unused `line_width_px_sm` import
+// FIX: Removed unused line_width_px_sm import
 use crate::ui::actors::{self, Actor, SizeSpec};
 use cgmath::{Deg, Matrix4, Vector2, Vector3};
 
@@ -21,16 +21,29 @@ pub fn build_screen(
     let mut objects = Vec::with_capacity(estimate_object_count(actors, fonts));
     let mut order_counter: u32 = 0;
 
-    let root_rect = SmRect { x: 0.0, y: 0.0, w: m.right - m.left, h: m.top - m.bottom };
+    let root_rect = SmRect {
+        x: 0.0,
+        y: 0.0,
+        w: m.right - m.left,
+        h: m.top - m.bottom,
+    };
     let parent_z: i16 = 0;
 
     for actor in actors {
         build_actor_recursive(
-            actor, root_rect, m, fonts, parent_z, &mut order_counter, &mut objects, total_elapsed,
+            actor,
+            root_rect,
+            m,
+            fonts,
+            parent_z,
+            &mut order_counter,
+            &mut objects,
+            total_elapsed,
         );
     }
 
     objects.sort_by_key(|o| (o.z, o.order));
+
     RenderList { clear_color, objects }
 }
 
@@ -41,8 +54,8 @@ fn estimate_object_count(
 ) -> usize {
     let mut stack: Vec<&Actor> = Vec::with_capacity(actors.len());
     stack.extend(actors.iter());
-
     let mut total = 0usize;
+
     while let Some(a) = stack.pop() {
         match a {
             Actor::Sprite { visible, tint, .. } => {
@@ -52,17 +65,26 @@ fn estimate_object_count(
             }
             Actor::Text { content, font, .. } => {
                 if let Some(fm) = fonts.get(font) {
-                    total += content.chars().filter(|&c| {
-                        if c == '\n' { return false; }
-                        let mapped = fm.glyph_map.contains_key(&c);
-                        if c == ' ' && !mapped { return false; } // skip unmapped spaces
-                        mapped || fm.default_glyph.is_some()
-                    }).count();
+                    total += content
+                        .chars()
+                        .filter(|&c| {
+                            if c == '\n' {
+                                return false;
+                            }
+                            let mapped = fm.glyph_map.contains_key(&c);
+                            if c == ' ' && !mapped {
+                                return false;
+                            } // skip unmapped spaces
+                            mapped || fm.default_glyph.is_some()
+                        })
+                        .count();
                 } else {
                     total += content.chars().filter(|&ch| ch != '\n').count();
                 }
             }
-            Actor::Frame { children, background, .. } => {
+            Actor::Frame {
+                children, background, ..
+            } => {
                 if background.is_some() {
                     total += 1;
                 }
@@ -76,7 +98,12 @@ fn estimate_object_count(
 /* ======================= ACTOR -> OBJECT CONVERSION ======================= */
 
 #[derive(Clone, Copy)]
-struct SmRect { x: f32, y: f32, w: f32, h: f32 }
+struct SmRect {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
 
 #[inline(always)]
 fn build_actor_recursive(
@@ -91,14 +118,36 @@ fn build_actor_recursive(
 ) {
     match actor {
         actors::Actor::Sprite {
-            align, offset, size, source, tint, z,
-            cell, grid, uv_rect, visible, flip_x, flip_y,
-            cropleft, cropright, croptop, cropbottom, blend,
-            fadeleft, faderight, fadetop, fadebottom,
-            rot_z_deg, texcoordvelocity, animate, state_delay,
+            align,
+            offset,
+            size,
+            source,
+            tint,
+            z,
+            cell,
+            grid,
+            uv_rect,
+            visible,
+            flip_x,
+            flip_y,
+            cropleft,
+            cropright,
+            croptop,
+            cropbottom,
+            blend,
+            fadeleft,
+            faderight,
+            fadetop,
+            fadebottom,
+            rot_z_deg,
+            texcoordvelocity,
+            animate,
+            state_delay,
             scale,
         } => {
-            if !*visible { return; }
+            if !*visible {
+                return;
+            }
 
             let (is_solid, texture_name) = match source {
                 actors::SpriteSource::Solid => (true, "__white"),
@@ -109,7 +158,8 @@ fn build_actor_recursive(
             let mut chosen_grid = *grid;
 
             if !is_solid && uv_rect.is_none() {
-                let (cols, rows) = grid.unwrap_or_else(|| font::parse_sheet_dims_from_filename(texture_name));
+                let (cols, rows) =
+                    grid.unwrap_or_else(|| font::parse_sheet_dims_from_filename(texture_name));
                 let total = cols.saturating_mul(rows).max(1);
 
                 let start_linear: u32 = match *cell {
@@ -134,40 +184,91 @@ fn build_actor_recursive(
             }
 
             let resolved_size = resolve_sprite_size_like_sm(
-                *size, is_solid, texture_name, *uv_rect, chosen_cell, chosen_grid, *scale
+                *size,
+                is_solid,
+                texture_name,
+                *uv_rect,
+                chosen_cell,
+                chosen_grid,
+                *scale,
             );
 
             let rect = place_rect(parent, *align, *offset, resolved_size);
 
             let before = out.len();
             push_sprite(
-                out, rect, m, is_solid, texture_name, *tint, *uv_rect, chosen_cell, chosen_grid,
-                *flip_x, *flip_y,
-                *cropleft, *cropright, *croptop, *cropbottom,
-                *fadeleft, *faderight, *fadetop, *fadebottom,
-                *blend, *rot_z_deg, *texcoordvelocity, total_elapsed,
+                out,
+                rect,
+                m,
+                is_solid,
+                texture_name,
+                *tint,
+                *uv_rect,
+                chosen_cell,
+                chosen_grid,
+                *flip_x,
+                *flip_y,
+                *cropleft,
+                *cropright,
+                *croptop,
+                *cropbottom,
+                *fadeleft,
+                *faderight,
+                *fadetop,
+                *fadebottom,
+                *blend,
+                *rot_z_deg,
+                *texcoordvelocity,
+                total_elapsed,
             );
+
             let layer = base_z.saturating_add(*z);
             for i in before..out.len() {
                 out[i].z = layer;
-                out[i].order = { let o = *order_counter; *order_counter += 1; o };
+                out[i].order = {
+                    let o = *order_counter;
+                    *order_counter += 1;
+                    o
+                };
             }
         }
 
         actors::Actor::Text {
-            align, offset, px, color, font, content, align_text, z, scale,
-            fit_width, fit_height, blend,
+            align,
+            offset,
+            px: _,
+            color,
+            font,
+            content,
+            align_text,
+            z,
+            scale,
+            fit_width,
+            fit_height,
+            blend,
         } => {
             if let Some(fm) = fonts.get(font) {
                 let mut objects = layout_text(
-                    fm, content, *px, *scale, *fit_width, *fit_height, 
-                    parent, *align, *offset, *align_text, m
+                    fm,
+                    content,
+                    0.0, // _px_size unused
+                    *scale,
+                    *fit_width,
+                    *fit_height,
+                    parent,
+                    *align,
+                    *offset,
+                    *align_text,
+                    m,
                 );
-                
                 let layer = base_z.saturating_add(*z);
                 for obj in &mut objects {
                     obj.z = layer;
-                    obj.order = { let o = *order_counter; *order_counter += 1; o };
+                    obj.order = {
+                        let o = *order_counter;
+                        *order_counter += 1;
+                        o
+                    };
                     obj.blend = *blend;
                     if let renderer::ObjectType::Sprite { tint, .. } = &mut obj.object_type {
                         *tint = *color;
@@ -178,50 +279,104 @@ fn build_actor_recursive(
         }
 
         actors::Actor::Frame {
-            align, offset, size, children, background, z,
+            align,
+            offset,
+            size,
+            children,
+            background,
+            z,
         } => {
             let rect = place_rect(parent, *align, *offset, *size);
             let layer = base_z.saturating_add(*z);
+
             if let Some(bg) = background {
                 match bg {
                     actors::Background::Color(c) => {
                         let before = out.len();
                         push_sprite(
-                            out, rect, m,
-                            true, "__white", *c,
-                            None, None, None,
-                            false, false,
-                            0.0, 0.0, 0.0, 0.0,
-                            0.0, 0.0, 0.0, 0.0,
+                            out,
+                            rect,
+                            m,
+                            true,
+                            "__white",
+                            *c,
+                            None,
+                            None,
+                            None,
+                            false,
+                            false,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
                             BlendMode::Alpha,
-                            0.0, None, total_elapsed,
+                            0.0,
+                            None,
+                            total_elapsed,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
-                            out[i].order = { let o = *order_counter; *order_counter += 1; o };
+                            out[i].order = {
+                                let o = *order_counter;
+                                *order_counter += 1;
+                                o
+                            };
                         }
                     }
                     actors::Background::Texture(tex) => {
                         let before = out.len();
                         push_sprite(
-                            out, rect, m,
-                            false, tex, [1.0; 4],
-                            None, None, None,
-                            false, false,
-                            0.0, 0.0, 0.0, 0.0,
-                            0.0, 0.0, 0.0, 0.0,
+                            out,
+                            rect,
+                            m,
+                            false,
+                            tex,
+                            [1.0; 4],
+                            None,
+                            None,
+                            None,
+                            false,
+                            false,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
                             BlendMode::Alpha,
-                            0.0, None, total_elapsed,
+                            0.0,
+                            None,
+                            total_elapsed,
                         );
                         for i in before..out.len() {
                             out[i].z = layer;
-                            out[i].order = { let o = *order_counter; *order_counter += 1; o };
+                            out[i].order = {
+                                let o = *order_counter;
+                                *order_counter += 1;
+                                o
+                            };
                         }
                     }
                 }
             }
+
             for child in children {
-                build_actor_recursive(child, rect, m, fonts, layer, order_counter, out, total_elapsed);
+                build_actor_recursive(
+                    child,
+                    rect,
+                    m,
+                    fonts,
+                    layer,
+                    order_counter,
+                    out,
+                    total_elapsed,
+                );
             }
         }
     }
@@ -255,10 +410,18 @@ fn resolve_sprite_size_like_sm(
 
     #[inline(always)]
     fn native_dims(
-        is_solid: bool, texture_name: &str, uv: Option<[f32; 4]>, cell: Option<(u32, u32)>, grid: Option<(u32, u32)>
+        is_solid: bool,
+        texture_name: &str,
+        uv: Option<[f32; 4]>,
+        cell: Option<(u32, u32)>,
+        grid: Option<(u32, u32)>,
     ) -> (f32, f32) {
-        if is_solid { return (1.0, 1.0); }
-        let Some(meta) = assets::texture_dims(texture_name) else { return (0.0, 0.0); };
+        if is_solid {
+            return (1.0, 1.0);
+        }
+        let Some(meta) = assets::texture_dims(texture_name) else {
+            return (0.0, 0.0);
+        };
         let (mut tw, mut th) = (meta.w as f32, meta.h as f32);
         if let Some([u0, v0, u1, v1]) = uv {
             tw *= (u1 - u0).abs().max(1e-6);
@@ -277,12 +440,8 @@ fn resolve_sprite_size_like_sm(
     let aspect = if nw > 0.0 && nh > 0.0 { nh / nw } else { 1.0 };
 
     match (size[0], size[1]) {
-        (Px(w), Px(h)) if w == 0.0 && h == 0.0 => {
-            [Px(nw * scale[0]), Px(nh * scale[1])]
-        }
-        (Px(w), Px(h)) if w > 0.0 && h == 0.0 => {
-            [Px(w), Px(w * aspect)]
-        }
+        (Px(w), Px(h)) if w == 0.0 && h == 0.0 => [Px(nw * scale[0]), Px(nh * scale[1])],
+        (Px(w), Px(h)) if w > 0.0 && h == 0.0 => [Px(w), Px(w * aspect)],
         (Px(w), Px(h)) if w == 0.0 && h > 0.0 => {
             let inv_aspect = if aspect > 0.0 { 1.0 / aspect } else { 1.0 };
             [Px(h * inv_aspect), Px(h)]
@@ -295,17 +454,16 @@ fn resolve_sprite_size_like_sm(
 fn place_rect(parent: SmRect, align: [f32; 2], offset: [f32; 2], size: [SizeSpec; 2]) -> SmRect {
     let w = match size[0] {
         SizeSpec::Px(w) => w,
-        SizeSpec::Fill  => parent.w,
+        SizeSpec::Fill => parent.w,
     };
     let h = match size[1] {
         SizeSpec::Px(h) => h,
-        SizeSpec::Fill  => parent.h,
+        SizeSpec::Fill => parent.h,
     };
     let rx = parent.x;
     let ry = parent.y;
     let ax = align[0];
     let ay = align[1];
-
     SmRect {
         x: rx + offset[0] - ax * w,
         y: ry + offset[1] - ay * h,
@@ -322,7 +480,10 @@ fn calculate_uvs(
     grid: Option<(u32, u32)>,
     flip_x: bool,
     flip_y: bool,
-    cl: f32, cr: f32, ct: f32, cb: f32,
+    cl: f32,
+    cr: f32,
+    ct: f32,
+    cb: f32,
     texcoordvelocity: Option<[f32; 2]>,
     total_elapsed: f32,
 ) -> ([f32; 2], [f32; 2]) {
@@ -334,14 +495,18 @@ fn calculate_uvs(
         let (gc, gr) = grid.unwrap_or_else(|| font::parse_sheet_dims_from_filename(texture));
         let cols = gc.max(1);
         let rows = gr.max(1);
-
         let (col, row) = if cy == u32::MAX {
             let idx = cx;
-            (idx % cols, (idx / cols).min(rows.saturating_sub(1)))
+            (
+                idx % cols,
+                (idx / cols).min(rows.saturating_sub(1)),
+            )
         } else {
-            (cx.min(cols.saturating_sub(1)), cy.min(rows.saturating_sub(1)))
+            (
+                cx.min(cols.saturating_sub(1)),
+                cy.min(rows.saturating_sub(1)),
+            )
         };
-
         let s = [1.0 / cols as f32, 1.0 / rows as f32];
         let o = [col as f32 * s[0], row as f32 * s[1]];
         (s, o)
@@ -354,9 +519,15 @@ fn calculate_uvs(
     uv_scale[0] *= (1.0 - cl - cr).max(0.0);
     uv_scale[1] *= (1.0 - ct - cb).max(0.0);
 
-    if flip_x { uv_offset[0] += uv_scale[0]; uv_scale[0] = -uv_scale[0]; }
-    if flip_y { uv_offset[1] += uv_scale[1]; uv_scale[1] = -uv_scale[1]; }
-    
+    if flip_x {
+        uv_offset[0] += uv_scale[0];
+        uv_scale[0] = -uv_scale[0];
+    }
+    if flip_y {
+        uv_offset[1] += uv_scale[1];
+        uv_scale[1] = -uv_scale[1];
+    }
+
     if let Some(vel) = texcoordvelocity {
         uv_offset[0] += vel[0] * total_elapsed;
         uv_offset[1] += vel[1] * total_elapsed;
@@ -391,20 +562,25 @@ fn push_sprite(
     texcoordvelocity: Option<[f32; 2]>,
     total_elapsed: f32,
 ) {
-    if tint[3] <= 0.0 { return; }
+    if tint[3] <= 0.0 {
+        return;
+    }
 
     let (cl, cr, ct, cb) = clamp_crop_fractions(cropleft, cropright, croptop, cropbottom);
 
     let (base_center, base_size) = sm_rect_to_world_center_size(rect, m);
-    if base_size.x <= 0.0 || base_size.y <= 0.0 { return; }
+    if base_size.x <= 0.0 || base_size.y <= 0.0 {
+        return;
+    }
 
     let sx_crop = (1.0 - cl - cr).max(0.0);
     let sy_crop = (1.0 - ct - cb).max(0.0);
-    if sx_crop <= 0.0 || sy_crop <= 0.0 { return; }
+    if sx_crop <= 0.0 || sy_crop <= 0.0 {
+        return;
+    }
 
     let center_x = base_center.x;
     let center_y = base_center.y;
-
     let size_x = base_size.x * sx_crop;
     let size_y = base_size.y * sy_crop;
 
@@ -412,10 +588,18 @@ fn push_sprite(
         ([1.0, 1.0], [0.0, 0.0])
     } else {
         calculate_uvs(
-            texture_id, uv_rect, cell, grid,
-            flip_x, flip_y,
-            cl, cr, ct, cb,
-            texcoordvelocity, total_elapsed,
+            texture_id,
+            uv_rect,
+            cell,
+            grid,
+            flip_x,
+            flip_y,
+            cl,
+            cr,
+            ct,
+            cb,
+            texcoordvelocity,
+            total_elapsed,
         )
     };
 
@@ -429,15 +613,22 @@ fn push_sprite(
     let mut ft_eff = ((ft - ct).max(0.0) / sy_crop).clamp(0.0, 1.0);
     let mut fb_eff = ((fb - cb).max(0.0) / sy_crop).clamp(0.0, 1.0);
 
-    if flip_x { std::mem::swap(&mut fl_eff, &mut fr_eff); }
-    if flip_y { std::mem::swap(&mut ft_eff, &mut fb_eff); }
+    if flip_x {
+        std::mem::swap(&mut fl_eff, &mut fr_eff);
+    }
+    if flip_y {
+        std::mem::swap(&mut ft_eff, &mut fb_eff);
+    }
 
-    let transform =
-        Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0)) *
-        Matrix4::from_angle_z(Deg(rot_z_deg)) *
-        Matrix4::from_nonuniform_scale(size_x, size_y, 1.0);
+    let transform = Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0))
+        * Matrix4::from_angle_z(Deg(rot_z_deg))
+        * Matrix4::from_nonuniform_scale(size_x, size_y, 1.0);
 
-    let final_texture_id = if is_solid { "__white".to_string() } else { texture_id.to_string() };
+    let final_texture_id = if is_solid {
+        "__white".to_string()
+    } else {
+        texture_id.to_string()
+    };
 
     out.push(renderer::RenderObject {
         object_type: renderer::ObjectType::Sprite {
@@ -455,6 +646,7 @@ fn push_sprite(
 }
 
 #[inline(always)]
+#[must_use]
 fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) {
     (
         l.clamp(0.0, 1.0),
@@ -465,19 +657,31 @@ fn clamp_crop_fractions(l: f32, r: f32, t: f32, b: f32) -> (f32, f32, f32, f32) 
 }
 
 #[inline(always)]
+#[must_use]
 fn lrint_ties_even(v: f32) -> f32 {
     let floor = v.floor();
     let frac = v - floor;
-    if frac < 0.5 { floor }
-    else if frac > 0.5 { floor + 1.0 }
-    else { if ((floor as i32) & 1) == 0 { floor } else { floor + 1.0 } }
+    if frac < 0.5 {
+        floor
+    } else if frac > 0.5 {
+        floor + 1.0
+    } else {
+        if ((floor as i32) & 1) == 0 {
+            floor
+        } else {
+            floor + 1.0
+        }
+    }
 }
 
 #[inline(always)]
+#[must_use]
 fn quantize_up_even_px(v: f32) -> f32 {
     // SM: QuantizeUp(m_size.x, 2) in *pixel* space
     let mut n = v.ceil() as i32;
-    if (n & 1) != 0 { n += 1; }
+    if (n & 1) != 0 {
+        n += 1;
+    }
     n as f32
 }
 
@@ -494,44 +698,63 @@ fn layout_text(
     text_align: actors::TextAlign,
     m: &Metrics,
 ) -> Vec<RenderObject> {
-    if text.is_empty() { return vec![]; }
-
+    if text.is_empty() {
+        return vec![];
+    }
     let lines: Vec<&str> = text.lines().collect();
-    if lines.is_empty() { return vec![]; }
+    if lines.is_empty() {
+        return vec![];
+    }
 
     // 1) Logical (integer) widths like SM
-    let logical_line_widths: Vec<i32> =
-        lines.iter().map(|l| measure_line_width_logical(font, l)).collect();
+    let logical_line_widths: Vec<i32> = lines
+        .iter()
+        .map(|l| measure_line_width_logical(font, l))
+        .collect();
     let max_logical_width = logical_line_widths.iter().copied().max().unwrap_or(0) as f32;
 
     // 2) Unscaled block height in logical units
-    let cap_height = if font.height > 0 { font.height as f32 } else { font.line_spacing as f32 };
+    let cap_height = if font.height > 0 {
+        font.height as f32
+    } else {
+        font.line_spacing as f32
+    };
     let num_lines = lines.len();
-    let unscaled_block_height =
-        if num_lines > 1 { cap_height + ((num_lines - 1) as f32 * font.line_spacing as f32) }
-        else { cap_height };
+    let unscaled_block_height = if num_lines > 1 {
+        cap_height + ((num_lines - 1) as f32 * font.line_spacing as f32)
+    } else {
+        cap_height
+    };
 
     // 3) Fit scaling (if any)
     use std::f32::INFINITY;
     let s_w = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
     let s_h = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
-    let fit_s = if s_w.is_infinite() && s_h.is_infinite() { 1.0 } else { s_w.min(s_h).max(0.0) };
-
+    let fit_s = if s_w.is_infinite() && s_h.is_infinite() {
+        1.0
+    } else {
+        s_w.min(s_h).max(0.0)
+    };
     let sx = scale[0] * fit_s;
     let sy = scale[1] * fit_s;
-    if sx.abs() < 1e-6 || sy.abs() < 1e-6 { return vec![]; }
+    if sx.abs() < 1e-6 || sy.abs() < 1e-6 {
+        return vec![];
+    }
 
     // 4) Pixel widths (post-scale), then SM’s QuantizeUp-even in *pixels*
-    let line_widths_px: Vec<f32> = logical_line_widths.iter().map(|w| ((*w as f32) * sx).round()).collect();
+    let line_widths_px: Vec<f32> = logical_line_widths
+        .iter()
+        .map(|w| ((*w as f32) * sx).round())
+        .collect();
     let max_line_width_px = line_widths_px.iter().fold(0.0_f32, |a, &b| a.max(b));
     let block_w_px = quantize_up_even_px(max_line_width_px);
     let block_h_px = unscaled_block_height * sy;
 
     // 5) Place the block and compute baseline from block center (SM order)
-    let block_left_sm   = parent.x + offset[0] - align[0] * block_w_px;
-    let block_top_sm    = parent.y + offset[1] - align[1] * block_h_px;
-    let block_center_x  = block_left_sm + 0.5 * block_w_px;
-    let block_center_y  = block_top_sm  + 0.5 * block_h_px;
+    let block_left_sm = parent.x + offset[0] - align[0] * block_w_px;
+    let block_top_sm = parent.y + offset[1] - align[1] * block_h_px;
+    let block_center_x = block_left_sm + 0.5 * block_w_px;
+    let block_center_y = block_top_sm + 0.5 * block_h_px;
 
     // iY = lrint(-block_h/2); baseline = iY + height
     let iY0 = lrint_ties_even(-block_h_px * 0.5);
@@ -539,20 +762,31 @@ fn layout_text(
 
     // 6) Start-X in *pixel* space (SM snaps here), not per-glyph
     #[inline(always)]
-    fn start_x_px(align: actors::TextAlign, block_left_px: f32, block_w_px: f32, line_w_px: f32) -> f32 {
+    fn start_x_px(
+        align: actors::TextAlign,
+        block_left_px: f32,
+        block_w_px: f32,
+        line_w_px: f32,
+    ) -> f32 {
         match align {
-            actors::TextAlign::Left   => block_left_px,
+            actors::TextAlign::Left => block_left_px,
             actors::TextAlign::Center => lrint_ties_even(block_left_px + 0.5 * (block_w_px - line_w_px)),
-            actors::TextAlign::Right  => lrint_ties_even(block_left_px + (block_w_px - line_w_px)),
+            actors::TextAlign::Right => lrint_ties_even(block_left_px + (block_w_px - line_w_px)),
         }
     }
 
     // atlas dims cache
     use std::collections::HashMap;
     let mut dims_cache: HashMap<&str, (f32, f32)> = HashMap::new();
+
     #[inline(always)]
-    fn atlas_dims<'a>(cache: &mut HashMap<&'a str, (f32, f32)>, key: &'a str) -> (f32, f32) {
-        if let Some(&d) = cache.get(key) { return d; }
+    fn atlas_dims<'a>(
+        cache: &mut HashMap<&'a str, (f32, f32)>,
+        key: &'a str,
+    ) -> (f32, f32) {
+        if let Some(&d) = cache.get(key) {
+            return d;
+        }
         let d = crate::core::assets::texture_dims(key)
             .map_or((1.0_f32, 1.0_f32), |meta| (meta.w as f32, meta.h as f32));
         cache.insert(key, d);
@@ -577,6 +811,7 @@ fn layout_text(
 
             let quad_w = glyph.size[0] * sx;
             let quad_h = glyph.size[1] * sy;
+
             let draw_quad = !(ch == ' ' && mapped.is_none());
 
             // Draw pen = snapped pixel start + scaled integer logical advance
@@ -585,24 +820,20 @@ fn layout_text(
             if draw_quad && quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
                 // No per-glyph X rounding; keep Y rounded
                 let quad_x_sm = pen_x_draw + glyph.offset[0] * sx;
-                let quad_y_sm = (baseline_sm  + glyph.offset[1] * sy).round();
+                let quad_y_sm = (baseline_sm + glyph.offset[1] * sy).round();
 
                 let center_x = m.left + quad_x_sm + quad_w * 0.5;
-                let center_y = m.top  - (quad_y_sm + quad_h * 0.5);
+                let center_y = m.top - (quad_y_sm + quad_h * 0.5);
 
-                let transform =
-                    Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0)) *
-                    Matrix4::from_nonuniform_scale(quad_w, quad_h, 1.0);
+                let transform = Matrix4::from_translation(Vector3::new(center_x, center_y, 0.0))
+                    * Matrix4::from_nonuniform_scale(quad_w, quad_h, 1.0);
 
                 let (tex_w, tex_h) = atlas_dims(&mut dims_cache, &glyph.texture_key);
                 let uv_scale = [
                     (glyph.tex_rect[2] - glyph.tex_rect[0]) / tex_w,
                     (glyph.tex_rect[3] - glyph.tex_rect[1]) / tex_h,
                 ];
-                let uv_offset = [
-                    glyph.tex_rect[0] / tex_w,
-                    glyph.tex_rect[1] / tex_h,
-                ];
+                let uv_offset = [glyph.tex_rect[0] / tex_w, glyph.tex_rect[1] / tex_h];
 
                 objects.push(RenderObject {
                     object_type: renderer::ObjectType::Sprite {

@@ -26,10 +26,10 @@ const FONT_DEFAULT_CHAR: char = '\u{F8FF}'; // SM default glyph (private use)
 #[derive(Debug, Clone)]
 pub struct Glyph {
     pub texture_key: String,
-    pub tex_rect: [f32; 4],   // px: [x0, y0, x1, y1] (texture space)
-    pub size: [f32; 2],       // draw units (SM authored units)
-    pub offset: [f32; 2],     // draw units: [x_off_from_pen, y_off_from_baseline]
-    pub advance: f32,         // draw units: pen advance
+    pub tex_rect: [f32; 4], // px: [x0, y0, x1, y1] (texture space)
+    pub size: [f32; 2],     // draw units (SM authored units)
+    pub offset: [f32; 2],   // draw units: [x_off_from_pen, y_off_from_baseline]
+    pub advance: f32,       // draw units: pen advance
 }
 
 #[derive(Debug, Clone)]
@@ -51,10 +51,10 @@ struct FontPageSettings {
     draw_extra_pixels_right: i32,
     add_to_all_widths: i32,
     scale_all_widths_by: f32,
-    line_spacing: i32,         // -1 = “use frame height”
-    top: i32,                  // -1 = “center – line_spacing/2”
-    baseline: i32,             // -1 = “center + line_spacing/2”
-    default_width: i32,        // -1 = “use frame width”
+    line_spacing: i32, // -1 = “use frame height”
+    top: i32,          // -1 = “center – line_spacing/2”
+    baseline: i32,     // -1 = “center + line_spacing/2”
+    default_width: i32, // -1 = “use frame width”
     advance_extra_pixels: i32, // SM default is 0
     glyph_widths: HashMap<usize, i32>,
 }
@@ -81,7 +81,9 @@ impl Default for FontPageSettings {
 
 #[inline(always)]
 fn strip_bom(mut s: String) -> String {
-    if s.starts_with('\u{FEFF}') { s.drain(..1); }
+    if s.starts_with('\u{FEFF}') {
+        s.drain(..1);
+    }
     s
 }
 
@@ -92,47 +94,75 @@ fn is_full_line_comment(s: &str) -> bool {
 }
 
 #[inline(always)]
-fn as_lower(s: &str) -> String { s.to_ascii_lowercase() }
+fn as_lower(s: &str) -> String {
+    s.to_ascii_lowercase()
+}
 
-/// Parse `[Section]` lines (returns section name) — whitespace tolerant.
+/// Parse [Section] lines (returns section name) — whitespace tolerant.
+/// Allocation-free; returns borrowed slice.
 #[inline(always)]
-fn parse_section_header(raw: &str) -> Option<String> {
+#[must_use]
+fn parse_section_header(raw: &str) -> Option<&str> {
     let t = raw.trim();
     if t.len() >= 2 && t.starts_with('[') && t.ends_with(']') {
         let name = &t[1..t.len() - 1];
-        Some(name.trim().to_string())
+        Some(name.trim())
     } else {
         None
     }
 }
 
-/// Parse `key=value` (trimmed key & value). Returns (key_lower, value_string).
+/// Parse key=value (trimmed key & value). Returns (key_lower, value_string).
 #[inline(always)]
 fn parse_kv_trimmed(raw: &str) -> Option<(String, String)> {
     let mut split = raw.splitn(2, '=');
     let k = split.next()?.trim();
     let v = split.next()?.trim();
-    if k.is_empty() { return None; }
+    if k.is_empty() {
+        return None;
+    }
     Some((as_lower(k), v.to_string()))
 }
 
-/// Parse LINE row with *raw* RHS preserved (no trim). Case-insensitive `line`.
+/// Parse LINE row with *raw* RHS preserved (no trim). Case-insensitive line.
+/// Allocation-free; returns borrowed rhs slice.
 #[inline(always)]
+#[must_use]
 fn parse_line_entry_raw(raw: &str) -> Option<(u32, &str)> {
     let eq = raw.find('=')?;
-    let (lhs, rhs) = raw.split_at(eq);
-    let rhs = &rhs[1..]; // skip '='
-    let lhs = lhs.trim_start();
+    let (lhs, rhs0) = raw.split_at(eq);
+    let rhs = &rhs0[1..]; // skip '='
 
-    // Expect: optional spaces, then "line" (any case), spaces, then digits
-    let mut it = lhs.chars().peekable();
-    while matches!(it.peek(), Some(c) if c.is_whitespace()) { it.next(); }
-    let mut buf = String::new();
-    for _ in 0..4 { buf.push(it.next()?); }
-    if buf.to_ascii_lowercase() != "line" { return None; }
-    while matches!(it.peek(), Some(c) if c.is_whitespace()) { it.next(); }
-    let num_str: String = it.collect();
-    let row: u32 = num_str.trim().parse().ok()?;
+    // Skip leading spaces on LHS
+    let bytes = lhs.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+
+    // Expect ascii "line"
+    if i + 4 > bytes.len() {
+        return None;
+    }
+    #[inline(always)]
+    fn low(b: u8) -> u8 {
+        b | 0x20
+    } // ascii lowercase
+    if !(low(bytes[i]) == b'l'
+        && low(bytes[i + 1]) == b'i'
+        && low(bytes[i + 2]) == b'n'
+        && low(bytes[i + 3]) == b'e')
+    {
+        return None;
+    }
+    i += 4;
+
+    // Skip spaces, then parse digits
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    let num_str = lhs[i..].trim();
+    let row: u32 = num_str.parse().ok()?;
     Some((row, rhs))
 }
 
@@ -140,6 +170,7 @@ fn parse_line_entry_raw(raw: &str) -> Option<(u32, &str)> {
 /// Strategy: collect all WxH pairs, drop those inside a "(res ...)" span (case-insensitive),
 /// then pick the **last** remaining pair (matches common SM naming like "... 16x16.png").
 #[inline(always)]
+#[must_use]
 pub fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
     let s = filename;
     let bytes = s.as_bytes();
@@ -154,7 +185,9 @@ pub fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
         if lb[i] == b'(' && i + 4 <= n && &lb[i..i + 4] == b"(res" {
             // find closing ')'
             let mut j = i + 4;
-            while j < n && lb[j] != b')' { j += 1; }
+            while j < n && lb[j] != b')' {
+                j += 1;
+            }
             if j < n && lb[j] == b')' {
                 res_spans.push((i, j)); // inclusive
                 i = j + 1;
@@ -165,7 +198,9 @@ pub fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
     }
     let in_res = |idx: usize| -> bool {
         for (a, b) in &res_spans {
-            if idx >= *a && idx <= *b { return true; }
+            if idx >= *a && idx <= *b {
+                return true;
+            }
         }
         false
     };
@@ -177,10 +212,14 @@ pub fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
         if bytes[i] == b'x' || bytes[i] == b'X' {
             // scan left for W
             let mut l = i;
-            while l > 0 && bytes[l - 1].is_ascii_digit() { l -= 1; }
+            while l > 0 && bytes[l - 1].is_ascii_digit() {
+                l -= 1;
+            }
             // scan right for H
             let mut r = i + 1;
-            while r < n && bytes[r].is_ascii_digit() { r += 1; }
+            while r < n && bytes[r].is_ascii_digit() {
+                r += 1;
+            }
             if l < i && i + 1 < r {
                 if let (Ok(ws), Ok(hs)) = (
                     std::str::from_utf8(&bytes[l..i]),
@@ -199,104 +238,165 @@ pub fn parse_sheet_dims_from_filename(filename: &str) -> (u32, u32) {
 
     // 3) Choose the last WxH not inside "(res ...)".
     for (pos, w, h) in pairs.into_iter().rev() {
-        if !in_res(pos) { return (w, h); }
+        if !in_res(pos) {
+            return (w, h);
+        }
     }
-
     (1, 1)
 }
 
 #[inline(always)]
 fn is_doubleres_in_name(name: &str) -> bool {
-    name.to_ascii_lowercase().contains("doubleres")
+    let b = name.as_bytes();
+    // search for "doubleres" case-insensitively without allocation
+    for w in b.windows(9) {
+        #[inline(always)]
+        fn low(x: u8) -> u8 {
+            x | 0x20
+        }
+        if low(w[0]) == b'd'
+            && low(w[1]) == b'o'
+            && low(w[2]) == b'u'
+            && low(w[3]) == b'b'
+            && low(w[4]) == b'l'
+            && low(w[5]) == b'e'
+            && low(w[6]) == b'r'
+            && low(w[7]) == b'e'
+            && low(w[8]) == b's'
+        {
+            return true;
+        }
+    }
+    false
 }
 
-/// `[section]->{key->val}` (both section/key lowercased, value trimmed). Only std.
+/// [section]->{key->val} (both section/key lowercased, value trimmed). Only std.
+/// Allocation-free per line (borrows &str).
+#[inline(always)]
 fn parse_ini_trimmed_map(text: &str) -> HashMap<String, HashMap<String, String>> {
     let mut out: HashMap<String, HashMap<String, String>> = HashMap::new();
     let mut section = String::from("common");
-    for mut line in text.lines().map(|s| s.to_string()) {
-        if line.ends_with('\r') { line.pop(); }
-        if is_full_line_comment(&line) { continue; }
-        if let Some(sec) = parse_section_header(&line) {
+    for raw in text.lines() {
+        let mut line = raw;
+        if let Some(s) = line.strip_suffix('\r') {
+            line = s;
+        }
+        if is_full_line_comment(line) {
+            continue;
+        }
+        if let Some(sec) = parse_section_header(line) {
             section = as_lower(sec.trim());
             continue;
         }
-        if line.trim().is_empty() { continue; }
-        if let Some((k, v)) = parse_kv_trimmed(&line) {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some((k, v)) = parse_kv_trimmed(t) {
             out.entry(section.clone()).or_default().insert(k, v);
         }
     }
     out
 }
 
-/// Harvest raw `line N=...` entries, keeping RHS verbatim (no trim).
+/// Harvest raw line N=... entries, keeping RHS verbatim (no trim).
+/// Allocation-free per line (borrows &str).
+#[inline(always)]
 fn harvest_raw_line_entries_from_text(text: &str) -> HashMap<(String, u32), String> {
     let mut out: HashMap<(String, u32), String> = HashMap::new();
     let mut section = String::from("common");
-    for mut line in text.lines().map(|s| s.to_string()) {
-        if line.ends_with('\r') { line.pop(); }
-        if is_full_line_comment(&line) { continue; }
-        if let Some(sec) = parse_section_header(&line) {
+    for raw in text.lines() {
+        let mut line = raw;
+        if let Some(s) = line.strip_suffix('\r') {
+            line = s;
+        }
+        if is_full_line_comment(line) {
+            continue;
+        }
+        if let Some(sec) = parse_section_header(line) {
             section = as_lower(sec.trim());
             continue;
         }
-        if let Some((row, rhs)) = parse_line_entry_raw(&line) {
+        if let Some((row, rhs)) = parse_line_entry_raw(line) {
             out.insert((section.clone(), row), rhs.to_string());
         }
     }
     out
 }
 
-/// Page name from filename stem: takes text inside first pair of `[...]`, else "main".
+/// Page name from filename stem: takes text inside first pair of [...], else "main".
 #[inline(always)]
 fn get_page_name_from_path(path: &Path) -> String {
     let filename = path.file_stem().unwrap_or_default().to_string_lossy();
     if let (Some(s), Some(e)) = (filename.find('['), filename.find(']')) {
-        if s < e { return filename[s + 1..e].to_string(); }
+        if s < e {
+            return filename[s + 1..e].to_string();
+        }
     }
     "main".to_string()
 }
 
-/// List PNG textures adjacent to INI where name starts with `prefix` (no glob).
+/// List PNG textures adjacent to INI where name starts with prefix (no glob).
 fn list_texture_pages(font_dir: &Path, prefix: &str) -> std::io::Result<Vec<PathBuf>> {
     let mut v = Vec::new();
     for entry in fs::read_dir(font_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if !path.is_file() { continue; }
+        if !path.is_file() {
+            continue;
+        }
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        if !name.to_ascii_lowercase().ends_with(".png") { continue; }
-        if !name.starts_with(prefix) { continue; }
-        if name.contains("-stroke") { continue; }
+        if !name.to_ascii_lowercase().ends_with(".png") {
+            continue;
+        }
+        if !name.starts_with(prefix) {
+            continue;
+        }
+        if name.contains("-stroke") {
+            continue;
+        }
         v.push(path);
     }
     v.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
     Ok(v)
 }
 
-/// Parse `range <codeset> [#start-end]` from a key (key only).
+/// Parse range <codeset> [#start-end] from a key (key only).
 #[inline(always)]
 fn parse_range_key(key: &str) -> Option<(String, Option<(u32, u32)>)> {
     let k = key.trim_start();
-    if !k.to_ascii_lowercase().starts_with("range ") { return None; }
+    if !k.to_ascii_lowercase().starts_with("range ") {
+        return None;
+    }
     let rest = k[6..].trim_start();
     // codeset token ends at whitespace or '#'
     let mut cs_end = rest.len();
     for (i, ch) in rest.char_indices() {
-        if ch.is_whitespace() || ch == '#' { cs_end = i; break; }
+        if ch.is_whitespace() || ch == '#' {
+            cs_end = i;
+            break;
+        }
     }
-    if cs_end == 0 { return None; }
+    if cs_end == 0 {
+        return None;
+    }
     let codeset = &rest[..cs_end];
     let tail = rest[cs_end..].trim_start();
-    if tail.is_empty() { return Some((codeset.to_string(), None)); }
-    if !tail.starts_with('#') { return Some((codeset.to_string(), None)); }
+    if tail.is_empty() {
+        return Some((codeset.to_string(), None));
+    }
+    if !tail.starts_with('#') {
+        return Some((codeset.to_string(), None));
+    }
     let tail = &tail[1..];
     let dash = tail.find('-')?;
     let (a, b) = tail.split_at(dash);
     let b = &b[1..];
     let start = u32::from_str_radix(a.trim(), 16).ok()?;
-    let end   = u32::from_str_radix(b.trim(), 16).ok()?;
-    if end < start { return None; }
+    let end = u32::from_str_radix(b.trim(), 16).ok()?;
+    if end < start {
+        return None;
+    }
     Some((codeset.to_string(), Some((start, end))))
 }
 
@@ -305,11 +405,11 @@ fn parse_range_key(key: &str) -> Option<(String, Option<(u32, u32)>)> {
 #[inline(always)]
 fn fmt_char(ch: char) -> String {
     match ch {
-        ' '        => "SPACE (U+0020)".to_string(),
+        ' ' => "SPACE (U+0020)".to_string(),
         '\u{00A0}' => "NBSP (U+00A0)".to_string(),
-        '\n'       => "\\n (U+000A)".to_string(),
-        '\r'       => "\\r (U+000D)".to_string(),
-        '\t'       => "\\t (U+0009)".to_string(),
+        '\n' => "\\n (U+000A)".to_string(),
+        '\r' => "\\r (U+000D)".to_string(),
+        '\t' => "\\t (U+0009)".to_string(),
         _ if ch.is_control() => format!("U+{:04X}", ch as u32),
         _ => format!("'{}' (U+{:04X})", ch, ch as u32),
     }
@@ -318,7 +418,9 @@ fn fmt_char(ch: char) -> String {
 /* ======================= STEPMania SHEET SCALE HELPERS ======================= */
 
 #[inline(always)]
-fn round_i(v: f32) -> i32 { v.round() as i32 }
+fn round_i(v: f32) -> i32 {
+    v.round() as i32
+}
 
 /// Parse "(res WxH)" from a filename or path (case-insensitive). Returns sheet base res.
 #[inline(always)]
@@ -331,7 +433,9 @@ fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
         if &bytes[i..i + needle.len()] == needle {
             // skip whitespace
             let mut k = i + needle.len();
-            while k < bytes.len() && bytes[k].is_ascii_whitespace() { k += 1; }
+            while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                k += 1;
+            }
             // parse W
             let mut w: u32 = 0;
             let mut h: u32 = 0;
@@ -341,11 +445,18 @@ fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
                 w = w.saturating_mul(10) + (bytes[k] - b'0') as u32;
                 k += 1;
             }
-            while k < bytes.len() && bytes[k].is_ascii_whitespace() { k += 1; }
+            while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                k += 1;
+            }
             // expect 'x'
-            if k >= bytes.len() || bytes[k] != b'x' { i += 1; continue; }
+            if k >= bytes.len() || bytes[k] != b'x' {
+                i += 1;
+                continue;
+            }
             k += 1;
-            while k < bytes.len() && bytes[k].is_ascii_whitespace() { k += 1; }
+            while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                k += 1;
+            }
             // parse H
             let mut have_h = false;
             while k < bytes.len() && bytes[k].is_ascii_digit() {
@@ -353,7 +464,9 @@ fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
                 h = h.saturating_mul(10) + (bytes[k] - b'0') as u32;
                 k += 1;
             }
-            while k < bytes.len() && bytes[k].is_ascii_whitespace() { k += 1; }
+            while k < bytes.len() && bytes[k].is_ascii_whitespace() {
+                k += 1;
+            }
             if have_w && have_h && k < bytes.len() && bytes[k] == b')' && w > 0 && h > 0 {
                 return Some((w, h));
             }
@@ -366,6 +479,7 @@ fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
 /// Compute vertical metrics in texture px, then convert height & line_spacing to draw units.
 /// Returns:
 /// (line_spacing_tex, baseline_tex, top_tex, height_draw, line_spacing_draw, vshift_tex, vshift_draw)
+#[allow(dead_code)]
 #[inline(always)]
 fn compute_vertical_metrics_draw(
     frame_h_i: i32,
@@ -373,41 +487,43 @@ fn compute_vertical_metrics_draw(
     dy: f32,
 ) -> (i32, i32, i32, i32, i32, f32, f32) {
     let frame_h_f = frame_h_i as f32;
-
     let line_spacing_tex = if settings.line_spacing != -1 {
         settings.line_spacing
     } else {
         frame_h_i
     };
-
     let baseline_tex = if settings.baseline != -1 {
         settings.baseline
     } else {
         // SM uses int(center + lineSpacing/2); cast truncates toward zero.
         (frame_h_f * 0.5 + line_spacing_tex as f32 * 0.5) as i32
     };
-
     let top_tex = if settings.top != -1 {
         settings.top
     } else {
         // SM uses int(center - lineSpacing/2)
         (frame_h_f * 0.5 - line_spacing_tex as f32 * 0.5) as i32
     };
-
     let height_tex = baseline_tex - top_tex;
 
     // Convert stored font metrics to logical (draw) units
-    let height_draw       = round_half_to_even_i32((height_tex as f32)       * dy);
+    let height_draw = round_half_to_even_i32((height_tex as f32) * dy);
     let line_spacing_draw = round_half_to_even_i32((line_spacing_tex as f32) * dy);
 
     // vshift (offset.y) stored per-glyph; keep both forms
-    let vshift_tex  = -(baseline_tex as f32);
+    let vshift_tex = -(baseline_tex as f32);
     let vshift_draw = vshift_tex * dy;
 
     trace!(
-        "    VMetrics: tex(line_spacing={}, baseline={}, top={}, height={}) -> draw(height={}, line_spacing={}), vshift_tex={:.1}, vshift_draw={:.3}",
-        line_spacing_tex, baseline_tex, top_tex, height_tex,
-        height_draw, line_spacing_draw, vshift_tex, vshift_draw
+        " VMetrics: tex(line_spacing={}, baseline={}, top={}, height={}) -> draw(height={}, line_spacing={}), vshift_tex={:.1}, vshift_draw={:.3}",
+        line_spacing_tex,
+        baseline_tex,
+        top_tex,
+        height_tex,
+        height_draw,
+        line_spacing_draw,
+        vshift_tex,
+        vshift_draw
     );
 
     (
@@ -423,8 +539,11 @@ fn compute_vertical_metrics_draw(
 
 /// Round-to-nearest with ties-to-even (banker's rounding), like C's lrint with FE_TONEAREST.
 #[inline(always)]
+#[must_use]
 fn round_half_to_even_i32(v: f32) -> i32 {
-    if !v.is_finite() { return 0; }
+    if !v.is_finite() {
+        return 0;
+    }
     let floor = v.floor();
     let frac = v - floor;
     if frac < 0.5 {
@@ -433,7 +552,11 @@ fn round_half_to_even_i32(v: f32) -> i32 {
         (floor + 1.0) as i32
     } else {
         let f = floor as i32;
-        if (f & 1) == 0 { f } else { f + 1 }
+        if (f & 1) == 0 {
+            f
+        } else {
+            f + 1
+        }
     }
 }
 
@@ -463,7 +586,9 @@ fn apply_range_mapping(
             let (start, end) = hex_range.unwrap_or((0, 0x7F));
             let mut ff = first_frame;
             for cp in start..=end {
-                if let Some(ch) = char::from_u32(cp) { map.insert(ch, ff); }
+                if let Some(ch) = char::from_u32(cp) {
+                    map.insert(ch, ff);
+                }
                 ff += 1;
             }
         }
@@ -471,14 +596,16 @@ fn apply_range_mapping(
             let (start, end) = hex_range.unwrap_or((0, 0xFF));
             let mut ff = first_frame;
             for cp in start..=end {
-                if let Some(ch) = char::from_u32(cp) { map.insert(ch, ff); }
+                if let Some(ch) = char::from_u32(cp) {
+                    map.insert(ch, ff);
+                }
                 ff += 1;
             }
         }
         "numbers" => {
             let numbers_map: &[char] = &[
-                '0','1','2','3','4','5','6','7','8','9',
-                '.',':','-','+','/','x','%',' ',
+                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', ':', '-', '+', '/', 'x', '%',
+                ' ',
             ];
             let (start, end) = hex_range.unwrap_or((0, (numbers_map.len() as u32) - 1));
             let mut ff = first_frame;
@@ -495,6 +622,7 @@ fn apply_range_mapping(
 }
 
 /* ======================= PARSE ======================= */
+
 pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Error>> {
     use std::collections::{HashMap, HashSet};
 
@@ -504,15 +632,16 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         if rel.extension().is_none() {
             rel.set_extension("ini");
         }
+
         // Try Fonts root (parent of the font dir), then sibling of current ini
         let font_dir = base_ini.parent()?;
         let fonts_root = font_dir.parent();
-        let candidates = [
-            fonts_root.map(|r| r.join(&rel)),
-            Some(font_dir.join(&rel)),
-        ];
+
+        let candidates = [fonts_root.map(|r| r.join(&rel)), Some(font_dir.join(&rel))];
         for c in candidates.iter().flatten() {
-            if c.is_file() { return Some(c.clone()); }
+            if c.is_file() {
+                return Some(c.clone());
+            }
         }
         None
     }
@@ -522,12 +651,20 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         for (_sec, map) in ini_map_lower {
             if let Some(v) = map.get("import") {
                 // allow comma/semicolon separated or single value
-                for s in v.split(&[',',';'][..]).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                for s in v
+                    .split(&[',', ';'][..])
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
                     specs.push(s.to_string());
                 }
             }
             if let Some(v) = map.get("_imports") {
-                for s in v.split(&[',',';'][..]).map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                for s in v
+                    .split(&[',', ';'][..])
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
                     specs.push(s.to_string());
                 }
             }
@@ -541,7 +678,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
     // ---- original parse begins
     let ini_path = Path::new(ini_path_str);
     let font_dir = ini_path.parent().ok_or("Could not find font directory")?;
-
     let mut ini_text = fs::read_to_string(ini_path_str)?;
     ini_text = strip_bom(ini_text);
 
@@ -560,7 +696,9 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
     let mut imported_once: HashSet<String> = HashSet::new();
 
     for spec in gather_import_specs(&ini_map_lower) {
-        if !imported_once.insert(spec.clone()) { continue; }
+        if !imported_once.insert(spec.clone()) {
+            continue;
+        }
         if let Some(import_ini) = resolve_import_path(ini_path, &spec) {
             match parse(import_ini.to_string_lossy().as_ref()) {
                 Ok(imported) => {
@@ -589,15 +727,14 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         let page_name = get_page_name_from_path(tex_path);
         let tex_dims = image::image_dimensions(tex_path)?;
         let texture_key = assets::canonical_texture_key(tex_path);
-
         required_textures.push(tex_path.to_path_buf());
 
         let (num_frames_wide, num_frames_high) = parse_sheet_dims_from_filename(&texture_key);
         let has_doubleres = is_doubleres_in_name(&texture_key);
         let total_frames = (num_frames_wide * num_frames_high) as usize;
 
-        let (base_tex_w, base_tex_h) = parse_base_res_from_filename(&texture_key)
-            .unwrap_or((tex_dims.0, tex_dims.1));
+        let (base_tex_w, base_tex_h) =
+            parse_base_res_from_filename(&texture_key).unwrap_or((tex_dims.0, tex_dims.1));
 
         // authored metrics parity w/ StepMania
         let mut authored_tex_w = base_tex_w;
@@ -606,12 +743,11 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             authored_tex_w = (authored_tex_w / 2).max(1);
             authored_tex_h = (authored_tex_h / 2).max(1);
         }
-
         let frame_w_i = (authored_tex_w / num_frames_wide) as i32;
         let frame_h_i = (authored_tex_h / num_frames_high) as i32;
 
         info!(
-            "  Page '{}', Texture: '{}' -> Authored Grid: {}x{} (frame {}x{} px)",
+            " Page '{}', Texture: '{}' -> Authored Grid: {}x{} (frame {}x{} px)",
             page_name, texture_key, num_frames_wide, num_frames_high, frame_w_i, frame_h_i
         );
 
@@ -621,21 +757,38 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         if page_name == "main" {
             sections_to_check.push("char widths".to_string());
         }
-
         for section in &sections_to_check {
             if let Some(map) = ini_map_lower.get(section) {
                 let get_int = |k: &str| -> Option<i32> { map.get(k).and_then(|s| s.parse().ok()) };
                 let get_f32 = |k: &str| -> Option<f32> { map.get(k).and_then(|s| s.parse().ok()) };
 
-                if let Some(n) = get_int("drawextrapixelsleft")   { settings.draw_extra_pixels_left = n; }
-                if let Some(n) = get_int("drawextrapixelsright")  { settings.draw_extra_pixels_right = n; }
-                if let Some(n) = get_int("addtoallwidths")        { settings.add_to_all_widths = n; }
-                if let Some(n) = get_f32("scaleallwidthsby")      { settings.scale_all_widths_by = n; }
-                if let Some(n) = get_int("linespacing")           { settings.line_spacing = n; }
-                if let Some(n) = get_int("top")                   { settings.top = n; }
-                if let Some(n) = get_int("baseline")              { settings.baseline = n; }
-                if let Some(n) = get_int("defaultwidth")          { settings.default_width = n; }
-                if let Some(n) = get_int("advanceextrapixels")    { settings.advance_extra_pixels = n; }
+                if let Some(n) = get_int("drawextrapixelsleft") {
+                    settings.draw_extra_pixels_left = n;
+                }
+                if let Some(n) = get_int("drawextrapixelsright") {
+                    settings.draw_extra_pixels_right = n;
+                }
+                if let Some(n) = get_int("addtoallwidths") {
+                    settings.add_to_all_widths = n;
+                }
+                if let Some(n) = get_f32("scaleallwidthsby") {
+                    settings.scale_all_widths_by = n;
+                }
+                if let Some(n) = get_int("linespacing") {
+                    settings.line_spacing = n;
+                }
+                if let Some(n) = get_int("top") {
+                    settings.top = n;
+                }
+                if let Some(n) = get_int("baseline") {
+                    settings.baseline = n;
+                }
+                if let Some(n) = get_int("defaultwidth") {
+                    settings.default_width = n;
+                }
+                if let Some(n) = get_int("advanceextrapixels") {
+                    settings.advance_extra_pixels = n;
+                }
 
                 for (key, val) in map {
                     if let Ok(frame_idx) = key.parse::<usize>() {
@@ -648,19 +801,35 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         }
 
         trace!(
-            "  [{}] settings(authored): draw_extra L={} R={}, add_to_all_widths={}, scale_all_widths_by={:.3}, \
+            " [{}] settings(authored): draw_extra L={} R={}, add_to_all_widths={}, scale_all_widths_by={:.3}, \
              line_spacing={}, top={}, baseline={}, default_width={}, advance_extra_pixels={}",
-            page_name, settings.draw_extra_pixels_left, settings.draw_extra_pixels_right,
-            settings.add_to_all_widths, settings.scale_all_widths_by, settings.line_spacing,
-            settings.top, settings.baseline, settings.default_width, settings.advance_extra_pixels
+            page_name,
+            settings.draw_extra_pixels_left,
+            settings.draw_extra_pixels_right,
+            settings.add_to_all_widths,
+            settings.scale_all_widths_by,
+            settings.line_spacing,
+            settings.top,
+            settings.baseline,
+            settings.default_width,
+            settings.advance_extra_pixels
         );
         trace!(
-            "  [{}] frames: {}x{} (frame_w={} frame_h={}), total_frames={}",
-            page_name, num_frames_wide, num_frames_high, frame_w_i, frame_h_i, total_frames
+            " [{}] frames: {}x{} (frame_w={} frame_h={}), total_frames={}",
+            page_name,
+            num_frames_wide,
+            num_frames_high,
+            frame_w_i,
+            frame_h_i,
+            total_frames
         );
 
         // vertical metrics (authored)
-        let line_spacing_authored = if settings.line_spacing != -1 { settings.line_spacing } else { frame_h_i };
+        let line_spacing_authored = if settings.line_spacing != -1 {
+            settings.line_spacing
+        } else {
+            frame_h_i
+        };
         let baseline_authored = if settings.baseline != -1 {
             settings.baseline
         } else {
@@ -679,8 +848,12 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         }
 
         trace!(
-            "    VMetrics(authored): line_spacing={}, baseline={}, top={}, height={}, vshift={:.1}",
-            line_spacing_authored, baseline_authored, top_authored, height_authored, vshift_authored
+            " VMetrics(authored): line_spacing={}, baseline={}, top={}, height={}, vshift={:.1}",
+            line_spacing_authored,
+            baseline_authored,
+            top_authored,
+            height_authored,
+            vshift_authored
         );
 
         // mapping char → frame (SM spill across row up to total_frames)
@@ -690,17 +863,24 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             if let Some(map) = ini_map_lower.get(&sec_lc) {
                 for (raw_key_lc, val_str) in map {
                     let key_lc = raw_key_lc.as_str();
-
                     if key_lc.starts_with("line ") {
                         if let Ok(row) = key_lc[5..].trim().parse::<u32>() {
-                            if row >= num_frames_high { continue; }
+                            if row >= num_frames_high {
+                                continue;
+                            }
                             let first_frame = (row * num_frames_wide) as usize;
+
                             let line_val = raw_line_map
                                 .get(&(sec_lc.clone(), row))
                                 .map_or(val_str.as_str(), |s| s.as_str());
+
                             for (i, ch) in line_val.chars().enumerate() {
                                 let idx = first_frame + i;
-                                if idx < total_frames { char_to_frame.insert(ch, idx); } else { break; }
+                                if idx < total_frames {
+                                    char_to_frame.insert(ch, idx);
+                                } else {
+                                    break;
+                                }
                             }
                         }
                     } else if key_lc.starts_with("map ") {
@@ -709,12 +889,16 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                             if let Some(hex) = spec.strip_prefix("U+").or_else(|| spec.strip_prefix("u+")) {
                                 if let Ok(cp) = u32::from_str_radix(hex, 16) {
                                     if let Some(ch) = char::from_u32(cp) {
-                                        if frame_index < total_frames { char_to_frame.insert(ch, frame_index); }
+                                        if frame_index < total_frames {
+                                            char_to_frame.insert(ch, frame_index);
+                                        }
                                     }
                                 }
                             } else if spec.starts_with('"') && spec.ends_with('"') && spec.len() >= 2 {
                                 for ch in spec[1..spec.len() - 1].chars() {
-                                    if frame_index < total_frames { char_to_frame.insert(ch, frame_index); }
+                                    if frame_index < total_frames {
+                                        char_to_frame.insert(ch, frame_index);
+                                    }
                                 }
                             }
                         }
@@ -728,6 +912,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 }
             }
         }
+
         apply_space_nbsp_symmetry(&mut char_to_frame);
 
         if page_name != "common" && char_to_frame.is_empty() {
@@ -739,12 +924,19 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             }
         }
 
-        debug!("Page '{}' mapped {} chars (frames={}).", page_name, char_to_frame.len(), total_frames);
+        debug!(
+            "Page '{}' mapped {} chars (frames={}).",
+            page_name,
+            char_to_frame.len(),
+            total_frames
+        );
 
         // SM extra pixels (+1/+1, left forced even)
         let mut draw_left = settings.draw_extra_pixels_left + 1;
         let mut draw_right = settings.draw_extra_pixels_right + 1;
-        if draw_left % 2 != 0 { draw_left += 1; }
+        if draw_left % 2 != 0 {
+            draw_left += 1;
+        }
 
         for i in 0..total_frames {
             let base_w_ini = if let Some(&w) = settings.glyph_widths.get(&i) {
@@ -754,28 +946,32 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             } else {
                 frame_w_i
             };
-            let base_w_scaled = round_half_to_even_i32((base_w_ini + settings.add_to_all_widths) as f32 * settings.scale_all_widths_by);
-
+            let base_w_scaled = round_half_to_even_i32(
+                (base_w_ini + settings.add_to_all_widths) as f32 * settings.scale_all_widths_by,
+            );
             let hadvance = base_w_scaled + settings.advance_extra_pixels;
 
             let mut width_i = base_w_scaled;
             let mut chop_i = frame_w_i - width_i;
-            if chop_i < 0 { chop_i = 0; }
+            if chop_i < 0 {
+                chop_i = 0;
+            }
             if (chop_i & 1) != 0 {
                 chop_i -= 1;
                 width_i += 1; // odd-chop quirk
             }
-
             let pad_i = (chop_i / 2).max(0);
-            let mut extra_left_i  = draw_left.min(pad_i);
+
+            let mut extra_left_i = draw_left.min(pad_i);
             let mut extra_right_i = draw_right.min(pad_i);
             if width_i <= 0 {
-                extra_left_i = 0; extra_right_i = 0;
+                extra_left_i = 0;
+                extra_right_i = 0;
             }
 
-            let glyph_size   = [(width_i + extra_left_i + extra_right_i) as f32, frame_h_i as f32];
+            let glyph_size = [(width_i + extra_left_i + extra_right_i) as f32, frame_h_i as f32];
             let glyph_offset = [-(extra_left_i as f32), vshift_authored];
-            let advance      = hadvance as f32;
+            let advance = hadvance as f32;
 
             // texture rect in actual pixels
             let actual_frame_w_i = (tex_dims.0 / num_frames_wide) as i32;
@@ -783,20 +979,21 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             let col_i = (i as u32 % num_frames_wide) as i32;
             let row_i = (i as u32 / num_frames_wide) as i32;
 
-            let authored_to_actual_ratio =
-                if frame_w_i > 0 { actual_frame_w_i as f32 / frame_w_i as f32 } else { 1.0 };
-            let tex_chop_off_i   = (chop_i as f32        * authored_to_actual_ratio).round() as i32;
-            let tex_extra_left_i = (extra_left_i as f32  * authored_to_actual_ratio).round() as i32;
-            let tex_extra_right_i= (extra_right_i as f32 * authored_to_actual_ratio).round() as i32;
+            let authored_to_actual_ratio = if frame_w_i > 0 {
+                actual_frame_w_i as f32 / frame_w_i as f32
+            } else {
+                1.0
+            };
+            let tex_chop_off_i = (chop_i as f32 * authored_to_actual_ratio).round() as i32;
+            let tex_extra_left_i = (extra_left_i as f32 * authored_to_actual_ratio).round() as i32;
+            let tex_extra_right_i = (extra_right_i as f32 * authored_to_actual_ratio).round() as i32;
 
-            let left_padding  = tex_chop_off_i / 2;
+            let left_padding = tex_chop_off_i / 2;
             let right_padding = tex_chop_off_i - left_padding;
 
             let frame_left_px = col_i * actual_frame_w_i;
-
-            let tex_rect_left  = frame_left_px + left_padding - tex_extra_left_i;
+            let tex_rect_left = frame_left_px + left_padding - tex_extra_left_i;
             let tex_rect_right = (col_i + 1) * actual_frame_w_i - right_padding + tex_extra_right_i;
-
             let tex_rect = [
                 tex_rect_left as f32,
                 (row_i * actual_frame_h_i) as f32,
@@ -815,12 +1012,26 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
             for (&ch, &frame_idx) in &char_to_frame {
                 if frame_idx == i {
                     trace!(
-                        "  [{}] GLYPH {} -> frame {} | width_i={} hadv={} chop={} extraL={} extraR={} \
+                        " [{}] GLYPH {} -> frame {} | width_i={} hadv={} chop={} extraL={} extraR={} \
                          size=[{:.3}x{:.3}] offset=[{:.3},{:.3}] advance={:.3} \
                          tex_rect=[{:.1},{:.1},{:.1},{:.1}]",
-                        page_name, fmt_char(ch), i, width_i, hadvance, chop_i, extra_left_i, extra_right_i,
-                        glyph.size[0], glyph.size[1], glyph.offset[0], glyph.offset[1], glyph.advance,
-                        tex_rect[0], tex_rect[1], tex_rect[2], tex_rect[3],
+                        page_name,
+                        fmt_char(ch),
+                        i,
+                        width_i,
+                        hadvance,
+                        chop_i,
+                        extra_left_i,
+                        extra_right_i,
+                        glyph.size[0],
+                        glyph.size[1],
+                        glyph.offset[0],
+                        glyph.offset[1],
+                        glyph.advance,
+                        tex_rect[0],
+                        tex_rect[1],
+                        tex_rect[2],
+                        tex_rect[3],
                     );
                     // local page overrides any previously-imported glyph
                     all_glyphs.insert(ch, glyph.clone());
@@ -829,7 +1040,9 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
             // default glyph from our first page only (not from imports)
             if page_idx == 0 && i == 0 {
-                all_glyphs.entry(FONT_DEFAULT_CHAR).or_insert_with(|| glyph.clone());
+                all_glyphs
+                    .entry(FONT_DEFAULT_CHAR)
+                    .or_insert_with(|| glyph.clone());
             }
         }
     }
@@ -853,17 +1066,29 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
     } else if let Some(g) = font.glyph_map.get(&' ') {
         trace!(
             "SPACE metrics (draw): advance={:.3} size=[{:.3}x{:.3}] offset=[{:.3},{:.3}]",
-            g.advance, g.size[0], g.size[1], g.offset[0], g.offset[1]
+            g.advance,
+            g.size[0],
+            g.size[1],
+            g.offset[0],
+            g.offset[1]
         );
-        debug!("SPACE mapped: draw advance {:.3} (texture='{}')", g.advance, g.texture_key);
+        debug!(
+            "SPACE mapped: draw advance {:.3} (texture='{}')",
+            g.advance, g.texture_key
+        );
     }
 
     info!(
         "--- FINISHED Parsing font '{}' with {} glyphs and {} textures. ---\n",
-        ini_path_str, font.glyph_map.len(), required_textures.len()
+        ini_path_str,
+        font.glyph_map.len(),
+        required_textures.len()
     );
 
-    Ok(FontLoadData { font, required_textures })
+    Ok(FontLoadData {
+        font,
+        required_textures,
+    })
 }
 
 /* ======================= API ======================= */
@@ -872,12 +1097,17 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 #[inline(always)]
 pub fn measure_line_width(font: &Font, text: &str) -> f32 {
     text.chars()
-        .map(|c| font.glyph_map.get(&c).or(font.default_glyph.as_ref()).map_or(0.0, |g| g.advance))
+        .map(|c| {
+            font.glyph_map
+                .get(&c)
+                .or(font.default_glyph.as_ref())
+                .map_or(0.0, |g| g.advance)
+        })
         .sum()
 }
 
 impl Font {
-    /// Wrapper retained for compatibility with existing call sites (e.g. `compose.rs`).
+    /// Wrapper retained for compatibility with existing call sites (e.g., compose.rs).
     #[inline(always)]
     pub fn measure_line_width(&self, text: &str) -> f32 {
         measure_line_width(self, text)
