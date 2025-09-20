@@ -71,10 +71,9 @@ fn estimate_object_count(
                             if c == '\n' {
                                 return false;
                             }
+                            // Count if explicitly mapped OR we have a default glyph.
+                            // (Previously skipped unmapped SPACE; SM still draws advance/default.)
                             let mapped = fm.glyph_map.contains_key(&c);
-                            if c == ' ' && !mapped {
-                                return false;
-                            } // skip unmapped spaces
                             mapped || fm.default_glyph.is_some()
                         })
                         .count();
@@ -744,7 +743,7 @@ fn layout_text(
     // 4) Pixel widths (post-scale), then SM’s QuantizeUp-even in *pixels*
     let line_widths_px: Vec<f32> = logical_line_widths
         .iter()
-        .map(|w| ((*w as f32) * sx).round())
+        .map(|w| lrint_ties_even((*w as f32) * sx))
         .collect();
     let max_line_width_px = line_widths_px.iter().fold(0.0_f32, |a, &b| a.max(b));
     let block_w_px = quantize_up_even_px(max_line_width_px);
@@ -818,9 +817,9 @@ fn layout_text(
             let pen_x_draw = pen_start_x + (pen_ux as f32) * sx;
 
             if draw_quad && quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
-                // No per-glyph X rounding; keep Y rounded
+                // No per-glyph X rounding; keep Y rounded using ties-to-even
                 let quad_x_sm = pen_x_draw + glyph.offset[0] * sx;
-                let quad_y_sm = (baseline_sm + glyph.offset[1] * sy).round();
+                let quad_y_sm = lrint_ties_even(baseline_sm + glyph.offset[1] * sy);
 
                 let center_x = m.left + quad_x_sm + quad_w * 0.5;
                 let center_y = m.top - (quad_y_sm + quad_h * 0.5);

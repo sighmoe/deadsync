@@ -101,8 +101,8 @@ pub fn build(params: ScreenBarParams) -> Actor {
             // Center title (Wendy) uses the same scaling as the top bar
             children.push(act!(text:
                 align(0.5, 0.5):
-                xy(screen_center_x(), 0.5 * BAR_H):
-                zoom(title_scale):
+                xy(screen_center_x(), 16.0):
+                zoom(0.5):
                 z(2):
                 diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
                 font("wendy"): settext(params.title): horizalign(center)

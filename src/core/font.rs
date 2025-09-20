@@ -47,16 +47,16 @@ pub struct FontLoadData {
 
 #[derive(Debug)]
 struct FontPageSettings {
-    draw_extra_pixels_left: i32,
-    draw_extra_pixels_right: i32,
-    add_to_all_widths: i32,
-    scale_all_widths_by: f32,
-    line_spacing: i32, // -1 = “use frame height”
-    top: i32,          // -1 = “center – line_spacing/2”
-    baseline: i32,     // -1 = “center + line_spacing/2”
-    default_width: i32, // -1 = “use frame width”
-    advance_extra_pixels: i32, // SM default is 0
-    glyph_widths: HashMap<usize, i32>,
+    pub(crate) draw_extra_pixels_left: i32,
+    pub(crate) draw_extra_pixels_right: i32,
+    pub(crate) add_to_all_widths: i32,
+    pub(crate) scale_all_widths_by: f32,
+    pub(crate) line_spacing: i32, // -1 = “use frame height”
+    pub(crate) top: i32,          // -1 = “center – line_spacing/2”
+    pub(crate) baseline: i32,     // -1 = “center + line_spacing/2”
+    pub(crate) default_width: i32, // -1 = “use frame width”
+    pub(crate) advance_extra_pixels: i32, // SM default is 0
+    pub(crate) glyph_widths: HashMap<usize, i32>,
 }
 
 impl Default for FontPageSettings {
@@ -563,6 +563,45 @@ fn round_half_to_even_i32(v: f32) -> i32 {
 /* ======================= RANGE APPLY ======================= */
 
 #[inline(always)]
+fn cp1252_to_unicode(byte: u8) -> u32 {
+    match byte {
+        0x80 => 0x20AC, // €
+        0x81 => 0x0081, // undefined (C1)
+        0x82 => 0x201A, // ‚
+        0x83 => 0x0192, // ƒ
+        0x84 => 0x201E, // „
+        0x85 => 0x2026, // …
+        0x86 => 0x2020, // †
+        0x87 => 0x2021, // ‡
+        0x88 => 0x02C6, // ˆ
+        0x89 => 0x2030, // ‰
+        0x8A => 0x0160, // Š
+        0x8B => 0x2039, // ‹
+        0x8C => 0x0152, // Œ
+        0x8D => 0x008D, // undefined (C1)
+        0x8E => 0x017D, // Ž
+        0x8F => 0x008F, // undefined (C1)
+        0x90 => 0x0090, // undefined (C1)
+        0x91 => 0x2018, // ‘
+        0x92 => 0x2019, // ’
+        0x93 => 0x201C, // “
+        0x94 => 0x201D, // ”
+        0x95 => 0x2022, // •
+        0x96 => 0x2013, // –
+        0x97 => 0x2014, // —
+        0x98 => 0x02DC, // ˜
+        0x99 => 0x2122, // ™
+        0x9A => 0x0161, // š
+        0x9B => 0x203A, // ›
+        0x9C => 0x0153, // œ
+        0x9D => 0x009D, // undefined (C1)
+        0x9E => 0x017E, // ž
+        0x9F => 0x0178, // Ÿ
+        _ => byte as u32, // 0x00..0x7F and 0xA0..0xFF map 1:1 to Unicode
+    }
+}
+
+#[inline(always)]
 fn apply_range_mapping(
     map: &mut HashMap<char, usize>,
     codeset: &str,
@@ -596,16 +635,21 @@ fn apply_range_mapping(
             let (start, end) = hex_range.unwrap_or((0, 0xFF));
             let mut ff = first_frame;
             for cp in start..=end {
-                if let Some(ch) = char::from_u32(cp) {
-                    map.insert(ch, ff);
+                if cp <= 0xFF {
+                    let u = cp1252_to_unicode(cp as u8);
+                    if let Some(ch) = char::from_u32(u) {
+                        map.insert(ch, ff);
+                    }
+                    ff += 1;
                 }
-                ff += 1;
             }
         }
         "numbers" => {
+            // Include both 'x' and 'X'; many SM fonts expect upper-case as well.
+            // Also include the multiplication sign × for completeness.
             let numbers_map: &[char] = &[
-                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', ':', '-', '+', '/', 'x', '%',
-                ' ',
+                '0','1','2','3','4','5','6','7','8','9',
+                '.',':','-','+','/','x','X','×','%',' ',
             ];
             let (start, end) = hex_range.unwrap_or((0, (numbers_map.len() as u32) - 1));
             let mut ff = first_frame;
@@ -648,6 +692,8 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
     fn gather_import_specs(ini_map_lower: &HashMap<String, HashMap<String, String>>) -> Vec<String> {
         let mut specs: Vec<String> = Vec::new();
+        // SM implicitly seeds "Common default". We'll add it first; failure is non-fatal.
+        specs.push("Common default".to_string());
         for (_sec, map) in ini_map_lower {
             if let Some(v) = map.get("import") {
                 // allow comma/semicolon separated or single value
@@ -669,9 +715,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 }
             }
         }
-        // SM also seeds "Common default" at top level; if your repo doesn’t ship it, ignore.
-        // You can uncomment to mimic SM’s list seeding:
-        // specs.insert(0, "Common default".to_string());
         specs
     }
 
