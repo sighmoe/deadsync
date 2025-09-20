@@ -6,8 +6,6 @@ use crate::ui::color;
 
 // --- Constants ---
 const BAR_H: f32 = 32.0;
-const SIDE_TEXT_PX: f32 = 15.0;       // bottom bar small text (Miso font)
-const SIDE_TEXT_MARGIN: f32 = 42.0;   // bottom bar small text margin
 
 // --- Positioning for the main title on the top bar when left-aligned ---
 const TOP_TITLE_OFFSET_X: f32 = 10.0;
@@ -108,12 +106,15 @@ pub fn build(params: ScreenBarParams) -> Actor {
                 font("wendy"): settext(params.title): horizalign(center)
             ));
 
-            // Small side texts (Miso) at SIDE_TEXT_PX and SIDE_TEXT_MARGIN
+            // Small side texts (Miso), positioned like Simply Love credits
+            let text_zoom = wide_scale(0.8, 0.9);
+
             if let Some(text) = params.left_text {
+                let margin_x = wide_scale(38.0, 45.0);
                 children.push(act!(text:
-                    align(0.0, 0.5):
-                    xy(SIDE_TEXT_MARGIN, 0.5 * BAR_H):
-                    zoomtoheight(SIDE_TEXT_PX):
+                    align(0.0, 1.0): // horizalign,left; vertalign,bottom
+                    xy(margin_x, BAR_H - 9.0):
+                    zoom(text_zoom):
                     z(2):
                     diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
                     font("miso"): settext(text): horizalign(left)
@@ -121,19 +122,20 @@ pub fn build(params: ScreenBarParams) -> Actor {
             }
             if let Some(text) = params.center_text {
                 children.push(act!(text:
-                    align(0.5, 0.5):
-                    xy(screen_center_x(), 0.5 * BAR_H):
-                    zoomtoheight(SIDE_TEXT_PX):
+                    align(0.5, 1.0): // horizalign,center; vertalign,bottom
+                    xy(screen_center_x(), BAR_H - 9.0):
+                    zoom(text_zoom):
                     z(2):
                     diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
                     font("miso"): settext(text): horizalign(center)
                 ));
             }
             if let Some(text) = params.right_text {
+                let margin_x = wide_scale(38.0, 45.0);
                 children.push(act!(text:
-                    align(1.0, 0.5):
-                    xy(screen_width() - SIDE_TEXT_MARGIN, 0.5 * BAR_H):
-                    zoomtoheight(SIDE_TEXT_PX):
+                    align(1.0, 1.0): // horizalign,right; vertalign,bottom
+                    xy(screen_width() - margin_x, BAR_H - 9.0):
+                    zoom(text_zoom):
                     z(2):
                     diffuse(params.fg_color[0], params.fg_color[1], params.fg_color[2], params.fg_color[3]):
                     font("miso"): settext(text): horizalign(right)
