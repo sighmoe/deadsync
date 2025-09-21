@@ -448,20 +448,19 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         left_text: Some("PerfectTaste"), center_text: None, right_text: Some("NOT PRESENT"),
     }));
 
-    // --- NEW: Calculate frame position and scale based on screen aspect ---
-    let (frame_zoom, frame_x, frame_y) = if is_wide() {
+    // --- BANNER (center-anchored like SL's ActorFrame) ---
+    let (banner_zoom, banner_cx, banner_cy) = if is_wide() {
         (0.7655, screen_center_x() - 170.0, 96.0)
     } else {
-        (0.75, screen_center_x() - 166.0, 96.0)
+        (0.75,   screen_center_x() - 166.0, 96.0) // <- keep -166 like the Lua
     };
 
-    // --- BANNER ---
-    let banner_key_to_draw = &state.current_banner_key;
-    actors.push(act!(sprite(banner_key_to_draw.clone()): 
-        xy(frame_x, frame_y): 
+    actors.push(act!(sprite(state.current_banner_key.clone()):
+        align(0.5, 0.5):                 // <- match SL (center)
+        xy(banner_cx, banner_cy):
         setsize(BANNER_NATIVE_WIDTH, BANNER_NATIVE_HEIGHT):
-        zoom(frame_zoom):
-        z(51) 
+        zoom(banner_zoom):
+        z(51)
     ));
 
     // --- ARTIST / BPM / LENGTH INFO BOX (Verbatim Implementation) ---
