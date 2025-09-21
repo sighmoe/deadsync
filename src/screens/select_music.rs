@@ -929,7 +929,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     // Row 2: Brackets | Total Stream
     add_item(0, 2, "90", "Brackets", None);
     // SL shows "None (0.0%)" for Total Stream when empty
-    add_item(1, 2, "23 (84.2%)", "Total Stream", Some(100.0));
+    add_item(1, 2, "None (0.0%)", "Total Stream", None);
 
     // --- StepsDisplayList (Difficulty Meter Grid, SL parity) ---
     // Center at (_screen.cx - 26, _screen.cy + 67) with a 32x152 background,
