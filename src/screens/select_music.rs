@@ -6,6 +6,7 @@ use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::heart_bg;
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
+use crate::ui::actors::SizeSpec;
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 use std::path::PathBuf;
@@ -15,21 +16,29 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use log::info;
 use std::fs;
 
-/* ---------------------------- transitions ---------------------------- */
-const TRANSITION_IN_DURATION: f32 = 0.5;
-const TRANSITION_OUT_DURATION: f32 = 0.3;
-
+// --- engine imports ---
+use crate::core::space::is_wide;
 use crate::core::song_loading::{SongData, get_song_cache, ChartData, SongPack};
+
 
 #[allow(dead_code)] fn col_music_wheel_box() -> [f32; 4] { color::rgba_hex("#0a141b") }
 #[allow(dead_code)] fn col_pack_header_box() -> [f32; 4] { color::rgba_hex("#4c565d") }
 #[allow(dead_code)] fn col_selected_song_box() -> [f32; 4] { color::rgba_hex("#272f35") }
 #[allow(dead_code)] fn col_selected_pack_header_box() -> [f32; 4] { color::rgba_hex("#5f686e") }
 #[allow(dead_code)] fn col_pink_box() -> [f32; 4] { color::rgba_hex("#ff47b3") }
+
+/* ---------------------------- transitions ---------------------------- */
+const TRANSITION_IN_DURATION: f32 = 0.5;
+const TRANSITION_OUT_DURATION: f32 = 0.3;
+
+// --- THEME LAYOUT CONSTANTS (unscaled, native dimensions) ---
+const BANNER_NATIVE_WIDTH: f32 = 418.0;
+const BANNER_NATIVE_HEIGHT: f32 = 164.0;
+const BAR_H: f32 = 32.0;
+
+// --- Other UI Constants ---
 static UI_BOX_BG_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#1E282F"));
 const MUSIC_WHEEL_TEXT_TARGET_PX: f32 = 15.0;
-const DETAIL_HEADER_TEXT_TARGET_PX: f32 = 22.0;
-const DETAIL_VALUE_TEXT_TARGET_PX: f32 = 15.0;
 const NUM_WHEEL_ITEMS: usize = 13;
 const CENTER_WHEEL_SLOT_INDEX: usize = NUM_WHEEL_ITEMS / 2;
 const SELECTION_ANIMATION_CYCLE_DURATION: f32 = 1.0;
@@ -38,8 +47,6 @@ const PACK_COUNT_RIGHT_PADDING: f32 = 11.0;
 const PACK_COUNT_TEXT_TARGET_PX: f32 = 14.0;
 static DIFFICULTY_DISPLAY_INNER_BOX_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#0f0f0f"));
 pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
-
-// --- NEW CONSTANTS FOR BEHAVIORS ---
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
 const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(250);
 const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(80);
@@ -66,7 +73,6 @@ pub struct State {
     pub current_banner_key: String,
     pub last_requested_chart_hash: Option<String>,
     pub current_graph_key: String,
-    // --- NEW STATE FOR BEHAVIORS ---
     pub active_chord_keys: HashSet<KeyCode>,
     pub last_difficulty_nav_key: Option<KeyCode>,
     pub last_difficulty_nav_time: Option<Instant>,
@@ -76,19 +82,17 @@ pub struct State {
     pub currently_playing_preview_path: Option<PathBuf>,
 }
 
+// ... (init, handle_key_press, update, etc. functions remain unchanged) ...
 /// Helper function to check if a specific difficulty index has a playable chart
 pub(crate) fn is_difficulty_playable(song: &Arc<SongData>, difficulty_index: usize) -> bool {
     if difficulty_index >= DIFFICULTY_NAMES.len() { return false; }
     let target_difficulty_name = DIFFICULTY_NAMES[difficulty_index];
-    // Our parser doesn't expose stepstype, but for now we assume all charts are dance-single.
-    // We check if notes exist.
     song.charts.iter().any(|c| {
         c.difficulty.eq_ignore_ascii_case(target_difficulty_name) && !c.notes.is_empty()
     })
 }
 
 fn find_pack_banner(pack: &SongPack) -> Option<PathBuf> {
-    // We need to determine the pack's directory. We can get it from the first song.
     let Some(first_song) = pack.songs.first() else { return None; };
     let Some(song_folder) = first_song.banner_path.as_ref().and_then(|p| p.parent()) else { return None; };
     let Some(pack_folder_path) = song_folder.parent() else { return None; };
@@ -164,7 +168,6 @@ pub fn init() -> State {
         current_banner_key: "banner1.png".to_string(),
         last_requested_chart_hash: None,
         current_graph_key: "__white".to_string(),
-        // --- INITIALIZE NEW STATE ---
         active_chord_keys: HashSet::new(),
         last_difficulty_nav_key: None,
         last_difficulty_nav_time: None,
@@ -199,13 +202,11 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 
         if !event.repeat {
             let mut combo_action_taken = false;
-            // Chord to collapse pack
             if state.active_chord_keys.contains(&KeyCode::ArrowUp) && state.active_chord_keys.contains(&KeyCode::ArrowDown) {
                 if state.expanded_pack_name.is_some() {
                     info!("Up+Down combo: Collapsing pack.");
                     state.expanded_pack_name = None;
-                    rebuild_displayed_entries(state); // Rebuild is important
-                    // Sound effect would go here
+                    rebuild_displayed_entries(state);
                     combo_action_taken = true;
                 }
             }
@@ -321,7 +322,6 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         state.selection_animation_timer -= SELECTION_ANIMATION_CYCLE_DURATION;
     }
     
-    // Auto-scroll logic
     if let (Some(direction), Some(held_since), Some(last_scrolled_at)) =
         (state.nav_key_held_direction.clone(), state.nav_key_held_since, state.nav_key_last_scrolled_at)
     {
@@ -349,7 +349,6 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         (None, None)
     };
 
-    // --- MUSIC PREVIEW LOGIC ---
     let music_path_for_preview = selected_song.as_ref().and_then(|s| s.music_path.clone());
     if state.currently_playing_preview_path != music_path_for_preview {
         state.currently_playing_preview_path = music_path_for_preview;
@@ -370,8 +369,6 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         }
     }
 
-
-    // Auto-adjust difficulty
     if let Some(song) = &selected_song {
         if !is_difficulty_playable(song, state.selected_difficulty_index) {
             for i in 0..DIFFICULTY_NAMES.len() {
@@ -448,114 +445,554 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         position: ScreenBarPosition::Bottom,
         transparent: false,
         fg_color: [1.0; 4],
-        left_text: Some("PerfectTaste"), center_text: None, right_text: None,
+        left_text: Some("PerfectTaste"), center_text: None, right_text: Some("NOT PRESENT"),
     }));
 
-    const BAR_H: f32 = 32.0;
-    let accent = color::simply_love_rgba(state.active_color_index);
-    let box_w = 373.8;
-    let box_h = 60.0;
-    let box_bottom = screen_height() - BAR_H;
-    let box_top = box_bottom - box_h;
+    // --- NEW: Calculate frame position and scale based on screen aspect ---
+    let (frame_zoom, frame_x, frame_y) = if is_wide() {
+        (0.7655, screen_center_x() - 170.0, 96.0)
+    } else {
+        (0.75, screen_center_x() - 166.0, 96.0)
+    };
 
-    actors.push(act!(quad: align(0.0, 1.0): xy(0.0, box_bottom): zoomto(box_w, box_h): diffuse(accent[0], accent[1], accent[2], 1.0): z(50) ));
-
-    const RATING_BOX_W: f32 = 31.8;
-    const RATING_BOX_H: f32 = 151.8;
-    const STEP_INFO_BOX_W: f32 = 286.2;
-    const STEP_INFO_BOX_H: f32 = 63.6;
-    const GAP: f32 = 1.8;
-    const MARGIN_ABOVE_STATS_BOX: f32 = 5.4;
-    let z_layer = 51;
-    let boxes_bottom_y = box_top - MARGIN_ABOVE_STATS_BOX;
-    let rating_box_right_x = box_w;
-
-    actors.push(act!(quad: align(1.0, 1.0): xy(rating_box_right_x, boxes_bottom_y): zoomto(RATING_BOX_W, RATING_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
-
-    let step_info_box_right_x = rating_box_right_x - RATING_BOX_W - GAP;
-    actors.push(act!(quad: align(1.0, 1.0): xy(step_info_box_right_x, boxes_bottom_y): zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
-    
-    let boxes_top_y = boxes_bottom_y - RATING_BOX_H;
-    let boxes_left_x = step_info_box_right_x - STEP_INFO_BOX_W;
-    let density_graph_top_y = boxes_top_y;
-
-    actors.push(act!(quad:
-        align(0.0, 0.0):
-        xy(boxes_left_x, density_graph_top_y):
-        zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
-        diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0):
-        z(z_layer)
-    ));
-    actors.push(act!(sprite(state.current_graph_key.as_str()):
-        align(0.0, 0.0):
-        xy(boxes_left_x, density_graph_top_y):
-        zoomto(STEP_INFO_BOX_W, STEP_INFO_BOX_H):
-        z(z_layer + 1)
-    ));
-
-    const STEP_ARTIST_BOX_W: f32 = 175.2;
-    const STEP_ARTIST_BOX_H: f32 = 16.8;
-    const GAP_ABOVE_DENSITY: f32 = 1.0;
-    let step_artist_box_color = color::simply_love_rgba(state.active_color_index);
-    let step_artist_box_bottom_y = density_graph_top_y - GAP_ABOVE_DENSITY;
-    actors.push(act!(quad:
-        align(0.0, 1.0):
-        xy(boxes_left_x, step_artist_box_bottom_y):
-        zoomto(STEP_ARTIST_BOX_W, STEP_ARTIST_BOX_H):
-        diffuse(step_artist_box_color[0], step_artist_box_color[1], step_artist_box_color[2], 1.0):
-        z(z_layer)
-    ));
-
-    const BANNER_BOX_W: f32 = 319.8;
-    const BANNER_BOX_H: f32 = 126.0;
-    const GAP_BELOW_TOP_BAR: f32 = 1.0;
-    let banner_box_top_y = BAR_H + GAP_BELOW_TOP_BAR;
-    let banner_box_left_x = boxes_left_x;
-    
-    let selected_entry = state.entries.get(state.selected_index);
+    // --- BANNER ---
     let banner_key_to_draw = &state.current_banner_key;
-    actors.push(act!(sprite(banner_key_to_draw.clone()): align(0.0, 0.0): xy(banner_box_left_x, banner_box_top_y): zoomto(BANNER_BOX_W, BANNER_BOX_H): z(z_layer) ));
+    actors.push(act!(sprite(banner_key_to_draw.clone()): 
+        xy(frame_x, frame_y): 
+        setsize(BANNER_NATIVE_WIDTH, BANNER_NATIVE_HEIGHT):
+        zoom(frame_zoom):
+        z(51) 
+    ));
 
-    let rating_box_left_x = rating_box_right_x - RATING_BOX_W;
-    const INNER_BOX_SIZE: f32 = 28.2;
-    const HORIZONTAL_PADDING: f32 = 1.8;
-    const VERTICAL_GAP: f32 = 1.8;
+    // --- ARTIST / BPM / LENGTH INFO BOX (Verbatim Implementation) ---
+    let (box_width, frame_x, frame_y) = if is_wide() {
+        (320.0, screen_center_x() - 170.0, screen_center_y() - 55.0)
+    } else {
+        (310.0, screen_center_x() - 165.0, screen_center_y() - 55.0)
+    };
 
-    for i in 0..DIFFICULTY_NAMES.len() {
-        let inner_box_x = rating_box_left_x + HORIZONTAL_PADDING;
-        let inner_box_y = boxes_top_y + VERTICAL_GAP + (i as f32 * (INNER_BOX_SIZE + VERTICAL_GAP));
+    // Data for the box
+    let selected_entry = state.entries.get(state.selected_index);
+    let (artist_text, bpm_text, length_text) = if let Some(MusicWheelEntry::Song(song)) = selected_entry {
+        let minutes = song.total_length_seconds / 60;
+        let seconds = song.total_length_seconds % 60;
+        (
+            song.artist.clone(),
+            song.normalized_bpms.clone(),
+            format!("{}:{:02}", minutes, seconds)
+        )
+    } else {
+        // Fallback text for pack headers or empty list
+        ("".to_string(), "".to_string(), "".to_string())
+    };
 
+    let label_color = [0.5, 0.5, 0.5, 1.0];
+    let value_color = [1.0, 1.0, 1.0, 1.0];
+
+    // Build the nested structure manually as per your example.
+    let main_frame = Actor::Frame {
+        align: [0.0, 0.0],
+        offset: [frame_x, frame_y],
+        size: [SizeSpec::Px(box_width), SizeSpec::Px(50.0)],
+        background: None,
+        z: 51,
+        children: vec![
+            // Background Quad
+            {
+                let bg_color = color::rgba_hex("#1e282f");
+                act!(quad:
+                    setsize(box_width, 50.0):
+                    diffuse(bg_color[0], bg_color[1], bg_color[2], bg_color[3])
+                )
+            },
+            // Inner Frame for Text
+            Actor::Frame {
+                align: [0.0, 0.0],
+                offset: [-110.0, -6.0],
+                size: [SizeSpec::Fill, SizeSpec::Fill],
+                background: None,
+                z: 0,
+                children: vec![
+                    act!(text: font("miso"): settext("ARTIST"):
+                        align(1.0, 0.0):
+                        y(-11.0):
+                        zoomtowidth(44.0):
+                        diffuse(label_color[0], label_color[1], label_color[2], label_color[3]):
+                        z(52)
+                    ),
+                    act!(text: font("miso"): settext(artist_text):
+                        align(0.0, 0.0):
+                        xy(5.0, -11.0):
+                        zoomtoheight(15.0):
+                        diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
+                        z(52)
+                    ),
+                    act!(text: font("miso"): settext("BPM"):
+                        align(1.0, 0.0):
+                        y(10.0):
+                        zoomtoheight(15.0): // Using zoomtoheight as maxwidth is not available for labels
+                        diffuse(label_color[0], label_color[1], label_color[2], label_color[3]):
+                        z(52)
+                    ),
+                    act!(text: font("miso"): settext(bpm_text):
+                        align(0.0, 0.5):
+                        xy(5.0, 17.0):
+                        zoomtoheight(15.0): // vertspacing not supported
+                        diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
+                        z(52)
+                    ),
+                    act!(text: font("miso"): settext("LENGTH"):
+                        align(1.0, 0.0):
+                        xy(box_width - 130.0, 10.0):
+                        zoomtoheight(15.0):
+                        diffuse(label_color[0], label_color[1], label_color[2], label_color[3]):
+                        z(52)
+                    ),
+                    act!(text: font("miso"): settext(length_text):
+                        align(0.0, 0.0):
+                        xy(box_width - 125.0, 10.0):
+                        zoomtoheight(15.0):
+                        diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
+                        z(52)
+                    ),
+                ],
+            },
+        ],
+    };
+
+    actors.push(main_frame);
+
+    // --- Get data for the selected chart ---
+        let selected_entry = state.entries.get(state.selected_index);
+        let selected_chart_data = if let Some(MusicWheelEntry::Song(song)) = selected_entry {
+            song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(DIFFICULTY_NAMES[state.selected_difficulty_index])).cloned()
+        } else {
+            None
+        };
+
+        let step_artist_text = selected_chart_data.as_ref().map_or("".to_string(), |c| c.step_artist.clone());
+        let peak_nps_text = selected_chart_data.as_ref().map_or("Peak NPS: --".to_string(), |c| format!("Peak NPS: {:.1}", c.meter)); // Using meter as a placeholder for now
+        let breakdown_text = selected_chart_data.as_ref().map_or("".to_string(), |c| format!("{}", c.meter)); // Placeholder
+
+    // --- Step credit panel (P1, song mode) — placed just above the density graph, no overlap ---
+
+    if is_wide() {
+        // Background quad — center at (cx - 243, Y just above the graph)
         actors.push(act!(quad:
-            align(0.0, 0.0): xy(inner_box_x, inner_box_y): zoomto(INNER_BOX_SIZE, INNER_BOX_SIZE):
-            diffuse(DIFFICULTY_DISPLAY_INNER_BOX_COLOR[0], DIFFICULTY_DISPLAY_INNER_BOX_COLOR[1], DIFFICULTY_DISPLAY_INNER_BOX_COLOR[2], 1.0):
-            z(z_layer + 1)
+            align(0.5, 0.5):
+            xy(
+                screen_center_x() - 243.0,
+                // graph top = cy + 23 - 32  ;  steps center = graph_top - steps_h/2 - 2
+                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
+            ):
+            setsize(175.0, screen_height() / 28.0):
+            z(120):
+            diffuse(
+                color::simply_love_rgba(state.selected_difficulty_index as i32)[0],
+                color::simply_love_rgba(state.selected_difficulty_index as i32)[1],
+                color::simply_love_rgba(state.selected_difficulty_index as i32)[2],
+                1.0
+            )
         ));
 
-        if let Some(MusicWheelEntry::Song(song)) = selected_entry {
-            if is_difficulty_playable(song, i) {
-                if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(DIFFICULTY_NAMES[i])) {
-                    if chart.meter > 0 {
-                        let color_offset = (DIFFICULTY_NAMES.len() - 1 - i) as i32;
-                        let text_color = color::simply_love_rgba(state.active_color_index - color_offset);
-                        const METER_TEXT_PX: f32 = 20.0;
-                        let text_center_x = inner_box_x + 0.5 * INNER_BOX_SIZE;
-                        let text_center_y = inner_box_y + 0.5 * INNER_BOX_SIZE;
-                        actors.push(act!(text:
-                            align(0.5, 0.5): xy(text_center_x, text_center_y): zoomtoheight(METER_TEXT_PX):
-                            font("wendy"): settext(format!("{}", chart.meter)): horizalign(center):
-                            diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(z_layer + 2)
-                        ));
-                    }
-                }
+        // "STEPS" label — left aligned at (cx - 326, same Y as the quad center)
+        actors.push(act!(text:
+            font("miso"):
+            settext("STEPS"):
+            align(0.0, 0.5):
+            xy(
+                screen_center_x() - 326.0,
+                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
+            ):
+            zoom(0.8):
+            zoomtowidth(40.0):
+            z(121):
+            diffuse(0.0, 0.0, 0.0, 1.0)
+        ));
+
+        // Step artist text — left aligned at (cx - 281, same Y as the quad center)
+        actors.push(act!(text:
+            font("miso"):
+            settext(step_artist_text):
+            align(0.0, 0.5):
+            xy(
+                screen_center_x() - 281.0,
+                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
+            ):
+            zoom(0.8):
+            zoomtowidth(124.0):
+            z(121):
+            diffuse(0.0, 0.0, 0.0, 1.0)
+        ));
+    } else {
+        // 4:3 layout — same math, SL X positions for 4:3
+        actors.push(act!(quad:
+            align(0.5, 0.5):
+            xy(
+                screen_center_x() - 233.0,
+                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
+            ):
+            setsize(175.0, screen_height() / 28.0):
+            z(120):
+            diffuse(
+                color::simply_love_rgba(state.selected_difficulty_index as i32)[0],
+                color::simply_love_rgba(state.selected_difficulty_index as i32)[1],
+                color::simply_love_rgba(state.selected_difficulty_index as i32)[2],
+                1.0
+            )
+        ));
+
+        actors.push(act!(text:
+            font("miso"):
+            settext("STEPS"):
+            align(0.0, 0.5):
+            xy(
+                screen_center_x() - 316.0,
+                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
+            ):
+            zoom(0.8):
+            zoomtowidth(40.0):
+            z(121):
+            diffuse(0.0, 0.0, 0.0, 1.0)
+        ));
+
+        actors.push(act!(text:
+            font("miso"):
+            settext(step_artist_text):
+            align(0.0, 0.5):
+            xy(
+                screen_center_x() - 271.0,
+                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
+            ):
+            zoom(0.8):
+            zoomtowidth(124.0):
+            z(121):
+            diffuse(0.0, 0.0, 0.0, 1.0)
+        ));
+    }
+
+    // --- Density graph panel (SL 1:1, Player 1, top-left anchored) ---
+    let density_graph_panel = Actor::Frame {
+        // Top-left corner at the SL-equivalent location:
+        // center at (cx-182 [-5 if wide], cy+23), then subtract half-size.
+        align: [0.0, 0.0],
+        offset: [
+            (screen_center_x() - 182.0 - if is_wide() { 5.0 } else { 0.0 })
+                - 0.5 * (if is_wide() { 286.0 } else { 276.0 }),
+            (screen_center_y() + 23.0) - 0.5 * 64.0,
+        ],
+        size: [SizeSpec::Px(if is_wide() { 286.0 } else { 276.0 }), SizeSpec::Px(64.0)],
+        background: None,
+        z: 51,
+        children: vec![
+            // Background quad (#1e282f), same size as the panel
+            act!(quad:
+                align(0.0, 0.0):
+                xy(0.0, 0.0):
+                setsize( if is_wide() { 286.0 } else { 276.0 }, 64.0 ):
+                diffuse(0.1176, 0.1568, 0.1843, 1.0)
+            ),
+
+            // Density graph image fills the panel
+            act!(sprite(state.current_graph_key.clone()):
+                align(0.0, 0.0):
+                xy(0.0, 0.0):
+                setsize( if is_wide() { 286.0 } else { 276.0 }, 64.0 )
+            ),
+
+            // Peak NPS text: SL uses +60, -41 from the panel center.
+            // Convert to top-left: (width/2 + 60, height/2 - 41).
+            act!(text: font("miso"): settext(peak_nps_text):
+                align(0.0, 0.5):  // left, vertically centered on its own baseline
+                xy(
+                    0.5 * (if is_wide() { 286.0 } else { 276.0 }) + 60.0,
+                    0.5 * 64.0 - 41.0
+                ):
+                zoom(0.8):
+                diffuse(1.0, 1.0, 1.0, 1.0)
+            ),
+
+            // Breakdown bar: SL places center at y = +23.5 from the panel center.
+            // Convert to top-left: y = height/2 + 23.5 = 55.5
+            // Draw the bar background and centered text.
+            act!(quad:
+                align(0.0, 0.0):
+                xy(0.0, 64.0 - 17.0):      // bottom-aligned strip (64 - 17)
+                setsize( if is_wide() { 286.0 } else { 276.0 }, 17.0 ):
+                diffuse(0.0, 0.0, 0.0, 0.5)
+            ),
+            act!(text: font("miso"): settext(breakdown_text):
+                align(0.5, 0.5):            // centered within the bar
+                xy(
+                    0.5 * (if is_wide() { 286.0 } else { 276.0 }),
+                    64.0 - 17.0 + 8.5       // center of the 17px-tall bar
+                ):
+                zoom(0.8):
+                zoomtoheight(15):
+                zoomtowidth( (if is_wide() { 286.0 } else { 276.0 }) / 0.8 )
+            ),
+        ],
+    };
+    actors.push(density_graph_panel);
+
+    // --- PaneDisplay (P1) just above footer — absolute placement, SL 1:1 layout ---
+
+    // pane anchor (center-top), same as SL
+    let pane_cx = screen_width() * 0.25 - 5.0;
+    let pane_top = screen_height() - 32.0 - 60.0;
+
+    // background bar — spans half-screen minus 10, height 60
+    actors.push(act!(quad:
+        align(0.5, 0.0):
+        xy(pane_cx, pane_top):
+        setsize(screen_width() / 2.0 - 10.0, 60.0):
+        z(120):
+        diffuse(
+            color::simply_love_rgba(state.selected_difficulty_index as i32)[0],
+            color::simply_love_rgba(state.selected_difficulty_index as i32)[1],
+            color::simply_love_rgba(state.selected_difficulty_index as i32)[2],
+            1.0
+        )
+    ));
+
+    // grid metrics (Straight from SL)
+    let text_zoom = if is_wide() { 0.9 } else { 0.8 };
+    let col1_x = if is_wide() { -133.0 } else { -104.0 };
+    let col2_x = if is_wide() {  -38.0 } else {  -36.0 };
+    let row1_y = 13.0;
+    let row2_y = 31.0;
+    let row3_y = 49.0;
+
+    // ---------- Row 1: Taps, Mines ----------
+    actors.push(act!(text: font("miso"): settext("432"):
+        align(1.0, 0.5):
+        xy(pane_cx + col1_x, pane_top + row1_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+    actors.push(act!(text: font("miso"): settext("Steps"):
+        align(0.0, 0.5):
+        xy(pane_cx + col1_x + 3.0, pane_top + row1_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+
+    actors.push(act!(text: font("miso"): settext("12"):
+        align(1.0, 0.5):
+        xy(pane_cx + col2_x, pane_top + row1_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+    actors.push(act!(text: font("miso"): settext("Mines"):
+        align(0.0, 0.5):
+        xy(pane_cx + col2_x + 3.0, pane_top + row1_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+
+    // ---------- Row 2: Jumps, Hands ----------
+    actors.push(act!(text: font("miso"): settext("38"):
+        align(1.0, 0.5):
+        xy(pane_cx + col1_x, pane_top + row2_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+    actors.push(act!(text: font("miso"): settext("Jumps"):
+        align(0.0, 0.5):
+        xy(pane_cx + col1_x + 3.0, pane_top + row2_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+
+    actors.push(act!(text: font("miso"): settext("5"):
+        align(1.0, 0.5):
+        xy(pane_cx + col2_x, pane_top + row2_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+    actors.push(act!(text: font("miso"): settext("Hands"):
+        align(0.0, 0.5):
+        xy(pane_cx + col2_x + 3.0, pane_top + row2_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+
+    // ---------- Row 3: Holds, Rolls ----------
+    actors.push(act!(text: font("miso"): settext("22"):
+        align(1.0, 0.5):
+        xy(pane_cx + col1_x, pane_top + row3_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+    actors.push(act!(text: font("miso"): settext("Holds"):
+        align(0.0, 0.5):
+        xy(pane_cx + col1_x + 3.0, pane_top + row3_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+
+    actors.push(act!(text: font("miso"): settext("0"):
+        align(1.0, 0.5):
+        xy(pane_cx + col2_x, pane_top + row3_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+    actors.push(act!(text: font("miso"): settext("Rolls"):
+        align(0.0, 0.5):
+        xy(pane_cx + col2_x + 3.0, pane_top + row3_y):
+        zoom(text_zoom):
+        z(121):
+        diffuse(0.0, 0.0, 0.0, 1.0)
+    ));
+
+    // --- Pattern Info (P1) — absolute placement, SL layout, static values ---
+
+    // density graph center (from SL): (cx-182, cy+23) with -5px extra on wide
+    let pat_cx = screen_center_x() - 182.0 - if is_wide() { 5.0 } else { 0.0 };
+    let pat_cy = screen_center_y() + 23.0 + 88.0; // PatternInfo sits 88px below graph center
+
+    let pat_w = if is_wide() { 286.0 } else { 276.0 };
+    let pat_h = 64.0;
+
+    // background
+    actors.push(act!(quad:
+        align(0.5, 0.5):
+        xy(pat_cx, pat_cy):
+        setsize(pat_w, pat_h):
+        z(120):
+        diffuse(0.1176, 0.1568, 0.1843, 1.0) // #1e282f
+    ));
+
+    // grid baseline (relative to panel center, converted to absolute)
+    let base_val_x   = pat_cx - pat_w * 0.5 + 40.0; // values (right-aligned)
+    let base_label_x = pat_cx - pat_w * 0.5 + 50.0; // labels (left-aligned, +10)
+    let base_y       = pat_cy - pat_h * 0.5 + 13.0;
+
+    let col_spacing = 150.0;
+    let row_spacing = 20.0;
+    let text_zoom   = 0.8;
+
+    // helper macro-ish closure for one cell (value + label)
+    let mut add_item = |col_idx: i32, row_idx: i32, value_text: &str, label_text: &str, max_label_w: Option<f32>| {
+        let x_val   = base_val_x   + (col_idx as f32) * col_spacing;
+        let x_label = base_label_x + (col_idx as f32) * col_spacing;
+        let y       = base_y       + (row_idx as f32) * row_spacing;
+
+        // value
+        actors.push(act!(text: font("miso"): settext(value_text):
+            align(1.0, 0.5):
+            xy(x_val, y):
+            zoom(text_zoom):
+            z(121):
+            diffuse(1.0, 1.0, 1.0, 1.0)
+        ));
+        // label
+        let mut label = act!(text: font("miso"): settext(label_text):
+            align(0.0, 0.5):
+            xy(x_label, y):
+            zoom(text_zoom):
+            z(121):
+            diffuse(1.0, 1.0, 1.0, 1.0)
+        );
+        if let Some(maxw) = max_label_w {
+            // clamp if you want; SL sometimes maxwidths here
+            label = act!(text: font("miso"): settext(label_text):
+                align(0.0, 0.5):
+                xy(x_label, y):
+                zoom(text_zoom):
+                zoomtowidth(maxw):
+                z(121):
+                diffuse(1.0, 1.0, 1.0, 1.0)
+            );
+        }
+        actors.push(label);
+    };
+
+    // Row 0: Crossovers | Footswitches
+    add_item(0, 0, "69", "Crossovers", None);
+    add_item(1, 0, "64", "Footswitches", None);
+
+    // Row 1: Sideswitches | Jacks
+    add_item(0, 1, "123", "Sideswitches", None);
+    add_item(1, 1, "124", "Jacks", None);
+
+    // Row 2: Brackets | Total Stream
+    add_item(0, 2, "90", "Brackets", None);
+    // SL shows "None (0.0%)" for Total Stream when empty
+    add_item(1, 2, "23 (84.2%)", "Total Stream", Some(100.0));
+
+    // --- StepsDisplayList (Difficulty Meter Grid, SL parity) ---
+    // Center at (_screen.cx - 26, _screen.cy + 67) with a 32x152 background,
+    // five 28x28 squares spaced by 2px.
+
+    let panel_cx = screen_center_x() - 26.0;
+    let panel_cy = screen_center_y() + 67.0;
+
+    // Background panel (#1e282f), 32x152
+    actors.push(act!(quad:
+        align(0.5, 0.5):
+        xy(panel_cx, panel_cy):
+        setsize(32.0, 152.0):
+        z(120):
+        diffuse(0.1176, 0.1568, 0.1843, 1.0) // #1e282f
+    ));
+
+    // Prepare meters per difficulty (Beginner..Challenge)
+    let mut meters: [Option<i32>; 5] = [None, None, None, None, None];
+    if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
+        for (i, name) in DIFFICULTY_NAMES.iter().enumerate() {
+            if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(name)) {
+                meters[i] = Some(chart.meter as i32);
             }
         }
     }
 
-    const BPM_BOX_H: f32 = 49.8;
-    const GAP_BELOW_BANNER: f32 = 1.0;
-    let bpm_box_top_y = banner_box_top_y + BANNER_BOX_H + GAP_BELOW_BANNER;
-    actors.push(act!(quad: align(0.0, 0.0): xy(banner_box_left_x, bpm_box_top_y): zoomto(BANNER_BOX_W, BPM_BOX_H): diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], 1.0): z(z_layer) ));
+    // Draw five rows: RowNumber = -2..2  (centered list)
+    for (row_num, row_i) in (-2..=2).zip(0..5) {
+        let y_off = (28.0 + 2.0) * (row_num as f32); // -60, -30, 0, +30, +60
 
+        // Square background (#0f0f0f), 28x28
+        actors.push(act!(quad:
+            align(0.5, 0.5):
+            xy(panel_cx, panel_cy + y_off):
+            setsize(28.0, 28.0):
+            z(121):
+            diffuse(0.0588, 0.0588, 0.0588, 1.0) // #0f0f0f
+        ));
+
+        // Meter text, centered, zoom 0.45
+        let (r, g, b, a) = if meters[row_i].is_some() {
+            let c = color::simply_love_rgba(row_i as i32);
+            (c[0], c[1], c[2], 1.0) // difficulty color
+        } else {
+            // dim when no chart: #182025
+            (0.0941, 0.1255, 0.1451, 1.0)
+        };
+        let meter_text = meters[row_i].map(|m| m.to_string()).unwrap_or_else(|| "".to_string());
+
+        actors.push(act!(text:
+            font("wendy"):
+            settext(meter_text):
+            align(0.5, 0.5):                   // centered in the square
+            xy(panel_cx, panel_cy + y_off):
+            zoom(0.45):
+            z(122):
+            diffuse(r, g, b, a)
+        ));
+    }
+
+    // --- MUSIC WHEEL (remains anchored to screen edges, unaffected by the frame) ---
     const WHEEL_W: f32 = 352.8;
     const WHEEL_ITEM_GAP: f32 = 1.0;
     let wheel_right_x = screen_width();
@@ -596,24 +1033,20 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     }
                 } else { ("".to_string(), col_music_wheel_box(), [1.0; 4], wheel_left_x, None) }
             } else { ("".to_string(), col_music_wheel_box(), [1.0; 4], wheel_left_x, None) };
-            actors.push(act!(quad: align(0.0, 0.0): xy(wheel_left_x, item_top_y): zoomto(WHEEL_W, item_h): diffuse(box_color[0], box_color[1], box_color[2], 1.0): z(z_layer) ));
+            actors.push(act!(quad: align(0.0, 0.0): xy(wheel_left_x, item_top_y): zoomto(WHEEL_W, item_h): diffuse(box_color[0], box_color[1], box_color[2], 1.0): z(51) ));
             let is_pack = song_count.is_some();
             if is_pack {
-                actors.push(act!(text: align(0.5, 0.5): xy(text_x_pos, item_top_y + 0.5 * item_h): zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX): font("miso"): settext(display_text): horizalign(center): diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(z_layer + 1) ));
+                actors.push(act!(text: align(0.5, 0.5): xy(text_x_pos, item_top_y + 0.5 * item_h): zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX): font("miso"): settext(display_text): horizalign(center): diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(52) ));
             } else {
-                actors.push(act!(text: align(0.0, 0.5): xy(text_x_pos, item_top_y + 0.5 * item_h): zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX): font("miso"): settext(display_text): horizalign(left): diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(z_layer + 1) ));
+                actors.push(act!(text: align(0.0, 0.5): xy(text_x_pos, item_top_y + 0.5 * item_h): zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX): font("miso"): settext(display_text): horizalign(left): diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(52) ));
             }
             if let Some(count) = song_count {
                 if count > 0 {
-                    actors.push(act!(text: align(1.0, 0.5): xy(wheel_right_x - PACK_COUNT_RIGHT_PADDING, item_top_y + 0.5 * item_h): zoomtoheight(PACK_COUNT_TEXT_TARGET_PX): font("miso"): settext(format!("{}", count)): horizalign(right): diffuse(1.0, 1.0, 1.0, 0.8): z(z_layer + 1) ));
+                    actors.push(act!(text: align(1.0, 0.5): xy(wheel_right_x - PACK_COUNT_RIGHT_PADDING, item_top_y + 0.5 * item_h): zoomtoheight(PACK_COUNT_TEXT_TARGET_PX): font("miso"): settext(format!("{}", count)): horizalign(right): diffuse(1.0, 1.0, 1.0, 0.8): z(52) ));
                 }
             }
         }
     }
-
-    let pad_x = 10.0;
-    let pad_y = 8.0;
-    actors.push(act!(text: align(0.0, 0.0): xy(pad_x, box_top + pad_y): zoomtoheight(15.0): font("miso"): settext("STEP STATS"): horizalign(left): diffuse(1.0, 1.0, 1.0, 1.0): z(51) ));
 
     actors
 }
