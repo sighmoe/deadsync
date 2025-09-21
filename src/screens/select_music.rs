@@ -39,7 +39,7 @@ const BAR_H: f32 = 32.0;
 // --- Other UI Constants ---
 static UI_BOX_BG_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#1E282F"));
 const MUSIC_WHEEL_TEXT_TARGET_PX: f32 = 15.0;
-const NUM_WHEEL_ITEMS: usize = 13;
+const NUM_WHEEL_ITEMS: usize = 17;
 const CENTER_WHEEL_SLOT_INDEX: usize = NUM_WHEEL_ITEMS / 2;
 const SELECTION_ANIMATION_CYCLE_DURATION: f32 = 1.0;
 const SONG_TEXT_LEFT_PADDING: f32 = 66.0;
@@ -992,57 +992,109 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ));
     }
 
-    // --- MUSIC WHEEL (remains anchored to screen edges, unaffected by the frame) ---
-    const WHEEL_W: f32 = 352.8;
-    const WHEEL_ITEM_GAP: f32 = 1.0;
-    let wheel_right_x = screen_width();
-    let wheel_left_x = wheel_right_x - WHEEL_W;
-    let content_area_y_start = BAR_H;
-    let content_area_y_end = screen_height() - BAR_H;
-    let total_available_h = content_area_y_end - content_area_y_start;
-    let total_gap_h = (NUM_WHEEL_ITEMS + 1) as f32 * WHEEL_ITEM_GAP;
-    let total_items_h = total_available_h - total_gap_h;
-    let item_h = total_items_h / NUM_WHEEL_ITEMS as f32;
-    let anim_t_unscaled = (state.selection_animation_timer / SELECTION_ANIMATION_CYCLE_DURATION) * std::f32::consts::PI * 2.0;
+    // --- MUSIC WHEEL (tight gap + full-bleed right edge + SL text anchors) ---
+
+    // SL text anchors
+    let song_title_x = screen_center_x() + if is_wide() { 104.0 } else { 65.0 };  // songs
+    let pack_title_x = screen_center_x() + if is_wide() { 204.0 } else { 150.0 }; // packs
+
+    // Derive left edge from song title X and your 66px padding; right edge = screen right
+    let wheel_left_x = song_title_x - SONG_TEXT_LEFT_PADDING;  // 66px left padding for song titles
+    let right_edge   = screen_width();                          // full bleed
+    let wheel_w      = right_edge - wheel_left_x;
+
+    // Spacing & row height (smaller gap)
+    let slot_spacing = screen_height() / 15.0;
+    let item_h       = (slot_spacing - 1.0).max(18.0); // set to slot_spacing for zero gap
+    let center_y     = screen_center_y();
+
+    // Selection pulse (unchanged)
+    let anim_t_unscaled = (state.selection_animation_timer / SELECTION_ANIMATION_CYCLE_DURATION)
+        * std::f32::consts::PI * 2.0;
     let anim_t = (anim_t_unscaled.sin() + 1.0) / 2.0;
-    if item_h > 0.0 {
-        let num_entries = state.entries.len();
+
+    let num_entries = state.entries.len();
+    if num_entries > 0 {
         for i_slot in 0..NUM_WHEEL_ITEMS {
-            let item_top_y = content_area_y_start + WHEEL_ITEM_GAP + (i_slot as f32 * (item_h + WHEEL_ITEM_GAP));
+            let offset_from_center = i_slot as isize - CENTER_WHEEL_SLOT_INDEX as isize;
+            let y_center = center_y + (offset_from_center as f32) * slot_spacing;
+            let y_top    = y_center - item_h * 0.5;
             let is_selected_slot = i_slot == CENTER_WHEEL_SLOT_INDEX;
-            let (display_text, box_color, text_color, text_x_pos, song_count) = if num_entries > 0 {
-                let list_index = (state.selected_index as isize + i_slot as isize - CENTER_WHEEL_SLOT_INDEX as isize + num_entries as isize) as usize % num_entries;
-                if let Some(entry) = state.entries.get(list_index) {
-                    match entry {
-                        MusicWheelEntry::Song(song_info) => {
-                            let base_color = col_music_wheel_box();
-                            let selected_color = col_selected_song_box();
-                            let final_box_color = if is_selected_slot { lerp_color(base_color, selected_color, anim_t) } else { base_color };
-                            (song_info.title.clone(), final_box_color, [1.0; 4], wheel_left_x + SONG_TEXT_LEFT_PADDING, None)
-                        }
-                        MusicWheelEntry::PackHeader { name, original_index, .. } => {
-                            let song_cache = get_song_cache();
-                            let count = song_cache.iter().find(|p| &p.name == name).map(|p| p.songs.len()).unwrap_or(0);
-                            let base_color = col_pack_header_box();
-                            let selected_color = col_selected_pack_header_box();
-                            let final_box_color = if is_selected_slot { lerp_color(base_color, selected_color, anim_t) } else { base_color };
-                            let text_x = wheel_left_x + 0.5 * WHEEL_W;
-                            let pack_color = color::simply_love_rgba(state.active_color_index + *original_index as i32);
-                            (name.clone(), final_box_color, pack_color, text_x, Some(count))
-                        }
+
+            let list_index = (state.selected_index as isize + offset_from_center + num_entries as isize)
+                as usize % num_entries;
+
+            let (display_text, is_pack, bg_col, txt_col) = if let Some(entry) = state.entries.get(list_index) {
+                match entry {
+                    MusicWheelEntry::Song(info) => {
+                        let base = col_music_wheel_box();
+                        let sel  = col_selected_song_box();
+                        let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
+                        (info.title.clone(), false, bg, [1.0, 1.0, 1.0])
                     }
-                } else { ("".to_string(), col_music_wheel_box(), [1.0; 4], wheel_left_x, None) }
-            } else { ("".to_string(), col_music_wheel_box(), [1.0; 4], wheel_left_x, None) };
-            actors.push(act!(quad: align(0.0, 0.0): xy(wheel_left_x, item_top_y): zoomto(WHEEL_W, item_h): diffuse(box_color[0], box_color[1], box_color[2], 1.0): z(51) ));
-            let is_pack = song_count.is_some();
-            if is_pack {
-                actors.push(act!(text: align(0.5, 0.5): xy(text_x_pos, item_top_y + 0.5 * item_h): zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX): font("miso"): settext(display_text): horizalign(center): diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(52) ));
+                    MusicWheelEntry::PackHeader { name, original_index, .. } => {
+                        let base = col_pack_header_box();
+                        let sel  = col_selected_pack_header_box();
+                        let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
+                        let c    = color::simply_love_rgba(state.active_color_index + *original_index as i32);
+                        (name.clone(), true, bg, [c[0], c[1], c[2]])
+                    }
+                }
             } else {
-                actors.push(act!(text: align(0.0, 0.5): xy(text_x_pos, item_top_y + 0.5 * item_h): zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX): font("miso"): settext(display_text): horizalign(left): diffuse(text_color[0], text_color[1], text_color[2], 1.0): z(52) ));
+                ("".to_string(), false, col_music_wheel_box(), [1.0, 1.0, 1.0])
+            };
+
+            // Full-bleed row background to the right edge
+            actors.push(act!(quad:
+                align(0.0, 0.0):
+                xy(wheel_left_x, y_top):
+                zoomto(wheel_w, item_h):
+                diffuse(bg_col[0], bg_col[1], bg_col[2], 1.0):
+                z(51)
+            ));
+
+            let pack_center_x = wheel_left_x + wheel_w * 0.5;
+
+            // Text alignment: songs at song_title_x (left), packs at pack_title_x (left)
+            if is_pack {
+                actors.push(act!(text:
+                    align(0.5, 0.5):
+                    xy(pack_center_x, y_center):
+                    zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX):
+                    font("miso"):
+                    settext(display_text):
+                    horizalign(center):
+                    diffuse(txt_col[0], txt_col[1], txt_col[2], 1.0):
+                    z(52)
+                ));
+            } else {
+                actors.push(act!(text:
+                    align(0.0, 0.5):
+                    xy(song_title_x, y_center):
+                    zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX):
+                    font("miso"):
+                    settext(display_text):
+                    horizalign(left):
+                    diffuse(txt_col[0], txt_col[1], txt_col[2], 1.0):
+                    z(52)
+                ));
             }
-            if let Some(count) = song_count {
+
+            // Pack song counts: right-aligned against the true right edge
+            if let Some(MusicWheelEntry::PackHeader { name, .. }) = state.entries.get(list_index) {
+                let count = get_song_cache().iter().find(|p| &p.name == name)
+                    .map(|p| p.songs.len()).unwrap_or(0);
                 if count > 0 {
-                    actors.push(act!(text: align(1.0, 0.5): xy(wheel_right_x - PACK_COUNT_RIGHT_PADDING, item_top_y + 0.5 * item_h): zoomtoheight(PACK_COUNT_TEXT_TARGET_PX): font("miso"): settext(format!("{}", count)): horizalign(right): diffuse(1.0, 1.0, 1.0, 0.8): z(52) ));
+                    actors.push(act!(text:
+                        align(1.0, 0.5):
+                        xy(right_edge - PACK_COUNT_RIGHT_PADDING, y_center):
+                        zoomtoheight(PACK_COUNT_TEXT_TARGET_PX):
+                        font("miso"):
+                        settext(format!("{}", count)):
+                        horizalign(right):
+                        diffuse(1.0, 1.0, 1.0, 0.8):
+                        z(52)
+                    ));
                 }
             }
         }
