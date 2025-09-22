@@ -671,68 +671,69 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     }
 
     // --- Density graph panel (SL 1:1, Player 1, top-left anchored) ---
+    // NEW: detect if a pack is selected
+    let is_pack_selected =
+        matches!(state.entries.get(state.selected_index), Some(MusicWheelEntry::PackHeader { .. }));
+
+    let panel_w = if is_wide() { 286.0 } else { 276.0 };
+    let panel_h = 64.0;
+
+    let mut graph_children: Vec<Actor> = Vec::new();
+
+    // Background quad (#1e282f), always drawn and exactly panel-sized
+    graph_children.push(act!(quad:
+        align(0.0, 0.0):
+        xy(0.0, 0.0):
+        setsize(panel_w, panel_h):
+        diffuse(0.1176, 0.1568, 0.1843, 1.0)   // #1e282f
+    ));
+
+    // Only draw the graph sprite + labels + breakdown when a SONG is selected
+    if !is_pack_selected {
+        // Density graph image fills the panel
+        graph_children.push(act!(sprite(state.current_graph_key.clone()):
+            align(0.0, 0.0):
+            xy(0.0, 0.0):
+            setsize(panel_w, panel_h)
+        ));
+
+        // Peak NPS text
+        graph_children.push(act!(text: font("miso"): settext(peak_nps_text):
+            align(0.0, 0.5):
+            xy(0.5 * panel_w + 60.0, 0.5 * panel_h - 41.0):
+            zoom(0.8):
+            diffuse(1.0, 1.0, 1.0, 1.0)
+        ));
+
+        // Breakdown strip + centered text at the bottom of the panel
+        graph_children.push(act!(quad:
+            align(0.0, 0.0):
+            xy(0.0, panel_h - 17.0):
+            setsize(panel_w, 17.0):
+            diffuse(0.0, 0.0, 0.0, 0.5)
+        ));
+        graph_children.push(act!(text: font("miso"): settext(breakdown_text):
+            align(0.5, 0.5):
+            xy(0.5 * panel_w, panel_h - 17.0 + 8.5):
+            zoom(0.8):
+            zoomtoheight(15):
+            zoomtowidth(panel_w / 0.8)
+        ));
+    }
+
     let density_graph_panel = Actor::Frame {
-        // Top-left corner at the SL-equivalent location:
-        // center at (cx-182 [-5 if wide], cy+23), then subtract half-size.
         align: [0.0, 0.0],
         offset: [
-            (screen_center_x() - 182.0 - if is_wide() { 5.0 } else { 0.0 })
-                - 0.5 * (if is_wide() { 286.0 } else { 276.0 }),
-            (screen_center_y() + 23.0) - 0.5 * 64.0,
+            (screen_center_x() - 182.0 - if is_wide() { 5.0 } else { 0.0 }) - 0.5 * panel_w,
+            (screen_center_y() + 23.0) - 0.5 * panel_h,
         ],
-        size: [SizeSpec::Px(if is_wide() { 286.0 } else { 276.0 }), SizeSpec::Px(64.0)],
+        size: [SizeSpec::Px(panel_w), SizeSpec::Px(panel_h)],
         background: None,
         z: 51,
-        children: vec![
-            // Background quad (#1e282f), same size as the panel
-            act!(quad:
-                align(0.0, 0.0):
-                xy(0.0, 0.0):
-                setsize( if is_wide() { 286.0 } else { 276.0 }, 64.0 ):
-                diffuse(0.1176, 0.1568, 0.1843, 1.0)
-            ),
-
-            // Density graph image fills the panel
-            act!(sprite(state.current_graph_key.clone()):
-                align(0.0, 0.0):
-                xy(0.0, 0.0):
-                setsize( if is_wide() { 286.0 } else { 276.0 }, 64.0 )
-            ),
-
-            // Peak NPS text: SL uses +60, -41 from the panel center.
-            // Convert to top-left: (width/2 + 60, height/2 - 41).
-            act!(text: font("miso"): settext(peak_nps_text):
-                align(0.0, 0.5):  // left, vertically centered on its own baseline
-                xy(
-                    0.5 * (if is_wide() { 286.0 } else { 276.0 }) + 60.0,
-                    0.5 * 64.0 - 41.0
-                ):
-                zoom(0.8):
-                diffuse(1.0, 1.0, 1.0, 1.0)
-            ),
-
-            // Breakdown bar: SL places center at y = +23.5 from the panel center.
-            // Convert to top-left: y = height/2 + 23.5 = 55.5
-            // Draw the bar background and centered text.
-            act!(quad:
-                align(0.0, 0.0):
-                xy(0.0, 64.0 - 17.0):      // bottom-aligned strip (64 - 17)
-                setsize( if is_wide() { 286.0 } else { 276.0 }, 17.0 ):
-                diffuse(0.0, 0.0, 0.0, 0.5)
-            ),
-            act!(text: font("miso"): settext(breakdown_text):
-                align(0.5, 0.5):            // centered within the bar
-                xy(
-                    0.5 * (if is_wide() { 286.0 } else { 276.0 }),
-                    64.0 - 17.0 + 8.5       // center of the 17px-tall bar
-                ):
-                zoom(0.8):
-                zoomtoheight(15):
-                zoomtowidth( (if is_wide() { 286.0 } else { 276.0 }) / 0.8 )
-            ),
-        ],
+        children: graph_children,
     };
     actors.push(density_graph_panel);
+
 
     // --- PaneDisplay (P1) just above footer — absolute placement, SL 1:1 layout ---
 
