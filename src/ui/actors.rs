@@ -1,4 +1,3 @@
-// FILE: src/ui/actors.rs
 use crate::core::gfx::BlendMode;
 
 #[allow(dead_code)]
@@ -79,6 +78,9 @@ pub enum Actor {
         // Optional “fit” targets (preserve aspect by scaling)
         fit_width: Option<f32>,
         fit_height: Option<f32>,
+        // NEW: max constraints (only scale down)
+        max_width: Option<f32>,
+        max_height: Option<f32>,
         // NEW: match SM — text honors blend mode too
         blend: BlendMode,
     },

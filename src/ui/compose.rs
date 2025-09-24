@@ -244,6 +244,8 @@ fn build_actor_recursive(
             scale,
             fit_width,
             fit_height,
+            max_width,
+            max_height,
             blend,
         } => {
             if let Some(fm) = fonts.get(font) {
@@ -254,6 +256,8 @@ fn build_actor_recursive(
                     *scale,
                     *fit_width,
                     *fit_height,
+                    *max_width,
+                    *max_height,
                     parent,
                     *align,
                     *offset,
@@ -701,6 +705,8 @@ fn layout_text(
     scale: [f32; 2],
     fit_width: Option<f32>,
     fit_height: Option<f32>,
+    max_width: Option<f32>,
+    max_height: Option<f32>,
     parent: SmRect,
     align: [f32; 2],
     offset: [f32; 2],
@@ -739,25 +745,48 @@ fn layout_text(
         cap_height
     };
 
-    // 3) Fit scaling (min of width/height fits; SM-style “don’t blow up infinity” handling)
+    // 3) Fit scaling (from zoomto... commands) preserves aspect ratio.
     use std::f32::INFINITY;
-    let s_w = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
-    let s_h = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
-    let fit_s = if s_w.is_infinite() && s_h.is_infinite() { 1.0 } else { s_w.min(s_h).max(0.0) };
+    let s_w_fit = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
+    let s_h_fit = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
+    let fit_s = if s_w_fit.is_infinite() && s_h_fit.is_infinite() { 1.0 } else { s_w_fit.min(s_h_fit).max(0.0) };
 
-    let sx = scale[0] * fit_s;
-    let sy = scale[1] * fit_s;
+    // 4) Calculate size after fit and base zoom (from zoom() command).
+    let width_after_zoom = max_logical_width * fit_s * scale[0];
+    let height_after_zoom = unscaled_block_height * fit_s * scale[1];
+
+    // 5) Max constraint scaling (from max... commands). This is NON-UNIFORM.
+    // This calculates an additional down-scaling factor for each axis independently.
+    let max_s_w = max_width.map_or(1.0, |mw| {
+        if width_after_zoom > mw {
+            mw / width_after_zoom
+        } else {
+            1.0
+        }
+    });
+    let max_s_h = max_height.map_or(1.0, |mh| {
+        if height_after_zoom > mh {
+            mh / height_after_zoom
+        } else {
+            1.0
+        }
+    });
+
+    // 6) Final scaling is a combination of all factors, applied independently per axis.
+    let sx = scale[0] * fit_s * max_s_w;
+    let sy = scale[1] * fit_s * max_s_h;
+
     if sx.abs() < 1e-6 || sy.abs() < 1e-6 {
         return vec![];
     }
 
-    // 4) Pixel widths (post-scale) rounded with ties-to-even, then block width quantized up to even pixels.
+    // 7) Pixel widths (post-scale) rounded with ties-to-even, then block width quantized up to even pixels.
     let line_widths_px: Vec<f32> = logical_line_widths.iter().map(|w| lrint_ties_even((*w as f32) * sx)).collect();
     let max_line_width_px = line_widths_px.iter().fold(0.0_f32, |a, &b| a.max(b));
     let block_w_px = quantize_up_even_px(max_line_width_px);
     let block_h_px = unscaled_block_height * sy;
 
-    // 5) Place the block in SM space (origin at top-left in your world mapping) and compute baseline.
+    // 8) Place the block in SM space (origin at top-left in your world mapping) and compute baseline.
     //    Parity-critical ordering: iY0 = lrint(-block_h/2); baseline_local = iY0 + height*sy; baseline = lrint(centerY + baseline_local)
     let block_left_sm = parent.x + offset[0] - align[0] * block_w_px;
     let block_top_sm  = parent.y + offset[1] - align[1] * block_h_px;
@@ -768,7 +797,7 @@ fn layout_text(
     let baseline_local = iY0 + (font.height as f32) * sy; // cap-height baseline from block center
     let mut baseline_sm = lrint_ties_even(block_center_y + baseline_local);
 
-    // 6) Line start X in *pixel* space (SM snaps whole line, not per-glyph).
+    // 9) Line start X in *pixel* space (SM snaps whole line, not per-glyph).
     #[inline(always)]
     fn start_x_px(align: actors::TextAlign, block_left_px: f32, block_w_px: f32, line_w_px: f32) -> f32 {
         match align {

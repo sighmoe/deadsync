@@ -118,8 +118,17 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     //));
 
     // TXT2 - Test text in center with wendy
+    // actors.push(act!(text:
+    //     font("wendy"): Center(): settext("Test")
+    // ));
+
+    // MW1 - maxheight(80) vs none (centered)
     actors.push(act!(text:
-        font("wendy"): Center(): settext("Test")
+        xy(screen_center_x(), screen_center_y()-60.0): halign(0.5): zoom(1): font("wendy"): settext("SELECT A COLOR")
+    ));
+
+    actors.push(act!(text:
+        xy(screen_center_x(), screen_center_y()+60.0): halign(0.5): zoom(1): font("wendy"): settext("SELECT A COLOR"): maxwidth(220)
     ));
 
     actors

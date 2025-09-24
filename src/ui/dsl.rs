@@ -38,6 +38,10 @@ pub enum Mod<'a> {
     ZoomToWidth(f32),
     ZoomToHeight(f32),
 
+    // NEW: max constraints (only shrink, preserve aspect)
+    MaxWidth(f32),
+    MaxHeight(f32),
+
     // cropping (fractions 0..1)
     CropLeft(f32),
     CropRight(f32),
@@ -175,7 +179,7 @@ fn build_sprite_like<'a>(
             Mod::AddRotZ(dd)=> { rot += *dd; }
 
             // text-only mods ignored here
-            Mod::Font(_) | Mod::Content(_) | Mod::TAlign(_) => {}
+            Mod::Font(_) | Mod::Content(_) | Mod::TAlign(_) | Mod::MaxWidth(_) | Mod::MaxHeight(_) => {}
             Mod::Tween(steps) => { tw = Some(steps); }
             Mod::State(i) => {
                 cell = Some((*i, u32::MAX));
@@ -192,7 +196,6 @@ fn build_sprite_like<'a>(
         }
     }
 
-    // tween (optional) — unchanged ...
     if let Some(steps) = tw {
         let mut init = anim::TweenState::default();
         init.x = x; init.y = y; init.w = w; init.h = h;
@@ -314,6 +317,7 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     // zoom + optional fit targets
     let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
     let (mut fit_w, mut fit_h): (Option<f32>, Option<f32>) = (None, None);
+    let (mut max_w, mut max_h): (Option<f32>, Option<f32>) = (None, None);
 
     // NEW: SM-compatible — text respects blend mode (default Normal/Alpha)
     let mut blend = BlendMode::Alpha;
@@ -346,6 +350,10 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
             // capture fit targets (applied at layout with actual metrics)
             Mod::ZoomToWidth(w)  => { fit_w = Some(*w); }
             Mod::ZoomToHeight(h) => { fit_h = Some(*h); }
+            
+            // capture max constraints
+            Mod::MaxWidth(w)  => { max_w = Some(*w); }
+            Mod::MaxHeight(h) => { max_h = Some(*h); }
 
             // NEW: honor blend mode for text
             Mod::Blend(bm)       => { blend = *bm; }
@@ -367,12 +375,13 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
         scale: [sx, sy],
         fit_width: fit_w,
         fit_height: fit_h,
+        max_width: max_w,
+        max_height: max_h,
         blend,
     }
 }
 
-/* ========================= compat: act! ============================== */
-
+// ... act! and helper macros ...
 #[macro_export]
 macro_rules! __ui_textalign_from_ident {
     (left) => {
@@ -610,6 +619,13 @@ macro_rules! __dsl_apply_one {
     }};
     (zoomtoheight ($h:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::ZoomToHeight(($h) as f32));
+    }};
+    // --- NEW: max constraints for text -------------------------------
+    (maxwidth ($w:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::MaxWidth(($w) as f32));
+    }};
+    (maxheight ($h:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::MaxHeight(($h) as f32));
     }};
 
     // static sprite bits / cropping / uv / blend ---------------------
