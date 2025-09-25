@@ -515,7 +515,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     act!(text: font("miso"): settext("ARTIST"):
                         align(1.0, 0.0):
                         y(-11.0):
-                        zoomtowidth(44.0):
+                        maxwidth(44.0):
                         diffuse(label_color[0], label_color[1], label_color[2], label_color[3]):
                         z(52)
                     ),
@@ -523,6 +523,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                         align(0.0, 0.0):
                         xy(5.0, -11.0):
                         zoomtoheight(15.0):
+                        maxwidth(260.0):
                         diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
                         z(52)
                     ),
@@ -604,7 +605,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
             ):
             zoom(0.8):
-            zoomtowidth(40.0):
+            maxwidth(40.0):
             z(121):
             diffuse(0.0, 0.0, 0.0, 1.0)
         ));
@@ -619,7 +620,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
             ):
             zoom(0.8):
-            zoomtowidth(124.0):
+            maxwidth(124.0):
             z(121):
             diffuse(0.0, 0.0, 0.0, 1.0)
         ));
@@ -650,7 +651,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
             ):
             zoom(0.8):
-            zoomtowidth(40.0):
+            maxwidth(40.0):
             z(121):
             diffuse(0.0, 0.0, 0.0, 1.0)
         ));
@@ -664,7 +665,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
             ):
             zoom(0.8):
-            zoomtowidth(124.0):
+            maxwidth(124.0):
             z(121):
             diffuse(0.0, 0.0, 0.0, 1.0)
         ));
