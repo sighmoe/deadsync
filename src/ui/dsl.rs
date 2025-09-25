@@ -319,11 +319,16 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     let (mut fit_w, mut fit_h): (Option<f32>, Option<f32>) = (None, None);
     let (mut max_w, mut max_h): (Option<f32>, Option<f32>) = (None, None);
 
-    // NEW: SM-compatible — text respects blend mode (default Normal/Alpha)
+    // NEW: track StepMania order semantics for max vs zoom (per axis)
+    let (mut saw_max_w, mut saw_max_h) = (false, false);
+    let (mut max_w_pre_zoom, mut max_h_pre_zoom) = (false, false);
+
+    // text respects blend mode
     let mut blend = BlendMode::Alpha;
 
     for m in mods {
         match m {
+            // position & alignment
             Mod::Xy(a, b)    => { x = *a; y = *b; }
             Mod::SetX(a)     => { x = *a; }
             Mod::SetY(b)     => { y = *b; }
@@ -334,6 +339,7 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
             Mod::VAlign(b)   => { vy = *b; }
             Mod::Align(a, b) => { hx = *a; vy = *b; }
 
+            // color/font/text/align
             Mod::Tint(r)     => { color = *r; }
             Mod::Alpha(a)    => { color[3] = *a; }
             Mod::Font(f)     => { font = *f; }
@@ -341,24 +347,49 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
             Mod::TAlign(a)   => { talign = *a; }
             Mod::Z(v)        => { z = *v; }
 
-            Mod::Zoom(f)     => { sx = *f; sy = *f; }
-            Mod::ZoomX(a)    => { sx = *a; }
-            Mod::ZoomY(b)    => { sy = *b; }
-            Mod::AddZoomX(a) => { sx += *a; }
-            Mod::AddZoomY(b) => { sy += *b; }
+            // zooms — if they occur after a max* for that axis, mark pre-zoom clamp
+            Mod::Zoom(f) => {
+                sx = *f; sy = *f;
+                if saw_max_w { max_w_pre_zoom = true; }
+                if saw_max_h { max_h_pre_zoom = true; }
+            }
+            Mod::ZoomX(a) => {
+                sx = *a;
+                if saw_max_w { max_w_pre_zoom = true; }
+            }
+            Mod::ZoomY(b) => {
+                sy = *b;
+                if saw_max_h { max_h_pre_zoom = true; }
+            }
+            Mod::AddZoomX(a) => {
+                sx += *a;
+                if saw_max_w { max_w_pre_zoom = true; }
+            }
+            Mod::AddZoomY(b) => {
+                sy += *b;
+                if saw_max_h { max_h_pre_zoom = true; }
+            }
 
-            // capture fit targets (applied at layout with actual metrics)
+            // fit targets (applied later with metrics)
             Mod::ZoomToWidth(w)  => { fit_w = Some(*w); }
             Mod::ZoomToHeight(h) => { fit_h = Some(*h); }
-            
-            // capture max constraints
-            Mod::MaxWidth(w)  => { max_w = Some(*w); }
-            Mod::MaxHeight(h) => { max_h = Some(*h); }
 
-            // NEW: honor blend mode for text
-            Mod::Blend(bm)       => { blend = *bm; }
+            // max constraints — reset the pre/post decision window
+            Mod::MaxWidth(w) => {
+                max_w = Some(*w);
+                saw_max_w = true;
+                max_w_pre_zoom = false; // a new max resets the boundary
+            }
+            Mod::MaxHeight(h) => {
+                max_h = Some(*h);
+                saw_max_h = true;
+                max_h_pre_zoom = false; // a new max resets the boundary
+            }
 
-            // sprite-only mods ignored here
+            // blend mode
+            Mod::Blend(bm) => { blend = *bm; }
+
+            // ignore sprite-only/text-irrelevant
             _ => {}
         }
     }
@@ -377,6 +408,9 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
         fit_height: fit_h,
         max_width: max_w,
         max_height: max_h,
+        // NEW flags for order semantics
+        max_w_pre_zoom,
+        max_h_pre_zoom,
         blend,
     }
 }

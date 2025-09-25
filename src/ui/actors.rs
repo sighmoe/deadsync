@@ -81,6 +81,8 @@ pub enum Actor {
         // NEW: max constraints (only scale down)
         max_width: Option<f32>,
         max_height: Option<f32>,
+        max_w_pre_zoom: bool,
+        max_h_pre_zoom: bool,
         // NEW: match SM — text honors blend mode too
         blend: BlendMode,
     },

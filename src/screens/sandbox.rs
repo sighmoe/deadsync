@@ -123,12 +123,21 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     // ));
 
     // MW1 - maxheight(80) vs none (centered)
+    // actors.push(act!(text:
+    //     xy(screen_center_x(), screen_center_y()-60.0): halign(0.5): zoom(1): font("wendy"): settext("SELECT A COLOR")
+    // ));
+
+    // actors.push(act!(text:
+    //     xy(screen_center_x(), screen_center_y()+60.0): halign(0.5): zoom(1): font("wendy"): settext("SELECT A COLOR"): maxwidth(220)
+    // ));
+
+    // MW2 - maxheight(80)
     actors.push(act!(text:
-        xy(screen_center_x(), screen_center_y()-60.0): halign(0.5): zoom(1): font("wendy"): settext("SELECT A COLOR")
+        xy(360,360): font("wendy"): settext("THIS STRING IS LONG"):
     ));
 
     actors.push(act!(text:
-        xy(screen_center_x(), screen_center_y()+60.0): halign(0.5): zoom(1): font("wendy"): settext("SELECT A COLOR"): maxwidth(220)
+        xy(360,420): font("wendy"): settext("THIS STRING IS LONG"): maxwidth(240):
     ));
 
     actors
