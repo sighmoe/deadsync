@@ -1015,15 +1015,12 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     // 4) SL text metrics (px) → world
     // Title/SubTitle x: WideScale(75,111); Title maxwidth: WideScale(245,350)
-    let title_left_px  = crate::core::space::widescale_px(75.0, 111.0);
-    let title_max_px   = crate::core::space::widescale_px(245.0, 350.0);
-    // Section (pack) maxwidth: WideScale(240,310)
-    let pack_max_px    = crate::core::space::widescale_px(240.0, 310.0);
+    let title_left_units = widescale(75.0, 111.0);   // Title/Subtitle x
+    let title_max_units  = widescale(245.0, 350.0);  // Title/Subtitle maxwidth
+    let pack_max_units   = widescale(240.0, 310.0);  // Section (pack) maxwidth
 
     // Convert to world once
-    let title_x_world  = wheel_left_x + crate::core::space::px_to_world_x(title_left_px);
-    let title_max_w    = crate::core::space::px_to_world_x(title_max_px);
-    let pack_max_w     = crate::core::space::px_to_world_x(pack_max_px);
+    let title_x_world  = wheel_left_x + title_left_units;
     // ±6px offset between Title and Subtitle
     let line_gap_units: f32 = 6.0;
 
@@ -1093,7 +1090,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     align(0.5, 0.5):
                     xy(pack_center_x, y_center):
                     zoom(1.0):
-                    maxwidth(pack_max_w):
+                    maxwidth(pack_max_units):
                     horizalign(center):
                     diffuse(txt_col[0], txt_col[1], txt_col[2], 1.0):
                     z(52)
@@ -1107,7 +1104,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     align(0.0, 0.5):
                     xy(title_x_world, y_center + if has_subtitle { -line_gap_units } else { 0.0 }):
                     zoom(0.85):                      // SL Title zoom
-                    maxwidth(title_max_w):           // SL Title maxwidth
+                    maxwidth(title_max_units):          // SL Title maxwidth
                     horizalign(left):
                     diffuse(1.0, 1.0, 1.0, 1.0):
                     z(52)
@@ -1121,7 +1118,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                         align(0.0, 0.5):
                         xy(title_x_world, y_center + line_gap_units):
                         zoom(0.7):                   // SL Subtitle zoom
-                        maxwidth(title_max_w):       // SL Subtitle shares same maxwidth
+                        maxwidth(title_max_units):      // SL Subtitle shares same maxwidth
                         horizalign(left):
                         diffuse(1.0, 1.0, 1.0, 1.0):
                         z(52)
