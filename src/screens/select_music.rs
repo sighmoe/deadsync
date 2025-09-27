@@ -17,7 +17,7 @@ use log::info;
 use std::fs;
 
 // --- engine imports ---
-use crate::core::space::is_wide;
+use crate::core::space::{is_wide, widescale};
 use crate::core::song_loading::{SongData, get_song_cache, ChartData, SongPack};
 
 
@@ -993,21 +993,29 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ));
     }
 
-    // --- MUSIC WHEEL (tight gap + full-bleed right edge + SL text anchors) ---
+    // --- MUSIC WHEEL (same spacing/placement as before; SL-accurate width) ---
 
-    // SL text anchors
-    let song_title_x = screen_center_x() + if is_wide() { 104.0 } else { 65.0 };  // songs
-    let pack_title_x = screen_center_x() + if is_wide() { 204.0 } else { 150.0 }; // packs
+    const WHEEL_WIDTH_DIVISOR: f32 = 2.125;
+    let num_visible_items = NUM_WHEEL_ITEMS - 2;
 
-    // Derive left edge from song title X and your 66px padding; right edge = screen right
-    let wheel_left_x = song_title_x - SONG_TEXT_LEFT_PADDING;  // 66px left padding for song titles
-    let right_edge   = screen_width();                          // full bleed
-    let wheel_w      = right_edge - wheel_left_x;
+    // 1) compute width in *pixels* like SL, then convert to world
+    let px_w = crate::core::space::screen_pixel_width();
+    let highlight_w_px = px_w / WHEEL_WIDTH_DIVISOR;                  // SL highlight width
+    let row_inset_px   = crate::core::space::widescale_px(10.0, 15.0); // SL subtracts a small inset
+    let row_w          = crate::core::space::px_to_world_x(highlight_w_px - row_inset_px);
 
-    // Spacing & row height (smaller gap)
-    let slot_spacing = screen_height() / 15.0;
-    let item_h       = (slot_spacing - 1.0).max(18.0); // set to slot_spacing for zero gap
+    // 2) keep full-bleed on the right; derive left from width
+    let right_edge   = screen_width();
+    let wheel_left_x = right_edge - row_w;
+
+    // 3) keep your previous vertical spacing (world units): ~“~2px” gap at 900p
+    let slot_spacing = screen_height() / (num_visible_items as f32);
+    let item_h       = (slot_spacing - 1.0).max(18.0);
     let center_y     = screen_center_y();
+
+    // 4) keep your previous inner text anchors (66px song padding from left edge)
+    let song_title_x  = wheel_left_x + crate::core::space::px_to_world_x(SONG_TEXT_LEFT_PADDING);
+    let pack_center_x = wheel_left_x + row_w * 0.5;
 
     // Selection pulse (unchanged)
     let anim_t_unscaled = (state.selection_animation_timer / SELECTION_ANIMATION_CYCLE_DURATION)
@@ -1022,8 +1030,9 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             let y_top    = y_center - item_h * 0.5;
             let is_selected_slot = i_slot == CENTER_WHEEL_SLOT_INDEX;
 
-            let list_index = (state.selected_index as isize + offset_from_center + num_entries as isize)
-                as usize % num_entries;
+            // Wrap around entries
+            let list_index = ((state.selected_index as isize + offset_from_center + num_entries as isize)
+                as usize) % num_entries;
 
             let (display_text, is_pack, bg_col, txt_col) = if let Some(entry) = state.entries.get(list_index) {
                 match entry {
@@ -1045,18 +1054,16 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 ("".to_string(), false, col_music_wheel_box(), [1.0, 1.0, 1.0])
             };
 
-            // Full-bleed row background to the right edge
+            // Row background — left-aligned, top-anchored (same as before)
             actors.push(act!(quad:
                 align(0.0, 0.0):
                 xy(wheel_left_x, y_top):
-                zoomto(wheel_w, item_h):
+                zoomto(row_w, item_h):
                 diffuse(bg_col[0], bg_col[1], bg_col[2], 1.0):
                 z(51)
             ));
 
-            let pack_center_x = wheel_left_x + wheel_w * 0.5;
-
-            // Text alignment: songs at song_title_x (left), packs at pack_title_x (left)
+            // Text: packs centered within column; songs left-aligned at 66px from left
             if is_pack {
                 actors.push(act!(text:
                     align(0.5, 0.5):
@@ -1081,14 +1088,17 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 ));
             }
 
-            // Pack song counts: right-aligned against the true right edge
+            // Pack song counts — right-aligned to true SCREEN_RIGHT with 11px padding
             if let Some(MusicWheelEntry::PackHeader { name, .. }) = state.entries.get(list_index) {
                 let count = get_song_cache().iter().find(|p| &p.name == name)
                     .map(|p| p.songs.len()).unwrap_or(0);
                 if count > 0 {
                     actors.push(act!(text:
                         align(1.0, 0.5):
-                        xy(right_edge - PACK_COUNT_RIGHT_PADDING, y_center):
+                        xy(
+                            right_edge - crate::core::space::px_to_world_x(PACK_COUNT_RIGHT_PADDING),
+                            y_center
+                        ):
                         zoomtoheight(PACK_COUNT_TEXT_TARGET_PX):
                         font("miso"):
                         settext(format!("{}", count)):
