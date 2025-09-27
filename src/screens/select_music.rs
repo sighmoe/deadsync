@@ -993,14 +993,14 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ));
     }
 
-    // --- MUSIC WHEEL (same spacing/placement as before; SL-accurate width) ---
+    // --- MUSIC WHEEL (same spacing/placement as before; SL-accurate width & text metrics) ---
 
     const WHEEL_WIDTH_DIVISOR: f32 = 2.125;
     let num_visible_items = NUM_WHEEL_ITEMS - 2;
 
     // 1) compute width in *pixels* like SL, then convert to world
     let px_w = crate::core::space::screen_pixel_width();
-    let highlight_w_px = px_w / WHEEL_WIDTH_DIVISOR;                  // SL highlight width
+    let highlight_w_px = px_w / WHEEL_WIDTH_DIVISOR;                   // SL highlight width
     let row_inset_px   = crate::core::space::widescale_px(10.0, 15.0); // SL subtracts a small inset
     let row_w          = crate::core::space::px_to_world_x(highlight_w_px - row_inset_px);
 
@@ -1008,13 +1008,26 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let right_edge   = screen_width();
     let wheel_left_x = right_edge - row_w;
 
-    // 3) keep your previous vertical spacing (world units): ~“~2px” gap at 900p
+    // 3) vertical spacing unchanged (world units)
     let slot_spacing = screen_height() / (num_visible_items as f32);
     let item_h       = (slot_spacing - 1.0).max(18.0);
     let center_y     = screen_center_y();
 
-    // 4) keep your previous inner text anchors (66px song padding from left edge)
-    let song_title_x  = wheel_left_x + crate::core::space::px_to_world_x(SONG_TEXT_LEFT_PADDING);
+    // 4) SL text metrics (px) → world
+    // Title/SubTitle x: WideScale(75,111); Title maxwidth: WideScale(245,350)
+    let title_left_px  = crate::core::space::widescale_px(75.0, 111.0);
+    let title_max_px   = crate::core::space::widescale_px(245.0, 350.0);
+    // Section (pack) maxwidth: WideScale(240,310)
+    let pack_max_px    = crate::core::space::widescale_px(240.0, 310.0);
+
+    // Convert to world once
+    let title_x_world  = wheel_left_x + crate::core::space::px_to_world_x(title_left_px);
+    let title_max_w    = crate::core::space::px_to_world_x(title_max_px);
+    let pack_max_w     = crate::core::space::px_to_world_x(pack_max_px);
+    // ±6px offset between Title and Subtitle
+    let line_gap_units: f32 = 6.0;
+
+    // Pack text center stays the same (column center)
     let pack_center_x = wheel_left_x + row_w * 0.5;
 
     // Selection pulse (unchanged)
@@ -1034,25 +1047,33 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             let list_index = ((state.selected_index as isize + offset_from_center + num_entries as isize)
                 as usize) % num_entries;
 
-            let (display_text, is_pack, bg_col, txt_col) = if let Some(entry) = state.entries.get(list_index) {
-                match entry {
-                    MusicWheelEntry::Song(info) => {
-                        let base = col_music_wheel_box();
-                        let sel  = col_selected_song_box();
-                        let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
-                        (info.title.clone(), false, bg, [1.0, 1.0, 1.0])
+            // Resolve display + colors
+            let (title_text, subtitle_text, is_pack, bg_col, txt_col) =
+                if let Some(entry) = state.entries.get(list_index) {
+                    match entry {
+                        MusicWheelEntry::Song(info) => {
+                            // Title & Subtitle parity (Subtitle may be empty)
+                            let title = info.title.clone();
+                            // If your SongData lacks `subtitle`, change this to `String::new()`.
+                            let subtitle = info.subtitle.clone();
+                            let base = col_music_wheel_box();
+                            let sel  = col_selected_song_box();
+                            let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
+                            (title, subtitle, false, bg, [1.0, 1.0, 1.0])
+                        }
+                        MusicWheelEntry::PackHeader { name, original_index, .. } => {
+                            let base = col_pack_header_box();
+                            let sel  = col_selected_pack_header_box();
+                            let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
+                            let c    = color::simply_love_rgba(state.active_color_index + *original_index as i32);
+                            (name.clone(), String::new(), true, bg, [c[0], c[1], c[2]])
+                        }
                     }
-                    MusicWheelEntry::PackHeader { name, original_index, .. } => {
-                        let base = col_pack_header_box();
-                        let sel  = col_selected_pack_header_box();
-                        let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
-                        let c    = color::simply_love_rgba(state.active_color_index + *original_index as i32);
-                        (name.clone(), true, bg, [c[0], c[1], c[2]])
-                    }
-                }
-            } else {
-                ("".to_string(), false, col_music_wheel_box(), [1.0, 1.0, 1.0])
-            };
+                } else {
+                    ("".to_string(), "".to_string(), false, col_music_wheel_box(), [1.0, 1.0, 1.0])
+                };
+
+            let has_subtitle = !subtitle_text.trim().is_empty();
 
             // Row background — left-aligned, top-anchored (same as before)
             actors.push(act!(quad:
@@ -1063,29 +1084,49 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 z(51)
             ));
 
-            // Text: packs centered within column; songs left-aligned at 66px from left
+            // Text
             if is_pack {
+                // PACK: centered, zoom 1.0, clamp width to WideScale(240,310)
                 actors.push(act!(text:
+                    font("miso"):
+                    settext(title_text):
                     align(0.5, 0.5):
                     xy(pack_center_x, y_center):
-                    zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX):
-                    font("miso"):
-                    settext(display_text):
+                    zoom(1.0):
+                    maxwidth(pack_max_w):
                     horizalign(center):
                     diffuse(txt_col[0], txt_col[1], txt_col[2], 1.0):
                     z(52)
                 ));
             } else {
+                // SONG: Title + optional Subtitle, left aligned at WideScale(75,111)
+                // Title
                 actors.push(act!(text:
-                    align(0.0, 0.5):
-                    xy(song_title_x, y_center):
-                    zoomtoheight(MUSIC_WHEEL_TEXT_TARGET_PX):
                     font("miso"):
-                    settext(display_text):
+                    settext(title_text.clone()):
+                    align(0.0, 0.5):
+                    xy(title_x_world, y_center + if has_subtitle { -line_gap_units } else { 0.0 }):
+                    zoom(0.85):                      // SL Title zoom
+                    maxwidth(title_max_w):           // SL Title maxwidth
                     horizalign(left):
-                    diffuse(txt_col[0], txt_col[1], txt_col[2], 1.0):
+                    diffuse(1.0, 1.0, 1.0, 1.0):
                     z(52)
                 ));
+
+                // Subtitle (only if present)
+                if has_subtitle {
+                    actors.push(act!(text:
+                        font("miso"):
+                        settext(subtitle_text):
+                        align(0.0, 0.5):
+                        xy(title_x_world, y_center + line_gap_units):
+                        zoom(0.7):                   // SL Subtitle zoom
+                        maxwidth(title_max_w):       // SL Subtitle shares same maxwidth
+                        horizalign(left):
+                        diffuse(1.0, 1.0, 1.0, 1.0):
+                        z(52)
+                    ));
+                }
             }
 
             // Pack song counts — right-aligned to true SCREEN_RIGHT with 11px padding
@@ -1099,11 +1140,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                             right_edge - crate::core::space::px_to_world_x(PACK_COUNT_RIGHT_PADDING),
                             y_center
                         ):
-                        zoomtoheight(PACK_COUNT_TEXT_TARGET_PX):
+                        zoom(0.75):
                         font("miso"):
                         settext(format!("{}", count)):
                         horizalign(right):
-                        diffuse(1.0, 1.0, 1.0, 0.8):
+                        diffuse(1.0, 1.0, 1.0, 1.0):
                         z(52)
                     ));
                 }

@@ -11,6 +11,7 @@ use once_cell::sync::Lazy;
 #[derive(Clone, Debug)]
 pub struct SongData {
     pub title: String,
+    pub subtitle: String,
     pub artist: String,
     pub banner_path: Option<PathBuf>,
     pub background_path: Option<PathBuf>,
@@ -155,6 +156,7 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
 
     Ok(SongData {
         title: summary.title_str,
+        subtitle: summary.subtitle_str,
         artist: summary.artist_str,
         banner_path,
         background_path,
