@@ -1065,19 +1065,22 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             let mut slot_children: Vec<Actor> = Vec::new();
 
             // Base black quad (full height)
-            slot_children.push(act!(quad:
-                align(0.0, 0.5):
-                xy(0.0, half_item_h): // FIX: Center vertically
-                zoomto(highlight_w, item_h_full):
-                diffuse(0.0, 0.0, 0.0, 1.0):
-                z(0)
-            ));
+            if is_pack {
+                // Base black quad (full height) — only for packs
+                slot_children.push(act!(quad:
+                    align(0.0, 0.5):
+                    xy(0.0, half_item_h):
+                    zoomto(highlight_w, item_h_full):
+                    diffuse(0.0, 0.0, 0.0, 1.0):
+                    z(0)
+                ));
+            }
             // Colored quad (height - 1)
             slot_children.push(act!(quad:
                 align(0.0, 0.5):
-                xy(0.0, half_item_h): // FIX: Center vertically
+                xy(0.0, half_item_h):
                 zoomto(highlight_w, item_h_colored):
-                diffuse(bg_col[0], bg_col[1], bg_col[2], 1.0):
+                diffuse(bg_col[0], bg_col[1], bg_col[2], bg_col[3]):
                 z(1)
             ));
 
