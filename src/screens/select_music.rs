@@ -81,6 +81,7 @@ pub struct State {
     pub nav_key_held_since: Option<Instant>,
     pub nav_key_last_scrolled_at: Option<Instant>,
     pub currently_playing_preview_path: Option<PathBuf>,
+    prev_selected_index: usize,
     pub time_since_selection_change: f32,
 }
 
@@ -177,10 +178,12 @@ pub fn init() -> State {
         nav_key_held_since: None,
         nav_key_last_scrolled_at: None,
         currently_playing_preview_path: None,
+        prev_selected_index: 0,
         time_since_selection_change: 0.0,
     };
 
     rebuild_displayed_entries(&mut state);
+    state.prev_selected_index = state.selected_index;
     state
 }
 
@@ -365,6 +368,11 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
                 }
             }
         }
+    }
+
+    if state.selected_index != state.prev_selected_index {
+        audio::play_sfx("assets/sounds/change.ogg");
+        state.prev_selected_index = state.selected_index;
     }
 
     // Get the currently selected song or pack header.
