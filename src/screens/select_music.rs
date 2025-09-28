@@ -1016,12 +1016,13 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     // Pack count
     let pack_count_x_local: f32 = screen_width() / 2.0 - widescale(9.0, 10.0) - sl_shift;
 
-    // Vertical geometry per SL
-    let slot_spacing: f32        = screen_height() / (num_visible_items as f32); // _screen.h/15
+    // --- VERTICAL GEOMETRY (1:1 with Simply Love Lua) ---
+    let slot_spacing: f32        = screen_height() / (num_visible_items as f32);
     let item_h_full: f32         = slot_spacing;
-    let item_h_colored: f32      = slot_spacing - 1.0;                            // 1px divider look
+    let item_h_colored: f32      = slot_spacing - 1.0;
     let center_y: f32            = screen_center_y();
     let line_gap_units: f32      = 6.0;
+    let half_item_h: f32         = item_h_full * 0.5; // NEW: Pre-calculate half height for centering children
 
     // Selection pulse
     let anim_t_unscaled = (state.selection_animation_timer / SELECTION_ANIMATION_CYCLE_DURATION)
@@ -1034,7 +1035,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     if num_entries > 0 {
         for i_slot in 0..NUM_WHEEL_ITEMS {
             let offset_from_center = i_slot as isize - CENTER_WHEEL_SLOT_INDEX as isize;
-            let y_center           = center_y + (offset_from_center as f32) * slot_spacing;
+            let y_center_item      = center_y + (offset_from_center as f32) * slot_spacing;
             let is_selected_slot   = i_slot == CENTER_WHEEL_SLOT_INDEX;
 
             let list_index = ((state.selected_index as isize + offset_from_center + num_entries as isize)
@@ -1066,7 +1067,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             // Base black quad (full height)
             slot_children.push(act!(quad:
                 align(0.0, 0.5):
-                xy(0.0, 0.0):
+                xy(0.0, half_item_h): // FIX: Center vertically
                 zoomto(highlight_w, item_h_full):
                 diffuse(0.0, 0.0, 0.0, 1.0):
                 z(0)
@@ -1074,7 +1075,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             // Colored quad (height - 1)
             slot_children.push(act!(quad:
                 align(0.0, 0.5):
-                xy(0.0, 0.0):
+                xy(0.0, half_item_h): // FIX: Center vertically
                 zoomto(highlight_w, item_h_colored):
                 diffuse(bg_col[0], bg_col[1], bg_col[2], 1.0):
                 z(1)
@@ -1086,7 +1087,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     font("miso"):
                     settext(title_str.clone()):
                     align(0.5, 0.5):
-                    xy(pack_center_x_local, 0.0):
+                    xy(pack_center_x_local, half_item_h): // FIX: Center vertically
                     maxwidth(pack_name_max_w):
                     zoom(1.0):
                     diffuse(txt_col[0], txt_col[1], txt_col[2], txt_col[3]):
@@ -1104,7 +1105,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                             font("miso"):
                             settext(format!("{}", count)):
                             align(1.0, 0.5):
-                            xy(pack_count_x_local, 0.0):
+                            xy(pack_count_x_local, half_item_h): // FIX: Center vertically
                             zoom(0.75):
                             horizalign(right):
                             diffuse(1.0, 1.0, 1.0, 1.0):
@@ -1114,11 +1115,12 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 }
             } else {
                 // SONG title/subtitle — subtract sl_shift to avoid double offset
+                let subtitle_y_offset = if has_subtitle { -line_gap_units } else { 0.0 };
                 slot_children.push(act!(text:
                     font("miso"):
                     settext(title_str.clone()):
                     align(0.0, 0.5):
-                    xy(title_x_local, if has_subtitle { -line_gap_units } else { 0.0 }):
+                    xy(title_x_local, half_item_h + subtitle_y_offset): // FIX: Center vertically
                     maxwidth(title_max_w_local):
                     zoom(0.85):
                     diffuse(1.0, 1.0, 1.0, 1.0):
@@ -1129,7 +1131,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                         font("miso"):
                         settext(subtitle_str.clone()):
                         align(0.0, 0.5):
-                        xy(title_x_local, line_gap_units):
+                        xy(title_x_local, half_item_h + line_gap_units): // FIX: Center vertically
                         maxwidth(title_max_w_local):
                         zoom(0.7):
                         diffuse(1.0, 1.0, 1.0, 1.0):
@@ -1141,7 +1143,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             // Container: left-anchored at SL highlight-left
             actors.push(Actor::Frame {
                 align: [0.0, 0.5], // left-center
-                offset: [highlight_left_world, y_center],
+                offset: [highlight_left_world, y_center_item],
                 size: [SizeSpec::Px(highlight_w), SizeSpec::Px(item_h_full)],
                 background: None,
                 z: 51,
