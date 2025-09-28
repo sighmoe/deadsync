@@ -48,8 +48,9 @@ const PACK_COUNT_TEXT_TARGET_PX: f32 = 14.0;
 static DIFFICULTY_DISPLAY_INNER_BOX_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#0f0f0f"));
 pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
-const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(250);
-const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(80);
+const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(200);
+const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(40);
+const PREVIEW_DELAY_SECONDS: f32 = 0.25;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum NavDirection { Left, Right }
@@ -80,6 +81,7 @@ pub struct State {
     pub nav_key_held_since: Option<Instant>,
     pub nav_key_last_scrolled_at: Option<Instant>,
     pub currently_playing_preview_path: Option<PathBuf>,
+    pub time_since_selection_change: f32,
 }
 
 // ... (init, handle_key_press, update, etc. functions remain unchanged) ...
@@ -175,6 +177,7 @@ pub fn init() -> State {
         nav_key_held_since: None,
         nav_key_last_scrolled_at: None,
         currently_playing_preview_path: None,
+        time_since_selection_change: 0.0,
     };
 
     rebuild_displayed_entries(&mut state);
@@ -220,6 +223,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                     }).unwrap_or(0); // Fallback to 0 if the pack isn't found.
 
                     state.selected_index = new_selection_index;
+                    state.time_since_selection_change = 0.0;
                     combo_action_taken = true;
                 }
             }
@@ -234,6 +238,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                         state.nav_key_held_direction = Some(NavDirection::Right);
                         state.nav_key_held_since = Some(Instant::now());
                         state.nav_key_last_scrolled_at = Some(Instant::now());
+                        state.time_since_selection_change = 0.0;
                     }
                 }
                 KeyCode::ArrowLeft | KeyCode::KeyA => {
@@ -243,6 +248,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                         state.nav_key_held_direction = Some(NavDirection::Left);
                         state.nav_key_held_since = Some(Instant::now());
                         state.nav_key_last_scrolled_at = Some(Instant::now());
+                        state.time_since_selection_change = 0.0;
                     }
                 }
                 KeyCode::ArrowUp | KeyCode::KeyW => {
@@ -308,6 +314,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                                     if let MusicWheelEntry::PackHeader{ name: n, .. } = e { n == &pack_name_to_focus } else { false }
                                 }).unwrap_or(0);
                                 state.selected_index = new_selection;
+                                state.time_since_selection_change = 0.0;
                             }
                         }
                     }
@@ -330,11 +337,16 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 pub fn update(state: &mut State, dt: f32) -> ScreenAction {
+    // Increment the timer every frame since the last selection change.
+    state.time_since_selection_change += dt;
+
+    // Handle the visual pulsing animation of the selected wheel item.
     state.selection_animation_timer += dt;
     if state.selection_animation_timer > SELECTION_ANIMATION_CYCLE_DURATION {
         state.selection_animation_timer -= SELECTION_ANIMATION_CYCLE_DURATION;
     }
     
+    // Handle rapid scrolling when a navigation key is held down.
     if let (Some(direction), Some(held_since), Some(last_scrolled_at)) =
         (state.nav_key_held_direction.clone(), state.nav_key_held_since, state.nav_key_last_scrolled_at)
     {
@@ -348,11 +360,14 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
                         NavDirection::Right => state.selected_index = (state.selected_index + 1) % num_entries,
                     }
                     state.nav_key_last_scrolled_at = Some(now);
+                    // Reset the preview delay timer each time we auto-scroll.
+                    state.time_since_selection_change = 0.0;
                 }
             }
         }
     }
 
+    // Get the currently selected song or pack header.
     let (selected_song, selected_pack) = if let Some(entry) = state.entries.get(state.selected_index) {
         match entry {
             MusicWheelEntry::Song(song) => (Some(song.clone()), None),
@@ -362,26 +377,35 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         (None, None)
     };
 
-    let music_path_for_preview = selected_song.as_ref().and_then(|s| s.music_path.clone());
-    if state.currently_playing_preview_path != music_path_for_preview {
-        state.currently_playing_preview_path = music_path_for_preview;
+    // --- MUSIC PREVIEW LOGIC WITH DELAY ---
+    if state.time_since_selection_change >= PREVIEW_DELAY_SECONDS {
+        let music_path_for_preview = selected_song.as_ref().and_then(|s| s.music_path.clone());
+        if state.currently_playing_preview_path != music_path_for_preview {
+            state.currently_playing_preview_path = music_path_for_preview;
 
-        let mut played = false;
-        if let Some(song) = &selected_song {
-            if let (Some(path), Some(start), Some(length)) = (&song.music_path, song.sample_start, song.sample_length) {
-                if length > 0.0 {
-                    info!("Playing preview for '{}' at {:.2}s for {:.2}s", song.title, start, length);
-                    let cut = audio::Cut { start_sec: start as f64, length_sec: length as f64 };
-                    audio::play_music(path.clone(), cut);
-                    played = true;
+            let mut played = false;
+            if let Some(song) = &selected_song {
+                if let (Some(path), Some(start), Some(length)) = (&song.music_path, song.sample_start, song.sample_length) {
+                    if length > 0.0 {
+                        info!("Playing preview for '{}' at {:.2}s for {:.2}s", song.title, start, length);
+                        let cut = audio::Cut { start_sec: start as f64, length_sec: length as f64 };
+                        audio::play_music(path.clone(), cut);
+                        played = true;
+                    }
                 }
             }
+            if !played {
+                audio::stop_music();
+            }
         }
-        if !played {
-            audio::stop_music();
-        }
+    } else if state.currently_playing_preview_path.is_some() {
+        // If we haven't met the delay yet but music is playing, stop it.
+        state.currently_playing_preview_path = None;
+        audio::stop_music();
     }
 
+    // --- DIFFICULTY SELECTION LOGIC ---
+    // If the current difficulty is not playable for the selected song, find one that is.
     if let Some(song) = &selected_song {
         if !is_difficulty_playable(song, state.selected_difficulty_index) {
             for i in 0..DIFFICULTY_NAMES.len() {
@@ -393,6 +417,8 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         }
     }
 
+    // --- DYNAMIC TEXTURE REQUEST LOGIC ---
+    // Request a new density graph if the selected chart has changed.
     let chart_to_display = selected_song.as_ref().and_then(|song| {
         let difficulty_name = DIFFICULTY_NAMES[state.selected_difficulty_index];
         song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).cloned()
@@ -404,6 +430,7 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         return ScreenAction::RequestDensityGraph(chart_to_display);
     }
     
+    // Request a new banner if the selected song or pack has changed.
     let new_banner_path = selected_song.as_ref().and_then(|s| s.banner_path.clone()).or_else(|| selected_pack.and_then(|(_, path)| path));
     if state.last_requested_banner_path != new_banner_path {
         state.last_requested_banner_path = new_banner_path.clone();
