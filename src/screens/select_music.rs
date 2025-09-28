@@ -445,7 +445,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         position: ScreenBarPosition::Bottom,
         transparent: false,
         fg_color: [1.0; 4],
-        left_text: Some("PerfectTaste"), center_text: None, right_text: Some("NOT PRESENT"),
+        left_text: Some("PerfectTaste"), center_text: None, right_text: Some("PRESS START"),
     }));
 
     // --- BANNER (center-anchored like SL's ActorFrame) ---
@@ -993,161 +993,165 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ));
     }
 
-    // --- MUSIC WHEEL (same spacing/placement as before; SL-accurate width & text metrics) ---
-
+// --- MUSIC WHEEL (Simply Love parity, corrected offsets) ---
+{
     const WHEEL_WIDTH_DIVISOR: f32 = 2.125;
-    let num_visible_items = NUM_WHEEL_ITEMS - 2;
+    let num_visible_items = NUM_WHEEL_ITEMS - 2; // 17 -> 15 visible
 
-    // 1) compute width in *pixels* like SL, then convert to world
-    let px_w = crate::core::space::screen_pixel_width();
-    let highlight_w_px = px_w / WHEEL_WIDTH_DIVISOR;                   // SL highlight width
-    let row_inset_px   = crate::core::space::widescale_px(10.0, 15.0); // SL subtracts a small inset
-    let row_w          = crate::core::space::px_to_world_x(highlight_w_px - row_inset_px);
+    // SL metrics-derived values
+    let sl_shift                 = widescale(28.0, 33.0);                 // InitCommand shift in SL
+    let highlight_w: f32         = screen_width() / WHEEL_WIDTH_DIVISOR;  // _screen.w/2.125
+    let highlight_left_world: f32= screen_center_x() + sl_shift;          // left edge of the column
+    let half_highlight: f32      = 0.5 * highlight_w;
 
-    // 2) keep full-bleed on the right; derive left from width
-    let right_edge   = screen_width();
-    let wheel_left_x = right_edge - row_w;
+    // Local Xs (container is LEFT-anchored at highlight_left_world)
+    // In SL, titles are WideScale(75,111) from wheel center (no +sl_shift); cancel the container shift here.
+    let title_x_local: f32       = widescale(75.0, 111.0) - sl_shift;
+    let title_max_w_local: f32   = widescale(245.0, 350.0);
 
-    // 3) vertical spacing unchanged (world units)
-    let slot_spacing = screen_height() / (num_visible_items as f32);
-    let item_h       = (slot_spacing - 1.0).max(18.0);
-    let center_y     = screen_center_y();
+    // Pack name: visually centered in the column
+    let pack_center_x_local: f32 = half_highlight - sl_shift + widescale(9.0, 10.0);
+    let pack_name_max_w: f32     = widescale(240.0, 310.0);
 
-    // 4) SL text metrics (px) → world
-    // Title/SubTitle x: WideScale(75,111); Title maxwidth: WideScale(245,350)
-    let title_left_units = widescale(75.0, 111.0);   // Title/Subtitle x
-    let title_max_units  = widescale(245.0, 350.0);  // Title/Subtitle maxwidth
-    let pack_max_units   = widescale(240.0, 310.0);  // Section (pack) maxwidth
+    // Pack count
+    let pack_count_x_local: f32 = screen_width() / 2.0 - widescale(9.0, 10.0) - sl_shift;
 
-    // Convert to world once
-    let title_x_world  = wheel_left_x + title_left_units;
-    // ±6px offset between Title and Subtitle
-    let line_gap_units: f32 = 6.0;
+    // Vertical geometry per SL
+    let slot_spacing: f32        = screen_height() / (num_visible_items as f32); // _screen.h/15
+    let item_h_full: f32         = slot_spacing;
+    let item_h_colored: f32      = slot_spacing - 1.0;                            // 1px divider look
+    let center_y: f32            = screen_center_y();
+    let line_gap_units: f32      = 6.0;
 
-    // Pack text center stays the same (column center)
-    let pack_center_x = wheel_left_x + row_w * 0.5;
-
-    // Selection pulse (unchanged)
+    // Selection pulse
     let anim_t_unscaled = (state.selection_animation_timer / SELECTION_ANIMATION_CYCLE_DURATION)
         * std::f32::consts::PI * 2.0;
     let anim_t = (anim_t_unscaled.sin() + 1.0) / 2.0;
 
+    let cache = get_song_cache();
     let num_entries = state.entries.len();
+
     if num_entries > 0 {
         for i_slot in 0..NUM_WHEEL_ITEMS {
             let offset_from_center = i_slot as isize - CENTER_WHEEL_SLOT_INDEX as isize;
-            let y_center = center_y + (offset_from_center as f32) * slot_spacing;
-            let y_top    = y_center - item_h * 0.5;
-            let is_selected_slot = i_slot == CENTER_WHEEL_SLOT_INDEX;
+            let y_center           = center_y + (offset_from_center as f32) * slot_spacing;
+            let is_selected_slot   = i_slot == CENTER_WHEEL_SLOT_INDEX;
 
-            // Wrap around entries
             let list_index = ((state.selected_index as isize + offset_from_center + num_entries as isize)
                 as usize) % num_entries;
 
-            // Resolve display + colors
-            let (title_text, subtitle_text, is_pack, bg_col, txt_col) =
-                if let Some(entry) = state.entries.get(list_index) {
-                    match entry {
-                        MusicWheelEntry::Song(info) => {
-                            // Title & Subtitle parity (Subtitle may be empty)
-                            let title = info.title.clone();
-                            // If your SongData lacks `subtitle`, change this to `String::new()`.
-                            let subtitle = info.subtitle.clone();
-                            let base = col_music_wheel_box();
-                            let sel  = col_selected_song_box();
-                            let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
-                            (title, subtitle, false, bg, [1.0, 1.0, 1.0])
-                        }
-                        MusicWheelEntry::PackHeader { name, original_index, .. } => {
-                            let base = col_pack_header_box();
-                            let sel  = col_selected_pack_header_box();
-                            let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
-                            let c    = color::simply_love_rgba(state.active_color_index + *original_index as i32);
-                            (name.clone(), String::new(), true, bg, [c[0], c[1], c[2]])
-                        }
+            let (is_pack, bg_col, txt_col, title_str, subtitle_str, pack_name_opt) =
+                match state.entries.get(list_index) {
+                    Some(MusicWheelEntry::Song(info)) => {
+                        let base = col_music_wheel_box();
+                        let sel  = col_selected_song_box();
+                        let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
+                        (false, bg, [1.0, 1.0, 1.0, 1.0], info.title.clone(), info.subtitle.clone(), None)
                     }
-                } else {
-                    ("".to_string(), "".to_string(), false, col_music_wheel_box(), [1.0, 1.0, 1.0])
+                    Some(MusicWheelEntry::PackHeader { name, original_index, .. }) => {
+                        let base = col_pack_header_box();
+                        let sel  = col_selected_pack_header_box();
+                        let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
+                        let c    = color::simply_love_rgba(state.active_color_index + *original_index as i32);
+                        (true, bg, [c[0], c[1], c[2], 1.0], name.clone(), String::new(), Some(name.clone()))
+                    }
+                    _ => (false, col_music_wheel_box(), [1.0; 4], String::new(), String::new(), None),
                 };
 
-            let has_subtitle = !subtitle_text.trim().is_empty();
+            let has_subtitle = !subtitle_str.trim().is_empty();
 
-            // Row background — left-aligned, top-anchored (same as before)
-            actors.push(act!(quad:
-                align(0.0, 0.0):
-                xy(wheel_left_x, y_top):
-                zoomto(row_w, item_h):
+            // Children local to container-left (highlight_left_world)
+            let mut slot_children: Vec<Actor> = Vec::new();
+
+            // Base black quad (full height)
+            slot_children.push(act!(quad:
+                align(0.0, 0.5):
+                xy(0.0, 0.0):
+                zoomto(highlight_w, item_h_full):
+                diffuse(0.0, 0.0, 0.0, 1.0):
+                z(0)
+            ));
+            // Colored quad (height - 1)
+            slot_children.push(act!(quad:
+                align(0.0, 0.5):
+                xy(0.0, 0.0):
+                zoomto(highlight_w, item_h_colored):
                 diffuse(bg_col[0], bg_col[1], bg_col[2], 1.0):
-                z(51)
+                z(1)
             ));
 
-            // Text
             if is_pack {
-                // PACK: centered, zoom 1.0, clamp width to WideScale(240,310)
-                actors.push(act!(text:
+                // PACK name — centered with slight right bias
+                slot_children.push(act!(text:
                     font("miso"):
-                    settext(title_text):
+                    settext(title_str.clone()):
                     align(0.5, 0.5):
-                    xy(pack_center_x, y_center):
+                    xy(pack_center_x_local, 0.0):
+                    maxwidth(pack_name_max_w):
                     zoom(1.0):
-                    maxwidth(pack_max_units):
-                    horizalign(center):
-                    diffuse(txt_col[0], txt_col[1], txt_col[2], 1.0):
-                    z(52)
+                    diffuse(txt_col[0], txt_col[1], txt_col[2], txt_col[3]):
+                    z(2)
                 ));
+
+                // PACK count — right-aligned, inset from edge
+                if let Some(pack_name) = pack_name_opt {
+                    let count = cache.iter()
+                        .find(|p| p.name == pack_name)
+                        .map(|p| p.songs.len())
+                        .unwrap_or(0);
+                    if count > 0 {
+                        slot_children.push(act!(text:
+                            font("miso"):
+                            settext(format!("{}", count)):
+                            align(1.0, 0.5):
+                            xy(pack_count_x_local, 0.0):
+                            zoom(0.75):
+                            horizalign(right):
+                            diffuse(1.0, 1.0, 1.0, 1.0):
+                            z(2)
+                        ));
+                    }
+                }
             } else {
-                // SONG: Title + optional Subtitle, left aligned at WideScale(75,111)
-                // Title
-                actors.push(act!(text:
+                // SONG title/subtitle — subtract sl_shift to avoid double offset
+                slot_children.push(act!(text:
                     font("miso"):
-                    settext(title_text.clone()):
+                    settext(title_str.clone()):
                     align(0.0, 0.5):
-                    xy(title_x_world, y_center + if has_subtitle { -line_gap_units } else { 0.0 }):
-                    zoom(0.85):                      // SL Title zoom
-                    maxwidth(title_max_units):          // SL Title maxwidth
-                    horizalign(left):
+                    xy(title_x_local, if has_subtitle { -line_gap_units } else { 0.0 }):
+                    maxwidth(title_max_w_local):
+                    zoom(0.85):
                     diffuse(1.0, 1.0, 1.0, 1.0):
-                    z(52)
+                    z(2)
                 ));
-
-                // Subtitle (only if present)
                 if has_subtitle {
-                    actors.push(act!(text:
+                    slot_children.push(act!(text:
                         font("miso"):
-                        settext(subtitle_text):
+                        settext(subtitle_str.clone()):
                         align(0.0, 0.5):
-                        xy(title_x_world, y_center + line_gap_units):
-                        zoom(0.7):                   // SL Subtitle zoom
-                        maxwidth(title_max_units):      // SL Subtitle shares same maxwidth
-                        horizalign(left):
+                        xy(title_x_local, line_gap_units):
+                        maxwidth(title_max_w_local):
+                        zoom(0.7):
                         diffuse(1.0, 1.0, 1.0, 1.0):
-                        z(52)
+                        z(2)
                     ));
                 }
             }
 
-            // Pack song counts — right-aligned to true SCREEN_RIGHT with 11px padding
-            if let Some(MusicWheelEntry::PackHeader { name, .. }) = state.entries.get(list_index) {
-                let count = get_song_cache().iter().find(|p| &p.name == name)
-                    .map(|p| p.songs.len()).unwrap_or(0);
-                if count > 0 {
-                    actors.push(act!(text:
-                        align(1.0, 0.5):
-                        xy(
-                            right_edge - crate::core::space::px_to_world_x(PACK_COUNT_RIGHT_PADDING),
-                            y_center
-                        ):
-                        zoom(0.75):
-                        font("miso"):
-                        settext(format!("{}", count)):
-                        horizalign(right):
-                        diffuse(1.0, 1.0, 1.0, 1.0):
-                        z(52)
-                    ));
-                }
-            }
+            // Container: left-anchored at SL highlight-left
+            actors.push(Actor::Frame {
+                align: [0.0, 0.5], // left-center
+                offset: [highlight_left_world, y_center],
+                size: [SizeSpec::Px(highlight_w), SizeSpec::Px(item_h_full)],
+                background: None,
+                z: 51,
+                children: slot_children,
+            });
         }
     }
+}
+
+
 
     actors
 }

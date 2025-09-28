@@ -44,7 +44,6 @@ pub fn set_current_window_px(px_w: u32, px_h: u32) {
 // StepMania-style globals (world space, origin at top-left)
 // Usage:
 //   use crate::core::space::globals::*;
-//   let w = screen_width();
 // -----------------------------------------------------------------------------
 #[allow(dead_code)]
 pub mod globals {
@@ -53,7 +52,7 @@ pub mod globals {
     #[inline(always)] pub fn screen_width()  -> f32 { CURRENT_METRICS.with(|c| { let m=c.get(); m.right - m.left }) }
     #[inline(always)] pub fn screen_height() -> f32 { CURRENT_METRICS.with(|c| { let m=c.get(); m.top   - m.bottom }) }
 
-    // We use a top-left origin for UI convenience (match SM’s SCREEN_LEFT/TOP = 0)
+    // Top-left origin to match SM (SCREEN_LEFT/TOP = 0)
     #[inline(always)] pub fn screen_left()   -> f32 { 0.0 }
     #[inline(always)] pub fn screen_top()    -> f32 { 0.0 }
     #[inline(always)] pub fn screen_right()  -> f32 { screen_width()  }
@@ -63,7 +62,7 @@ pub mod globals {
     #[inline(always)] pub fn screen_center_y() -> f32 { 0.5 * screen_height() }
 }
 
-// Re-export the common getters at the crate::core::space root for convenience
+// Re-export the common getters at crate::core::space root for convenience
 pub use globals::{screen_width, screen_height, screen_left, screen_top, screen_right, screen_bottom, screen_center_x, screen_center_y};
 
 // -----------------------------------------------------------------------------
@@ -72,9 +71,14 @@ pub use globals::{screen_width, screen_height, screen_left, screen_top, screen_r
 #[inline(always)]
 pub fn metrics_for_window(px_w: u32, px_h: u32) -> Metrics {
     let aspect = if px_h == 0 { 1.0 } else { px_w as f32 / px_h as f32 };
-    let h = logical_height();
-    let unclamped_w = h * aspect;
-    let w = unclamped_w.min(design_width_16_9());
+    let h = logical_height();                // 480 world units
+    let w = if aspect >= 16.0/9.0 {
+        // Match SM/SL exactly: 854 units at ≥16:9
+        design_width_16_9()
+    } else {
+        // below 16:9, scale width from height
+        (h * aspect).min(design_width_16_9())
+    };
     let half_w = 0.5 * w;
     let half_h = 0.5 * h;
 
@@ -83,6 +87,7 @@ pub fn metrics_for_window(px_w: u32, px_h: u32) -> Metrics {
         bottom: -half_h, top: half_h,
     }
 }
+
 
 // -----------------------------------------------------------------------------
 // Ortho for current window (also stores CURRENT_PIXEL + CURRENT_METRICS)
@@ -120,64 +125,10 @@ pub fn screen_pixel_height() -> f32 {
 }
 
 // -----------------------------------------------------------------------------
-// Pixel ↔ World converters (axis-aware)
-// -----------------------------------------------------------------------------
-#[inline(always)]
-pub fn px_to_world_x(px: f32) -> f32 {
-    let pw = screen_pixel_width();
-    if pw <= 0.0 { return 0.0; }
-    screen_width() * (px / pw)
-}
-
-#[inline(always)]
-pub fn px_to_world_y(px: f32) -> f32 {
-    let ph = screen_pixel_height();
-    if ph <= 0.0 { return 0.0; }
-    screen_height() * (px / ph)
-}
-
-// (Optional) helpers in the other direction if needed later
-#[allow(dead_code)]
-#[inline(always)]
-pub fn world_to_px_x(world: f32) -> f32 {
-    let pw = screen_pixel_width();
-    let w  = screen_width();
-    if w <= 0.0 { return 0.0; }
-    pw * (world / w)
-}
-
-#[allow(dead_code)]
-#[inline(always)]
-pub fn world_to_px_y(world: f32) -> f32 {
-    let ph = screen_pixel_height();
-    let h  = screen_height();
-    if h <= 0.0 { return 0.0; }
-    ph * (world / h)
-}
-
-// -----------------------------------------------------------------------------
 // WideScale helpers
 // -----------------------------------------------------------------------------
 
-// World-space WideScale (clamp world width between 640 and 854 world units)
-#[inline(always)]
+/// Helper to select a scale factor based on screen aspect ratio.
 pub fn widescale(n43: f32, n169: f32) -> f32 {
-    let w   = screen_width();
-    let w43 = logical_height() * (4.0 / 3.0);  // 480 * 4/3 = 640
-    let w169 = design_width_16_9();            // 854
-    if w169 <= w43 { return n169; }
-    let t = ((w - w43) / (w169 - w43)).clamp(0.0, 1.0);
-    n43 + (n169 - n43) * t
+    if is_wide() { n169 } else { n43 }
 }
-
-// Pixel-space WideScale (exact SL: clamp _screen.w between 640 and 854 *pixels*)
-#[inline(always)]
-pub fn widescale_px(n43: f32, n169: f32) -> f32 {
-    let w = screen_pixel_width();
-    let w43: f32 = 640.0;
-    let w169: f32 = 854.0;
-    if w169 <= w43 { return n169; }
-    let t = ((w - w43) / (w169 - w43)).clamp(0.0, 1.0);
-    n43 + (n169 - n43) * t
-}
-
