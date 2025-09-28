@@ -55,6 +55,7 @@ pub struct App {
     metrics: Metrics,
     last_fps: f32,
     last_vpf: u32,
+    current_frame_vpf: u32,
     show_overlay: bool,
     transition: TransitionState,
     init_state: init::State,
@@ -99,8 +100,8 @@ impl App {
             current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: None, options_state,
             select_color_state, select_music_state: select_music::init(), sandbox_state: sandbox::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
-            vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay,
-            last_fps: 0.0, last_vpf: 0, transition: TransitionState::Idle,
+            vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay, last_fps: 0.0, last_vpf: 0, 
+            current_frame_vpf: 0, transition: TransitionState::Idle,
             current_dynamic_banner: None,
             current_density_graph: None,
             display_width,
@@ -464,6 +465,7 @@ impl App {
         if elapsed.as_secs_f32() >= 1.0 {
             let fps = self.frame_count as f32 / elapsed.as_secs_f32();
             self.last_fps = fps;
+            self.last_vpf = self.current_frame_vpf;
             let screen_name = format!("{:?}", self.current_screen);
             window.set_title(&format!("DeadSync - {:?} | {} | {:.2} FPS", self.backend_type, screen_name, fps));
             self.frame_count = 0;
@@ -731,7 +733,7 @@ impl ApplicationHandler for App {
 
                 if let Some(backend) = &mut self.backend {
                     match renderer::draw(backend, &screen, &self.texture_manager) {
-                        Ok(vpf) => self.last_vpf = vpf,
+                        Ok(vpf) => self.current_frame_vpf = vpf,
                         Err(e) => {
                             error!("Failed to draw frame: {}", e);
                             event_loop.exit();
