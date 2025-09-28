@@ -1099,9 +1099,19 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
                 // PACK count — right-aligned, inset from edge
                 if let Some(pack_name) = pack_name_opt {
-                    let count = cache.iter()
+                    let count = cache
+                        .iter()
                         .find(|p| p.name == pack_name)
-                        .map(|p| p.songs.len())
+                        .map(|p| {
+                            p.songs
+                                .iter()
+                                .filter(|song| {
+                                    song.charts
+                                        .iter()
+                                        .any(|chart| chart.chart_type.eq_ignore_ascii_case("dance-single"))
+                                })
+                                .count()
+                        })
                         .unwrap_or(0);
                     if count > 0 {
                         slot_children.push(act!(text:

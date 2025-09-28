@@ -26,6 +26,7 @@ pub struct SongData {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChartData {
+    pub chart_type: String,
     pub difficulty: String,
     pub meter: u32,
     pub step_artist: String,
@@ -124,6 +125,7 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
                 c.notes.len()
             );
             ChartData {
+                chart_type: c.step_type_str,
                 difficulty: c.difficulty_str,
                 meter: c.rating_str.parse().unwrap_or(0),
                 step_artist: c.step_artist_str.join(", "),
