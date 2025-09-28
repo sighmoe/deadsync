@@ -203,10 +203,23 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
         if !event.repeat {
             let mut combo_action_taken = false;
             if state.active_chord_keys.contains(&KeyCode::ArrowUp) && state.active_chord_keys.contains(&KeyCode::ArrowDown) {
-                if state.expanded_pack_name.is_some() {
-                    info!("Up+Down combo: Collapsing pack.");
+                // This combo collapses the currently open pack.
+                if let Some(pack_to_collapse) = state.expanded_pack_name.clone() {
+                    info!("Up+Down combo: Collapsing pack '{}'.", pack_to_collapse);
                     state.expanded_pack_name = None;
                     rebuild_displayed_entries(state);
+
+                    // After collapsing, we must update the selected index to point to the
+                    // header of the pack we were just in.
+                    let new_selection_index = state.entries.iter().position(|e| {
+                        if let MusicWheelEntry::PackHeader { name, .. } = e {
+                            *name == pack_to_collapse
+                        } else {
+                            false
+                        }
+                    }).unwrap_or(0); // Fallback to 0 if the pack isn't found.
+
+                    state.selected_index = new_selection_index;
                     combo_action_taken = true;
                 }
             }
