@@ -226,6 +226,8 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                     }).unwrap_or(0); // Fallback to 0 if the pack isn't found.
 
                     state.selected_index = new_selection_index;
+                    // Sync previous index to prevent the 'change' sound from playing.
+                    state.prev_selected_index = new_selection_index;
                     state.time_since_selection_change = 0.0;
                     combo_action_taken = true;
                 }
@@ -306,6 +308,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                                 return ScreenAction::Navigate(Screen::Gameplay);
                             }
                             MusicWheelEntry::PackHeader { name, .. } => {
+                                audio::play_sfx("assets/sounds/expand.ogg");
                                 let pack_name_to_focus = name.clone();
                                 if state.expanded_pack_name.as_ref() == Some(&pack_name_to_focus) {
                                     state.expanded_pack_name = None;
