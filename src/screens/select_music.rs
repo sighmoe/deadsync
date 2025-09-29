@@ -625,6 +625,24 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let peak_nps_text = selected_chart_data.as_ref().map_or("Peak NPS: --".to_string(), |c| format!("Peak NPS: {:.1}", c.meter)); // Using meter as a placeholder for now
         let breakdown_text = selected_chart_data.as_ref().map_or("".to_string(), |c| format!("{}", c.meter)); // Placeholder
 
+    // --- Get stats for the PaneDisplay ---
+    let (steps_text, jumps_text, holds_text, mines_text, hands_text, rolls_text) =
+        if let Some(chart) = &selected_chart_data {
+            (
+                chart.stats.total_steps.to_string(),
+                chart.stats.jumps.to_string(),
+                chart.stats.holds.to_string(),
+                chart.stats.mines.to_string(),
+                chart.stats.hands.to_string(),
+                chart.stats.rolls.to_string(),
+            )
+        } else {
+            (
+                "?".to_string(), "?".to_string(), "?".to_string(),
+                "?".to_string(), "?".to_string(), "?".to_string(),
+            )
+        };
+
     // --- Step credit panel (P1, song mode) — placed just above the density graph, no overlap ---
 
     if is_wide() {
@@ -816,7 +834,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let row3_y = 49.0;
 
     // ---------- Row 1: Taps, Mines ----------
-    actors.push(act!(text: font("miso"): settext("432"):
+    actors.push(act!(text: font("miso"): settext(steps_text):
         align(1.0, 0.5):
         xy(pane_cx + col1_x, pane_top + row1_y):
         zoom(text_zoom):
@@ -831,7 +849,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         diffuse(0.0, 0.0, 0.0, 1.0)
     ));
 
-    actors.push(act!(text: font("miso"): settext("12"):
+    actors.push(act!(text: font("miso"): settext(mines_text):
         align(1.0, 0.5):
         xy(pane_cx + col2_x, pane_top + row1_y):
         zoom(text_zoom):
@@ -847,7 +865,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     ));
 
     // ---------- Row 2: Jumps, Hands ----------
-    actors.push(act!(text: font("miso"): settext("38"):
+    actors.push(act!(text: font("miso"): settext(jumps_text):
         align(1.0, 0.5):
         xy(pane_cx + col1_x, pane_top + row2_y):
         zoom(text_zoom):
@@ -862,7 +880,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         diffuse(0.0, 0.0, 0.0, 1.0)
     ));
 
-    actors.push(act!(text: font("miso"): settext("5"):
+    actors.push(act!(text: font("miso"): settext(hands_text):
         align(1.0, 0.5):
         xy(pane_cx + col2_x, pane_top + row2_y):
         zoom(text_zoom):
@@ -878,7 +896,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     ));
 
     // ---------- Row 3: Holds, Rolls ----------
-    actors.push(act!(text: font("miso"): settext("22"):
+    actors.push(act!(text: font("miso"): settext(holds_text):
         align(1.0, 0.5):
         xy(pane_cx + col1_x, pane_top + row3_y):
         zoom(text_zoom):
@@ -893,7 +911,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         diffuse(0.0, 0.0, 0.0, 1.0)
     ));
 
-    actors.push(act!(text: font("miso"): settext("0"):
+    actors.push(act!(text: font("miso"): settext(rolls_text):
         align(1.0, 0.5):
         xy(pane_cx + col2_x, pane_top + row3_y):
         zoom(text_zoom):

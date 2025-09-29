@@ -3,6 +3,7 @@ use rssp::{analyze, AnalysisOptions};
 use rssp::graph::GraphImageData;
 use std::fs;
 use std::path::{Path, PathBuf};
+use rssp::stats::ArrowStats;
 use std::sync::{Arc, Mutex};
 use once_cell::sync::Lazy;
 
@@ -33,6 +34,7 @@ pub struct ChartData {
     pub notes: Vec<u8>, // This is the minimized raw data we will parse
     pub density_graph: Option<GraphImageData>,
     pub short_hash: String,
+    pub stats: ArrowStats,
 }
 
 #[derive(Clone, Debug)]
@@ -159,6 +161,7 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
                 notes: c.minimized_note_data,
                 density_graph: c.density_graph,
                 short_hash: c.short_hash,
+                stats: c.stats,
             }
         })
         .collect();
