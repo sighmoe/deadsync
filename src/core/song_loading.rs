@@ -35,6 +35,8 @@ pub struct ChartData {
     pub density_graph: Option<GraphImageData>,
     pub short_hash: String,
     pub stats: ArrowStats,
+    pub total_streams: u32,
+    pub total_measures: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -162,6 +164,8 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
                 density_graph: c.density_graph,
                 short_hash: c.short_hash,
                 stats: c.stats,
+                total_streams: c.total_streams,
+                total_measures: c.total_measures,
             }
         })
         .collect();

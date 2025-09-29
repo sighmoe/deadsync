@@ -1000,7 +1000,17 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     // Row 2: Brackets | Total Stream
     add_item(0, 2, "90", "Brackets", None);
     // SL shows "None (0.0%)" for Total Stream when empty
-    add_item(1, 2, "None (0.0%)", "Total Stream", None);
+    let total_stream_text = if let Some(chart) = &selected_chart_data {
+        if chart.total_measures > 0 {
+            let percent = (chart.total_streams as f32 / chart.total_measures as f32) * 100.0;
+            format!("{}/{} ({:.1}%)", chart.total_streams, chart.total_measures, percent)
+        } else {
+            "None (0.0%)".to_string()
+        }
+    } else {
+        "None (0.0%)".to_string()
+    };
+    add_item(1, 2, &total_stream_text, "Total Stream", None);
 
     // --- StepsDisplayList (Difficulty Meter Grid, SL parity) ---
     // Center at (_screen.cx - 26, _screen.cy + 67) with a 32x152 background,
