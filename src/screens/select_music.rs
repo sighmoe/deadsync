@@ -926,14 +926,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         diffuse(0.0, 0.0, 0.0, 1.0)
     ));
 
-    // --- Pattern Info (P1) — absolute placement, SL layout, static values ---
-
-    // density graph center (from SL): (cx-182, cy+23) with -5px extra on wide
+    // --- Pattern Info (P1) — SL 1:1 geometry ---
     let pat_cx = screen_center_x() - 182.0 - if is_wide() { 5.0 } else { 0.0 };
-    let pat_cy = screen_center_y() + 23.0 + 88.0; // PatternInfo sits 88px below graph center
-
-    let pat_w = if is_wide() { 286.0 } else { 276.0 };
-    let pat_h = 64.0;
+    let pat_cy = screen_center_y() + 23.0 + 88.0;
+    let pat_w  = if is_wide() { 286.0 } else { 276.0 };
+    let pat_h  = 64.0;
 
     // background
     actors.push(act!(quad:
@@ -944,73 +941,78 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         diffuse(0.1176, 0.1568, 0.1843, 1.0) // #1e282f
     ));
 
-    // grid baseline (relative to panel center, converted to absolute)
     let base_val_x   = pat_cx - pat_w * 0.5 + 40.0; // values (right-aligned)
-    let base_label_x = pat_cx - pat_w * 0.5 + 50.0; // labels (left-aligned, +10)
+    let base_label_x = pat_cx - pat_w * 0.5 + 50.0; // labels (left-aligned)
     let base_y       = pat_cy - pat_h * 0.5 + 13.0;
 
     let col_spacing = 150.0;
     let row_spacing = 20.0;
     let text_zoom   = 0.8;
 
-    // helper macro-ish closure for one cell (value + label)
-    let mut add_item = |col_idx: i32, row_idx: i32, value_text: &str, label_text: &str, max_label_w: Option<f32>| {
+    // helper: push one (value, label) cell — ONLY the value supports maxwidth
+    let mut add_item = |col_idx: i32,
+                        row_idx: i32,
+                        value_text: &str,
+                        label_text: &str,
+                        max_value_w: Option<f32>| {
         let x_val   = base_val_x   + (col_idx as f32) * col_spacing;
         let x_label = base_label_x + (col_idx as f32) * col_spacing;
         let y       = base_y       + (row_idx as f32) * row_spacing;
 
-        // value
-        actors.push(act!(text: font("miso"): settext(value_text):
-            align(1.0, 0.5):
-            xy(x_val, y):
-            zoom(text_zoom):
-            z(121):
-            diffuse(1.0, 1.0, 1.0, 1.0)
-        ));
-        // label
-        let mut label = act!(text: font("miso"): settext(label_text):
+        // value (right-aligned), optionally clamped
+        match max_value_w {
+            Some(maxw) => actors.push(act!(text: font("miso"): settext(value_text):
+                align(1.0, 0.5):
+                xy(x_val, y):
+                zoom(text_zoom):
+                maxwidth(maxw):
+                z(121):
+                diffuse(1.0, 1.0, 1.0, 1.0)
+            )),
+            None => actors.push(act!(text: font("miso"): settext(value_text):
+                align(1.0, 0.5):
+                xy(x_val, y):
+                zoom(text_zoom):
+                z(121):
+                diffuse(1.0, 1.0, 1.0, 1.0)
+            )),
+        }
+
+        // label (left-aligned) — no clamp for SL parity
+        actors.push(act!(text: font("miso"): settext(label_text):
             align(0.0, 0.5):
             xy(x_label, y):
             zoom(text_zoom):
             z(121):
             diffuse(1.0, 1.0, 1.0, 1.0)
-        );
-        if let Some(maxw) = max_label_w {
-            // clamp if you want; SL sometimes maxwidths here
-            label = act!(text: font("miso"): settext(label_text):
-                align(0.0, 0.5):
-                xy(x_label, y):
-                zoom(text_zoom):
-                zoomtowidth(maxw):
-                z(121):
-                diffuse(1.0, 1.0, 1.0, 1.0)
-            );
-        }
-        actors.push(label);
+        ));
     };
 
     // Row 0: Crossovers | Footswitches
-    add_item(0, 0, "69", "Crossovers", None);
-    add_item(1, 0, "64", "Footswitches", None);
+    add_item(0, 0, "69",  "Crossovers",   None);
+    add_item(1, 0, "64",  "Footswitches", None);
 
     // Row 1: Sideswitches | Jacks
     add_item(0, 1, "123", "Sideswitches", None);
-    add_item(1, 1, "124", "Jacks", None);
+    add_item(1, 1, "124", "Jacks",        None);
 
     // Row 2: Brackets | Total Stream
-    add_item(0, 2, "90", "Brackets", None);
-    // SL shows "None (0.0%)" for Total Stream when empty
-    let total_stream_text = if let Some(chart) = &selected_chart_data {
+    add_item(0, 2, "90",  "Brackets",     None);
+
+    // Total Stream value text (only this one is clamped to 100 like SL)
+    let total_stream_value = if let Some(chart) = &selected_chart_data {
         if chart.total_measures > 0 {
-            let percent = (chart.total_streams as f32 / chart.total_measures as f32) * 100.0;
-            format!("{}/{} ({:.1}%)", chart.total_streams, chart.total_measures, percent)
+            let pct = (chart.total_streams as f32 / chart.total_measures as f32) * 100.0;
+            format!("{}/{} ({:.1}%)", chart.total_streams, chart.total_measures, pct)
         } else {
             "None (0.0%)".to_string()
         }
     } else {
         "None (0.0%)".to_string()
     };
-    add_item(1, 2, &total_stream_text, "Total Stream", None);
+
+    // clamp ONLY the value to 100
+    add_item(1, 2, &total_stream_value, "Total Stream", Some(80.0));
 
     // --- StepsDisplayList (Difficulty Meter Grid, SL parity) ---
     // Center at (_screen.cx - 26, _screen.cy + 67) with a 32x152 background,
