@@ -549,7 +549,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let value_color = [1.0, 1.0, 1.0, 1.0];
 
     let artist_max_w = box_width - 60.0;
-    let bpm_zoom = if bpm_text.contains('\n') { 0.8 } else { 1.0 };
 
     let main_frame = Actor::Frame {
         align: [0.0, 0.0],
@@ -577,13 +576,14 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     // --- Artist ---
                     act!(text: font("miso"): settext("ARTIST"):
                         align(1.0, 0.0): y(-11.0):
-                        maxwidth(44.0): // This is correct
+                        maxwidth(44.0):
                         diffuse(label_color[0], label_color[1], label_color[2], label_color[3]):
                         z(52)
                     ),
                     act!(text: font("miso"): settext(artist_text):
                         align(0.0, 0.0): xy(5.0, -11.0):
-                        maxwidth(artist_max_w): // Correctly ordered and dynamic
+                        maxwidth(artist_max_w): // maxwidth is applied before final size calc
+                        zoomtoheight(15.0):     // Enforce a consistent height for alignment
                         diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
                         z(52)
                     ),
@@ -595,8 +595,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                         z(52)
                     ),
                     act!(text: font("miso"): settext(bpm_text):
-                        align(0.0, 0.5): xy(5.0, 17.0):
-                        zoom(bpm_zoom): // Correctly conditional
+                        align(0.0, 0.0): xy(5.0, 10.0):
+                        zoomtoheight(15.0):     // Base height for alignment
                         diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
                         z(52)
                     ),
@@ -609,6 +609,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     ),
                     act!(text: font("miso"): settext(length_text):
                         align(0.0, 0.0): xy(box_width - 125.0, 10.0):
+                        zoomtoheight(15.0):     // Enforce a consistent height for alignment
                         diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
                         z(52)
                     ),
