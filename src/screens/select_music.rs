@@ -964,8 +964,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             Some(maxw) => actors.push(act!(text: font("miso"): settext(value_text):
                 align(1.0, 0.5):
                 xy(x_val, y):
-                zoom(text_zoom):
                 maxwidth(maxw):
+                zoom(text_zoom):
                 z(121):
                 diffuse(1.0, 1.0, 1.0, 1.0)
             )),
@@ -1012,7 +1012,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     };
 
     // clamp ONLY the value to 100
-    add_item(1, 2, &total_stream_value, "Total Stream", Some(80.0));
+    add_item(1, 2, &total_stream_value, "Total Stream", Some(100.0));
 
     // --- StepsDisplayList (Difficulty Meter Grid, SL parity) ---
     // Center at (_screen.cx - 26, _screen.cy + 67) with a 32x152 background,
