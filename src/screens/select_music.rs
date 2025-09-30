@@ -526,9 +526,18 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let (artist_text, bpm_text, length_text) = if let Some(MusicWheelEntry::Song(song)) = selected_entry {
         let minutes = song.total_length_seconds / 60;
         let seconds = song.total_length_seconds % 60;
+        let formatted_bpm = {
+            let min = song.min_bpm.round() as i32;
+            let max = song.max_bpm.round() as i32;
+            if (song.min_bpm - song.max_bpm).abs() < 1e-6 { // Use an epsilon for float comparison
+                format!("{}", min)
+            } else {
+                format!("{} - {}", min, max)
+            }
+        };
         (
             song.artist.clone(),
-            song.normalized_bpms.clone(),
+            formatted_bpm,
             format!("{}:{:02}", minutes, seconds)
         )
     } else {
@@ -539,7 +548,9 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let label_color = [0.5, 0.5, 0.5, 1.0];
     let value_color = [1.0, 1.0, 1.0, 1.0];
 
-    // Build the nested structure manually as per your example.
+    let artist_max_w = box_width - 60.0;
+    let bpm_zoom = if bpm_text.contains('\n') { 0.8 } else { 1.0 };
+
     let main_frame = Actor::Frame {
         align: [0.0, 0.0],
         offset: [frame_x, frame_y],
@@ -547,7 +558,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         background: None,
         z: 51,
         children: vec![
-            // Background Quad
+            // Background Quad (unchanged)
             {
                 let bg_color = color::rgba_hex("#1e282f");
                 act!(quad:
@@ -555,7 +566,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     diffuse(bg_color[0], bg_color[1], bg_color[2], bg_color[3])
                 )
             },
-            // Inner Frame for Text
+            // Inner Frame for Text (unchanged structure)
             Actor::Frame {
                 align: [0.0, 0.0],
                 offset: [-110.0, -6.0],
@@ -563,46 +574,41 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 background: None,
                 z: 0,
                 children: vec![
+                    // --- Artist ---
                     act!(text: font("miso"): settext("ARTIST"):
-                        align(1.0, 0.0):
-                        y(-11.0):
-                        maxwidth(44.0):
+                        align(1.0, 0.0): y(-11.0):
+                        maxwidth(44.0): // This is correct
                         diffuse(label_color[0], label_color[1], label_color[2], label_color[3]):
                         z(52)
                     ),
                     act!(text: font("miso"): settext(artist_text):
-                        align(0.0, 0.0):
-                        xy(5.0, -11.0):
-                        zoomtoheight(15.0):
-                        maxwidth(260.0):
+                        align(0.0, 0.0): xy(5.0, -11.0):
+                        maxwidth(artist_max_w): // Correctly ordered and dynamic
                         diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
                         z(52)
                     ),
+
+                    // --- BPM ---
                     act!(text: font("miso"): settext("BPM"):
-                        align(1.0, 0.0):
-                        y(10.0):
-                        zoomtoheight(15.0): // Using zoomtoheight as maxwidth is not available for labels
+                        align(1.0, 0.0): y(10.0):
                         diffuse(label_color[0], label_color[1], label_color[2], label_color[3]):
                         z(52)
                     ),
                     act!(text: font("miso"): settext(bpm_text):
-                        align(0.0, 0.5):
-                        xy(5.0, 17.0):
-                        zoomtoheight(15.0): // vertspacing not supported
+                        align(0.0, 0.5): xy(5.0, 17.0):
+                        zoom(bpm_zoom): // Correctly conditional
                         diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
                         z(52)
                     ),
+
+                    // --- Length ---
                     act!(text: font("miso"): settext("LENGTH"):
-                        align(1.0, 0.0):
-                        xy(box_width - 130.0, 10.0):
-                        zoomtoheight(15.0):
+                        align(1.0, 0.0): xy(box_width - 130.0, 10.0):
                         diffuse(label_color[0], label_color[1], label_color[2], label_color[3]):
                         z(52)
                     ),
                     act!(text: font("miso"): settext(length_text):
-                        align(0.0, 0.0):
-                        xy(box_width - 125.0, 10.0):
-                        zoomtoheight(15.0):
+                        align(0.0, 0.0): xy(box_width - 125.0, 10.0):
                         diffuse(value_color[0], value_color[1], value_color[2], value_color[3]):
                         z(52)
                     ),
