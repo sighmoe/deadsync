@@ -651,7 +651,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 } else if check_width(&chart.simple_breakdown) {
                     chart.simple_breakdown.clone()
                 } else {
-                    format!("{} Total", chart.stats.total_steps)
+                    format!("{} Total", chart.total_streams)
                 }
             }).unwrap_or_else(|| chart.simple_breakdown.clone()) // Fallback if font isn't found
         } else {
