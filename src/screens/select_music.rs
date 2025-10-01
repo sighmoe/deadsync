@@ -832,13 +832,18 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         )
     ));
 
-    // --- Stats Grid (Taps, Jumps, etc.) ---
-    // This block is refactored to exactly match the Lua script's grid layout.
+    // --- Stats Grid, High Scores, and Meter (SL Parity) ---
     {
         let text_zoom = widescale(0.8, 0.9);
-        let cols_x = [widescale(-104.0, -133.0), widescale(-36.0, -38.0)];
+        let cols_x = [
+            widescale(-104.0, -133.0), // col 1
+            widescale(-36.0, -38.0),   // col 2
+            widescale(54.0, 76.0),     // col 3
+            widescale(150.0, 190.0),   // col 4
+        ];
         let rows_y = [13.0, 31.0, 49.0];
 
+        // --- Main Stats Grid ---
         let items = [
             ("Steps", &steps_text), ("Mines", &mines_text),
             ("Jumps", &jumps_text), ("Hands", &hands_text),
@@ -846,29 +851,66 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ];
 
         for (i, (label, value)) in items.iter().enumerate() {
-            let col_idx = i % 2;
-            let row_idx = i / 2;
-            let col_x = cols_x[col_idx];
-            let row_y = rows_y[row_idx];
+            let (col_idx, row_idx) = (i % 2, i / 2);
+            let (col_x, row_y) = (cols_x[col_idx], rows_y[row_idx]);
 
-            // Stat value (the number)
+            // Stat value (right-aligned)
             actors.push(act!(text: font("miso"): settext(*value):
-                align(1.0, 0.5): // right-aligned
-                xy(pane_cx + col_x, pane_top + row_y):
-                zoom(text_zoom):
-                z(121):
-                diffuse(0.0, 0.0, 0.0, 1.0)
+                align(1.0, 0.5): xy(pane_cx + col_x, pane_top + row_y):
+                zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
             ));
-
-            // Stat label ("Taps", "Mines", etc.)
+            // Stat label (left-aligned, +3px offset)
             actors.push(act!(text: font("miso"): settext(*label):
-                align(0.0, 0.5): // left-aligned
-                xy(pane_cx + col_x + 3.0, pane_top + row_y):
-                zoom(text_zoom):
-                z(121):
-                diffuse(0.0, 0.0, 0.0, 1.0)
+                align(0.0, 0.5): xy(pane_cx + col_x + 3.0, pane_top + row_y):
+                zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
             ));
         }
+        
+        // --- High Score Placeholders ---
+        // Machine High Score
+        actors.push(act!(text: font("miso"): settext("----"):
+            align(0.5, 0.5): // Centered, like default BitmapText in SM
+            xy(pane_cx + cols_x[2] - (50.0 * text_zoom), pane_top + rows_y[0]):
+            maxwidth(30.0): zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
+        ));
+        actors.push(act!(text: font("miso"): settext("??.??%"):
+            align(1.0, 0.5): // Right-aligned
+            xy(pane_cx + cols_x[2] + (25.0 * text_zoom), pane_top + rows_y[0]):
+            zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
+        ));
+
+        // Player High Score
+        actors.push(act!(text: font("miso"): settext("----"):
+            align(0.5, 0.5): // Centered, like default BitmapText in SM
+            xy(pane_cx + cols_x[2] - (50.0 * text_zoom), pane_top + rows_y[1]):
+            maxwidth(30.0): zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
+        ));
+        actors.push(act!(text: font("miso"): settext("??.??%"):
+            align(1.0, 0.5): // Right-aligned
+            xy(pane_cx + cols_x[2] + (25.0 * text_zoom), pane_top + rows_y[1]):
+            zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
+        ));
+
+        // --- Difficulty Meter ---
+        let meter_text = if let Some(MusicWheelEntry::Song(_)) = selected_entry {
+            // It's a song, show meter or "?" if no chart exists for the difficulty
+            selected_chart_data.as_ref().map_or("?".to_string(), |c| c.meter.to_string())
+        } else {
+            // It's a pack header, show nothing
+            "".to_string()
+        };
+        
+        let mut meter_actor = act!(text: font("wendy"): settext(meter_text):
+            align(1.0, 0.5):
+            xy(pane_cx + cols_x[3], pane_top + rows_y[1]):
+            z(121): diffuse(0.0, 0.0, 0.0, 1.0)
+        );
+        if !is_wide() {
+            if let Actor::Text { max_width, .. } = &mut meter_actor {
+                *max_width = Some(66.0);
+            }
+        }
+        actors.push(meter_actor);
     }
 
     // --- Pattern Info (P1) — SL 1:1 geometry ---
