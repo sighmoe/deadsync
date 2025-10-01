@@ -650,18 +650,29 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             )
         };
 
-    // --- Step credit panel (P1, song mode) — placed just above the density graph, no overlap ---
+// --- Step credit panel (P1, song mode) — positioned directly above the density graph ---
+
+    // The component's bottom edge should align with the density graph's top edge.
+    // Density Graph Top Y = (screen_center_y() + 23.0) - (64.0 / 2.0) = screen_center_y() - 9.0
+    let graph_top_y = screen_center_y() - 9.0;
+    
+    // This component's height is defined in SL as screen.h / 28
+    let component_h = screen_height() / 28.0;
+
+    // The center of this component will be its height / 2 above the graph's top.
+    let y_center = graph_top_y - (0.5 * component_h);
 
     if is_wide() {
-        // Background quad — center at (cx - 243, Y just above the graph)
+        // --- Widescreen Layout (X positions from StepArtistAF.lua) ---
+        let quad_cx = screen_center_x() - 243.0; // Lua: (cx-356) + 113
+        let steps_label_x = screen_center_x() - 326.0; // Lua: (cx-356) + 30
+        let artist_text_x = screen_center_x() - 281.0; // Lua: (cx-356) + 75
+
+        // Background quad
         actors.push(act!(quad:
             align(0.5, 0.5):
-            xy(
-                screen_center_x() - 243.0,
-                // graph top = cy + 23 - 32  ;  steps center = graph_top - steps_h/2 - 2
-                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
-            ):
-            setsize(175.0, screen_height() / 28.0):
+            xy(quad_cx, y_center):
+            setsize(175.0, component_h):
             z(120):
             diffuse(
                 color::simply_love_rgba(state.selected_difficulty_index as i32)[0],
@@ -671,44 +682,40 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             )
         ));
 
-        // "STEPS" label — left aligned at (cx - 326, same Y as the quad center)
+        // "STEPS" label
         actors.push(act!(text:
             font("miso"):
             settext("STEPS"):
             align(0.0, 0.5):
-            xy(
-                screen_center_x() - 326.0,
-                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
-            ):
+            xy(steps_label_x, y_center):
             zoom(0.8):
             maxwidth(40.0):
             z(121):
             diffuse(0.0, 0.0, 0.0, 1.0)
         ));
 
-        // Step artist text — left aligned at (cx - 281, same Y as the quad center)
+        // Step artist text
         actors.push(act!(text:
             font("miso"):
             settext(step_artist_text):
             align(0.0, 0.5):
-            xy(
-                screen_center_x() - 281.0,
-                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
-            ):
+            xy(artist_text_x, y_center):
             zoom(0.8):
             maxwidth(124.0):
             z(121):
             diffuse(0.0, 0.0, 0.0, 1.0)
         ));
     } else {
-        // 4:3 layout — same math, SL X positions for 4:3
+        // --- 4:3 Layout (X positions from StepArtistAF.lua) ---
+        let quad_cx = screen_center_x() - 233.0; // Lua: (cx-346) + 113
+        let steps_label_x = screen_center_x() - 316.0; // Lua: (cx-346) + 30
+        let artist_text_x = screen_center_x() - 271.0; // Lua: (cx-346) + 75
+
+        // Background quad
         actors.push(act!(quad:
             align(0.5, 0.5):
-            xy(
-                screen_center_x() - 233.0,
-                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
-            ):
-            setsize(175.0, screen_height() / 28.0):
+            xy(quad_cx, y_center):
+            setsize(175.0, component_h):
             z(120):
             diffuse(
                 color::simply_love_rgba(state.selected_difficulty_index as i32)[0],
@@ -718,28 +725,24 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             )
         ));
 
+        // "STEPS" label
         actors.push(act!(text:
             font("miso"):
             settext("STEPS"):
             align(0.0, 0.5):
-            xy(
-                screen_center_x() - 316.0,
-                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
-            ):
+            xy(steps_label_x, y_center):
             zoom(0.8):
             maxwidth(40.0):
             z(121):
             diffuse(0.0, 0.0, 0.0, 1.0)
         ));
 
+        // Step artist text
         actors.push(act!(text:
             font("miso"):
             settext(step_artist_text):
             align(0.0, 0.5):
-            xy(
-                screen_center_x() - 271.0,
-                screen_center_y() - 9.0 - (screen_height() / 28.0) * 0.5 - 2.0
-            ):
+            xy(artist_text_x, y_center):
             zoom(0.8):
             maxwidth(124.0):
             z(121):
