@@ -832,106 +832,44 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         )
     ));
 
-    // grid metrics (Straight from SL)
-    let text_zoom = if is_wide() { 0.9 } else { 0.8 };
-    let col1_x = if is_wide() { -133.0 } else { -104.0 };
-    let col2_x = if is_wide() {  -38.0 } else {  -36.0 };
-    let row1_y = 13.0;
-    let row2_y = 31.0;
-    let row3_y = 49.0;
+    // --- Stats Grid (Taps, Jumps, etc.) ---
+    // This block is refactored to exactly match the Lua script's grid layout.
+    {
+        let text_zoom = widescale(0.8, 0.9);
+        let cols_x = [widescale(-104.0, -133.0), widescale(-36.0, -38.0)];
+        let rows_y = [13.0, 31.0, 49.0];
 
-    // ---------- Row 1: Taps, Mines ----------
-    actors.push(act!(text: font("miso"): settext(steps_text):
-        align(1.0, 0.5):
-        xy(pane_cx + col1_x, pane_top + row1_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
-    actors.push(act!(text: font("miso"): settext("Steps"):
-        align(0.0, 0.5):
-        xy(pane_cx + col1_x + 3.0, pane_top + row1_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
+        let items = [
+            ("Steps", &steps_text), ("Mines", &mines_text),
+            ("Jumps", &jumps_text), ("Hands", &hands_text),
+            ("Holds", &holds_text), ("Rolls", &rolls_text),
+        ];
 
-    actors.push(act!(text: font("miso"): settext(mines_text):
-        align(1.0, 0.5):
-        xy(pane_cx + col2_x, pane_top + row1_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
-    actors.push(act!(text: font("miso"): settext("Mines"):
-        align(0.0, 0.5):
-        xy(pane_cx + col2_x + 3.0, pane_top + row1_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
+        for (i, (label, value)) in items.iter().enumerate() {
+            let col_idx = i % 2;
+            let row_idx = i / 2;
+            let col_x = cols_x[col_idx];
+            let row_y = rows_y[row_idx];
 
-    // ---------- Row 2: Jumps, Hands ----------
-    actors.push(act!(text: font("miso"): settext(jumps_text):
-        align(1.0, 0.5):
-        xy(pane_cx + col1_x, pane_top + row2_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
-    actors.push(act!(text: font("miso"): settext("Jumps"):
-        align(0.0, 0.5):
-        xy(pane_cx + col1_x + 3.0, pane_top + row2_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
+            // Stat value (the number)
+            actors.push(act!(text: font("miso"): settext(*value):
+                align(1.0, 0.5): // right-aligned
+                xy(pane_cx + col_x, pane_top + row_y):
+                zoom(text_zoom):
+                z(121):
+                diffuse(0.0, 0.0, 0.0, 1.0)
+            ));
 
-    actors.push(act!(text: font("miso"): settext(hands_text):
-        align(1.0, 0.5):
-        xy(pane_cx + col2_x, pane_top + row2_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
-    actors.push(act!(text: font("miso"): settext("Hands"):
-        align(0.0, 0.5):
-        xy(pane_cx + col2_x + 3.0, pane_top + row2_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
-
-    // ---------- Row 3: Holds, Rolls ----------
-    actors.push(act!(text: font("miso"): settext(holds_text):
-        align(1.0, 0.5):
-        xy(pane_cx + col1_x, pane_top + row3_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
-    actors.push(act!(text: font("miso"): settext("Holds"):
-        align(0.0, 0.5):
-        xy(pane_cx + col1_x + 3.0, pane_top + row3_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
-
-    actors.push(act!(text: font("miso"): settext(rolls_text):
-        align(1.0, 0.5):
-        xy(pane_cx + col2_x, pane_top + row3_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
-    actors.push(act!(text: font("miso"): settext("Rolls"):
-        align(0.0, 0.5):
-        xy(pane_cx + col2_x + 3.0, pane_top + row3_y):
-        zoom(text_zoom):
-        z(121):
-        diffuse(0.0, 0.0, 0.0, 1.0)
-    ));
+            // Stat label ("Taps", "Mines", etc.)
+            actors.push(act!(text: font("miso"): settext(*label):
+                align(0.0, 0.5): // left-aligned
+                xy(pane_cx + col_x + 3.0, pane_top + row_y):
+                zoom(text_zoom):
+                z(121):
+                diffuse(0.0, 0.0, 0.0, 1.0)
+            ));
+        }
+    }
 
     // --- Pattern Info (P1) — SL 1:1 geometry ---
     let pat_cx = screen_center_x() - 182.0 - if is_wide() { 5.0 } else { 0.0 };
