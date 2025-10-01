@@ -635,10 +635,13 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             font::with_font("miso", |miso_font| {
                 let panel_w = if is_wide() { 286.0 } else { 276.0 };
                 let text_zoom = 0.8;
-                let max_text_width = panel_w / text_zoom;
-        
+                let horizontal_padding = 16.0; // 8px padding on each side
+                let max_allowed_width = panel_w - horizontal_padding;
+
                 let check_width = |text: &str| {
-                    (font::measure_line_width_logical(miso_font, text) as f32) * text_zoom <= max_text_width
+                    let logical_width = font::measure_line_width_logical(miso_font, text) as f32;
+                    let final_width = logical_width * text_zoom;
+                    final_width <= max_allowed_width
                 };
         
                 if check_width(&chart.detailed_breakdown) {
@@ -819,8 +822,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             align(0.5, 0.5):
             xy(0.5 * panel_w, panel_h - 17.0 + 8.5):
             zoom(0.8):
-            zoomtoheight(15):
-            zoomtowidth(panel_w / 0.8)
+            maxheight(15.0) // Use maxheight to ensure it doesn't overflow, but width is handled by string selection.
         ));
     }
 
