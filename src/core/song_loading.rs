@@ -38,6 +38,10 @@ pub struct ChartData {
     pub short_hash: String,
     pub stats: ArrowStats,
     pub total_streams: u32,
+    pub max_nps: f64,
+    pub detailed_breakdown: String,
+    pub partial_breakdown: String,
+    pub simple_breakdown: String,
     pub total_measures: usize,
 }
 
@@ -168,6 +172,10 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
                 stats: c.stats,
                 total_streams: c.total_streams,
                 total_measures: c.total_measures,
+                max_nps: c.max_nps,
+                detailed_breakdown: c.detailed,
+                partial_breakdown: c.partial,
+                simple_breakdown: c.simple,
             }
         })
         .collect();

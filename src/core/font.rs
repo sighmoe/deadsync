@@ -1,5 +1,3 @@
-// FILE: src/core/font.rs
-
 //! StepMania bitmap font parser (Rust port — dependency-light, functional/procedural)
 //! - SM-parity defaults for metrics and width handling (fixes tight/overlapping glyphs)
 //! - Supports LINE, MAP U+XXXX / "..." (Unicode, ASCII, CP1252, numbers)
@@ -13,13 +11,41 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use image;
-use log::{debug, info, warn, trace};
+use log::{debug, info, trace, warn};
+use once_cell::sync::Lazy;
 
 use crate::core::assets;
 
 const FONT_DEFAULT_CHAR: char = '\u{F8FF}'; // SM default glyph (private use)
+
+/* ======================= GLOBAL FONT CACHE ======================= */
+
+static FONT_CACHE: Lazy<RwLock<HashMap<&'static str, Font>>> = Lazy::new(|| RwLock::new(HashMap::new()));
+
+/// Stores a loaded font in the global cache. Called from `app.rs` during startup.
+pub fn register_font(name: &'static str, font: Font) {
+    FONT_CACHE.write().unwrap().insert(name, font);
+}
+
+/// Provides safe, read-only access to the entire font map.
+pub fn with_fonts<F, R>(f: F) -> R
+where
+    F: FnOnce(&HashMap<&'static str, Font>) -> R,
+{
+    f(&FONT_CACHE.read().unwrap())
+}
+
+/// Provides safe, read-only access to a single font by name.
+pub fn with_font<F, R>(name: &str, f: F) -> Option<R>
+where
+    F: FnOnce(&Font) -> R,
+{
+    FONT_CACHE.read().unwrap().get(name).map(f)
+}
+
 
 /* ======================= TYPES ======================= */
 
@@ -1148,6 +1174,19 @@ pub fn measure_line_width(font: &Font, text: &str) -> f32 {
         })
         .sum()
 }
+
+/// StepMania parity: calculates the logical width of a line by summing the integer advances.
+#[inline(always)]
+pub fn measure_line_width_logical(font: &Font, text: &str) -> i32 {
+    text.chars()
+        .map(|c| {
+            let g = font.glyph_map.get(&c).or(font.default_glyph.as_ref());
+            // truncate; SM advances are ints already
+            g.map_or(0, |glyph| glyph.advance as i32)
+        })
+        .sum()
+}
+
 
 impl Font {
     /// Wrapper retained for compatibility with existing call sites (e.g., compose.rs).

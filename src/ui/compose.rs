@@ -1,10 +1,7 @@
-// FILE: src/ui/compose.rs
-
 use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;
 use crate::core::{assets, font};
-// FIX: Removed unused line_width_px_sm import
 use crate::ui::actors::{self, Actor, SizeSpec};
 use cgmath::{Deg, Matrix4, Vector2, Vector3};
 
@@ -393,18 +390,6 @@ fn build_actor_recursive(
 
 /* ======================= LAYOUT HELPERS ======================= */
 
-/// StepMania parity: calculates the logical width of a line by summing the integer advances.
-#[inline(always)]
-fn measure_line_width_logical(font: &font::Font, text: &str) -> i32 {
-    text.chars()
-        .map(|c| {
-            let g = font.glyph_map.get(&c).or(font.default_glyph.as_ref());
-            // truncate; SM advances are ints already
-            g.map_or(0, |glyph| glyph.advance as i32)
-        })
-        .sum()
-}
-
 #[inline(always)]
 fn resolve_sprite_size_like_sm(
     size: [SizeSpec; 2],
@@ -731,18 +716,7 @@ fn layout_text(
     }
 
     // 1) Logical (integer) widths like SM: sum integer advances (default glyph if unmapped).
-    #[inline(always)]
-    fn measure_line_width_logical(font: &font::Font, s: &str) -> i32 {
-        s.chars()
-            .map(|c| {
-                font.glyph_map
-                    .get(&c)
-                    .or(font.default_glyph.as_ref())
-                    .map_or(0, |g| g.advance as i32)
-            })
-            .sum()
-    }
-    let logical_line_widths: Vec<i32> = lines.iter().map(|l| measure_line_width_logical(font, l)).collect();
+    let logical_line_widths: Vec<i32> = lines.iter().map(|l| font::measure_line_width_logical(font, l)).collect();
     let max_logical_width = logical_line_widths.iter().copied().max().unwrap_or(0) as f32;
 
     // 2) Unscaled block cap height + line spacing in logical units

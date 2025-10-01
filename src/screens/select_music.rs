@@ -7,12 +7,13 @@ use crate::ui::color;
 use crate::ui::components::heart_bg;
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::ui::actors::SizeSpec;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use crate::core::font;
 use log::info;
 use std::fs;
 
@@ -629,8 +630,30 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         };
 
         let step_artist_text = selected_chart_data.as_ref().map_or("".to_string(), |c| c.step_artist.clone());
-        let peak_nps_text = selected_chart_data.as_ref().map_or("Peak NPS: --".to_string(), |c| format!("Peak NPS: {:.1}", c.meter)); // Using meter as a placeholder for now
-        let breakdown_text = selected_chart_data.as_ref().map_or("".to_string(), |c| format!("{}", c.meter)); // Placeholder
+        let peak_nps_text = selected_chart_data.as_ref().map_or("Peak NPS: --".to_string(), |c| format!("Peak NPS: {:.1}", c.max_nps));
+        let breakdown_text = if let Some(chart) = &selected_chart_data {
+            font::with_font("miso", |miso_font| {
+                let panel_w = if is_wide() { 286.0 } else { 276.0 };
+                let text_zoom = 0.8;
+                let max_text_width = panel_w / text_zoom;
+        
+                let check_width = |text: &str| {
+                    (font::measure_line_width_logical(miso_font, text) as f32) * text_zoom <= max_text_width
+                };
+        
+                if check_width(&chart.detailed_breakdown) {
+                    chart.detailed_breakdown.clone()
+                } else if check_width(&chart.partial_breakdown) {
+                    chart.partial_breakdown.clone()
+                } else if check_width(&chart.simple_breakdown) {
+                    chart.simple_breakdown.clone()
+                } else {
+                    format!("{} Total", chart.stats.total_steps)
+                }
+            }).unwrap_or_else(|| chart.simple_breakdown.clone()) // Fallback if font isn't found
+        } else {
+            "".to_string()
+        };
 
     // --- Get stats for the PaneDisplay ---
     let (steps_text, jumps_text, holds_text, mines_text, hands_text, rolls_text) =

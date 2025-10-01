@@ -51,7 +51,6 @@ pub struct App {
     start_time: Instant,
     vsync_enabled: bool,
     fullscreen_enabled: bool,
-    fonts: HashMap<&'static str, font::Font>,
     metrics: Metrics,
     last_fps: f32,
     last_vpf: u32,
@@ -100,7 +99,7 @@ impl App {
             current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: None, options_state,
             select_color_state, select_music_state: select_music::init(), sandbox_state: sandbox::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
-            vsync_enabled, fullscreen_enabled, fonts: HashMap::new(), show_overlay, last_fps: 0.0, last_vpf: 0, 
+            vsync_enabled, fullscreen_enabled, show_overlay, last_fps: 0.0, last_vpf: 0, 
             current_frame_vpf: 0, transition: TransitionState::Idle,
             current_dynamic_banner: None,
             current_density_graph: None,
@@ -211,7 +210,7 @@ impl App {
             }
         }
 
-        self.fonts.insert(name, load_data.font);
+        font::register_font(name, load_data.font);
         log::info!("Loaded font '{}' from '{}'", name, ini_path_str);
         Ok(())
     }
@@ -378,7 +377,9 @@ impl App {
     }
 
     fn build_screen(&self, actors: &[Actor], clear_color: [f32; 4], total_elapsed: f32) -> RenderList {
-        crate::ui::compose::build_screen(actors, clear_color, &self.metrics, &self.fonts, total_elapsed)
+        font::with_fonts(|fonts| {
+            crate::ui::compose::build_screen(actors, clear_color, &self.metrics, fonts, total_elapsed)
+        })
     }
 
     fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
