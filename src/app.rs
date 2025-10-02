@@ -61,6 +61,7 @@ pub struct App {
     select_color_state: select_color::State,
     select_music_state: select_music::State,
     sandbox_state: sandbox::State,
+    session_start_time: Option<Instant>,
     current_dynamic_banner: Option<(String, PathBuf)>,
     current_density_graph: Option<(String, String)>,
     display_width: u32,
@@ -101,6 +102,7 @@ impl App {
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
             vsync_enabled, fullscreen_enabled, show_overlay, last_fps: 0.0, last_vpf: 0, 
             current_frame_vpf: 0, transition: TransitionState::Idle,
+            session_start_time: None,
             current_dynamic_banner: None,
             current_density_graph: None,
             display_width,
@@ -659,6 +661,9 @@ impl ApplicationHandler for App {
                             CurrentScreen::Sandbox => sandbox::update(&mut self.sandbox_state, delta_time),
                             CurrentScreen::SelectColor => select_color::update(&mut self.select_color_state, delta_time),
                             CurrentScreen::SelectMusic => {
+                                if let Some(start) = self.session_start_time {
+                                    self.select_music_state.session_elapsed = now.duration_since(start).as_secs_f32();
+                                }
                                 let action = select_music::update(&mut self.select_music_state, delta_time);
                                 match action {
                                     ScreenAction::RequestBanner(path_opt) => {
@@ -713,10 +718,19 @@ impl ApplicationHandler for App {
                         self.gameplay_state.as_mut().unwrap().player_color = color::decorative_rgba(self.menu_state.active_color_index);
                     }
 
-                    if target == CurrentScreen::SelectMusic && prev == CurrentScreen::Menu {
-                        let current_color_index = self.select_music_state.active_color_index;
-                        self.select_music_state = select_music::init();
-                        self.select_music_state.active_color_index = current_color_index;
+                    if target == CurrentScreen::SelectMusic {
+                        // Start the session timer if it hasn't been started yet.
+                        if self.session_start_time.is_none() {
+                            self.session_start_time = Some(Instant::now());
+                            info!("Session timer started.");
+                        }
+
+                        // If we are coming from anywhere EXCEPT gameplay, reset the music wheel state.
+                        if prev != CurrentScreen::Gameplay {
+                            let current_color_index = self.select_music_state.active_color_index;
+                            self.select_music_state = select_music::init();
+                            self.select_music_state.active_color_index = current_color_index;
+                        }
                     }
 
                     let (in_actors, in_duration) = self.get_in_transition_for_screen(target);

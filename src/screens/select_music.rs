@@ -82,6 +82,7 @@ pub struct State {
     pub nav_key_held_since: Option<Instant>,
     pub nav_key_last_scrolled_at: Option<Instant>,
     pub currently_playing_preview_path: Option<PathBuf>,
+    pub session_elapsed: f32,
     prev_selected_index: usize,
     pub time_since_selection_change: f32,
 }
@@ -179,6 +180,7 @@ pub fn init() -> State {
         nav_key_held_since: None,
         nav_key_last_scrolled_at: None,
         currently_playing_preview_path: None,
+        session_elapsed: 0.0,
         prev_selected_index: 0,
         time_since_selection_change: 0.0,
     };
@@ -475,6 +477,23 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
     (vec![actor], TRANSITION_OUT_DURATION)
 }
 
+fn format_session_time(seconds_total: f32) -> String {
+    if seconds_total < 0.0 {
+        return "0:00".to_string();
+    }
+    let seconds_total = seconds_total as u64;
+
+    let hours = seconds_total / 3600;
+    let minutes = (seconds_total % 3600) / 60;
+    let seconds = seconds_total % 60;
+
+    if hours > 0 {
+        format!("{}:{:02}:{:02}", hours, minutes, seconds)
+    } else {
+        format!("{}:{:02}", minutes, seconds)
+    }
+}
+
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(256);
 
@@ -499,6 +518,30 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         fg_color: [1.0; 4],
         left_text: Some("PerfectTaste"), center_text: None, right_text: Some("PRESS START"),
     }));
+
+    // "ITG" label aligned to the right of the top bar.
+    actors.push(act!(text:
+        font("wendy"):
+        settext("ITG"):
+        align(1.0, 0.5): // right, v-center
+        xy(screen_width() - widescale(55.0, 62.0), 16.0): // y=16 to match bar's vertical center
+        zoom(widescale(0.5, 0.6)):
+        z(121): // Draw above the bar (z=120)
+        diffuse(1.0, 1.0, 1.0, 1.0)
+    ));
+
+    // Session Timer, centered in the top bar.
+    let timer_text = format_session_time(state.session_elapsed);
+    actors.push(act!(text:
+        font("wendy"):
+        settext(timer_text):
+        align(0.5, 0.5): // center, v-center
+        xy(screen_center_x(), 10.0): // Slightly higher, matching Lua theme
+        zoom(widescale(0.3, 0.36)):
+        z(121): // Draw above the bar
+        diffuse(1.0, 1.0, 1.0, 1.0):
+        horizalign(center)
+    ));
 
     // --- BANNER (center-anchored like SL's ActorFrame) ---
     let (banner_zoom, banner_cx, banner_cy) = if is_wide() {
