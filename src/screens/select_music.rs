@@ -403,7 +403,7 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
                     if length > 0.0 {
                         info!("Playing preview for '{}' at {:.2}s for {:.2}s", song.title, start, length);
                         let cut = audio::Cut { start_sec: start as f64, length_sec: length as f64 };
-                        audio::play_music(path.clone(), cut);
+                        audio::play_music(path.clone(), cut, true);
                         played = true;
                     }
                 }

@@ -28,7 +28,7 @@ impl Default for Cut {
 // Commands to the audio engine
 enum AudioCommand {
     PlaySfx(Arc<Vec<i16>>),
-    PlayMusic(PathBuf, Cut),
+    PlayMusic(PathBuf, Cut, bool), // bool is for looping
     StopMusic,
 }
 
@@ -81,8 +81,8 @@ pub fn play_sfx(path: &str) {
 
 /// Plays a music track from a file path.
 #[allow(dead_code)]
-pub fn play_music(path: PathBuf, cut: Cut) {
-    let _ = ENGINE.command_sender.send(AudioCommand::PlayMusic(path, cut));
+pub fn play_music(path: PathBuf, cut: Cut, looping: bool) {
+    let _ = ENGINE.command_sender.send(AudioCommand::PlayMusic(path, cut, looping));
 }
 
 /// Stops the currently playing music track.
@@ -230,13 +230,13 @@ fn audio_manager_thread(command_receiver: Receiver<AudioCommand>) {
     loop {
         match command_receiver.recv() {
             Ok(AudioCommand::PlaySfx(data)) => { let _ = sfx_sender.send(data); },
-            Ok(AudioCommand::PlayMusic(path, cut)) => {
+            Ok(AudioCommand::PlayMusic(path, cut, looping)) => {
                 if let Some(old) = music_stream.take() {
                     old.stop_signal.store(true, std::sync::atomic::Ordering::Relaxed);
                     let _ = old.thread.join();
                 }
                 internal::ring_clear(&music_ring);
-                music_stream = Some(spawn_music_decoder_thread(path, cut, music_ring.clone()));
+                music_stream = Some(spawn_music_decoder_thread(path, cut, looping, music_ring.clone()));
             }
             Ok(AudioCommand::StopMusic) => {
                 if let Some(old) = music_stream.take() {
@@ -253,12 +253,12 @@ fn audio_manager_thread(command_receiver: Receiver<AudioCommand>) {
 /* ========================= Music decode + resample ========================= */
 
 /// Spawn a thread to decode & resample one music file into the ring buffer.
-fn spawn_music_decoder_thread(path: PathBuf, cut: Cut, ring: Arc<internal::SpscRingI16>) -> MusicStream {
+fn spawn_music_decoder_thread(path: PathBuf, cut: Cut, looping: bool, ring: Arc<internal::SpscRingI16>) -> MusicStream {
     let stop_signal = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stop_signal_clone = stop_signal.clone();
 
     let thread = thread::spawn(move || {
-        if let Err(e) = music_decoder_thread_loop(path, cut, ring, stop_signal_clone) {
+        if let Err(e) = music_decoder_thread_loop(path, cut, looping, ring, stop_signal_clone) {
             error!("Music decoder thread failed: {}", e);
         }
     });
@@ -268,7 +268,7 @@ fn spawn_music_decoder_thread(path: PathBuf, cut: Cut, ring: Arc<internal::SpscR
 
 /// The decoder loop, mirrored from v1 (seek+preroll, cut capping, flush).
 fn music_decoder_thread_loop(
-    path: PathBuf, cut: Cut, ring: Arc<internal::SpscRingI16>, stop: Arc<std::sync::atomic::AtomicBool>
+    path: PathBuf, cut: Cut, looping: bool, ring: Arc<internal::SpscRingI16>, stop: Arc<std::sync::atomic::AtomicBool>
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let file = File::open(&path)?;
     let mut ogg = OggStreamReader::new(BufReader::new(file))?;
@@ -278,127 +278,155 @@ fn music_decoder_thread_loop(
     let out_ch = ENGINE.device_channels;
     let out_hz = ENGINE.device_sample_rate;
 
-    let mut st = internal::poly_init(in_hz, out_hz, in_ch, out_ch, internal::BASE_TAPS, internal::BETA);
+    'main_loop: loop {
+        let mut st = internal::poly_init(in_hz, out_hz, in_ch, out_ch, internal::BASE_TAPS, internal::BETA);
 
-    // --- v1-style start & pre-roll ---
-    let start_frame_f = (cut.start_sec * in_hz as f64).max(0.0);
-    let start_floor   = start_frame_f.floor() as u64;
-    let start_frac    = start_frame_f - start_floor as f64;
+        // --- v1-style start & pre-roll ---
+        let start_frame_f = (cut.start_sec * in_hz as f64).max(0.0);
+        let start_floor   = start_frame_f.floor() as u64;
+        let start_frac    = start_frame_f - start_floor as f64;
 
-    // Try to seek a little before start to fill FIR, else fall back to decode+drop
-    let mut seek_ok = true;
-    if start_floor > 0 {
-        let seek_frame = start_floor.saturating_sub(internal::PREROLL_IN_FRAMES);
-        if ogg.seek_absgp_pg(seek_frame).is_err() {
-            seek_ok = false;
+        // Try to seek a little before start to fill FIR, else fall back to decode+drop
+        let mut seek_ok = true;
+        if start_floor > 0 {
+            let seek_frame = start_floor.saturating_sub(internal::PREROLL_IN_FRAMES);
+            if ogg.seek_absgp_pg(seek_frame).is_err() {
+                seek_ok = false;
+            }
         }
-    }
 
-    // Fractional phase align only if seek worked (same as v1)
-    if seek_ok && start_floor > 0 {
-        internal::poly_set_fractional_phase(&mut st, start_frac);
-    }
-
-    // How many output frames to throw away to finish pre-roll?
-    let ratio = out_hz as f64 / in_hz as f64;
-    let mut preroll_out_frames: u64 =
+        // Fractional phase align only if seek worked (same as v1)
         if seek_ok && start_floor > 0 {
-            (internal::PREROLL_IN_FRAMES as f64 * ratio).ceil() as u64
-        } else { 0 };
-
-    // If seek failed, decode and drop input frames until we hit start
-    let mut to_drop_in: u64 = if seek_ok { 0 } else { start_floor };
-
-    // Optional cut length in output frames
-    let mut frames_left_out: Option<u64> = if cut.length_sec.is_finite() {
-        Some((cut.length_sec * out_hz as f64).round().max(0.0) as u64)
-    } else { None };
-
-    #[inline(always)]
-    fn cap_out_frames(out_tmp: &mut Vec<i16>, out_ch: usize, frames_left_out: &mut Option<u64>) -> bool {
-        if let Some(left) = frames_left_out {
-            let frames = out_tmp.len() / out_ch;
-            if *left == 0 { out_tmp.clear(); return true; }
-            if (frames as u64) > *left {
-                out_tmp.truncate((*left as usize) * out_ch);
-                *left = 0;
-                return true;
-            } else {
-                *left -= frames as u64;
-            }
-        }
-        false
-    }
-
-    let mut out_tmp: Vec<i16> = Vec::with_capacity(1 << 15);
-
-    // --- Main decode loop ---
-    while let Ok(pkt_opt) = ogg.read_dec_packet_itl() {
-        if stop.load(std::sync::atomic::Ordering::Relaxed) { break; }
-
-        let p = match pkt_opt { Some(p) if !p.is_empty() => p, Some(_) => continue, None => break };
-
-        // If seek failed, drop whole input frames until we reach start
-        let mut slice = &p[..];
-        if to_drop_in > 0 {
-            let pkt_frames = (p.len() / in_ch) as u64;
-            if to_drop_in >= pkt_frames {
-                to_drop_in -= pkt_frames;
-                continue;
-            } else {
-                let drop_samples = (to_drop_in as usize) * in_ch;
-                slice = &p[drop_samples..];
-                to_drop_in = 0;
-            }
+            internal::poly_set_fractional_phase(&mut st, start_frac);
         }
 
+        // How many output frames to throw away to finish pre-roll?
+        let ratio = out_hz as f64 / in_hz as f64;
+        let mut preroll_out_frames: u64 =
+            if seek_ok && start_floor > 0 {
+                (internal::PREROLL_IN_FRAMES as f64 * ratio).ceil() as u64
+            } else { 0 };
+
+        // If seek failed, decode and drop input frames until we hit start
+        let mut to_drop_in: u64 = if seek_ok { 0 } else { start_floor };
+
+        // Optional cut length in output frames
+        let mut frames_left_out: Option<u64> = if cut.length_sec.is_finite() {
+            Some((cut.length_sec * out_hz as f64).round().max(0.0) as u64)
+        } else { None };
+
+        #[inline(always)]
+        fn cap_out_frames(out_tmp: &mut Vec<i16>, out_ch: usize, frames_left_out: &mut Option<u64>) -> bool {
+            if let Some(left) = frames_left_out {
+                let frames = out_tmp.len() / out_ch;
+                if *left == 0 { out_tmp.clear(); return true; }
+                if (frames as u64) > *left {
+                    out_tmp.truncate((*left as usize) * out_ch);
+                    *left = 0;
+                    return true;
+                } else {
+                    *left -= frames as u64;
+                }
+            }
+            false
+        }
+
+        let mut out_tmp: Vec<i16> = Vec::with_capacity(1 << 15);
+
+        // --- Main decode loop ---
+        while let Ok(pkt_opt) = ogg.read_dec_packet_itl() {
+            if stop.load(std::sync::atomic::Ordering::Relaxed) { break 'main_loop; }
+
+            let p = match pkt_opt { Some(p) if !p.is_empty() => p, Some(_) => continue, None => break };
+
+            // If seek failed, drop whole input frames until we reach start
+            let mut slice = &p[..];
+            if to_drop_in > 0 {
+                let pkt_frames = (p.len() / in_ch) as u64;
+                if to_drop_in >= pkt_frames {
+                    to_drop_in -= pkt_frames;
+                    continue;
+                } else {
+                    let drop_samples = (to_drop_in as usize) * in_ch;
+                    slice = &p[drop_samples..];
+                    to_drop_in = 0;
+                }
+            }
+
+            out_tmp.clear();
+            internal::poly_push_produce(&mut st, slice, &mut out_tmp);
+
+            // Discard pre-roll output first (fills FIR)
+            if preroll_out_frames > 0 {
+                let frames = out_tmp.len() / out_ch;
+                let drop_frames = (preroll_out_frames as usize).min(frames);
+                let drop_samples = drop_frames * out_ch;
+                if drop_samples > 0 {
+                    out_tmp.drain(0..drop_samples);
+                    preroll_out_frames = preroll_out_frames.saturating_sub(drop_frames as u64);
+                    if out_tmp.is_empty() { continue; }
+                }
+            }
+
+            let finished = cap_out_frames(&mut out_tmp, out_ch, &mut frames_left_out);
+
+            // Push to ring (producer thread), back off if full (like v1)
+            let mut off = 0;
+            while off < out_tmp.len() {
+                if stop.load(std::sync::atomic::Ordering::Relaxed) { return Ok(()); }
+                let pushed = internal::ring_push(&ring, &out_tmp[off..]);
+                if pushed == 0 { thread::sleep(std::time::Duration::from_micros(300)); } else { off += pushed; }
+            }
+
+            if finished { break; }
+        }
+
+        // --- Flush remainder & finish any pre-roll ---
         out_tmp.clear();
-        internal::poly_push_produce(&mut st, slice, &mut out_tmp);
+        internal::poly_push_produce(&mut st, &[], &mut out_tmp);
 
-        // Discard pre-roll output first (fills FIR)
         if preroll_out_frames > 0 {
             let frames = out_tmp.len() / out_ch;
             let drop_frames = (preroll_out_frames as usize).min(frames);
             let drop_samples = drop_frames * out_ch;
-            if drop_samples > 0 {
-                out_tmp.drain(0..drop_samples);
-                preroll_out_frames = preroll_out_frames.saturating_sub(drop_frames as u64);
-                if out_tmp.is_empty() { continue; }
-            }
+            if drop_samples > 0 { out_tmp.drain(0..drop_samples); }
+            preroll_out_frames = 0;
         }
 
-        let finished = cap_out_frames(&mut out_tmp, out_ch, &mut frames_left_out);
+        let _ = cap_out_frames(&mut out_tmp, out_ch, &mut frames_left_out);
 
-        // Push to ring (producer thread), back off if full (like v1)
         let mut off = 0;
         while off < out_tmp.len() {
             if stop.load(std::sync::atomic::Ordering::Relaxed) { return Ok(()); }
             let pushed = internal::ring_push(&ring, &out_tmp[off..]);
             if pushed == 0 { thread::sleep(std::time::Duration::from_micros(300)); } else { off += pushed; }
         }
+        
+        // --- Looping logic ---
+        if !looping {
+            break 'main_loop;
+        }
+        if stop.load(std::sync::atomic::Ordering::Relaxed) {
+            break 'main_loop;
+        }
 
-        if finished { break; }
-    }
+        // Push 0.5 seconds of silence into the ring buffer to create a delay.
+        let silence_samples = (0.5 * out_hz as f64 * out_ch as f64).round() as usize;
+        if silence_samples > 0 {
+            let silence_buf = vec![0i16; silence_samples];
+            let mut off = 0;
+            while off < silence_buf.len() {
+                if stop.load(std::sync::atomic::Ordering::Relaxed) { return Ok(()); }
+                let pushed = internal::ring_push(&ring, &silence_buf[off..]);
+                if pushed == 0 { thread::sleep(std::time::Duration::from_micros(300)); } else { off += pushed; }
+            }
+        }
 
-    // --- Flush remainder & finish any pre-roll ---
-    out_tmp.clear();
-    internal::poly_push_produce(&mut st, &[], &mut out_tmp);
-
-    if preroll_out_frames > 0 {
-        let frames = out_tmp.len() / out_ch;
-        let drop_frames = (preroll_out_frames as usize).min(frames);
-        let drop_samples = drop_frames * out_ch;
-        if drop_samples > 0 { out_tmp.drain(0..drop_samples); }
-        preroll_out_frames = 0;
-    }
-
-    let _ = cap_out_frames(&mut out_tmp, out_ch, &mut frames_left_out);
-
-    let mut off = 0;
-    while off < out_tmp.len() {
-        if stop.load(std::sync::atomic::Ordering::Relaxed) { return Ok(()); }
-        let pushed = internal::ring_push(&ring, &out_tmp[off..]);
-        if pushed == 0 { thread::sleep(std::time::Duration::from_micros(300)); } else { off += pushed; }
+        // Rewind the Ogg stream to the beginning for the next loop iteration.
+        if ogg.seek_absgp_pg(0).is_err() {
+            warn!("Could not rewind OGG stream for looping: {:?}", path);
+            break 'main_loop;
+        }
     }
 
     Ok(())
