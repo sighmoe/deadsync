@@ -39,13 +39,9 @@ const BAR_H: f32 = 32.0;
 
 // --- Other UI Constants ---
 static UI_BOX_BG_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#1E282F"));
-const MUSIC_WHEEL_TEXT_TARGET_PX: f32 = 15.0;
 const NUM_WHEEL_ITEMS: usize = 17;
 const CENTER_WHEEL_SLOT_INDEX: usize = NUM_WHEEL_ITEMS / 2;
 const SELECTION_ANIMATION_CYCLE_DURATION: f32 = 1.0;
-const SONG_TEXT_LEFT_PADDING: f32 = 66.0;
-const PACK_COUNT_RIGHT_PADDING: f32 = 11.0;
-const PACK_COUNT_TEXT_TARGET_PX: f32 = 14.0;
 static DIFFICULTY_DISPLAY_INNER_BOX_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#0f0f0f"));
 pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
@@ -601,14 +597,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         background: None,
         z: 51,
         children: vec![
-            // Background Quad (unchanged)
-            {
-                let bg_color = color::rgba_hex("#1e282f");
-                act!(quad:
-                    setsize(box_width, 50.0):
-                    diffuse(bg_color[0], bg_color[1], bg_color[2], bg_color[3])
-                )
-            },
+            // Background Quad
+            act!(quad:
+                setsize(box_width, 50.0):
+                diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], UI_BOX_BG_COLOR[3])
+            ),
             // Inner Frame for Text (unchanged structure)
             Actor::Frame {
                 align: [0.0, 0.0],
@@ -834,7 +827,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         align(0.0, 0.0):
         xy(0.0, 0.0):
         setsize(panel_w, panel_h):
-        diffuse(0.1176, 0.1568, 0.1843, 1.0)   // #1e282f
+        diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], UI_BOX_BG_COLOR[3])
     ));
 
     // Only draw the graph sprite + labels + breakdown when a SONG is selected
@@ -996,7 +989,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         xy(pat_cx, pat_cy):
         setsize(pat_w, pat_h):
         z(120):
-        diffuse(0.1176, 0.1568, 0.1843, 1.0) // #1e282f
+        diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], UI_BOX_BG_COLOR[3])
     ));
 
     let base_val_x   = pat_cx - pat_w * 0.5 + 40.0; // values (right-aligned)
@@ -1085,7 +1078,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         xy(panel_cx, panel_cy):
         setsize(32.0, 152.0):
         z(120):
-        diffuse(0.1176, 0.1568, 0.1843, 1.0) // #1e282f
+        diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], UI_BOX_BG_COLOR[3])
     ));
 
     // Prepare meters per difficulty (Beginner..Challenge)
