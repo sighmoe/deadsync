@@ -4,7 +4,7 @@ use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
-use crate::ui::components::heart_bg;
+use crate::ui::components::{heart_bg, pad_display};
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::ui::actors::SizeSpec;
 use std::collections::{HashMap, HashSet};
@@ -515,29 +515,40 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         left_text: Some("PerfectTaste"), center_text: None, right_text: Some("PRESS START"),
     }));
 
-    // "ITG" label aligned to the right of the top bar.
-    actors.push(act!(text:
-        font("wendy"):
-        settext("ITG"):
-        align(1.0, 0.5): // right, v-center
-        xy(screen_width() - widescale(55.0, 62.0), 16.0): // y=16 to match bar's vertical center
-        zoom(widescale(0.5, 0.6)):
-        z(121): // Draw above the bar (z=120)
-        diffuse(1.0, 1.0, 1.0, 1.0)
-    ));
+    // --- "ITG" text and Pads (top right), matching Simply Love layout ---
+    {
+        // "ITG" text, positioned to the left of the pads.
+        let itg_text_x = screen_width() - widescale(55.0, 62.0);
+        actors.push(act!(text:
+            font("wendy"):
+            settext("ITG"):
+            align(1.0, 0.5): // right, v-center
+            xy(itg_text_x, 15.0):
+            zoom(widescale(0.5, 0.6)):
+            z(121):
+            diffuse(1.0, 1.0, 1.0, 1.0)
+        ));
 
-    // Session Timer, centered in the top bar.
-    let timer_text = format_session_time(state.session_elapsed);
-    actors.push(act!(text:
-        font("wendy"):
-        settext(timer_text):
-        align(0.5, 0.5): // center, v-center
-        xy(screen_center_x(), 10.0): // Slightly higher, matching Lua theme
-        zoom(widescale(0.3, 0.36)):
-        z(121): // Draw above the bar
-        diffuse(1.0, 1.0, 1.0, 1.0):
-        horizalign(center)
-    ));
+        // Calculate the final combined zoom for the pads.
+        let final_pad_zoom = 0.24 * widescale(0.435, 0.525);
+
+        // P1 Pad
+        actors.push(pad_display::build(pad_display::PadDisplayParams {
+            center_x: screen_width() - widescale(35.0, 41.0),
+            center_y: widescale(22.0, 23.5),
+            zoom: final_pad_zoom,
+            z: 121,
+            is_active: true,
+        }));
+        // P2 Pad
+        actors.push(pad_display::build(pad_display::PadDisplayParams {
+            center_x: screen_width() - widescale(15.0, 17.0),
+            center_y: widescale(22.0, 23.5),
+            zoom: final_pad_zoom,
+            z: 121,
+            is_active: false,
+        }));
+    }
 
     // --- BANNER (center-anchored like SL's ActorFrame) ---
     let (banner_zoom, banner_cx, banner_cy) = if is_wide() {
