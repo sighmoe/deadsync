@@ -253,7 +253,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                                     if is_difficulty_playable(song, new_idx) {
                                         state.selected_difficulty_index = new_idx;
                                         state.preferred_difficulty_index = new_idx;
-                                        audio::play_sfx("assets/sounds/change.ogg");
+                                        audio::play_sfx("assets/sounds/easier.ogg");
                                         break;
                                     }
                                 }
@@ -277,7 +277,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                                     if is_difficulty_playable(song, new_idx) {
                                         state.selected_difficulty_index = new_idx;
                                         state.preferred_difficulty_index = new_idx;
-                                        audio::play_sfx("assets/sounds/change.ogg");
+                                        audio::play_sfx("assets/sounds/harder.ogg");
                                         break;
                                     }
                                 }
