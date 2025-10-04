@@ -1154,5 +1154,47 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         pack_song_counts: &pack_song_counts,
     }));
 
+    // --- Pulsating Meter Arrow (P1) ---
+    let arrow_x_base = screen_center_x() - 53.0;
+    let arrow_zoom = 0.575;
+
+    // Y position must match the selected difficulty meter's Y.
+    // This logic is duplicated from the StepsDisplayList construction above.
+    let row_num = state.selected_difficulty_index as i32 - 2;
+    let y_off = (28.0 + 2.0) * (row_num as f32);
+    // The +1 matches the offset in the original Lua code.
+    let arrow_y = panel_cy + y_off + 1.0;
+
+    // The bounce animation is synced to the song's beat.
+    // We'll simulate this with a cosine wave based on session time and the song's BPM.
+    let selected_song = if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
+        Some(song.clone())
+    } else {
+        None
+    };
+
+    // Use song's max BPM if available, otherwise default to a common value like 150.
+    let bpm = selected_song.as_ref().map_or(150.0, |s| s.max_bpm.max(1.0)) as f32;
+    let beat_duration_secs = 60.0 / bpm;
+
+    // Calculate the phase for a 1-beat period cosine oscillation.
+    // StepMania's `bounce` effect uses an oscillation from 0 to 1, often (1-cos(t))/2.
+    // `effectmagnitude(-3)` results in an offset of -3 * (1-cos(t))/2 = -1.5 + 1.5*cos(t).
+    // This creates motion over a 3-unit range, from -3 to 0. The previous implementation
+    // used `cos(t)` directly, resulting in a 6-unit range [-3, 3], which was too wide.
+    let phase = (state.session_elapsed / beat_duration_secs) * 2.0 * std::f32::consts::PI;
+    let bounce_offset_x = -1.5 + 1.5 * phase.cos();
+
+    // The arrow is only visible when a song is selected, not a pack header.
+    let arrow_visible = matches!(state.entries.get(state.selected_index), Some(MusicWheelEntry::Song(_)));
+
+    actors.push(act!(sprite("meter_arrow.png"):
+        align(0.0, 0.5): // Left-center align to match Lua's halign(0)
+        xy(arrow_x_base + bounce_offset_x, arrow_y):
+        zoom(arrow_zoom):
+        z(122): // Above the difficulty display panel
+        visible(arrow_visible)
+    ));
+
     actors
 }
