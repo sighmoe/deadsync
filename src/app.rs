@@ -624,6 +624,16 @@ impl ApplicationHandler for App {
                             let prev = self.current_screen;
                             self.current_screen = *target;
 
+                            if *target == CurrentScreen::Menu {
+                                let current_color_index = self.menu_state.active_color_index;
+                                self.menu_state = menu::init();
+                                self.menu_state.active_color_index = current_color_index;
+                            } else if *target == CurrentScreen::Options {
+                                let current_color_index = self.options_state.active_color_index;
+                                self.options_state = options::init();
+                                self.options_state.active_color_index = current_color_index;
+                            }
+
                             if prev == CurrentScreen::SelectColor {
                                 let idx = self.select_color_state.active_color_index;
                                 self.menu_state.active_color_index = idx;
@@ -705,6 +715,16 @@ impl ApplicationHandler for App {
                         self.menu_state.active_color_index = idx;
                         self.select_music_state.active_color_index = idx;
                         self.options_state.active_color_index = idx;
+                    }
+
+                    if target == CurrentScreen::Menu {
+                        let current_color_index = self.menu_state.active_color_index;
+                        self.menu_state = menu::init();
+                        self.menu_state.active_color_index = current_color_index;
+                    } else if target == CurrentScreen::Options {
+                        let current_color_index = self.options_state.active_color_index;
+                        self.options_state = options::init();
+                        self.options_state.active_color_index = current_color_index;
                     }
 
                     if target == CurrentScreen::Gameplay {
