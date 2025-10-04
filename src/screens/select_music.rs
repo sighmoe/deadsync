@@ -4,7 +4,7 @@ use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
-use crate::ui::components::{heart_bg, pad_display};
+use crate::ui::components::{heart_bg, pad_display, music_wheel};
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::ui::actors::SizeSpec;
 use std::collections::{HashMap, HashSet};
@@ -22,12 +22,6 @@ use crate::core::space::{is_wide, widescale};
 use crate::core::song_loading::{SongData, get_song_cache, ChartData, SongPack};
 
 
-#[allow(dead_code)] fn col_music_wheel_box() -> [f32; 4] { color::rgba_hex("#0a141b") }
-#[allow(dead_code)] fn col_pack_header_box() -> [f32; 4] { color::rgba_hex("#4c565d") }
-#[allow(dead_code)] fn col_selected_song_box() -> [f32; 4] { color::rgba_hex("#272f35") }
-#[allow(dead_code)] fn col_selected_pack_header_box() -> [f32; 4] { color::rgba_hex("#5f686e") }
-#[allow(dead_code)] fn col_pink_box() -> [f32; 4] { color::rgba_hex("#ff47b3") }
-
 /* ---------------------------- transitions ---------------------------- */
 const TRANSITION_IN_DURATION: f32 = 0.5;
 const TRANSITION_OUT_DURATION: f32 = 0.3;
@@ -39,11 +33,9 @@ const BAR_H: f32 = 32.0;
 
 // --- Other UI Constants ---
 static UI_BOX_BG_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#1E282F"));
-const NUM_WHEEL_ITEMS: usize = 17;
-const CENTER_WHEEL_SLOT_INDEX: usize = NUM_WHEEL_ITEMS / 2;
-const SELECTION_ANIMATION_CYCLE_DURATION: f32 = 1.0;
 static DIFFICULTY_DISPLAY_INNER_BOX_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#0f0f0f"));
 pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
+const SELECTION_ANIMATION_CYCLE_DURATION: f32 = 1.0;
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
 const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(200);
 const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(40);
@@ -184,13 +176,6 @@ pub fn init() -> State {
     rebuild_displayed_entries(&mut state);
     state.prev_selected_index = state.selected_index;
     state
-}
-
-fn lerp_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
-    [
-        a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t,
-    ]
 }
 
 pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
@@ -344,13 +329,13 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 pub fn update(state: &mut State, dt: f32) -> ScreenAction {
     // Increment the timer every frame since the last selection change.
     state.time_since_selection_change += dt;
-
+    
     // Handle the visual pulsing animation of the selected wheel item.
     state.selection_animation_timer += dt;
     if state.selection_animation_timer > SELECTION_ANIMATION_CYCLE_DURATION {
         state.selection_animation_timer -= SELECTION_ANIMATION_CYCLE_DURATION;
     }
-    
+
     // Handle rapid scrolling when a navigation key is held down.
     if let (Some(direction), Some(held_since), Some(last_scrolled_at)) =
         (state.nav_key_held_direction.clone(), state.nav_key_held_since, state.nav_key_last_scrolled_at)
@@ -514,6 +499,16 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         fg_color: [1.0; 4],
         left_text: Some("PerfectTaste"), center_text: None, right_text: Some("PRESS START"),
     }));
+ 
+    // --- Build pack song counts for music wheel ---
+    let mut pack_song_counts = HashMap::new();
+    let song_cache = get_song_cache();
+    for pack in song_cache.iter() {
+        let count = pack.songs.iter().filter(|song| {
+            song.charts.iter().any(|chart| chart.chart_type.eq_ignore_ascii_case("dance-single"))
+        }).count();
+        pack_song_counts.insert(pack.name.clone(), count);
+    }
 
     // --- "ITG" text and Pads (top right), matching Simply Love layout ---
     {
@@ -1136,180 +1131,14 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ));
     }
 
-// --- MUSIC WHEEL (Simply Love parity, corrected offsets) ---
-{
-    const WHEEL_WIDTH_DIVISOR: f32 = 2.125;
-    let num_visible_items = NUM_WHEEL_ITEMS - 2; // 17 -> 15 visible
-
-    // SL metrics-derived values
-    let sl_shift                 = widescale(28.0, 33.0);                 // InitCommand shift in SL
-    let highlight_w: f32         = screen_width() / WHEEL_WIDTH_DIVISOR;  // _screen.w/2.125
-    let highlight_left_world: f32= screen_center_x() + sl_shift;          // left edge of the column
-    let half_highlight: f32      = 0.5 * highlight_w;
-
-    // Local Xs (container is LEFT-anchored at highlight_left_world)
-    // In SL, titles are WideScale(75,111) from wheel center (no +sl_shift); cancel the container shift here.
-    let title_x_local: f32       = widescale(75.0, 111.0) - sl_shift;
-    let title_max_w_local: f32   = widescale(245.0, 350.0);
-
-    // Pack name: visually centered in the column
-    let pack_center_x_local: f32 = half_highlight - sl_shift + widescale(9.0, 10.0);
-    let pack_name_max_w: f32     = widescale(240.0, 310.0);
-
-    // Pack count
-    let pack_count_x_local: f32 = screen_width() / 2.0 - widescale(9.0, 10.0) - sl_shift;
-
-    // --- VERTICAL GEOMETRY (1:1 with Simply Love Lua) ---
-    let slot_spacing: f32        = screen_height() / (num_visible_items as f32);
-    let item_h_full: f32         = slot_spacing;
-    let item_h_colored: f32      = slot_spacing - 1.0;
-    let center_y: f32            = screen_center_y();
-    let line_gap_units: f32      = 6.0;
-    let half_item_h: f32         = item_h_full * 0.5; // NEW: Pre-calculate half height for centering children
-
-    // Selection pulse
-    let anim_t_unscaled = (state.selection_animation_timer / SELECTION_ANIMATION_CYCLE_DURATION)
-        * std::f32::consts::PI * 2.0;
-    let anim_t = (anim_t_unscaled.sin() + 1.0) / 2.0;
-
-    let cache = get_song_cache();
-    let num_entries = state.entries.len();
-
-    if num_entries > 0 {
-        for i_slot in 0..NUM_WHEEL_ITEMS {
-            let offset_from_center = i_slot as isize - CENTER_WHEEL_SLOT_INDEX as isize;
-            let y_center_item      = center_y + (offset_from_center as f32) * slot_spacing;
-            let is_selected_slot   = i_slot == CENTER_WHEEL_SLOT_INDEX;
-
-            let list_index = ((state.selected_index as isize + offset_from_center + num_entries as isize)
-                as usize) % num_entries;
-
-            let (is_pack, bg_col, txt_col, title_str, subtitle_str, pack_name_opt) =
-                match state.entries.get(list_index) {
-                    Some(MusicWheelEntry::Song(info)) => {
-                        let base = col_music_wheel_box();
-                        let sel  = col_selected_song_box();
-                        let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
-                        (false, bg, [1.0, 1.0, 1.0, 1.0], info.title.clone(), info.subtitle.clone(), None)
-                    }
-                    Some(MusicWheelEntry::PackHeader { name, original_index, .. }) => {
-                        let base = col_pack_header_box();
-                        let sel  = col_selected_pack_header_box();
-                        let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
-                        let c    = color::simply_love_rgba(state.active_color_index + *original_index as i32);
-                        (true, bg, [c[0], c[1], c[2], 1.0], name.clone(), String::new(), Some(name.clone()))
-                    }
-                    _ => (false, col_music_wheel_box(), [1.0; 4], String::new(), String::new(), None),
-                };
-
-            let has_subtitle = !subtitle_str.trim().is_empty();
-
-            // Children local to container-left (highlight_left_world)
-            let mut slot_children: Vec<Actor> = Vec::new();
-
-            // Base black quad (full height)
-            if is_pack {
-                // Base black quad (full height) — only for packs
-                slot_children.push(act!(quad:
-                    align(0.0, 0.5):
-                    xy(0.0, half_item_h):
-                    zoomto(highlight_w, item_h_full):
-                    diffuse(0.0, 0.0, 0.0, 1.0):
-                    z(0)
-                ));
-            }
-            // Colored quad (height - 1)
-            slot_children.push(act!(quad:
-                align(0.0, 0.5):
-                xy(0.0, half_item_h):
-                zoomto(highlight_w, item_h_colored):
-                diffuse(bg_col[0], bg_col[1], bg_col[2], bg_col[3]):
-                z(1)
-            ));
-
-            if is_pack {
-                // PACK name — centered with slight right bias
-                slot_children.push(act!(text:
-                    font("miso"):
-                    settext(title_str.clone()):
-                    align(0.5, 0.5):
-                    xy(pack_center_x_local, half_item_h): // FIX: Center vertically
-                    maxwidth(pack_name_max_w):
-                    zoom(1.0):
-                    diffuse(txt_col[0], txt_col[1], txt_col[2], txt_col[3]):
-                    z(2)
-                ));
-
-                // PACK count — right-aligned, inset from edge
-                if let Some(pack_name) = pack_name_opt {
-                    let count = cache
-                        .iter()
-                        .find(|p| p.name == pack_name)
-                        .map(|p| {
-                            p.songs
-                                .iter()
-                                .filter(|song| {
-                                    song.charts
-                                        .iter()
-                                        .any(|chart| chart.chart_type.eq_ignore_ascii_case("dance-single"))
-                                })
-                                .count()
-                        })
-                        .unwrap_or(0);
-                    if count > 0 {
-                        slot_children.push(act!(text:
-                            font("miso"):
-                            settext(format!("{}", count)):
-                            align(1.0, 0.5):
-                            xy(pack_count_x_local, half_item_h): // FIX: Center vertically
-                            zoom(0.75):
-                            horizalign(right):
-                            diffuse(1.0, 1.0, 1.0, 1.0):
-                            z(2)
-                        ));
-                    }
-                }
-            } else {
-                // SONG title/subtitle — subtract sl_shift to avoid double offset
-                let subtitle_y_offset = if has_subtitle { -line_gap_units } else { 0.0 };
-                slot_children.push(act!(text:
-                    font("miso"):
-                    settext(title_str.clone()):
-                    align(0.0, 0.5):
-                    xy(title_x_local, half_item_h + subtitle_y_offset): // FIX: Center vertically
-                    maxwidth(title_max_w_local):
-                    zoom(0.85):
-                    diffuse(1.0, 1.0, 1.0, 1.0):
-                    z(2)
-                ));
-                if has_subtitle {
-                    slot_children.push(act!(text:
-                        font("miso"):
-                        settext(subtitle_str.clone()):
-                        align(0.0, 0.5):
-                        xy(title_x_local, half_item_h + line_gap_units): // FIX: Center vertically
-                        maxwidth(title_max_w_local):
-                        zoom(0.7):
-                        diffuse(1.0, 1.0, 1.0, 1.0):
-                        z(2)
-                    ));
-                }
-            }
-
-            // Container: left-anchored at SL highlight-left
-            actors.push(Actor::Frame {
-                align: [0.0, 0.5], // left-center
-                offset: [highlight_left_world, y_center_item],
-                size: [SizeSpec::Px(highlight_w), SizeSpec::Px(item_h_full)],
-                background: None,
-                z: 51,
-                children: slot_children,
-            });
-        }
-    }
-}
-
-
+    // --- MUSIC WHEEL (Now a component) ---
+    actors.extend(music_wheel::build(music_wheel::MusicWheelParams {
+        entries: &state.entries,
+        selected_index: state.selected_index,
+        active_color_index: state.active_color_index,
+        selection_animation_timer: state.selection_animation_timer,
+        pack_song_counts: &pack_song_counts,
+    }));
 
     actors
 }
