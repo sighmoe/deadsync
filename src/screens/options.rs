@@ -1,6 +1,10 @@
+// FILE: src/screens/options.rs
 use crate::act;
 use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
+use crate::core::audio;
+use std::time::{Duration, Instant};
+
 use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::{heart_bg, screen_bar};
@@ -10,6 +14,10 @@ use crate::ui::actors;
 /* ---------------------------- transitions ---------------------------- */
 const TRANSITION_IN_DURATION: f32 = 0.4;
 const TRANSITION_OUT_DURATION: f32 = 0.4;
+
+/* -------------------------- hold-to-scroll timing ------------------------- */
+const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(300);
+const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(50);
 
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -71,18 +79,32 @@ const ITEMS: &[Item] = &[
     Item { name: "Credits",                         help: &["Project contributors and licenses."] },
     Item { name: "Exit",                            help: &["Return to the main menu."] },
 ];
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NavDirection {
+    Up,
+    Down,
+}
 
 pub struct State {
     pub selected: usize,
+    prev_selected: usize,
     pub active_color_index: i32, // <-- ADDED
     bg: heart_bg::State,
+    nav_key_held_direction: Option<NavDirection>,
+    nav_key_held_since: Option<Instant>,
+    nav_key_last_scrolled_at: Option<Instant>,
 }
 
 pub fn init() -> State {
     State {
         selected: 0,
+        prev_selected: 0,
         active_color_index: color::DEFAULT_COLOR_INDEX, // <-- ADDED
         bg: heart_bg::State::new(),
+
+        nav_key_held_direction: None,
+        nav_key_held_since: None,
+        nav_key_last_scrolled_at: None,
     }
 }
 
@@ -112,30 +134,77 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 /* --------------------------------- input --------------------------------- */
 
 pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
-    if e.state != ElementState::Pressed || e.repeat {
-        return ScreenAction::None;
-    }
     let total = ITEMS.len();
-    match e.physical_key {
-        PhysicalKey::Code(KeyCode::Escape) => ScreenAction::Navigate(Screen::Menu),
-        PhysicalKey::Code(KeyCode::ArrowUp) | PhysicalKey::Code(KeyCode::KeyW) => {
-            if state.selected == 0 { state.selected = total.saturating_sub(1); } else { state.selected -= 1; }
-            ScreenAction::None
+    let key_code = if let PhysicalKey::Code(code) = e.physical_key { code } else { return ScreenAction::None };
+
+    if e.state == ElementState::Pressed {
+        if e.repeat { return ScreenAction::None; } // We handle our own repeats in `update`
+
+        match key_code {
+            KeyCode::Escape => return ScreenAction::Navigate(Screen::Menu),
+            KeyCode::ArrowUp | KeyCode::KeyW => {
+                if total > 0 {
+                    state.selected = if state.selected == 0 { total - 1 } else { state.selected - 1 };
+                }
+                state.nav_key_held_direction = Some(NavDirection::Up);
+                state.nav_key_held_since = Some(Instant::now());
+                state.nav_key_last_scrolled_at = Some(Instant::now());
+            }
+            KeyCode::ArrowDown | KeyCode::KeyS => {
+                if total > 0 {
+                    state.selected = (state.selected + 1) % total;
+                }
+                state.nav_key_held_direction = Some(NavDirection::Down);
+                state.nav_key_held_since = Some(Instant::now());
+                state.nav_key_last_scrolled_at = Some(Instant::now());
+            }
+            KeyCode::Enter => {
+                // If the last item ("Exit") is selected, go back to main menu.
+                if total > 0 && state.selected == total - 1 {
+                    return ScreenAction::Navigate(Screen::Menu);
+                }
+            }
+            _ => {}
         }
-        PhysicalKey::Code(KeyCode::ArrowDown) | PhysicalKey::Code(KeyCode::KeyS) => {
-            state.selected = if total == 0 { 0 } else { (state.selected + 1) % total };
-            ScreenAction::None
+    } else if e.state == ElementState::Released {
+        match key_code {
+            KeyCode::ArrowUp | KeyCode::KeyW | KeyCode::ArrowDown | KeyCode::KeyS => {
+                state.nav_key_held_direction = None;
+                state.nav_key_held_since = None;
+                state.nav_key_last_scrolled_at = None;
+            }
+            _ => {}
         }
-        PhysicalKey::Code(KeyCode::Enter) => {
-            // If the last item ("Exit") is selected, go back to main menu.
-            if total > 0 && state.selected == total - 1 {
-                ScreenAction::Navigate(Screen::Menu)
-            } else {
-                // Stub for other items (open sub-screens later).
-                ScreenAction::None
+    }
+    ScreenAction::None
+}
+
+pub fn update(state: &mut State, _dt: f32) {
+    if let (Some(direction), Some(held_since), Some(last_scrolled_at)) =
+        (state.nav_key_held_direction, state.nav_key_held_since, state.nav_key_last_scrolled_at)
+    {
+        let now = Instant::now();
+        if now.duration_since(held_since) > NAV_INITIAL_HOLD_DELAY {
+            if now.duration_since(last_scrolled_at) >= NAV_REPEAT_SCROLL_INTERVAL {
+                let total = ITEMS.len();
+                if total > 0 {
+                    match direction {
+                        NavDirection::Up => {
+                            state.selected = if state.selected == 0 { total - 1 } else { state.selected - 1 };
+                        }
+                        NavDirection::Down => {
+                            state.selected = (state.selected + 1) % total;
+                        }
+                    }
+                    state.nav_key_last_scrolled_at = Some(now);
+                }
             }
         }
-        _ => ScreenAction::None,
+    }
+
+    if state.selected != state.prev_selected {
+        audio::play_sfx("assets/sounds/change.ogg");
+        state.prev_selected = state.selected;
     }
 }
 

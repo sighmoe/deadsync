@@ -661,6 +661,9 @@ impl ApplicationHandler for App {
                                     if self.handle_action(action, event_loop).is_err() {}
                                 }
                             }
+                            CurrentScreen::Options => {
+                                options::update(&mut self.options_state, delta_time);
+                            }
                             CurrentScreen::Sandbox => sandbox::update(&mut self.sandbox_state, delta_time),
                             CurrentScreen::SelectColor => select_color::update(&mut self.select_color_state, delta_time),
                             CurrentScreen::SelectMusic => {
