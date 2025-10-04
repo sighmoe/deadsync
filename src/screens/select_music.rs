@@ -55,6 +55,7 @@ pub struct State {
     pub entries: Vec<MusicWheelEntry>,
     pub selected_index: usize,
     pub selected_difficulty_index: usize,
+    pub preferred_difficulty_index: usize,
     pub active_color_index: i32,
     pub selection_animation_timer: f32,
     pub expanded_pack_name: Option<String>,
@@ -153,6 +154,7 @@ pub fn init() -> State {
         entries: Vec::new(),
         selected_index: 0,
         selected_difficulty_index: 2,
+        preferred_difficulty_index: 2,
         active_color_index: color::DEFAULT_COLOR_INDEX,
         selection_animation_timer: 0.0,
         expanded_pack_name: None,
@@ -250,6 +252,8 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                                     new_idx -= 1;
                                     if is_difficulty_playable(song, new_idx) {
                                         state.selected_difficulty_index = new_idx;
+                                        state.preferred_difficulty_index = new_idx;
+                                        audio::play_sfx("assets/sounds/change.ogg");
                                         break;
                                     }
                                 }
@@ -272,6 +276,8 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                                     new_idx += 1;
                                     if is_difficulty_playable(song, new_idx) {
                                         state.selected_difficulty_index = new_idx;
+                                        state.preferred_difficulty_index = new_idx;
+                                        audio::play_sfx("assets/sounds/change.ogg");
                                         break;
                                     }
                                 }
@@ -357,10 +363,33 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         }
     }
 
+    // --- Song/Difficulty Change Logic ---
     if state.selected_index != state.prev_selected_index {
         audio::play_sfx("assets/sounds/change.ogg");
         state.prev_selected_index = state.selected_index;
-    }
+        state.time_since_selection_change = 0.0; // Reset preview timer on any change.
+
+        // When the song changes, find the best matching difficulty based on the user's PREFERENCE.
+        if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
+            let preferred_difficulty = state.preferred_difficulty_index; // Use the stored preference
+            let mut best_match_index = None;
+            let mut min_diff = i32::MAX;
+
+            // Iterate through difficulties in canonical order (Beginner -> Challenge)
+            // to ensure tie-breaking favors easier charts.
+            for i in 0..DIFFICULTY_NAMES.len() {
+                if is_difficulty_playable(song, i) {
+                    let diff = (i as i32 - preferred_difficulty as i32).abs();
+                    if diff < min_diff {
+                        min_diff = diff;
+                        best_match_index = Some(i);
+                    }
+                }
+            }
+            // Update the *current* selection, but NOT the preference.
+            if let Some(best_index) = best_match_index { state.selected_difficulty_index = best_index; }
+        }
+    }    
 
     // Get the currently selected song or pack header.
     let (selected_song, selected_pack) = if let Some(entry) = state.entries.get(state.selected_index) {
@@ -398,20 +427,7 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         state.currently_playing_preview_path = None;
         audio::stop_music();
     }
-
-    // --- DIFFICULTY SELECTION LOGIC ---
-    // If the current difficulty is not playable for the selected song, find one that is.
-    if let Some(song) = &selected_song {
-        if !is_difficulty_playable(song, state.selected_difficulty_index) {
-            for i in 0..DIFFICULTY_NAMES.len() {
-                if is_difficulty_playable(song, i) {
-                    state.selected_difficulty_index = i;
-                    break;
-                }
-            }
-        }
-    }
-
+    
     // --- DYNAMIC TEXTURE REQUEST LOGIC ---
     // Request a new density graph if the selected chart has changed.
     let chart_to_display = selected_song.as_ref().and_then(|song| {

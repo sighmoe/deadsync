@@ -60,6 +60,7 @@ pub struct App {
     init_state: init::State,
     select_color_state: select_color::State,
     select_music_state: select_music::State,
+    preferred_difficulty_index: usize,
     sandbox_state: sandbox::State,
     session_start_time: Option<Instant>,
     current_dynamic_banner: Option<(String, PathBuf)>,
@@ -102,7 +103,7 @@ impl App {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
             current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: None, options_state,
             select_color_state, select_music_state, sandbox_state: sandbox::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
-            start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
+            start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height), preferred_difficulty_index: 2, // Default to Medium
             vsync_enabled, fullscreen_enabled, show_overlay, last_fps: 0.0, last_vpf: 0, 
             current_frame_vpf: 0, transition: TransitionState::Idle,
             session_start_time: None,
@@ -708,6 +709,7 @@ impl ApplicationHandler for App {
 
                     if prev == CurrentScreen::SelectMusic {
                         crate::core::audio::stop_music();
+                        self.preferred_difficulty_index = self.select_music_state.preferred_difficulty_index;
                     }
 
                     if prev == CurrentScreen::SelectColor {
@@ -756,6 +758,8 @@ impl ApplicationHandler for App {
                             let current_color_index = self.select_music_state.active_color_index;
                             self.select_music_state = select_music::init();
                             self.select_music_state.active_color_index = current_color_index;
+                            self.select_music_state.selected_difficulty_index = self.preferred_difficulty_index;
+                            self.select_music_state.preferred_difficulty_index = self.preferred_difficulty_index;
                         }
                     }
 
