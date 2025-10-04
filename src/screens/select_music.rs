@@ -510,6 +510,20 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         pack_song_counts.insert(pack.name.clone(), count);
     }
 
+    // Session Timer, centered in the top bar.
+    let timer_text = format_session_time(state.session_elapsed);
+
+    actors.push(act!(text:
+        font("wendy"):
+        settext(timer_text):
+        align(0.5, 0.5): // center, v-center
+        xy(screen_center_x(), 10.0): // Slightly higher, matching Lua theme
+        zoom(widescale(0.3, 0.36)):
+        z(121): // Draw above the bar
+        diffuse(1.0, 1.0, 1.0, 1.0):
+        horizalign(center)
+    ));
+
     // --- "ITG" text and Pads (top right), matching Simply Love layout ---
     {
         // "ITG" text, positioned to the left of the pads.
