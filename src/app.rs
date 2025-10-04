@@ -89,6 +89,9 @@ impl App {
         select_color_state.bg_from_index = color_index;
         select_color_state.bg_to_index = color_index;
 
+        let mut select_music_state = select_music::init();
+        select_music_state.active_color_index = color_index;
+
         let mut options_state = options::init();
         options_state.active_color_index = color_index;
         
@@ -98,7 +101,7 @@ impl App {
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
             current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: None, options_state,
-            select_color_state, select_music_state: select_music::init(), sandbox_state: sandbox::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
+            select_color_state, select_music_state, sandbox_state: sandbox::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height),
             vsync_enabled, fullscreen_enabled, show_overlay, last_fps: 0.0, last_vpf: 0, 
             current_frame_vpf: 0, transition: TransitionState::Idle,

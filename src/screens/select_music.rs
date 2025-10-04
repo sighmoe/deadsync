@@ -500,6 +500,10 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         left_text: Some("PerfectTaste"), center_text: None, right_text: Some("PRESS START"),
     }));
  
+    // Calculate the color for the currently selected difficulty based on the active theme color
+    let selected_difficulty_color_index = state.active_color_index - (4 - state.selected_difficulty_index) as i32;
+    let selected_difficulty_color = color::simply_love_rgba(selected_difficulty_color_index);
+
     // --- Build pack song counts for music wheel ---
     let mut pack_song_counts = HashMap::new();
     let song_cache = get_song_cache();
@@ -756,12 +760,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             xy(quad_cx, y_center):
             setsize(175.0, component_h):
             z(120):
-            diffuse(
-                color::simply_love_rgba(state.selected_difficulty_index as i32)[0],
-                color::simply_love_rgba(state.selected_difficulty_index as i32)[1],
-                color::simply_love_rgba(state.selected_difficulty_index as i32)[2],
-                1.0
-            )
+            diffuse(selected_difficulty_color[0], selected_difficulty_color[1], selected_difficulty_color[2], 1.0)
         ));
 
         // "STEPS" label
@@ -799,12 +798,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             xy(quad_cx, y_center):
             setsize(175.0, component_h):
             z(120):
-            diffuse(
-                color::simply_love_rgba(state.selected_difficulty_index as i32)[0],
-                color::simply_love_rgba(state.selected_difficulty_index as i32)[1],
-                color::simply_love_rgba(state.selected_difficulty_index as i32)[2],
-                1.0
-            )
+            diffuse(selected_difficulty_color[0], selected_difficulty_color[1], selected_difficulty_color[2], 1.0)
         ));
 
         // "STEPS" label
@@ -908,12 +902,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         xy(pane_cx, pane_top):
         setsize(screen_width() / 2.0 - 10.0, 60.0):
         z(120):
-        diffuse(
-            color::simply_love_rgba(state.selected_difficulty_index as i32)[0],
-            color::simply_love_rgba(state.selected_difficulty_index as i32)[1],
-            color::simply_love_rgba(state.selected_difficulty_index as i32)[2],
-            1.0
-        )
+        diffuse(selected_difficulty_color[0], selected_difficulty_color[1], selected_difficulty_color[2], 1.0)
     ));
 
     // --- Stats Grid, High Scores, and Meter (SL Parity) ---
@@ -1126,7 +1115,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
         // Meter text, centered, zoom 0.45
         let (r, g, b, a) = if meters[row_i].is_some() {
-            let c = color::simply_love_rgba(row_i as i32);
+            let meter_color_index = state.active_color_index - (4 - row_i) as i32;
+            let c = color::simply_love_rgba(meter_color_index);
             (c[0], c[1], c[2], 1.0) // difficulty color
         } else {
             // dim when no chart: #182025

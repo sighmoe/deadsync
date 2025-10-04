@@ -94,7 +94,7 @@ pub fn build(p: MusicWheelParams) -> Vec<Actor> {
                         let base = col_pack_header_box();
                         let sel  = col_selected_pack_header_box();
                         let bg   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
-                        let c    = color::simply_love_rgba(p.active_color_index + *original_index as i32);
+                        let c    = color::simply_love_rgba(*original_index as i32);
                         (true, bg, [c[0], c[1], c[2], 1.0], name.clone(), String::new(), Some(name.clone()))
                     }
                     _ => (false, col_music_wheel_box(), [1.0; 4], String::new(), String::new(), None),
