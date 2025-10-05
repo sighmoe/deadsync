@@ -119,15 +119,15 @@ fn find_pack_banner(pack: &SongPack) -> Option<PathBuf> {
     if image_files.is_empty() { return None; }
     
     // --- Step 2: Search by filename hints (case-insensitive) ---
-    // First pass: look for "banner" in the name or " bn" at the end (before extension).
-    let name_contains = ["banner"];
-    let name_ends_with = [" bn"];
+    // These hints are checked against the file stem (no extension).
+    // A simple `contains` check for "bn" is more effective than a strict
+    // `ends_with` and catches common variations like "-bn" or "abn".
+    let name_hints = ["banner", "bn"];
 
     for path in &image_files {
         if let Some(filename_str) = path.file_stem().and_then(|s| s.to_str()) {
             let filename_lower = filename_str.to_lowercase();
-            if name_contains.iter().any(|&hint| filename_lower.contains(hint)) ||
-               name_ends_with.iter().any(|&hint| filename_lower.ends_with(hint)) {
+            if name_hints.iter().any(|&hint| filename_lower.contains(hint)) {
                 info!("Found pack banner by name hint: {:?}", path);
                 return Some(path.clone());
             }
