@@ -25,7 +25,7 @@ const TRANSITION_IN_DURATION: f32 = 0.4;
 const TRANSITION_OUT_DURATION: f32 = 0.4;
 
 // Gameplay Layout & Feel
-const SCROLL_SPEED_SECONDS: f32 = 0.55; // Time for a note to travel screen_height() pixels
+const SCROLL_SPEED_SECONDS: f32 = 0.60; // Time for a note to travel screen_height() pixels
 const RECEPTOR_Y_OFFSET_FROM_CENTER: f32 = -125.0; // From Simply Love metrics for standard up-scroll
 
 // Lead-in timing (from StepMania theme defaults)
@@ -112,6 +112,9 @@ pub struct State {
     pub active_color_index: i32,
     pub player_color: [f32; 4],
     pub receptor_glow_timers: [f32; 4], // Timers for glow effect on each receptor
+
+    // Animation timing for this screen
+    pub total_elapsed_in_screen: f32,
 
     // Debugging
     log_timer: f32,
@@ -203,6 +206,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         active_color_index,
         player_color: color::decorative_rgba(active_color_index),
         receptor_glow_timers: [0.0; 4],
+        total_elapsed_in_screen: 0.0,
         log_timer: 0.0,
     }
 }
@@ -295,6 +299,8 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 
 #[inline(always)]
 pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
+    state.total_elapsed_in_screen += delta_time;
+
     let now = Instant::now();
     let music_time_sec = if now < state.song_start_instant {
         -(state.song_start_instant.saturating_duration_since(now).as_secs_f32())
@@ -389,7 +395,7 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 
 // --- DRAWING ---
 
-pub fn get_actors(state: &State, total_elapsed: f32) -> Vec<Actor> {
+pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::new();
     
     // FIXED: This section calculates the playfield position based on Simply Love metrics.
@@ -504,7 +510,8 @@ pub fn get_actors(state: &State, total_elapsed: f32) -> Vec<Actor> {
 
         // Simulate diffuseshift
         let effect_period = 0.8;
-        let t = (total_elapsed / effect_period).fract();
+        // Use the screen's internal timer
+        let t = (state.total_elapsed_in_screen / effect_period).fract();
         let anim_t = ( (t * 2.0 * std::f32::consts::PI).sin() + 1.0) / 2.0;
 
         let final_color = [

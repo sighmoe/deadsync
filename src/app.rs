@@ -391,7 +391,7 @@ impl App {
         })
     }
 
-    fn get_current_actors(&self, total_elapsed: f32) -> (Vec<Actor>, [f32; 4]) {
+    fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
         const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
         let mut screen_alpha_multiplier = 1.0;
 
@@ -413,7 +413,7 @@ impl App {
             CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier),
             CurrentScreen::Gameplay => {
                 if let Some(gs) = &self.gameplay_state {
-                    gameplay::get_actors(gs, total_elapsed)
+                    gameplay::get_actors(gs)
                 } else { vec![] }
             },
             CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
@@ -790,7 +790,7 @@ impl ApplicationHandler for App {
                     crate::ui::runtime::clear_all();
                 }
 
-                let (actors, clear_color) = self.get_current_actors(total_elapsed);
+                let (actors, clear_color) = self.get_current_actors();
                 let screen = self.build_screen(&actors, clear_color, total_elapsed);
                 self.update_fps_title(&window, now);
 
