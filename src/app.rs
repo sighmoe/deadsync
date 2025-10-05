@@ -149,6 +149,7 @@ impl App {
             ("noteskins/metal/tex notes.png", "noteskins/metal/tex notes.png"),
             ("noteskins/metal/tex receptors.png", "noteskins/metal/tex receptors.png"),
             ("noteskins/metal/tex glow.png", "noteskins/metal/tex glow.png"),
+            ("judgements/Love 2x7 (doubleres).png", "judgements/Love 2x7 (doubleres).png"),
         ];
 
         let mut handles = Vec::with_capacity(textures_to_load.len());

@@ -731,6 +731,10 @@ macro_rules! __dsl_apply_one {
     (setallstatedelays ($s:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::StateDelay(($s) as f32));
     }};
+    // --- SM/ITG Sprite: choose frame ---
+    (setstate ($i:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
+        $mods.push($crate::ui::dsl::Mod::State(($i) as u32));
+    }};
     // --- SM/ITG Sprite: explicit UVs (normalized, top-left origin) ---
     (customtexturerect ($u0:expr, $v0:expr, $u1:expr, $v1:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::UvRect([($u0) as f32, ($v0) as f32, ($u1) as f32, ($v1) as f32]));

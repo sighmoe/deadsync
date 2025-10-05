@@ -1,3 +1,4 @@
+// FILE: src/screens/gameplay.rs
 use crate::core::input::InputState;
 use crate::core::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
 use crate::screens::select_music::DIFFICULTY_NAMES;
@@ -47,7 +48,7 @@ const BOO_WINDOW: f32 = 0.180;
 
 // --- DATA STRUCTURES ---
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum JudgeGrade {
     Marvelous,
     Perfect,
@@ -84,6 +85,13 @@ pub struct Arrow {
     pub note_type: NoteType,
 }
 
+#[derive(Clone, Debug)]
+pub struct JudgmentRenderInfo {
+    pub judgment: Judgment,
+    pub judged_at: Instant,
+}
+
+
 pub struct State {
     // Song & Chart data
     pub song: Arc<SongData>,
@@ -105,7 +113,7 @@ pub struct State {
     pub combo: u32,
     pub miss_combo: u32,
     pub full_combo_grade: Option<JudgeGrade>,
-    pub last_judgment: Option<(JudgeGrade, Instant)>,
+    pub last_judgment: Option<JudgmentRenderInfo>,
     
     // Visuals
     pub noteskin: Option<Noteskin>,
@@ -236,8 +244,9 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) {
 
             // Process judgment
             info!("HIT! Column {}, Error: {:.2}ms, Grade: {:?}", column, time_error * 1000.0, grade);
-            state.judgments.push(Judgment { time_error_ms: time_error * 1000.0, grade: grade.clone() });
-            state.last_judgment = Some((grade.clone(), Instant::now()));
+            let judgment = Judgment { time_error_ms: time_error * 1000.0, grade: grade.clone() };
+            state.judgments.push(judgment.clone());
+            state.last_judgment = Some(JudgmentRenderInfo { judgment, judged_at: Instant::now() });
 
             state.miss_combo = 0; // Any hit breaks a miss combo
             if matches!(grade, JudgeGrade::Boo) {
@@ -340,8 +349,13 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
             let note_time = state.timing.get_time_for_beat(arrow.beat);
             if music_time_sec - note_time > BOO_WINDOW {
                 info!("MISS! Column {}, Beat {:.2}", arrow.column, arrow.beat);
-                state.judgments.push(Judgment { time_error_ms: ((music_time_sec - note_time) * 1000.0) as f32, grade: JudgeGrade::Miss });
-                state.last_judgment = Some((JudgeGrade::Miss, Instant::now()));
+                let judgment = Judgment {
+                    time_error_ms: ((music_time_sec - note_time) * 1000.0),
+                    grade: JudgeGrade::Miss,
+                };
+                state.judgments.push(judgment.clone());
+                state.last_judgment = Some(JudgmentRenderInfo { judgment, judged_at: Instant::now() });
+
                 state.combo = 0;
                 state.miss_combo += 1;
                 state.full_combo_grade = None;
@@ -486,7 +500,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         }
     }
     
-    // 3. Draw Combo and Judgment text
+    // 3. Draw Combo
     if state.miss_combo >= SHOW_COMBO_AT {
         actors.push(act!(text:
             font("wendy_combo"): settext(state.miss_combo.to_string()):
@@ -510,7 +524,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
         // Simulate diffuseshift
         let effect_period = 0.8;
-        // Use the screen's internal timer
         let t = (state.total_elapsed_in_screen / effect_period).fract();
         let anim_t = ( (t * 2.0 * std::f32::consts::PI).sin() + 1.0) / 2.0;
 
@@ -530,27 +543,47 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ));
     }
     
-    if let Some((grade, judged_at)) = &state.last_judgment {
-        if judged_at.elapsed().as_secs_f32() < JUDGMENT_DISPLAY_DURATION {
-            let (text, color) = match grade {
-                JudgeGrade::Marvelous => ("MARVELOUS", [1.0, 1.0, 0.0, 1.0]),
-                JudgeGrade::Perfect => ("PERFECT", [1.0, 1.0, 0.0, 1.0]),
-                JudgeGrade::Great => ("GREAT", [0.0, 1.0, 0.0, 1.0]),
-                JudgeGrade::Good => ("GOOD", [0.0, 0.0, 1.0, 1.0]),
-                JudgeGrade::Boo => ("BOO", [1.0, 0.0, 1.0, 1.0]),
-                JudgeGrade::Miss => ("MISS", [1.0, 0.0, 0.0, 1.0]),
+    // 4. Draw Judgment Sprite (Love)
+    if let Some(render_info) = &state.last_judgment {
+        let judgment = &render_info.judgment;
+        let elapsed = render_info.judged_at.elapsed().as_secs_f32();
+        if elapsed < 0.9 { // Total animation duration from the Lua script.
+            // Replicate the animation: zoom(0.8) -> decelerate(0.1) -> zoom(0.75) -> sleep(0.6) -> accelerate(0.2) -> zoom(0)
+            let zoom = if elapsed < 0.1 {
+                let t = elapsed / 0.1;
+                let ease_t = 1.0 - (1.0 - t).powi(2); // decelerate
+                0.8 + (0.75 - 0.8) * ease_t
+            } else if elapsed < 0.7 { // sleep
+                0.75
+            } else { // accelerate out
+                let t = (elapsed - 0.7) / 0.2;
+                let ease_t = t.powi(2);
+                0.75 * (1.0 - ease_t)
             };
-            actors.push(act!(text:
-                font("wendy"): settext(text):
+
+            // Calculate tilt based on timing error
+            let offset_sec = judgment.time_error_ms / 1000.0;
+            let tilt_multiplier = 1.0;
+            let offset_rot = offset_sec.abs().min(0.050) * 300.0 * tilt_multiplier;
+            let direction = if offset_sec < 0.0 { -1.0 } else { 1.0 };
+            let rot = if judgment.grade == JudgeGrade::Miss { 0.0 } else { direction * offset_rot };
+
+            // Calculate frame index from grade and timing (early/late) for a 2x7 sprite sheet
+            let frame_base = judgment.grade as usize;
+            let frame_offset = if offset_sec < 0.0 { 0 } else { 1 };
+            let linear_index = (frame_base * 2 + frame_offset) as u32;
+
+            actors.push(act!(sprite("judgements/Love 2x7 (doubleres).png"):
                 align(0.5, 0.5): xy(playfield_center_x, screen_center_y() - 30.0):
-                zoom(0.7): horizalign(center):
-                diffuse(color[0], color[1], color[2], color[3]):
-                z(200)
+                z(200):
+                zoomtoheight(64.0): // Give the sprite a base size
+                setstate(linear_index): 
+                zoom(zoom)
             ));
         }
     }
 
-    // 4. Draw Difficulty Box (1:1 with Simply Love)
+    // 5. Draw Difficulty Box (1:1 with Simply Love)
     let x = screen_center_x() - widescale(292.5, 342.5);
     let y = 56.0;
 
@@ -568,22 +601,19 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let meter_text = state.chart.meter.to_string();
 
     // The ActorFrame acts as a container to group and position the quad and text.
-    // It's sizeless, and its children are positioned relative to its center.
     let difficulty_meter_frame = Actor::Frame {
-        align: [0.5, 0.5], // The frame's pivot is its center.
-        offset: [x, y],    // Position the center at (_x, 56).
-        size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)], // Sizeless frame allows children to be centered at its origin.
+        align: [0.5, 0.5],
+        offset: [x, y],
+        size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
         children: vec![
-            // The colored background quad.
             act!(quad:
-                align(0.5, 0.5): xy(0.0, 0.0): // Center relative to parent's origin.
+                align(0.5, 0.5): xy(0.0, 0.0):
                 zoomto(30.0, 30.0):
                 diffuse(difficulty_color[0], difficulty_color[1], difficulty_color[2], 1.0)
             ),
-            // The meter text.
             act!(text:
                 font("wendy"): settext(meter_text):
-                align(0.5, 0.5): xy(0.0, 0.0): // Center relative to parent's origin.
+                align(0.5, 0.5): xy(0.0, 0.0):
                 zoom(0.4): diffuse(0.0, 0.0, 0.0, 1.0)
             )
         ],
@@ -592,7 +622,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     };
     actors.push(difficulty_meter_frame);
 
-    // 5. Draw Song Title Box (SongMeter)
+    // 6. Draw Song Title Box (SongMeter)
     {
         let w = widescale(310.0, 417.0);
         let h = 22.0;
@@ -601,7 +631,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
         let mut frame_children = Vec::new();
 
-        // Border quads
         frame_children.push(act!(quad:
             align(0.5, 0.5): xy(w / 2.0, h / 2.0):
             zoomto(w, h):
@@ -615,8 +644,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             z(1)
         ));
 
-        // Progress meter
-        // FIX: Only draw the progress bar if the music has actually started (time is non-negative).
         if state.song.total_length_seconds > 0 && state.current_music_time >= 0.0 {
             let progress = (state.current_music_time / state.song.total_length_seconds as f32).clamp(0.0, 1.0);
             let stream_max_w = w - 4.0;
@@ -632,7 +659,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             ));
         }
 
-        // Song Title
         let full_title = if state.song.subtitle.trim().is_empty() {
             state.song.title.clone()
         } else {
@@ -663,9 +689,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let w = 136.0;
         let h = 18.0;
         let meter_cx = screen_center_x() - widescale(238.0, 288.0);
-        let meter_cy = 20.0; // The meter's center Y, same as progress bar.
+        let meter_cy = 20.0;
 
-        // Background Frame (outer white border)
         actors.push(act!(quad:
             align(0.5, 0.5):
             xy(meter_cx, meter_cy):
@@ -673,7 +698,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             diffuse(1.0, 1.0, 1.0, 1.0):
             z(150)
         ));
-        // Inner black quad
         actors.push(act!(quad:
             align(0.5, 0.5):
             xy(meter_cx, meter_cy):
@@ -682,23 +706,21 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             z(151)
         ));
 
-        // Meter Fill (full for now)
         let fill_color = state.player_color;
         actors.push(act!(quad:
-            align(0.0, 0.5): // left-center
+            align(0.0, 0.5):
             xy(meter_cx - w / 2.0, meter_cy):
-            zoomto(w, h): // full width
+            zoomto(w, h):
             diffuse(fill_color[0], fill_color[1], fill_color[2], fill_color[3]):
             z(152)
         ));
 
-        // Swoosh
         let current_bpm = state.timing.get_bpm_for_beat(state.current_beat);
         let bps = current_bpm / 60.0;
         let velocity_x = -(bps * 0.5);
 
         actors.push(act!(sprite("swoosh.png"):
-            align(0.0, 0.5): // left-center
+            align(0.0, 0.5):
             xy(meter_cx - w / 2.0, meter_cy):
             zoomto(w, h):
             diffusealpha(0.2):
