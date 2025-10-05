@@ -28,6 +28,10 @@ const TRANSITION_OUT_DURATION: f32 = 0.4;
 const SCROLL_SPEED_SECONDS: f32 = 0.75; // Time for a note to travel from top to bottom
 const RECEPTOR_Y_FRAC: f32 = 0.15;      // Receptors are 15% from the bottom of the screen
 
+// Lead-in timing (from StepMania theme defaults)
+const MIN_SECONDS_TO_STEP: f32 = 6.0;
+const MIN_SECONDS_TO_MUSIC: f32 = 2.0;
+
 // Visual Feedback
 const RECEPTOR_GLOW_DURATION: f32 = 0.2; // How long the glow sprite is visible
 const JUDGMENT_DISPLAY_DURATION: f32 = 0.8; // How long "Perfect" etc. stays on screen
@@ -87,8 +91,10 @@ pub struct State {
     pub notes: Vec<Note>,
     
     // Gameplay state
-    pub start_time: Instant,
+    pub song_start_instant: Instant, // The wall-clock moment music t=0 begins (after the initial delay).
+    pub start_delay: f32, // The calculated initial pause duration.
     pub current_beat: f32,
+    pub current_music_time: f32, // Time calculated at the start of each update frame.
     pub music_started: bool,
     pub note_cursor: usize,
     pub arrows: [Vec<Arrow>; 4], // Active on-screen arrows per column
@@ -133,10 +139,6 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>) -> State {
         &chart.notes,
     ));
 
-    let time_at_beat_zero = timing.get_time_for_beat(0.0);
-    // Start the clock *before* now if the music has an offset, so elapsed time matches music time.
-    let start_time = Instant::now() - Duration::from_secs_f32(time_at_beat_zero.max(0.0));
-
     let parsed_notes = parsing::simfile::parse_chart_notes(&chart.notes);
     let notes: Vec<Note> = parsed_notes.into_iter().filter_map(|(row_index, column, raw_note_type)| {
         timing.get_beat_for_row(row_index).map(|beat| {
@@ -151,14 +153,39 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>) -> State {
 
     info!("Parsed {} notes from chart data.", notes.len());
 
+    // --- StepMania Timing Logic Implementation ---
+    // 1. Find the time of the first note relative to the music file's start.
+    let first_note_beat = notes.first().map_or(0.0, |n| n.beat);
+    let first_second = timing.get_time_for_beat(first_note_beat);
+
+    // 2. Calculate the required preroll delay to meet theme metrics.
+    let start_delay = (MIN_SECONDS_TO_STEP - first_second).max(MIN_SECONDS_TO_MUSIC);
+    
+    // 3. Schedule the visual clock's "time zero" to be `start_delay` seconds in the future.
+    let song_start_instant = Instant::now() + Duration::from_secs_f32(start_delay);
+
+    // 4. Immediately tell the audio engine to start playing, but with a negative
+    //    start time. The audio engine will fill the beginning with silence.
+    let music_started = if let Some(music_path) = &song.music_path {
+        info!("Starting music with a preroll delay of {:.2}s", start_delay);
+        let cut = audio::Cut { start_sec: (-start_delay) as f64, length_sec: f64::INFINITY };
+        audio::play_music(music_path.clone(), cut, false);
+        true
+    } else {
+        warn!("No music path found for song '{}'", song.title);
+        true // Set to true to prevent trying again every frame
+    };
+
     State {
         song,
         chart,
         timing,
         notes,
-        start_time,
+        song_start_instant,
+        start_delay,
         current_beat: 0.0,
-        music_started: false,
+        current_music_time: -start_delay, // At screen t=0, music time is negative
+        music_started,
         note_cursor: 0,
         arrows: [vec![], vec![], vec![], vec![]],
         judgments: Vec::new(),
@@ -173,9 +200,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>) -> State {
 
 // --- INPUT HANDLING ---
 
-fn process_hit(state: &mut State, column: usize) {
-    let current_time = state.start_time.elapsed().as_secs_f32();
-
+fn process_hit(state: &mut State, column: usize, current_time: f32) {
     // Find the first (i.e., earliest) note in the target column
     if let Some(arrow) = state.arrows[column].first() {
         let note_time = state.timing.get_time_for_beat(arrow.beat);
@@ -236,7 +261,13 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
         };
         
         if let Some(col_idx) = column {
-            process_hit(state, col_idx);
+            let now = Instant::now();
+            let hit_time = if now < state.song_start_instant {
+                -(state.song_start_instant.saturating_duration_since(now).as_secs_f32())
+            } else {
+                now.saturating_duration_since(state.song_start_instant).as_secs_f32()
+            };
+            process_hit(state, col_idx, hit_time);
         }
     }
     ScreenAction::None
@@ -246,23 +277,16 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 
 #[inline(always)]
 pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
-    let elapsed_sec = state.start_time.elapsed().as_secs_f32();
-
-    // Start music on the first valid frame
-    if !state.music_started && elapsed_sec >= 0.0 {
-        if let Some(music_path) = &state.song.music_path {
-            info!("Starting music: {:?}", music_path);
-            // We play from the start of the file; the offset is handled by start_time.
-            audio::play_music(music_path.clone(), audio::Cut::default(), false);
-            state.music_started = true;
-        } else {
-            warn!("No music path found for song '{}'", state.song.title);
-            state.music_started = true; // Prevent this from running every frame
-        }
-    }
+    let now = Instant::now();
+    let music_time_sec = if now < state.song_start_instant {
+        -(state.song_start_instant.saturating_duration_since(now).as_secs_f32())
+    } else {
+        now.saturating_duration_since(state.song_start_instant).as_secs_f32()
+    };
+    state.current_music_time = music_time_sec;
     
     // Update current beat
-    state.current_beat = state.timing.get_beat_for_time(elapsed_sec);
+    state.current_beat = state.timing.get_beat_for_time(music_time_sec);
 
     // Update glow timers
     for timer in &mut state.receptor_glow_timers {
@@ -271,7 +295,7 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
 
     // --- Add notes from the main list to the active on-screen arrows ---
     // Look ahead in time to see which notes should be on screen
-    let lookahead_time = elapsed_sec + SCROLL_SPEED_SECONDS;
+    let lookahead_time = music_time_sec + SCROLL_SPEED_SECONDS;
     let lookahead_beat = state.timing.get_beat_for_time(lookahead_time);
     
     while state.note_cursor < state.notes.len() && state.notes[state.note_cursor].beat < lookahead_beat {
@@ -290,9 +314,9 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
         let mut missed = false;
         if let Some(arrow) = col_arrows.first() {
             let note_time = state.timing.get_time_for_beat(arrow.beat);
-            if elapsed_sec - note_time > BOO_WINDOW {
+            if music_time_sec - note_time > BOO_WINDOW {
                 info!("MISS! Column {}, Beat {:.2}", arrow.column, arrow.beat);
-                state.judgments.push(Judgment { time_error_ms: ((elapsed_sec - note_time) * 1000.0) as f32, grade: JudgeGrade::Miss });
+                state.judgments.push(Judgment { time_error_ms: ((music_time_sec - note_time) * 1000.0) as f32, grade: JudgeGrade::Miss });
                 state.last_judgment = Some((JudgeGrade::Miss, Instant::now()));
                 state.combo = 0;
                 missed = true;
@@ -310,7 +334,7 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
         info!(
             "Beat: {:.2}, Time: {:.2}, Combo: {}, Active Arrows: {}",
             state.current_beat,
-            elapsed_sec,
+            music_time_sec,
             state.combo,
             active_arrows
         );
@@ -323,7 +347,8 @@ pub fn in_transition() -> (Vec<Actor>, f32) {
     let actor = act!(quad:
         align(0.0, 0.0): xy(0.0, 0.0):
         zoomto(screen_width(), screen_height()):
-        diffuse(0.0, 0.0, 0.0, 1.0): z(1100):
+        diffuse(0.0, 0.0, 0.0, 1.0):
+        z(1100):
         linear(TRANSITION_IN_DURATION): alpha(0.0):
         linear(0.0): visible(false)
     );
@@ -384,7 +409,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         }
 
         // 2. Draw active arrows
-        let current_time = state.start_time.elapsed().as_secs_f32();
+        let current_time = state.current_music_time;
 
         for column_arrows in &state.arrows {
             for arrow in column_arrows {
@@ -400,9 +425,12 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 // Determine which note sprite to use based on quantization
                 let beat_fraction = arrow.beat.fract();
                 let quantization = match (beat_fraction * 192.0).round() as u32 {
-                    0 | 192 => Quantization::Q4th, 96 => Quantization::Q8th,
-                    48 | 144 => Quantization::Q16th, 24 | 72 | 120 | 168 => Quantization::Q32nd,
-                    64 | 128 => Quantization::Q12th, 32 | 160 => Quantization::Q24th,
+                    0 | 192 => Quantization::Q4th,
+                    96 => Quantization::Q8th,
+                    48 | 144 => Quantization::Q16th,
+                    24 | 72 | 120 | 168 => Quantization::Q32nd,
+                    64 | 128 => Quantization::Q12th,
+                    32 | 160 => Quantization::Q24th,
                     _ => Quantization::Q192nd,
                 };
 

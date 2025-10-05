@@ -278,6 +278,21 @@ fn music_decoder_thread_loop(
     let out_ch = ENGINE.device_channels;
     let out_hz = ENGINE.device_sample_rate;
 
+    // --- Handle negative start time as preroll silence ---
+    if cut.start_sec < 0.0 {
+        let silence_duration_sec = -cut.start_sec;
+        let silence_samples = (silence_duration_sec * out_hz as f64 * out_ch as f64).round() as usize;
+        if silence_samples > 0 {
+            let silence_buf = vec![0i16; silence_samples];
+            let mut off = 0;
+            while off < silence_buf.len() {
+                if stop.load(std::sync::atomic::Ordering::Relaxed) { return Ok(()); }
+                let pushed = internal::ring_push(&ring, &silence_buf[off..]);
+                if pushed == 0 { thread::sleep(std::time::Duration::from_micros(300)); } else { off += pushed; }
+            }
+        }
+    }
+
     'main_loop: loop {
         let mut st = internal::poly_init(in_hz, out_hz, in_ch, out_ch, internal::BASE_TAPS, internal::BETA);
 
