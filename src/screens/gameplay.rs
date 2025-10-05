@@ -25,7 +25,7 @@ const TRANSITION_IN_DURATION: f32 = 0.4;
 const TRANSITION_OUT_DURATION: f32 = 0.4;
 
 // Gameplay Layout & Feel
-const SCROLL_SPEED_SECONDS: f32 = 0.75; // Time for a note to travel from top to bottom
+const SCROLL_SPEED_SECONDS: f32 = 0.55; // Time for a note to travel from top to bottom
 const RECEPTOR_Y_FRAC: f32 = 0.15;      // Receptors are 15% from the bottom of the screen
 
 // Lead-in timing (from StepMania theme defaults)
@@ -130,8 +130,10 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>) -> State {
         ns.tex_glow_dims = image::image_dimensions(base_path.join(&ns.tex_glow_path)).unwrap_or((96, 96));
     }
 
+    let config = crate::config::get();
     let timing = Arc::new(TimingData::from_chart_data(
         -song.offset,
+        config.global_offset_seconds,
         None, // chart-specific BPMs not supported by this timing data constructor yet
         &song.normalized_bpms,
         None, // chart-specific stops not supported yet

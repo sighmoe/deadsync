@@ -11,6 +11,7 @@ pub struct TimingData {
     beat_to_time: Arc<Vec<BeatTimePoint>>,
     stops_at_beat: Vec<(f32, f32)>,
     song_offset_sec: f32,
+    global_offset_sec: f32,
 }
 
 #[derive(Debug, Clone, Default, Copy)]
@@ -23,6 +24,7 @@ struct BeatTimePoint {
 impl TimingData {
     pub fn from_chart_data(
         song_offset_sec: f32,
+        global_offset_sec: f32,
         chart_bpms: Option<&str>,
         global_bpms: &str,
         chart_stops: Option<&str>,
@@ -88,6 +90,7 @@ impl TimingData {
             beat_to_time: Arc::new(beat_to_time),
             stops_at_beat,
             song_offset_sec,
+            global_offset_sec,
         }
     }
 
@@ -99,21 +102,25 @@ impl TimingData {
         let points = &self.beat_to_time;
         if points.is_empty() { return 0.0; }
 
-        let mut adjusted_target_time = target_time_sec;
+        // Start with the time we want the beat for, including global offset.
+        let mut time_for_beat_calc = target_time_sec + self.global_offset_sec;
+
+        // Now, remove the duration of any stops that have already occurred.
+        // The stops are defined in the song's timeline, so we check against target_time_sec.
         for (stop_beat, stop_duration) in &self.stops_at_beat {
-            let time_of_stop = self.get_time_for_beat(*stop_beat);
+            let time_of_stop = self.get_time_for_beat_internal(*stop_beat);
             if time_of_stop < target_time_sec {
-                adjusted_target_time -= stop_duration;
+                time_for_beat_calc -= stop_duration;
             }
         }
 
-        let point_idx = match points.binary_search_by(|p| p.time_sec.partial_cmp(&adjusted_target_time).unwrap_or(std::cmp::Ordering::Less)) {
+        let point_idx = match points.binary_search_by(|p| p.time_sec.partial_cmp(&time_for_beat_calc).unwrap_or(std::cmp::Ordering::Less)) {
             Ok(i) => i,
             Err(i) => i.saturating_sub(1),
         };
         let point = &points[point_idx];
         
-        let time_since_point = adjusted_target_time - point.time_sec;
+        let time_since_point = time_for_beat_calc - point.time_sec;
         if point.bpm <= 0.0 {
             point.beat
         } else {
@@ -122,6 +129,10 @@ impl TimingData {
     }
 
     pub fn get_time_for_beat(&self, target_beat: f32) -> f32 {
+        self.get_time_for_beat_internal(target_beat) - self.global_offset_sec
+    }
+
+    fn get_time_for_beat_internal(&self, target_beat: f32) -> f32 {
         let points = &self.beat_to_time;
         if points.is_empty() { return 0.0; }
 
