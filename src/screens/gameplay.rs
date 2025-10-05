@@ -35,6 +35,7 @@ const MIN_SECONDS_TO_MUSIC: f32 = 2.0;
 // Visual Feedback
 const RECEPTOR_GLOW_DURATION: f32 = 0.2; // How long the glow sprite is visible
 const JUDGMENT_DISPLAY_DURATION: f32 = 0.8; // How long "Perfect" etc. stays on screen
+const SHOW_COMBO_AT: u32 = 4; // From Simply Love metrics
 
 // --- JUDGMENT WINDOWS (in seconds) ---
 const MARVELOUS_WINDOW: f32 = 0.022;
@@ -46,7 +47,7 @@ const BOO_WINDOW: f32 = 0.180;
 
 // --- DATA STRUCTURES ---
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum JudgeGrade {
     Marvelous,
     Perfect,
@@ -102,6 +103,8 @@ pub struct State {
     // Scoring & Feedback
     pub judgments: Vec<Judgment>,
     pub combo: u32,
+    pub miss_combo: u32,
+    pub full_combo_grade: Option<JudgeGrade>,
     pub last_judgment: Option<(JudgeGrade, Instant)>,
     
     // Visuals
@@ -193,6 +196,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         arrows: [vec![], vec![], vec![], vec![]],
         judgments: Vec::new(),
         combo: 0,
+        miss_combo: 0,
+        full_combo_grade: None,
         last_judgment: None,
         noteskin,
         active_color_index,
@@ -230,10 +235,19 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) {
             state.judgments.push(Judgment { time_error_ms: time_error * 1000.0, grade: grade.clone() });
             state.last_judgment = Some((grade.clone(), Instant::now()));
 
-            if matches!(grade, JudgeGrade::Boo | JudgeGrade::Miss) {
+            state.miss_combo = 0; // Any hit breaks a miss combo
+            if matches!(grade, JudgeGrade::Boo) {
                 state.combo = 0;
+                state.full_combo_grade = None;
             } else {
                 state.combo += 1;
+                
+                // Update full combo grade: if a worse grade is hit, the FC color downgrades
+                if let Some(current_fc_grade) = &state.full_combo_grade {
+                    state.full_combo_grade = Some(grade.clone().max(current_fc_grade.clone()));
+                } else {
+                    state.full_combo_grade = Some(grade.clone());
+                }
             }
             
             // Remove the note that was hit
@@ -323,6 +337,8 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
                 state.judgments.push(Judgment { time_error_ms: ((music_time_sec - note_time) * 1000.0) as f32, grade: JudgeGrade::Miss });
                 state.last_judgment = Some((JudgeGrade::Miss, Instant::now()));
                 state.combo = 0;
+                state.miss_combo += 1;
+                state.full_combo_grade = None;
                 missed = true;
             }
         }
@@ -336,10 +352,11 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
     if state.log_timer >= 1.0 {
         let active_arrows: usize = state.arrows.iter().map(|v| v.len()).sum();
         info!(
-            "Beat: {:.2}, Time: {:.2}, Combo: {}, Active Arrows: {}",
+            "Beat: {:.2}, Time: {:.2}, Combo: {}, Misses: {}, Active Arrows: {}",
             state.current_beat,
             music_time_sec,
             state.combo,
+            state.miss_combo,
             active_arrows
         );
         state.log_timer -= 1.0;
@@ -372,7 +389,7 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 
 // --- DRAWING ---
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
+pub fn get_actors(state: &State, total_elapsed: f32) -> Vec<Actor> {
     let mut actors = Vec::new();
     
     // FIXED: This section calculates the playfield position based on Simply Love metrics.
@@ -464,11 +481,44 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     }
     
     // 3. Draw Combo and Judgment text
-    if state.combo > 2 {
+    if state.miss_combo >= SHOW_COMBO_AT {
         actors.push(act!(text:
-            font("wendy"): settext(state.combo.to_string()):
-            align(0.5, 0.5): xy(screen_center_x(), screen_center_y() - 50.0):
-            zoom(0.8): horizalign(center):
+            font("wendy_combo"): settext(state.miss_combo.to_string()):
+            align(0.5, 0.5): xy(playfield_center_x, screen_center_y() + 30.0):
+            zoom(0.75): horizalign(center):
+            diffuse(1.0, 0.0, 0.0, 1.0): // Red
+            z(200)
+        ));
+    } else if state.combo >= SHOW_COMBO_AT {
+        let (color1, color2) = if let Some(fc_grade) = &state.full_combo_grade {
+            match fc_grade {
+                JudgeGrade::Marvelous => (color::rgba_hex("#C8FFFF"), color::rgba_hex("#6BF0FF")), // Blue
+                JudgeGrade::Perfect   => (color::rgba_hex("#FDFFC9"), color::rgba_hex("#FDDB85")), // Gold
+                JudgeGrade::Great     => (color::rgba_hex("#C9FFC9"), color::rgba_hex("#94FEC1")), // Green
+                _                     => ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]), // Good or other -> White
+            }
+        } else {
+            // Not a full combo (broken by Boo/Miss)
+            ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0])
+        };
+
+        // Simulate diffuseshift
+        let effect_period = 0.8;
+        let t = (total_elapsed / effect_period).fract();
+        let anim_t = ( (t * 2.0 * std::f32::consts::PI).sin() + 1.0) / 2.0;
+
+        let final_color = [
+            color1[0] + (color2[0] - color1[0]) * anim_t,
+            color1[1] + (color2[1] - color1[1]) * anim_t,
+            color1[2] + (color2[2] - color1[2]) * anim_t,
+            1.0,
+        ];
+        
+        actors.push(act!(text:
+            font("wendy_combo"): settext(state.combo.to_string()):
+            align(0.5, 0.5): xy(playfield_center_x, screen_center_y() + 30.0):
+            zoom(0.75): horizalign(center):
+            diffuse(final_color[0], final_color[1], final_color[2], final_color[3]):
             z(200)
         ));
     }
@@ -485,7 +535,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             };
             actors.push(act!(text:
                 font("wendy"): settext(text):
-                align(0.5, 0.5): xy(screen_center_x(), screen_center_y()):
+                align(0.5, 0.5): xy(playfield_center_x, screen_center_y() - 30.0):
                 zoom(0.7): horizalign(center):
                 diffuse(color[0], color[1], color[2], color[3]):
                 z(200)

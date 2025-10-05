@@ -187,7 +187,7 @@ impl App {
     }
 
     fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
-        for &name in &["wendy", "miso", "wendy_monospace_numbers"] {
+        for &name in &["wendy", "miso", "wendy_monospace_numbers", "wendy_combo"] {
             self.load_font_asset(name)?;
         }
         Ok(())
@@ -198,6 +198,7 @@ impl App {
             "wendy" => "assets/fonts/wendy/_wendy small.ini".to_string(),
             "miso"  => "assets/fonts/miso/_miso light.ini".to_string(),
             "wendy_monospace_numbers" => "assets/fonts/wendy/_wendy monospace numbers.ini".to_string(),
+            "wendy_combo" => "assets/fonts/_combo/wendy/Wendy.ini".to_string(),
             _ => return Err(format!("Unknown font name: {}", name).into()),
         };
 
@@ -390,7 +391,7 @@ impl App {
         })
     }
 
-    fn get_current_actors(&self) -> (Vec<Actor>, [f32; 4]) {
+    fn get_current_actors(&self, total_elapsed: f32) -> (Vec<Actor>, [f32; 4]) {
         const CLEAR: [f32; 4] = [0.03, 0.03, 0.03, 1.0];
         let mut screen_alpha_multiplier = 1.0;
 
@@ -412,7 +413,7 @@ impl App {
             CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier),
             CurrentScreen::Gameplay => {
                 if let Some(gs) = &self.gameplay_state {
-                    gameplay::get_actors(gs)
+                    gameplay::get_actors(gs, total_elapsed)
                 } else { vec![] }
             },
             CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
@@ -789,7 +790,7 @@ impl ApplicationHandler for App {
                     crate::ui::runtime::clear_all();
                 }
 
-                let (actors, clear_color) = self.get_current_actors();
+                let (actors, clear_color) = self.get_current_actors(total_elapsed);
                 let screen = self.build_screen(&actors, clear_color, total_elapsed);
                 self.update_fps_title(&window, now);
 
