@@ -534,7 +534,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let timer_text = format_session_time(state.session_elapsed);
 
     actors.push(act!(text:
-        font("wendy"):
+        font("wendy_monospace_numbers"):
         settext(timer_text):
         align(0.5, 0.5): // center, v-center
         xy(screen_center_x(), 10.0): // Slightly higher, matching Lua theme

@@ -186,7 +186,7 @@ impl App {
     }
 
     fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
-        for &name in &["wendy", "miso"] {
+        for &name in &["wendy", "miso", "wendy_monospace_numbers"] {
             self.load_font_asset(name)?;
         }
         Ok(())
@@ -196,6 +196,7 @@ impl App {
         let ini_path_str = match name {
             "wendy" => "assets/fonts/wendy/_wendy small.ini".to_string(),
             "miso"  => "assets/fonts/miso/_miso light.ini".to_string(),
+            "wendy_monospace_numbers" => "assets/fonts/wendy/_wendy monospace numbers.ini".to_string(),
             _ => return Err(format!("Unknown font name: {}", name).into()),
         };
 
