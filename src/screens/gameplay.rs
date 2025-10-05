@@ -375,6 +375,11 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 
 // --- DRAWING ---
 
+// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/new-engine/src/screens/gameplay.rs =====
+// ... (imports and other functions remain the same) ...
+
+// --- DRAWING ---
+
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::new();
     let cx = screen_center_x();
@@ -462,7 +467,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         actors.push(act!(text:
             font("wendy"): settext(state.combo.to_string()):
             align(0.5, 0.5): xy(cx, screen_center_y() - 50.0):
-            zoom(0.8): horizalign(center)
+            zoom(0.8): horizalign(center):
+            z(200)
         ));
     }
     
@@ -480,7 +486,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 font("wendy"): settext(text):
                 align(0.5, 0.5): xy(cx, screen_center_y()):
                 zoom(0.7): horizalign(center):
-                diffuse(color[0], color[1], color[2], color[3])
+                diffuse(color[0], color[1], color[2], color[3]):
+                z(200)
             ));
         }
     }
@@ -515,6 +522,71 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             )
         ]
     });
+
+    // 5. Draw Song Title Box (SongMeter)
+    {
+        let w = widescale(310.0, 417.0);
+        let h = 22.0;
+        let cx = screen_center_x();
+        let y = 20.0;
+
+        let mut frame_children = Vec::new();
+
+        // Border quads
+        frame_children.push(act!(quad:
+            align(0.5, 0.5): xy(w / 2.0, h / 2.0):
+            zoomto(w, h):
+            diffuse(1.0, 1.0, 1.0, 1.0):
+            z(0)
+        ));
+        frame_children.push(act!(quad:
+            align(0.5, 0.5): xy(w / 2.0, h / 2.0):
+            zoomto(w - 4.0, h - 4.0):
+            diffuse(0.0, 0.0, 0.0, 1.0):
+            z(1)
+        ));
+
+        // Progress meter
+        if state.song.total_length_seconds > 0 {
+            let progress = (state.current_music_time / state.song.total_length_seconds as f32).clamp(0.0, 1.0);
+            let stream_max_w = w - 4.0;
+            let stream_h = h - 4.0;
+            let stream_current_w = stream_max_w * progress;
+
+            frame_children.push(act!(quad:
+                align(0.0, 0.5):
+                xy(2.0, h / 2.0):
+                zoomto(stream_current_w, stream_h):
+                diffuse(state.player_color[0], state.player_color[1], state.player_color[2], 1.0):
+                z(2)
+            ));
+        }
+
+        // Song Title
+        let full_title = if state.song.subtitle.trim().is_empty() {
+            state.song.title.clone()
+        } else {
+            format!("{} {}", state.song.title, state.song.subtitle)
+        };
+
+        frame_children.push(act!(text:
+            font("miso"): settext(full_title):
+            align(0.5, 0.5): xy(w / 2.0, h / 2.0):
+            zoom(0.8):
+            maxwidth(screen_width() / 2.5 - 10.0):
+            horizalign(center):
+            z(3)
+        ));
+
+        actors.push(Actor::Frame {
+            align: [0.5, 0.5],
+            offset: [cx, y],
+            size: [SizeSpec::Px(w), SizeSpec::Px(h)],
+            background: None,
+            z: 150,
+            children: frame_children,
+        });
+    }
 
     actors
 }
