@@ -641,7 +641,8 @@ impl ApplicationHandler for App {
                                 self.menu_state.active_color_index = idx;
                                 self.select_music_state.active_color_index = idx;
                                 if let Some(gs) = self.gameplay_state.as_mut() {
-                                    gs.player_color = color::decorative_rgba(idx);
+                                    gs.active_color_index = idx;
+                                    gs.player_color = color::simply_love_rgba(idx);
                                 }
                                 self.options_state.active_color_index = idx;
                             }
@@ -728,6 +729,10 @@ impl ApplicationHandler for App {
                         self.menu_state.active_color_index = idx;
                         self.select_music_state.active_color_index = idx;
                         self.options_state.active_color_index = idx;
+                        if let Some(gs) = self.gameplay_state.as_mut() {
+                            gs.active_color_index = idx;
+                            gs.player_color = color::simply_love_rgba(idx);
+                        }
                     }
 
                     if target == CurrentScreen::Menu {

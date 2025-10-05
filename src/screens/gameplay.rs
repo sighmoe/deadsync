@@ -1,6 +1,3 @@
-// FILE: src/screens/gameplay.rs
-
-// --- IMPORTS ---
 use crate::core::input::InputState; // Though we won't use this for note hits
 use crate::core::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
 use crate::core::space::widescale;
@@ -375,11 +372,6 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 
 // --- DRAWING ---
 
-// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/new-engine/src/screens/gameplay.rs =====
-// ... (imports and other functions remain the same) ...
-
-// --- DRAWING ---
-
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::new();
     let cx = screen_center_x();
@@ -547,7 +539,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ));
 
         // Progress meter
-        if state.song.total_length_seconds > 0 {
+        // FIX: Only draw the progress bar if the music has actually started (time is non-negative).
+        if state.song.total_length_seconds > 0 && state.current_music_time >= 0.0 {
             let progress = (state.current_music_time / state.song.total_length_seconds as f32).clamp(0.0, 1.0);
             let stream_max_w = w - 4.0;
             let stream_h = h - 4.0;
