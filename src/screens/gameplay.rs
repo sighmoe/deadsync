@@ -212,7 +212,6 @@ fn process_hit(state: &mut State, column: usize) {
 
             // Trigger visual/audio feedback
             state.receptor_glow_timers[column] = RECEPTOR_GLOW_DURATION;
-            audio::play_sfx("assets/sounds/tap.ogg");
 
         }
     }
@@ -347,7 +346,7 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::new();
     let cx = screen_center_x();
-    let receptor_y = screen_height() * (1.0 - RECEPTOR_Y_FRAC);
+    let receptor_y = screen_height() * RECEPTOR_Y_FRAC;
     let pixels_per_second = screen_height() / SCROLL_SPEED_SECONDS;
 
     if let Some(ns) = &state.noteskin {
@@ -391,7 +390,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             for arrow in column_arrows {
                 let arrow_time = state.timing.get_time_for_beat(arrow.beat);
                 let time_diff = arrow_time - current_time;
-                let y_pos = receptor_y - (time_diff * pixels_per_second); // Note: Subtracted for upscroll
+                let y_pos = receptor_y + (time_diff * pixels_per_second);
                 
                 // Culling
                 if y_pos < -100.0 || y_pos > screen_height() + 100.0 { continue; }
