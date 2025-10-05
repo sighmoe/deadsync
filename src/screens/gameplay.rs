@@ -26,7 +26,8 @@ const TRANSITION_OUT_DURATION: f32 = 0.4;
 
 // Gameplay Layout & Feel
 const SCROLL_SPEED_SECONDS: f32 = 0.55; // Time for a note to travel from top to bottom
-const RECEPTOR_Y_FRAC: f32 = 0.15;      // Receptors are 15% from the bottom of the screen
+// REVERTED: This is a fraction from the TOP of the screen, for up-scroll.
+const RECEPTOR_Y_FRAC: f32 = 0.15; // Receptors are 15% from the top of the screen
 
 // Lead-in timing (from StepMania theme defaults)
 const MIN_SECONDS_TO_STEP: f32 = 6.0;
@@ -374,7 +375,15 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::new();
-    let cx = screen_center_x();
+    
+    // FIXED: This section calculates the playfield position based on Simply Love metrics.
+    // --- Playfield Positioning (1:1 with Simply Love) ---
+    // This logic places the center of the P1 notefield to the left of the screen's center.
+    let logical_screen_width = screen_width();
+    let clamped_width = logical_screen_width.clamp(640.0, 854.0);
+    let playfield_center_x = screen_center_x() - (clamped_width * 0.25);
+
+    // REVERTED: This correctly places the receptors near the TOP of the screen.
     let receptor_y = screen_height() * RECEPTOR_Y_FRAC;
     let pixels_per_second = screen_height() / SCROLL_SPEED_SECONDS;
 
@@ -388,7 +397,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             let uv = noteskin::get_uv_rect(receptor_def, ns.tex_receptors_dims);
             actors.push(act!(sprite(ns.tex_receptors_path.clone()):
                 align(0.5, 0.5):
-                xy(cx + col_x_offset as f32, receptor_y):
+                xy(playfield_center_x + col_x_offset as f32, receptor_y):
                 zoomto(receptor_def.size[0] as f32, receptor_def.size[1] as f32):
                 rotationz(-receptor_def.rotation_deg as f32):
                 customtexturerect(uv[0], uv[1], uv[2], uv[3])
@@ -402,7 +411,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 let alpha = (glow_timer / RECEPTOR_GLOW_DURATION).powf(0.75); // Fade out
                 actors.push(act!(sprite(ns.tex_glow_path.clone()):
                     align(0.5, 0.5):
-                    xy(cx + col_x_offset as f32, receptor_y):
+                    xy(playfield_center_x + col_x_offset as f32, receptor_y):
                     zoomto(glow_def.size[0] as f32, glow_def.size[1] as f32):
                     rotationz(-glow_def.rotation_deg as f32):
                     customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], glow_uv[3]):
@@ -419,6 +428,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             for arrow in column_arrows {
                 let arrow_time = state.timing.get_time_for_beat(arrow.beat);
                 let time_diff = arrow_time - current_time;
+                // REVERTED: Add the offset to make notes scroll UP.
                 let y_pos = receptor_y + (time_diff * pixels_per_second);
                 
                 // Culling
@@ -444,7 +454,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     
                     actors.push(act!(sprite(ns.tex_notes_path.clone()):
                         align(0.5, 0.5):
-                        xy(cx + col_x_offset as f32, y_pos):
+                        xy(playfield_center_x + col_x_offset as f32, y_pos):
                         zoomto(note_def.size[0] as f32, note_def.size[1] as f32):
                         rotationz(-note_def.rotation_deg as f32):
                         customtexturerect(uv[0], uv[1], uv[2], uv[3])
@@ -458,7 +468,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     if state.combo > 2 {
         actors.push(act!(text:
             font("wendy"): settext(state.combo.to_string()):
-            align(0.5, 0.5): xy(cx, screen_center_y() - 50.0):
+            align(0.5, 0.5): xy(screen_center_x(), screen_center_y() - 50.0):
             zoom(0.8): horizalign(center):
             z(200)
         ));
@@ -476,7 +486,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             };
             actors.push(act!(text:
                 font("wendy"): settext(text):
-                align(0.5, 0.5): xy(cx, screen_center_y()):
+                align(0.5, 0.5): xy(screen_center_x(), screen_center_y()):
                 zoom(0.7): horizalign(center):
                 diffuse(color[0], color[1], color[2], color[3]):
                 z(200)
