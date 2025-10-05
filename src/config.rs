@@ -30,7 +30,7 @@ impl Default for Config {
             display_height: 900,
             video_renderer: BackendType::Vulkan,
             simply_love_color: 2, // Corresponds to DEFAULT_COLOR_INDEX
-            global_offset_seconds: 0.0,            
+            global_offset_seconds: -0.008,
         }
     }
 }

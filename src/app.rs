@@ -753,8 +753,8 @@ impl ApplicationHandler for App {
                             (song.clone(), Arc::new(chart_ref.clone()))
                         };
                         
-                        self.gameplay_state = Some(gameplay::init(song_arc, chart));
-                        self.gameplay_state.as_mut().unwrap().player_color = color::decorative_rgba(self.menu_state.active_color_index);
+                        let color_index = self.menu_state.active_color_index;
+                        self.gameplay_state = Some(gameplay::init(song_arc, chart, color_index));
                     }
 
                     if target == CurrentScreen::SelectMusic {

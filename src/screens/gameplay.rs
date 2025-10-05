@@ -3,14 +3,17 @@
 // --- IMPORTS ---
 use crate::core::input::InputState; // Though we won't use this for note hits
 use crate::core::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
+use crate::core::space::widescale;
+use crate::screens::select_music::DIFFICULTY_NAMES;
 use crate::core::parsing;
 use crate::core::song_loading::{ChartData, SongData};
 use crate::core::space::globals::*;
 use crate::core::timing::TimingData;
 use crate::core::audio;
 use crate::screens::{Screen, ScreenAction};
-use crate::ui::actors::Actor;
+use crate::ui::actors::{Actor, SizeSpec};
 use crate::act;
+use crate::ui::color;
 use log::{info, warn};
 use std::path::Path;
 use std::sync::Arc;
@@ -106,6 +109,7 @@ pub struct State {
     
     // Visuals
     pub noteskin: Option<Noteskin>,
+    pub active_color_index: i32,
     pub player_color: [f32; 4],
     pub receptor_glow_timers: [f32; 4], // Timers for glow effect on each receptor
 
@@ -115,7 +119,7 @@ pub struct State {
 
 // --- INITIALIZATION ---
 
-pub fn init(song: Arc<SongData>, chart: Arc<ChartData>) -> State {
+pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32) -> State {
     info!("Initializing Gameplay Screen...");
     info!("Loaded song '{}' and chart '{}'", song.title, chart.difficulty);
 
@@ -194,7 +198,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>) -> State {
         combo: 0,
         last_judgment: None,
         noteskin,
-        player_color: [0.0, 0.0, 1.0, 1.0], // Default color, can be set from menu
+        active_color_index,
+        player_color: color::decorative_rgba(active_color_index),
         receptor_glow_timers: [0.0; 4],
         log_timer: 0.0,
     }
@@ -479,6 +484,37 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             ));
         }
     }
+
+    // 4. Draw Difficulty Box (1:1 with Simply Love)
+    let x = screen_center_x() - widescale(292.5, 342.5);
+    let y = 56.0;
+
+    let difficulty_name_lc = state.chart.difficulty.to_lowercase();
+    let difficulty_index = DIFFICULTY_NAMES.iter().position(|&name| name.to_lowercase() == difficulty_name_lc).unwrap_or(2);
+
+    let difficulty_color_index = state.active_color_index - (4 - difficulty_index) as i32;
+    let difficulty_color = color::simply_love_rgba(difficulty_color_index);
+    let meter_text = state.chart.meter.to_string();
+
+    actors.push(Actor::Frame {
+        align: [0.5, 0.5],
+        offset: [x, y],
+        size: [SizeSpec::Px(30.0), SizeSpec::Px(30.0)],
+        background: None,
+        z: 100,
+        children: vec![
+            act!(quad:
+                align(0.5, 0.5): xy(0.0, 0.0):
+                zoomto(30.0, 30.0):
+                diffuse(difficulty_color[0], difficulty_color[1], difficulty_color[2], 1.0)
+            ),
+            act!(text:
+                font("wendy"): settext(meter_text):
+                align(0.5, 0.5): xy(0.0, 0.0):
+                zoom(0.4): diffuse(0.0, 0.0, 0.0, 1.0)
+            )
+        ]
+    });
 
     actors
 }
