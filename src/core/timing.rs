@@ -156,6 +156,17 @@ impl TimingData {
         }
         time
     }
+
+    pub fn get_bpm_for_beat(&self, target_beat: f32) -> f32 {
+        let points = &self.beat_to_time;
+        if points.is_empty() { return 120.0; } // Fallback BPM
+
+        let point_idx = match points.binary_search_by(|p| p.beat.partial_cmp(&target_beat).unwrap_or(std::cmp::Ordering::Less)) {
+            Ok(i) => i,
+            Err(i) => i.saturating_sub(1),
+        };
+        points[point_idx].bpm
+    }
 }
 
 

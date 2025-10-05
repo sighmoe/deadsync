@@ -581,5 +581,53 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         });
     }
 
+    // --- LIFE METER (P1) ---
+    {
+        let w = 136.0;
+        let h = 18.0;
+        let meter_cx = screen_center_x() - widescale(238.0, 288.0);
+        let meter_top_y = 20.0;
+
+        // Background Frame
+        actors.push(act!(quad:
+            align(0.5, 0.0): // center-top
+            xy(meter_cx, meter_top_y - 2.0):
+            zoomto(w + 4.0, h + 4.0):
+            diffuse(1.0, 1.0, 1.0, 1.0): // Outer border is white
+            z(150)
+        ));
+        actors.push(act!(quad:
+            align(0.5, 0.0): // center-top
+            xy(meter_cx, meter_top_y):
+            zoomto(w, h):
+            diffuse(0.0, 0.0, 0.0, 1.0): // Inner is black
+            z(151)
+        ));
+
+        // Meter Fill (full for now)
+        let fill_color = state.player_color;
+        actors.push(act!(quad:
+            align(0.0, 0.0): // left-top
+            xy(meter_cx - w / 2.0, meter_top_y):
+            zoomto(w, h): // full width
+            diffuse(fill_color[0], fill_color[1], fill_color[2], fill_color[3]):
+            z(152)
+        ));
+
+        // Swoosh
+        let current_bpm = state.timing.get_bpm_for_beat(state.current_beat);
+        let bps = current_bpm / 60.0;
+        let velocity_x = -(bps * 0.5);
+
+        actors.push(act!(sprite("swoosh.png"):
+            align(0.0, 0.0):
+            xy(meter_cx - w / 2.0, meter_top_y):
+            zoomto(w, h):
+            diffusealpha(0.2):
+            texcoordvelocity(velocity_x, 0.0):
+           z(153)
+        ));
+    }
+
     actors
 }

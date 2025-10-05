@@ -138,6 +138,7 @@ impl App {
         let textures_to_load: Vec<(&'static str, &'static str)> = vec![
             ("logo.png", "logo.png"), ("init_arrow.png", "init_arrow.png"),
             ("dance.png", "dance.png"), ("meter_arrow.png", "meter_arrow.png"), ("rounded-square.png", "rounded-square.png"),
+            ("swoosh.png", "swoosh.png"),
             ("heart.png", "heart.png"), ("banner1.png", "_fallback/banner1.png"),
             ("banner2.png", "_fallback/banner2.png"), ("banner3.png", "_fallback/banner3.png"),
             ("banner4.png", "_fallback/banner4.png"), ("banner5.png", "_fallback/banner5.png"),
