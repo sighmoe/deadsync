@@ -681,11 +681,21 @@ impl ApplicationHandler for App {
                                 if let Some(start) = self.session_start_time {
                                     self.select_music_state.session_elapsed = now.duration_since(start).as_secs_f32();
                                 }
-                                let action = select_music::update(&mut self.select_music_state, delta_time);
+                            let action = select_music::update(&mut self.select_music_state, delta_time);
                                 match action {
                                     ScreenAction::RequestBanner(path_opt) => {
-                                        let key = self.set_dynamic_banner(path_opt);
-                                        self.select_music_state.current_banner_key = key;
+                                        if let Some(path) = path_opt {
+                                            // If a specific banner path is provided (from a song or pack), load it.
+                                            let key = self.set_dynamic_banner(Some(path));
+                                            self.select_music_state.current_banner_key = key;
+                                        } else {
+                                            // Otherwise, fall back to a theme-colored banner.
+                                            self.destroy_current_dynamic_banner(); // Ensure no custom banner is active.
+                                            let color_index = self.select_music_state.active_color_index;
+                                            let banner_num = color_index.rem_euclid(12) + 1; // Wrap index to 1-12 range
+                                            let key = format!("banner{}.png", banner_num);
+                                            self.select_music_state.current_banner_key = key;
+                                        }
                                     }
                                     ScreenAction::RequestDensityGraph(chart_opt) => {
                                         let key = self.set_density_graph(chart_opt.as_ref());
