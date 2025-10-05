@@ -1,6 +1,5 @@
-use crate::core::input::InputState; // Though we won't use this for note hits
+use crate::core::input::InputState;
 use crate::core::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
-use crate::core::space::widescale;
 use crate::screens::select_music::DIFFICULTY_NAMES;
 use crate::core::parsing;
 use crate::core::song_loading::{ChartData, SongData};
@@ -8,6 +7,7 @@ use crate::core::space::globals::*;
 use crate::core::timing::TimingData;
 use crate::core::audio;
 use crate::screens::{Screen, ScreenAction};
+use crate::core::space::widescale;
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::act;
 use crate::ui::color;
@@ -488,39 +488,50 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let x = screen_center_x() - widescale(292.5, 342.5);
     let y = 56.0;
 
-    let difficulty_name_lc = state.chart.difficulty.to_lowercase();
-    let difficulty_index = DIFFICULTY_NAMES.iter().position(|&name| name.to_lowercase() == difficulty_name_lc).unwrap_or(2);
+    // Get the current chart's difficulty to determine the color.
+    let difficulty_index = DIFFICULTY_NAMES
+        .iter()
+        .position(|&name| name.eq_ignore_ascii_case(&state.chart.difficulty))
+        .unwrap_or(2); // Default to Medium if not found
 
+    // The color of the difficulty square is based on the theme color and the difficulty.
     let difficulty_color_index = state.active_color_index - (4 - difficulty_index) as i32;
     let difficulty_color = color::simply_love_rgba(difficulty_color_index);
+
+    // The number to display in the square.
     let meter_text = state.chart.meter.to_string();
 
-    actors.push(Actor::Frame {
-        align: [0.5, 0.5],
-        offset: [x, y],
-        size: [SizeSpec::Px(30.0), SizeSpec::Px(30.0)],
-        background: None,
-        z: 100,
+    // The ActorFrame acts as a container to group and position the quad and text.
+    // It's sizeless, and its children are positioned relative to its center.
+    let difficulty_meter_frame = Actor::Frame {
+        align: [0.5, 0.5], // The frame's pivot is its center.
+        offset: [x, y],    // Position the center at (_x, 56).
+        size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)], // Sizeless frame allows children to be centered at its origin.
         children: vec![
+            // The colored background quad.
             act!(quad:
-                align(0.5, 0.5): xy(0.0, 0.0):
+                align(0.5, 0.5): xy(0.0, 0.0): // Center relative to parent's origin.
                 zoomto(30.0, 30.0):
                 diffuse(difficulty_color[0], difficulty_color[1], difficulty_color[2], 1.0)
             ),
+            // The meter text.
             act!(text:
                 font("wendy"): settext(meter_text):
-                align(0.5, 0.5): xy(0.0, 0.0):
+                align(0.5, 0.5): xy(0.0, 0.0): // Center relative to parent's origin.
                 zoom(0.4): diffuse(0.0, 0.0, 0.0, 1.0)
             )
-        ]
-    });
+        ],
+        background: None,
+        z: 100,
+    };
+    actors.push(difficulty_meter_frame);
 
     // 5. Draw Song Title Box (SongMeter)
     {
         let w = widescale(310.0, 417.0);
         let h = 22.0;
-        let cx = screen_center_x();
-        let y = 20.0;
+        let box_cx = screen_center_x();
+        let box_cy = 20.0;
 
         let mut frame_children = Vec::new();
 
@@ -573,7 +584,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
         actors.push(Actor::Frame {
             align: [0.5, 0.5],
-            offset: [cx, y],
+            offset: [box_cx, box_cy],
             size: [SizeSpec::Px(w), SizeSpec::Px(h)],
             background: None,
             z: 150,
@@ -586,29 +597,30 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let w = 136.0;
         let h = 18.0;
         let meter_cx = screen_center_x() - widescale(238.0, 288.0);
-        let meter_top_y = 20.0;
+        let meter_cy = 20.0; // The meter's center Y, same as progress bar.
 
-        // Background Frame
+        // Background Frame (outer white border)
         actors.push(act!(quad:
-            align(0.5, 0.0): // center-top
-            xy(meter_cx, meter_top_y - 2.0):
+            align(0.5, 0.5):
+            xy(meter_cx, meter_cy):
             zoomto(w + 4.0, h + 4.0):
-            diffuse(1.0, 1.0, 1.0, 1.0): // Outer border is white
+            diffuse(1.0, 1.0, 1.0, 1.0):
             z(150)
         ));
+        // Inner black quad
         actors.push(act!(quad:
-            align(0.5, 0.0): // center-top
-            xy(meter_cx, meter_top_y):
+            align(0.5, 0.5):
+            xy(meter_cx, meter_cy):
             zoomto(w, h):
-            diffuse(0.0, 0.0, 0.0, 1.0): // Inner is black
+            diffuse(0.0, 0.0, 0.0, 1.0):
             z(151)
         ));
 
         // Meter Fill (full for now)
         let fill_color = state.player_color;
         actors.push(act!(quad:
-            align(0.0, 0.0): // left-top
-            xy(meter_cx - w / 2.0, meter_top_y):
+            align(0.0, 0.5): // left-center
+            xy(meter_cx - w / 2.0, meter_cy):
             zoomto(w, h): // full width
             diffuse(fill_color[0], fill_color[1], fill_color[2], fill_color[3]):
             z(152)
@@ -620,12 +632,12 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let velocity_x = -(bps * 0.5);
 
         actors.push(act!(sprite("swoosh.png"):
-            align(0.0, 0.0):
-            xy(meter_cx - w / 2.0, meter_top_y):
+            align(0.0, 0.5): // left-center
+            xy(meter_cx - w / 2.0, meter_cy):
             zoomto(w, h):
             diffusealpha(0.2):
             texcoordvelocity(velocity_x, 0.0):
-           z(153)
+            z(153)
         ));
     }
 
