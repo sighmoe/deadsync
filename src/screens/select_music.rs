@@ -88,26 +88,69 @@ pub(crate) fn is_difficulty_playable(song: &Arc<SongData>, difficulty_index: usi
 
 fn find_pack_banner(pack: &SongPack) -> Option<PathBuf> {
     let Some(first_song) = pack.songs.first() else { return None; };
-    let Some(song_folder) = first_song.banner_path.as_ref().and_then(|p| p.parent()) else { return None; };
+    // A song's banner_path might not exist. music_path is more reliable for finding its folder.
+    let song_folder = first_song.music_path.as_ref()
+        .or(first_song.banner_path.as_ref())
+        .or(first_song.background_path.as_ref())
+        .and_then(|p| p.parent());
+        
+    let Some(song_folder) = song_folder else { return None; };
     let Some(pack_folder_path) = song_folder.parent() else { return None; };
 
     if !pack_folder_path.is_dir() { return None; }
     
-    let banner_name_patterns = ["banner", "bn", "ban"];
-    for pattern in banner_name_patterns {
-        let entries = fs::read_dir(pack_folder_path).ok()?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(filename_str) = path.file_name().and_then(|s| s.to_str()) {
-                    let filename_lower = filename_str.to_lowercase();
-                    if filename_lower.contains(pattern) && (filename_lower.ends_with(".png") || filename_lower.ends_with(".jpg")) {
-                        return Some(path);
-                    }
-                }
+    // --- Step 1: Collect all image files in the pack directory ---
+    let Ok(entries) = fs::read_dir(pack_folder_path) else { return None; };
+    
+    let image_files: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            if !p.is_file() { return false; }
+            p.extension()
+                .and_then(|s| s.to_str())
+                .map_or(false, |ext| {
+                    let ext_lower = ext.to_lowercase();
+                    ext_lower == "png" || ext_lower == "jpg" || ext_lower == "jpeg"
+                })
+        })
+        .collect();
+
+    if image_files.is_empty() { return None; }
+    
+    // --- Step 2: Search by filename hints (case-insensitive) ---
+    // First pass: look for "banner" in the name or " bn" at the end (before extension).
+    let name_contains = ["banner"];
+    let name_ends_with = [" bn"];
+
+    for path in &image_files {
+        if let Some(filename_str) = path.file_stem().and_then(|s| s.to_str()) {
+            let filename_lower = filename_str.to_lowercase();
+            if name_contains.iter().any(|&hint| filename_lower.contains(hint)) ||
+               name_ends_with.iter().any(|&hint| filename_lower.ends_with(hint)) {
+                info!("Found pack banner by name hint: {:?}", path);
+                return Some(path.clone());
             }
         }
     }
+
+    // --- Step 3: Fallback to searching by image dimensions ---
+    for path in &image_files {
+        if let Ok((width, height)) = image::image_dimensions(path) {
+            // Condition 1: Standard banner dimensions
+            let is_standard_banner = (100..=320).contains(&width) && (50..=240).contains(&height);
+            
+            // Condition 2: Overlarge banner with a wide aspect ratio
+            let is_overlarge_banner = width > 200 && height > 0 && (width as f32 / height as f32) > 2.0;
+
+            if is_standard_banner || is_overlarge_banner {
+                info!("Found pack banner by dimension hint: {:?}", path);
+                return Some(path.clone());
+            }
+        }
+    }
+
+    // --- Step 4: No banner found ---
     None
 }
 
