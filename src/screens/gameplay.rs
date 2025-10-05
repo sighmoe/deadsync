@@ -25,9 +25,8 @@ const TRANSITION_IN_DURATION: f32 = 0.4;
 const TRANSITION_OUT_DURATION: f32 = 0.4;
 
 // Gameplay Layout & Feel
-const SCROLL_SPEED_SECONDS: f32 = 0.55; // Time for a note to travel from top to bottom
-// REVERTED: This is a fraction from the TOP of the screen, for up-scroll.
-const RECEPTOR_Y_FRAC: f32 = 0.15; // Receptors are 15% from the top of the screen
+const SCROLL_SPEED_SECONDS: f32 = 0.55; // Time for a note to travel screen_height() pixels
+const RECEPTOR_Y_OFFSET_FROM_CENTER: f32 = -125.0; // From Simply Love metrics for standard up-scroll
 
 // Lead-in timing (from StepMania theme defaults)
 const MIN_SECONDS_TO_STEP: f32 = 6.0;
@@ -383,8 +382,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let clamped_width = logical_screen_width.clamp(640.0, 854.0);
     let playfield_center_x = screen_center_x() - (clamped_width * 0.25);
 
-    // REVERTED: This correctly places the receptors near the TOP of the screen.
-    let receptor_y = screen_height() * RECEPTOR_Y_FRAC;
+    // This calculation matches Simply Love's metrics for standard up-scroll.
+    let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
     let pixels_per_second = screen_height() / SCROLL_SPEED_SECONDS;
 
     if let Some(ns) = &state.noteskin {
