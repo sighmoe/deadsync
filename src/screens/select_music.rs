@@ -594,7 +594,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         z(51)
     ));
 
-    // --- ARTIST / BPM / LENGTH INFO BOX (Verbatim Implementation) ---
+// --- ARTIST / BPM / LENGTH INFO BOX (Verbatim Implementation) ---
     let (box_width, frame_x, frame_y) = if is_wide() {
         (320.0, screen_center_x() - 170.0, screen_center_y() - 55.0)
     } else {
@@ -603,25 +603,37 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     // Data for the box
     let selected_entry = state.entries.get(state.selected_index);
-    let (artist_text, bpm_text, length_text) = if let Some(MusicWheelEntry::Song(song)) = selected_entry {
-        let minutes = song.total_length_seconds / 60;
-        let seconds = song.total_length_seconds % 60;
-        let formatted_bpm = {
-            let min = song.min_bpm.round() as i32;
-            let max = song.max_bpm.round() as i32;
-            if (song.min_bpm - song.max_bpm).abs() < 1e-6 { // Use an epsilon for float comparison
-                format!("{}", min)
-            } else {
-                format!("{} - {}", min, max)
+    let (artist_text, bpm_text, length_text) = if let Some(entry) = selected_entry {
+        match entry {
+            MusicWheelEntry::Song(song) => {
+                let minutes = song.total_length_seconds / 60;
+                let seconds = song.total_length_seconds % 60;
+                let formatted_bpm = {
+                    let min = song.min_bpm.round() as i32;
+                    let max = song.max_bpm.round() as i32;
+                    if (song.min_bpm - song.max_bpm).abs() < 1e-6 {
+                        format!("{}", min)
+                    } else {
+                        format!("{} - {}", min, max)
+                    }
+                };
+                (
+                    song.artist.clone(),
+                    formatted_bpm,
+                    format!("{}:{:02}", minutes, seconds)
+                )
             }
-        };
-        (
-            song.artist.clone(),
-            formatted_bpm,
-            format!("{}:{:02}", minutes, seconds)
-        )
+            MusicWheelEntry::PackHeader { original_index, .. } => {
+                let total_length_sec = if let Some(pack) = song_cache.get(*original_index) {
+                    pack.songs.iter().map(|s| s.total_length_seconds as u64).sum()
+                } else {
+                    0
+                };
+                ("".to_string(), "".to_string(), format_session_time(total_length_sec as f32))
+            }
+        }
     } else {
-        // Fallback text for pack headers or empty list
+        // Fallback text for empty list
         ("".to_string(), "".to_string(), "".to_string())
     };
 
