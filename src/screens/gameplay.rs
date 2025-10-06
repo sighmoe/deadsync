@@ -12,12 +12,15 @@ use crate::core::space::widescale;
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::act;
 use crate::ui::color;
+use crate::ui::components::screen_bar;
+use crate::screens::gameplay::screen_bar::ScreenBarParams;
 use log::{info, warn};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+
 
 // --- CONSTANTS ---
 
@@ -728,6 +731,17 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             z(153)
         ));
     }
+
+    // --- Bottom Bar with Profile Name ---
+    actors.push(screen_bar::build(ScreenBarParams {
+        title: "",
+        title_placement: screen_bar::ScreenBarTitlePlacement::Center,
+        position: screen_bar::ScreenBarPosition::Bottom,
+        transparent: true,
+        fg_color: [1.0; 4],
+        left_text: Some("PerfectTaste"), center_text: None, right_text: None,
+    }));
+    
 
     actors
 }
