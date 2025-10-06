@@ -44,22 +44,22 @@ const JUDGMENT_DISPLAY_DURATION: f32 = 0.8; // How long "Perfect" etc. stays on 
 const SHOW_COMBO_AT: u32 = 4; // From Simply Love metrics
 
 // --- JUDGMENT WINDOWS (in seconds) - From ITG ---
-pub const MARVELOUS_WINDOW: f32 = 0.0215; // W1
-const PERFECT_WINDOW:   f32 = 0.0430; // W2
+pub const FANTASTIC_WINDOW: f32 = 0.0215; // W1
+const EXCELLENT_WINDOW: f32 = 0.0430; // W2
 const GREAT_WINDOW:     f32 = 0.1020; // W3
-const GOOD_WINDOW:      f32 = 0.1350; // W4
-const BOO_WINDOW:       f32 = 0.1800; // W5
-// Notes outside the BOO_WINDOW are considered a Miss.
+const DECENT_WINDOW:    f32 = 0.1350; // W4
+const WAY_OFF_WINDOW:   f32 = 0.1800; // W5
+// Notes outside the WAY_OFF_WINDOW are considered a Miss.
 
 // --- DATA STRUCTURES ---
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum JudgeGrade {
-    Marvelous, // W1
-    Perfect,   // W2
+    Fantastic, // W1
+    Excellent, // W2
     Great,     // W3
-    Good,      // W4
-    Boo,       // W5
+    Decent,    // W4
+    WayOff,    // W5
     Miss,
 }
 
@@ -213,11 +213,11 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         note_cursor: 0,
         arrows: [vec![], vec![], vec![], vec![]],
         judgment_counts: HashMap::from([
-            (JudgeGrade::Marvelous, 0),
-            (JudgeGrade::Perfect, 0),
+            (JudgeGrade::Fantastic, 0),
+            (JudgeGrade::Excellent, 0),
             (JudgeGrade::Great, 0),
-            (JudgeGrade::Good, 0),
-            (JudgeGrade::Boo, 0),
+            (JudgeGrade::Decent, 0),
+            (JudgeGrade::WayOff, 0),
             (JudgeGrade::Miss, 0),
         ]),
         judgments: Vec::new(),
@@ -245,17 +245,17 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) {
         let abs_time_error = time_error.abs();
 
         // Check if the hit is within the widest possible timing window
-        if abs_time_error <= BOO_WINDOW {
-            let grade = if abs_time_error <= MARVELOUS_WINDOW {
-                JudgeGrade::Marvelous
-            } else if abs_time_error <= PERFECT_WINDOW {
-                JudgeGrade::Perfect
+        if abs_time_error <= WAY_OFF_WINDOW {
+            let grade = if abs_time_error <= FANTASTIC_WINDOW {
+                JudgeGrade::Fantastic
+            } else if abs_time_error <= EXCELLENT_WINDOW {
+                JudgeGrade::Excellent
             } else if abs_time_error <= GREAT_WINDOW {
                 JudgeGrade::Great
-            } else if abs_time_error <= GOOD_WINDOW {
-                JudgeGrade::Good
+            } else if abs_time_error <= DECENT_WINDOW {
+                JudgeGrade::Decent
             } else {
-                JudgeGrade::Boo
+                JudgeGrade::WayOff
             };
 
             // Process judgment
@@ -267,7 +267,7 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) {
             *state.judgment_counts.entry(grade.clone()).or_insert(0) += 1;
 
             state.miss_combo = 0; // Any hit breaks a miss combo
-            if matches!(grade, JudgeGrade::Boo) {
+            if matches!(grade, JudgeGrade::WayOff) {
                 state.combo = 0;
                 // If a colored combo was active, mark the first attempt as broken.
                 if state.full_combo_grade.is_some() {
@@ -369,12 +369,12 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
     }
 
     // --- Handle missed notes ---
-    // A note is missed if the current time has passed its time by more than the BOO_WINDOW
+    // A note is missed if the current time has passed its time by more than the WAY_OFF_WINDOW
     for col_arrows in &mut state.arrows {
         let mut missed = false;
         if let Some(arrow) = col_arrows.first() {
             let note_time = state.timing.get_time_for_beat(arrow.beat);
-            if music_time_sec - note_time > BOO_WINDOW {
+            if music_time_sec - note_time > WAY_OFF_WINDOW {
                 info!("MISS! Column {}, Beat {:.2}", arrow.column, arrow.beat);
                 let judgment = Judgment {
                     time_error_ms: ((music_time_sec - note_time) * 1000.0),
@@ -444,11 +444,11 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 // --- NEW: Statics for Judgment Counter Display ---
 
 static JUDGMENT_ORDER: [JudgeGrade; 6] = [
-    JudgeGrade::Marvelous,
-    JudgeGrade::Perfect,
+    JudgeGrade::Fantastic,
+    JudgeGrade::Excellent,
     JudgeGrade::Great,
-    JudgeGrade::Good,
-    JudgeGrade::Boo,
+    JudgeGrade::Decent,
+    JudgeGrade::WayOff,
     JudgeGrade::Miss,
 ];
 
@@ -459,11 +459,11 @@ struct JudgmentDisplayInfo {
 
 static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyLock::new(|| {
     HashMap::from([
-        (JudgeGrade::Marvelous, JudgmentDisplayInfo { label: "FANTASTIC", color: color::rgba_hex(color::JUDGMENT_HEX[0]) }),
-        (JudgeGrade::Perfect,   JudgmentDisplayInfo { label: "EXCELLENT", color: color::rgba_hex(color::JUDGMENT_HEX[1]) }),
+        (JudgeGrade::Fantastic, JudgmentDisplayInfo { label: "FANTASTIC", color: color::rgba_hex(color::JUDGMENT_HEX[0]) }),
+        (JudgeGrade::Excellent, JudgmentDisplayInfo { label: "EXCELLENT", color: color::rgba_hex(color::JUDGMENT_HEX[1]) }),
         (JudgeGrade::Great,     JudgmentDisplayInfo { label: "GREAT",     color: color::rgba_hex(color::JUDGMENT_HEX[2]) }),
-        (JudgeGrade::Good,      JudgmentDisplayInfo { label: "DECENT",    color: color::rgba_hex(color::JUDGMENT_HEX[3]) }),
-        (JudgeGrade::Boo,       JudgmentDisplayInfo { label: "WAY OFF",   color: color::rgba_hex(color::JUDGMENT_HEX[4]) }),
+        (JudgeGrade::Decent,    JudgmentDisplayInfo { label: "DECENT",    color: color::rgba_hex(color::JUDGMENT_HEX[3]) }),
+        (JudgeGrade::WayOff,    JudgmentDisplayInfo { label: "WAY OFF",   color: color::rgba_hex(color::JUDGMENT_HEX[4]) }),
         (JudgeGrade::Miss,      JudgmentDisplayInfo { label: "MISS",      color: color::rgba_hex(color::JUDGMENT_HEX[5]) }),
     ])
 });
@@ -565,8 +565,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     } else if state.combo >= SHOW_COMBO_AT {
         let (color1, color2) = if let Some(fc_grade) = &state.full_combo_grade {
             match fc_grade {
-                JudgeGrade::Marvelous => (color::rgba_hex("#C8FFFF"), color::rgba_hex("#6BF0FF")),
-                JudgeGrade::Perfect   => (color::rgba_hex("#FDFFC9"), color::rgba_hex("#FDDB85")),
+                JudgeGrade::Fantastic => (color::rgba_hex("#C8FFFF"), color::rgba_hex("#6BF0FF")),
+                JudgeGrade::Excellent => (color::rgba_hex("#FDFFC9"), color::rgba_hex("#FDDB85")),
                 JudgeGrade::Great     => (color::rgba_hex("#C9FFC9"), color::rgba_hex("#94FEC1")),
                 _                     => ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]),
             }
@@ -619,7 +619,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
             // Frame selection (skip white fantastic row)
             let mut frame_base = judgment.grade as usize;
-            if judgment.grade >= JudgeGrade::Perfect {
+            if judgment.grade >= JudgeGrade::Excellent {
                 frame_base += 1;
             }
             let frame_offset = if offset_sec < 0.0 { 0 } else { 1 };
