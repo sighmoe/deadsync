@@ -828,9 +828,9 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
         4
     };
 
-    // --- NEW: Calculate label horizontal position first to anchor the numbers ---
+    // --- Calculate label horizontal position first to anchor the numbers ---
     // SL positions the label's right edge at x = 80 + (digits-4)*16 relative to the frame center.
-    // Our left-aligned labels (which you've confirmed are correctly placed) use this as a left-edge offset.
+    // Our left-aligned labels use this as a left-edge offset.
     let label_local_x_offset = 80.0 + (digits.saturating_sub(4) as f32 * 16.0);
     let label_world_x = final_judgments_center_x + (label_local_x_offset * final_text_base_zoom);
 
@@ -842,78 +842,66 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
     let row_height = 35.0;
     let y_base = -280.0; 
 
-    for (index, grade) in JUDGMENT_ORDER.iter().enumerate() {
-        let info = JUDGMENT_INFO.get(grade).unwrap();
-        let count = *state.judgment_counts.get(grade).unwrap_or(&0);
-        
-        let local_y = y_base + (index as f32 * row_height);
-        let world_y = final_judgments_center_y + (local_y * final_text_base_zoom);
-
-        // Colors
-        let bright = info.color;
-        let dim = [bright[0]*0.35, bright[1]*0.35, bright[2]*0.35, bright[3]];
-
-        // ---------- Numbers (right-aligned), SL-style leading-zero dim without overlap ----------
-        let full_number_str = format!("{:0width$}", count, width = digits);
-        let first_nonzero = full_number_str.find(|c: char| c != '0').unwrap_or(full_number_str.len());
-
-        let zeros_part = &full_number_str[..first_nonzero];
-        let tail_part  = &full_number_str[first_nonzero..];
-
+    // This block is wrapped in `with_font` to get access to the font metrics needed to
+    // simulate a monospace layout with a proportional font, preventing jitter.
+    font::with_font("wendy_screenevaluation", |f| {
         let numbers_zoom = final_text_base_zoom * 0.5;
+        // Determine the width of the widest digit ('0') to use as our fixed cell width.
+        let max_digit_w = (font::measure_line_width_logical(f, "0") as f32) * numbers_zoom;
+        if max_digit_w <= 0.0 { return; } // Avoid division by zero if font fails
 
-        // Measure logical widths and scale by zoom; fallback to a safe monospace-ish guess.
-        let (zeros_w, tail_w) = font::with_font("wendy_screenevaluation", |f| {
-            let zw = (font::measure_line_width_logical(f, zeros_part) as f32) * numbers_zoom;
-            let tw = (font::measure_line_width_logical(f, tail_part)  as f32) * numbers_zoom;
-            (zw, tw)
-        }).unwrap_or_else(|| {
-            let gw = 12.0 * numbers_zoom;
-            (zeros_part.len() as f32 * gw, tail_part.len() as f32 * gw)
-        });
+        for (index, grade) in JUDGMENT_ORDER.iter().enumerate() {
+            let info = JUDGMENT_INFO.get(grade).unwrap();
+            let count = *state.judgment_counts.get(grade).unwrap_or(&0);
+            
+            let local_y = y_base + (index as f32 * row_height);
+            let world_y = final_judgments_center_y + (local_y * final_text_base_zoom);
 
-        // 1) Bright tail: right-aligned to numbers_cx
-        if !tail_part.is_empty() {
+            // Colors
+            let bright = info.color;
+            let dim = [bright[0]*0.35, bright[1]*0.35, bright[2]*0.35, bright[3]];
+
+            // Format number with leading zeros
+            let full_number_str = format!("{:0width$}", count, width = digits);
+            let first_nonzero = full_number_str.find(|c: char| c != '0').unwrap_or(full_number_str.len());
+
+            // --- Render each digit individually in a fixed-width cell ---
+            for (i, ch) in full_number_str.chars().enumerate() {
+                let is_leading_zero = i < first_nonzero;
+                let color = if is_leading_zero { dim } else { bright };
+                
+                // Position each digit's "cell" from the right edge of the number block.
+                let index_from_right = digits - 1 - i;
+                let cell_right_x = numbers_cx - (index_from_right as f32 * max_digit_w);
+
+                // Render the digit, right-aligned within its cell.
+                actors.push(act!(text:
+                    font("wendy_screenevaluation"):
+                    settext(ch.to_string()):
+                    align(1.0, 0.5): // Right-align
+                    xy(cell_right_x, world_y):
+                    zoom(numbers_zoom):
+                    diffuse(color[0], color[1], color[2], color[3])
+                ));
+            }
+
+            // ---------- Label (left-aligned, position is now calculated above) ----------
+            let label_world_y = world_y + (1.0 * final_text_base_zoom);
+            let label_zoom = final_text_base_zoom * 0.833;
+    
+            // SL keeps labels bright (we’re not implementing disabled-window dim in this file)
             actors.push(act!(text:
-                font("wendy_screenevaluation"):
-                settext(tail_part.to_string()):
-                align(1.0, 0.5):
-                xy(numbers_cx, world_y):
-                zoom(numbers_zoom):
-                horizalign(right):
+                font("miso"):
+                settext(info.label):
+                align(0.0, 0.5):
+                xy(label_world_x, label_world_y):
+                zoom(label_zoom):
+                maxwidth(72.0 * final_text_base_zoom):
+                horizalign(left):
                 diffuse(bright[0], bright[1], bright[2], bright[3])
             ));
         }
-
-        // 2) Dim zeros: right-aligned to the left edge of the tail (no overlap)
-        if !zeros_part.is_empty() {
-            actors.push(act!(text:
-                font("wendy_screenevaluation"):
-                settext(zeros_part.to_string()):
-                align(1.0, 0.5):
-                xy(numbers_cx - tail_w, world_y):
-                zoom(numbers_zoom):
-                horizalign(right):
-                diffuse(dim[0], dim[1], dim[2], dim[3])
-            ));
-        }
-
-        // ---------- Label (left-aligned, position is now calculated above) ----------
-        let label_world_y = world_y + (1.0 * final_text_base_zoom);
-        let label_zoom = final_text_base_zoom * 0.833;
-
-        // SL keeps labels bright (we’re not implementing disabled-window dim in this file)
-        actors.push(act!(text:
-            font("miso"):
-            settext(info.label):
-            align(0.0, 0.5):
-            xy(label_world_x, label_world_y):
-            zoom(label_zoom):
-            maxwidth(72.0 * final_text_base_zoom):
-            horizalign(left):
-            diffuse(bright[0], bright[1], bright[2], bright[3])
-        ));
-    }
+    });
 
     actors
 }
