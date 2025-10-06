@@ -7,15 +7,16 @@ use crate::core::space::globals::*;
 use crate::core::timing::TimingData;
 use crate::core::audio;
 use crate::screens::{Screen, ScreenAction};
-use crate::core::space::widescale;
+use crate::core::space::{is_wide, widescale};
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::act;
 use crate::ui::color;
 use crate::ui::components::screen_bar;
 use crate::screens::gameplay::screen_bar::ScreenBarParams;
 use log::{info, warn};
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -40,23 +41,23 @@ const RECEPTOR_GLOW_DURATION: f32 = 0.2; // How long the glow sprite is visible
 const JUDGMENT_DISPLAY_DURATION: f32 = 0.8; // How long "Perfect" etc. stays on screen
 const SHOW_COMBO_AT: u32 = 4; // From Simply Love metrics
 
-// --- JUDGMENT WINDOWS (in seconds) ---
-const MARVELOUS_WINDOW: f32 = 0.022;
-const PERFECT_WINDOW: f32 = 0.045;
-const GREAT_WINDOW: f32 = 0.090;
-const GOOD_WINDOW: f32 = 0.135;
-const BOO_WINDOW: f32 = 0.180;
+// --- JUDGMENT WINDOWS (in seconds) - From ITG ---
+pub const MARVELOUS_WINDOW: f32 = 0.0215; // W1
+const PERFECT_WINDOW:   f32 = 0.0430; // W2
+const GREAT_WINDOW:     f32 = 0.1020; // W3
+const GOOD_WINDOW:      f32 = 0.1350; // W4
+const BOO_WINDOW:       f32 = 0.1800; // W5
 // Notes outside the BOO_WINDOW are considered a Miss.
 
 // --- DATA STRUCTURES ---
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum JudgeGrade {
-    Marvelous,
-    Perfect,
-    Great,
-    Good,
-    Boo,
+    Marvelous, // W1
+    Perfect,   // W2
+    Great,     // W3
+    Good,      // W4
+    Boo,       // W5
     Miss,
 }
 
@@ -115,6 +116,7 @@ pub struct State {
     pub combo: u32,
     pub miss_combo: u32,
     pub full_combo_grade: Option<JudgeGrade>,
+    pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub last_judgment: Option<JudgmentRenderInfo>,
     
     // Visuals
@@ -207,6 +209,14 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         music_started,
         note_cursor: 0,
         arrows: [vec![], vec![], vec![], vec![]],
+        judgment_counts: HashMap::from([
+            (JudgeGrade::Marvelous, 0),
+            (JudgeGrade::Perfect, 0),
+            (JudgeGrade::Great, 0),
+            (JudgeGrade::Good, 0),
+            (JudgeGrade::Boo, 0),
+            (JudgeGrade::Miss, 0),
+        ]),
         judgments: Vec::new(),
         combo: 0,
         miss_combo: 0,
@@ -249,6 +259,8 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) {
             let judgment = Judgment { time_error_ms: time_error * 1000.0, grade: grade.clone() };
             state.judgments.push(judgment.clone());
             state.last_judgment = Some(JudgmentRenderInfo { judgment, judged_at: Instant::now() });
+            // Increment the counter for this grade
+            *state.judgment_counts.entry(grade.clone()).or_insert(0) += 1;
 
             state.miss_combo = 0; // Any hit breaks a miss combo
             if matches!(grade, JudgeGrade::Boo) {
@@ -356,6 +368,9 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
                     grade: JudgeGrade::Miss,
                 };
                 state.judgments.push(judgment.clone());
+                // Increment the miss counter
+                *state.judgment_counts.entry(JudgeGrade::Miss).or_insert(0) += 1;
+
                 state.last_judgment = Some(JudgmentRenderInfo { judgment, judged_at: Instant::now() });
 
                 state.combo = 0;
@@ -408,6 +423,33 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
     );
     (vec![actor], TRANSITION_OUT_DURATION)
 }
+
+// --- NEW: Statics for Judgment Counter Display ---
+
+static JUDGMENT_ORDER: [JudgeGrade; 6] = [
+    JudgeGrade::Marvelous,
+    JudgeGrade::Perfect,
+    JudgeGrade::Great,
+    JudgeGrade::Good,
+    JudgeGrade::Boo,
+    JudgeGrade::Miss,
+];
+
+struct JudgmentDisplayInfo {
+    label: &'static str,
+    color: [f32; 4],
+}
+
+static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyLock::new(|| {
+    HashMap::from([
+        (JudgeGrade::Marvelous, JudgmentDisplayInfo { label: "FANTASTIC", color: color::rgba_hex(color::JUDGMENT_HEX[0]) }),
+        (JudgeGrade::Perfect,   JudgmentDisplayInfo { label: "EXCELLENT", color: color::rgba_hex(color::JUDGMENT_HEX[1]) }),
+        (JudgeGrade::Great,     JudgmentDisplayInfo { label: "GREAT",     color: color::rgba_hex(color::JUDGMENT_HEX[2]) }),
+        (JudgeGrade::Good,      JudgmentDisplayInfo { label: "DECENT",    color: color::rgba_hex(color::JUDGMENT_HEX[3]) }),
+        (JudgeGrade::Boo,       JudgmentDisplayInfo { label: "WAY OFF",   color: color::rgba_hex(color::JUDGMENT_HEX[4]) }),
+        (JudgeGrade::Miss,      JudgmentDisplayInfo { label: "MISS",      color: color::rgba_hex(color::JUDGMENT_HEX[5]) }),
+    ])
+});
 
 // --- DRAWING ---
 
@@ -741,5 +783,96 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         left_text: Some("PerfectTaste"), center_text: None, right_text: None,
     }));
     
+    // --- Step Statistics Side Pane (P1) ---
+    actors.extend(build_side_pane(state));
+
+    actors
+}
+
+/// Builds the entire right-side statistics pane, including judgment counters.
+fn build_side_pane(state: &State) -> Vec<Actor> {
+    // Only show this pane in single-player on a wide screen, mirroring the SL theme's behavior.
+    if !is_wide() {
+        return vec![];
+    }
+
+    let mut actors = Vec::new();
+
+    // --- Calculate the final, absolute world-space properties for the judgment list ---
+    
+    // 1. Define the root anchor point of the entire side panel in world space.
+    let sidepane_center_x = screen_width() * 0.75;
+    let sidepane_center_y = screen_center_y() + 80.0;
+    
+    // 2. Define the zoom factor applied to the "BannerAndData" container.
+    let banner_data_zoom = if screen_width() / screen_height() > 1.7 { 0.925 } else { 0.825 };
+
+    // 3. Define the local properties of the "TapNoteJudgments" container.
+    let judgments_local_x = -widescale(152.0, 204.0);
+    let judgments_local_zoom = 0.8;
+
+    // 4. Calculate the final world-space center of the judgments container.
+    let final_judgments_center_x = sidepane_center_x + (judgments_local_x * banner_data_zoom);
+    let final_judgments_center_y = sidepane_center_y;
+
+    // 5. Calculate the final zoom that will be applied to all text actors inside.
+    let final_text_base_zoom = banner_data_zoom * judgments_local_zoom;
+
+    // --- Now, build the individual text actors with final calculated properties ---
+
+    let total_tapnotes = state.chart.stats.total_steps as f32;
+    let digits = if total_tapnotes > 0.0 {
+        (total_tapnotes.log10().floor() as usize + 1).max(4)
+    } else {
+        4
+    };
+
+    let row_height = 35.0;
+    let y_base = -280.0;
+
+    for (index, grade) in JUDGMENT_ORDER.iter().enumerate() {
+        let info = JUDGMENT_INFO.get(grade).unwrap();
+        let count = state.judgment_counts.get(grade).unwrap_or(&0);
+        
+        // Calculate the local Y offset for this row.
+        let local_y = y_base + (index as f32 * row_height);
+        // Transform the local Y into final world Y.
+        let world_y = final_judgments_center_y + (local_y * final_text_base_zoom);
+
+        // -- Number Text --
+        let number_final_zoom = final_text_base_zoom * 0.5;
+        actors.push(act!(text:
+            font("wendy"):
+            settext(format!("{:0width$}", count, width = digits)):
+            // The number's right edge is anchored to the final calculated center X.
+            align(1.0, 0.5):
+            xy(final_judgments_center_x, world_y):
+            zoom(number_final_zoom):
+            horizalign(right):
+            diffuse(info.color[0], info.color[1], info.color[2], 1.0)
+        ));
+
+        // -- Label Text --
+        let label_final_zoom = final_text_base_zoom * 0.833;
+        let label_local_x = 80.0 + (digits.saturating_sub(4) as f32 * 16.0);
+        // Transform the local X into final world X.
+        let world_x = final_judgments_center_x + (label_local_x * final_text_base_zoom);
+
+        actors.push(act!(text:
+            font("wendy"):
+            settext(info.label):
+            // The label's left edge is anchored to its final calculated world X.
+            align(0.0, 0.5):
+            xy(world_x, world_y):
+            zoom(label_final_zoom):
+            maxwidth(72.0 * final_text_base_zoom): // Scale maxwidth accordingly
+            horizalign(left):
+            diffuse(info.color[0], info.color[1], info.color[2], 1.0)
+        ));
+    }
+
+    // In the future, other components like Banner, Holds/Mines would be built here
+    // using the same direct calculation method.
+
     actors
 }

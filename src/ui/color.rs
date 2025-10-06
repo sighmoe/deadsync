@@ -70,6 +70,16 @@ pub const SIMPLY_LOVE_HEX: [&str; 12] = [
     "#FF7D00",
 ];
 
+/// Judgment colors for the statistics display, ordered from best to worst.
+pub const JUDGMENT_HEX: [&str; 6] = [
+    "#21CCE8", // Fantastic
+    "#E29C18", // Excellent
+    "#66C955", // Great
+    "#B45CFF", // Decent
+    "#C9855E", // Way Off
+    "#FF3030", // Miss
+];
+
 #[inline(always)]
 fn wrap(n: usize, i: i32) -> usize {
     (i.rem_euclid(n as i32)) as usize
