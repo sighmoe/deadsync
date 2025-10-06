@@ -828,6 +828,17 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
         4
     };
 
+    // --- NEW: Calculate label horizontal position first to anchor the numbers ---
+    // SL positions the label's right edge at x = 80 + (digits-4)*16 relative to the frame center.
+    // Our left-aligned labels (which you've confirmed are correctly placed) use this as a left-edge offset.
+    let label_local_x_offset = 80.0 + (digits.saturating_sub(4) as f32 * 16.0);
+    let label_world_x = final_judgments_center_x + (label_local_x_offset * final_text_base_zoom);
+
+    // The right edge of the number block should be a small gap to the left of the label's left edge.
+    // This value is chosen to visually match the theme.
+    const NUMBER_TO_LABEL_GAP: f32 = 8.0;
+    let numbers_cx = label_world_x - NUMBER_TO_LABEL_GAP;
+
     let row_height = 35.0;
     let y_base = -280.0; 
 
@@ -850,9 +861,6 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
         let tail_part  = &full_number_str[first_nonzero..];
 
         let numbers_zoom = final_text_base_zoom * 0.5;
-
-        // Right-aligned anchor (world-space) for the whole number
-        let numbers_cx = final_judgments_center_x;
 
         // Measure logical widths and scale by zoom; fallback to a safe monospace-ish guess.
         let (zeros_w, tail_w) = font::with_font("wendy_screenevaluation", |f| {
@@ -890,11 +898,7 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
             ));
         }
 
-        // ---------- Label (left-aligned) ----------
-        // SL: label offset = 80 + (digits-4)*16  (inside TapNoteJudgments, which is zoom(0.8))
-        let label_local_x = 80.0 + (digits.saturating_sub(4) as f32 * 16.0);
-        // FIX: multiply by BOTH parent and local zooms => final_text_base_zoom
-        let label_world_x = final_judgments_center_x + (label_local_x * final_text_base_zoom);
+        // ---------- Label (left-aligned, position is now calculated above) ----------
         let label_world_y = world_y + (1.0 * final_text_base_zoom);
         let label_zoom = final_text_base_zoom * 0.833;
 
