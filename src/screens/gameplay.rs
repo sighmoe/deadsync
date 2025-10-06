@@ -612,8 +612,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             let direction = if offset_sec < 0.0 { -1.0 } else { 1.0 };
             let rot = if judgment.grade == JudgeGrade::Miss { 0.0 } else { direction * offset_rot };
 
-            // Calculate frame index from grade and timing (early/late) for a 2x7 sprite sheet
-            let frame_base = judgment.grade as usize;
+            // CORRECTED: Calculate frame index, skipping the unused "white fantastic" row.
+            let mut frame_base = judgment.grade as usize;
+            if judgment.grade >= JudgeGrade::Perfect {
+                frame_base += 1;
+            }
             let frame_offset = if offset_sec < 0.0 { 0 } else { 1 };
             let linear_index = (frame_base * 2 + frame_offset) as u32;
 
