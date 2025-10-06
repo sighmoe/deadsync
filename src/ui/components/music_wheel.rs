@@ -1,4 +1,3 @@
-// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/new-engine/src/ui/components/music_wheel.rs =====
 use crate::act;
 use crate::core::space::globals::*;
 use crate::core::space::{is_wide, widescale};

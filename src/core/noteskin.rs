@@ -1,4 +1,3 @@
-// FILE: src/core/noteskin.rs
 use log::info;
 use std::collections::HashMap;
 use std::io::{self, BufRead};

@@ -1,4 +1,3 @@
-// ===== FILE: src/core/timing.rs =====
 use rssp::bpm::{parse_bpm_map, normalize_float_digits};
 use log::info;
 use std::sync::Arc;

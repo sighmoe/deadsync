@@ -773,8 +773,8 @@ fn layout_text(
     let block_center_x = block_left_sm + 0.5 * block_w_px;
     let block_center_y = block_top_sm  + 0.5 * block_h_px;
 
-    let iY0 = lrint_ties_even(-block_h_px * 0.5);
-    let baseline_local = iY0 + (font.height as f32) * sy;
+    let i_y0 = lrint_ties_even(-block_h_px * 0.5);
+    let baseline_local = i_y0 + (font.height as f32) * sy;
     let mut baseline_sm = lrint_ties_even(block_center_y + baseline_local);
 
     #[inline(always)]

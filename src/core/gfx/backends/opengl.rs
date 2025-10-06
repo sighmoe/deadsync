@@ -1,5 +1,3 @@
-// FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/new-engine/src/core/gfx/backends/opengl.rs
-
 use crate::core::gfx::{BlendMode, ObjectType, RenderList, Texture as RendererTexture};
 use crate::core::space::ortho_for_window;
 use cgmath::Matrix4;

@@ -1,4 +1,3 @@
-// FILE: src/core/assets.rs
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::path::{Path, PathBuf};

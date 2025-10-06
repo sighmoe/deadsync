@@ -1,4 +1,3 @@
-// FILE: src/screens/sandbox.rs
 use crate::act;
 use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};

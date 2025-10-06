@@ -1,5 +1,3 @@
-// FILE: src/core/parsing/simfile.rs
-
 use log::info;
 
 // Define a public enum for the parsing result. This decouples the parser from the gameplay screen.

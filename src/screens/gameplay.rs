@@ -1,4 +1,3 @@
-// FILE: src/screens/gameplay.rs
 use crate::core::input::InputState;
 use crate::core::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
 use crate::screens::select_music::DIFFICULTY_NAMES;
@@ -742,6 +741,5 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         left_text: Some("PerfectTaste"), center_text: None, right_text: None,
     }));
     
-
     actors
 }

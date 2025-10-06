@@ -1,4 +1,3 @@
-// FILE: src/core/gfx/mod.rs
 mod backends;
 
 use crate::core::gfx::backends::{opengl, vulkan};

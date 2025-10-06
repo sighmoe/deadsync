@@ -1,4 +1,3 @@
-// ===== FILE: src/config.rs =====
 use crate::core::gfx::BackendType;
 use configparser::ini::Ini;
 use log::{info, warn};

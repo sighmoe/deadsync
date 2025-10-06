@@ -29,7 +29,6 @@ const TRANSITION_OUT_DURATION: f32 = 0.3;
 // --- THEME LAYOUT CONSTANTS (unscaled, native dimensions) ---
 const BANNER_NATIVE_WIDTH: f32 = 418.0;
 const BANNER_NATIVE_HEIGHT: f32 = 164.0;
-const BAR_H: f32 = 32.0;
 
 // --- Other UI Constants ---
 static UI_BOX_BG_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#1E282F"));
