@@ -845,7 +845,7 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
         // -- Number Text --
         let number_final_zoom = final_text_base_zoom * 0.5;
         actors.push(act!(text:
-            font("wendy"):
+            font("wendy_screenevaluation"):
             settext(format!("{:0width$}", count, width = digits)):
             // The number's right edge is anchored to the final calculated center X.
             align(1.0, 0.5):
