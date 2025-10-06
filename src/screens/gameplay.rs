@@ -20,6 +20,8 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+// FIX: for precise width measurement of zero/tail without overlap
+use crate::core::font;
 
 
 // --- CONSTANTS ---
@@ -456,23 +458,19 @@ static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyL
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::new();
     
-    // FIXED: This section calculates the playfield position based on Simply Love metrics.
     // --- Playfield Positioning (1:1 with Simply Love) ---
-    // This logic places the center of the P1 notefield to the left of the screen's center.
     let logical_screen_width = screen_width();
     let clamped_width = logical_screen_width.clamp(640.0, 854.0);
     let playfield_center_x = screen_center_x() - (clamped_width * 0.25);
 
-    // This calculation matches Simply Love's metrics for standard up-scroll.
     let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
     let pixels_per_second = screen_height() / SCROLL_SPEED_SECONDS;
 
     if let Some(ns) = &state.noteskin {
-        // 1. Draw Receptors and Glows
+        // 1. Receptors + glow
         for i in 0..4 {
             let col_x_offset = ns.column_xs[i];
             
-            // Draw base receptor
             let receptor_def = &ns.receptor_off[i];
             let uv = noteskin::get_uv_rect(receptor_def, ns.tex_receptors_dims);
             actors.push(act!(sprite(ns.tex_receptors_path.clone()):
@@ -483,12 +481,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                 customtexturerect(uv[0], uv[1], uv[2], uv[3])
             ));
 
-            // Draw glow if active
             let glow_timer = state.receptor_glow_timers[i];
             if glow_timer > 0.0 {
                 let glow_def = &ns.receptor_glow[i];
                 let glow_uv = noteskin::get_uv_rect(glow_def, ns.tex_glow_dims);
-                let alpha = (glow_timer / RECEPTOR_GLOW_DURATION).powf(0.75); // Fade out
+                let alpha = (glow_timer / RECEPTOR_GLOW_DURATION).powf(0.75);
                 actors.push(act!(sprite(ns.tex_glow_path.clone()):
                     align(0.5, 0.5):
                     xy(playfield_center_x + col_x_offset as f32, receptor_y):
@@ -496,27 +493,24 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
                     rotationz(-glow_def.rotation_deg as f32):
                     customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], glow_uv[3]):
                     diffuse(1.0, 1.0, 1.0, alpha):
-                    blend(add) // Use additive blending for a nice glow effect
+                    blend(add)
                 ));
             }
         }
 
-        // 2. Draw active arrows
+        // 2. Active arrows
         let current_time = state.current_music_time;
 
         for column_arrows in &state.arrows {
             for arrow in column_arrows {
                 let arrow_time = state.timing.get_time_for_beat(arrow.beat);
                 let time_diff = arrow_time - current_time;
-                // REVERTED: Add the offset to make notes scroll UP.
                 let y_pos = receptor_y + (time_diff * pixels_per_second);
                 
-                // Culling
                 if y_pos < -100.0 || y_pos > screen_height() + 100.0 { continue; }
 
                 let col_x_offset = ns.column_xs[arrow.column];
                 
-                // Determine which note sprite to use based on quantization
                 let beat_fraction = arrow.beat.fract();
                 let quantization = match (beat_fraction * 192.0).round() as u32 {
                     0 | 192 => Quantization::Q4th,
@@ -544,29 +538,27 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         }
     }
     
-    // 3. Draw Combo
+    // 3. Combo
     if state.miss_combo >= SHOW_COMBO_AT {
         actors.push(act!(text:
             font("wendy_combo"): settext(state.miss_combo.to_string()):
             align(0.5, 0.5): xy(playfield_center_x, screen_center_y() + 30.0):
             zoom(0.75): horizalign(center):
-            diffuse(1.0, 0.0, 0.0, 1.0): // Red
+            diffuse(1.0, 0.0, 0.0, 1.0):
             z(200)
         ));
     } else if state.combo >= SHOW_COMBO_AT {
         let (color1, color2) = if let Some(fc_grade) = &state.full_combo_grade {
             match fc_grade {
-                JudgeGrade::Marvelous => (color::rgba_hex("#C8FFFF"), color::rgba_hex("#6BF0FF")), // Blue
-                JudgeGrade::Perfect   => (color::rgba_hex("#FDFFC9"), color::rgba_hex("#FDDB85")), // Gold
-                JudgeGrade::Great     => (color::rgba_hex("#C9FFC9"), color::rgba_hex("#94FEC1")), // Green
-                _                     => ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]), // Good or other -> White
+                JudgeGrade::Marvelous => (color::rgba_hex("#C8FFFF"), color::rgba_hex("#6BF0FF")),
+                JudgeGrade::Perfect   => (color::rgba_hex("#FDFFC9"), color::rgba_hex("#FDDB85")),
+                JudgeGrade::Great     => (color::rgba_hex("#C9FFC9"), color::rgba_hex("#94FEC1")),
+                _                     => ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]),
             }
         } else {
-            // Not a full combo (broken by Boo/Miss)
             ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0])
         };
 
-        // Simulate diffuseshift
         let effect_period = 0.8;
         let t = (state.total_elapsed_in_screen / effect_period).fract();
         let anim_t = ( (t * 2.0 * std::f32::consts::PI).sin() + 1.0) / 2.0;
@@ -587,32 +579,30 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ));
     }
     
-    // 4. Draw Judgment Sprite (Love)
+    // 4. Judgment Sprite (Love)
     if let Some(render_info) = &state.last_judgment {
         let judgment = &render_info.judgment;
         let elapsed = render_info.judged_at.elapsed().as_secs_f32();
-        if elapsed < 0.9 { // Total animation duration from the Lua script.
-            // Replicate the animation: zoom(0.8) -> decelerate(0.1) -> zoom(0.75) -> sleep(0.6) -> accelerate(0.2) -> zoom(0)
+        if elapsed < 0.9 {
             let zoom = if elapsed < 0.1 {
                 let t = elapsed / 0.1;
-                let ease_t = 1.0 - (1.0 - t).powi(2); // decelerate
+                let ease_t = 1.0 - (1.0 - t).powi(2);
                 0.8 + (0.75 - 0.8) * ease_t
-            } else if elapsed < 0.7 { // sleep
+            } else if elapsed < 0.7 {
                 0.75
-            } else { // accelerate out
+            } else {
                 let t = (elapsed - 0.7) / 0.2;
                 let ease_t = t.powi(2);
                 0.75 * (1.0 - ease_t)
             };
 
-            // Calculate tilt based on timing error
             let offset_sec = judgment.time_error_ms / 1000.0;
             let tilt_multiplier = 1.0;
             let offset_rot = offset_sec.abs().min(0.050) * 300.0 * tilt_multiplier;
             let direction = if offset_sec < 0.0 { -1.0 } else { 1.0 };
             let rot = if judgment.grade == JudgeGrade::Miss { 0.0 } else { direction * offset_rot };
 
-            // CORRECTED: Calculate frame index, skipping the unused "white fantastic" row.
+            // Frame selection (skip white fantastic row)
             let mut frame_base = judgment.grade as usize;
             if judgment.grade >= JudgeGrade::Perfect {
                 frame_base += 1;
@@ -623,31 +613,27 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             actors.push(act!(sprite("judgements/Love 2x7 (doubleres).png"):
                 align(0.5, 0.5): xy(playfield_center_x, screen_center_y() - 30.0):
                 z(200):
-                zoomtoheight(64.0): // Give the sprite a base size
-                setstate(linear_index): 
+                zoomtoheight(64.0):
+                setstate(linear_index):
                 zoom(zoom)
             ));
         }
     }
 
-    // 5. Draw Difficulty Box (1:1 with Simply Love)
+    // 5. Difficulty Box
     let x = screen_center_x() - widescale(292.5, 342.5);
     let y = 56.0;
 
-    // Get the current chart's difficulty to determine the color.
     let difficulty_index = DIFFICULTY_NAMES
         .iter()
         .position(|&name| name.eq_ignore_ascii_case(&state.chart.difficulty))
-        .unwrap_or(2); // Default to Medium if not found
+        .unwrap_or(2);
 
-    // The color of the difficulty square is based on the theme color and the difficulty.
     let difficulty_color_index = state.active_color_index - (4 - difficulty_index) as i32;
     let difficulty_color = color::simply_love_rgba(difficulty_color_index);
 
-    // The number to display in the square.
     let meter_text = state.chart.meter.to_string();
 
-    // The ActorFrame acts as a container to group and position the quad and text.
     let difficulty_meter_frame = Actor::Frame {
         align: [0.5, 0.5],
         offset: [x, y],
@@ -669,7 +655,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     };
     actors.push(difficulty_meter_frame);
 
-    // 6. Draw Song Title Box (SongMeter)
+    // 6. Song Title Box (SongMeter)
     {
         let w = widescale(310.0, 417.0);
         let h = 22.0;
@@ -801,28 +787,40 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
 
     let mut actors = Vec::new();
 
-    // --- Calculate the final, absolute world-space properties for the judgment list ---
-    
-    // 1. Define the root anchor point of the entire side panel in world space.
+    // --- StepStatsPane container parity (SL defaults for single player) ---
     let sidepane_center_x = screen_width() * 0.75;
     let sidepane_center_y = screen_center_y() + 80.0;
-    
-    // 2. Define the zoom factor applied to the "BannerAndData" container.
-    let banner_data_zoom = if screen_width() / screen_height() > 1.7 { 0.925 } else { 0.825 };
 
-    // 3. Define the local properties of the "TapNoteJudgments" container.
+    // Determine if notefield is centered (approximation based on our notefield math).
+    let logical_screen_width = screen_width();
+    let clamped_width = logical_screen_width.clamp(640.0, 854.0);
+    let nf_center_x = screen_center_x() - (clamped_width * 0.25);
+    let note_field_is_centered = (nf_center_x - screen_center_x()).abs() < 1.0;
+
+    // Parent zoom for BannerAndData (SL only shrinks when Center1Player & wide)
+    let is_ultrawide = screen_width() / screen_height() > (21.0 / 9.0);
+    // FIX: default 1.0; only shrink in Center1Player-like case (rough parity)
+    let banner_data_zoom = if note_field_is_centered && is_wide() && !is_ultrawide {
+        let ar = screen_width() / screen_height();
+        let t = ((ar - (16.0/10.0)) / ((16.0/9.0) - (16.0/10.0))).clamp(0.0, 1.0);
+        0.825 + (0.925 - 0.825) * t
+    } else {
+        1.0
+    };
+
+    // Local offset for TapNoteJudgments inside BannerAndData:
+    // P1 → negative (we only draw P1 here)
     let judgments_local_x = -widescale(152.0, 204.0);
-    let judgments_local_zoom = 0.8;
 
-    // 4. Calculate the final world-space center of the judgments container.
+    // FIX: child frame has zoom(0.8) but its x is not scaled by its own zoom; only by parent.
     let final_judgments_center_x = sidepane_center_x + (judgments_local_x * banner_data_zoom);
     let final_judgments_center_y = sidepane_center_y;
 
-    // 5. Calculate the final zoom that will be applied to all text actors inside.
-    let final_text_base_zoom = banner_data_zoom * judgments_local_zoom;
+    // TapNoteJudgments zoom(0.8) like SL; children inherit this
+    let parent_local_zoom = 0.8;
+    let final_text_base_zoom = banner_data_zoom * parent_local_zoom;
 
-    // --- Now, build the individual text actors with final calculated properties ---
-
+    // Digits (SL: max(4, floor(log10(total))+1))
     let total_tapnotes = state.chart.stats.total_steps as f32;
     let digits = if total_tapnotes > 0.0 {
         (total_tapnotes.log10().floor() as usize + 1).max(4)
@@ -831,51 +829,87 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
     };
 
     let row_height = 35.0;
-    let y_base = -280.0;
+    let y_base = -280.0; 
 
     for (index, grade) in JUDGMENT_ORDER.iter().enumerate() {
         let info = JUDGMENT_INFO.get(grade).unwrap();
-        let count = state.judgment_counts.get(grade).unwrap_or(&0);
+        let count = *state.judgment_counts.get(grade).unwrap_or(&0);
         
-        // Calculate the local Y offset for this row.
         let local_y = y_base + (index as f32 * row_height);
-        // Transform the local Y into final world Y.
         let world_y = final_judgments_center_y + (local_y * final_text_base_zoom);
 
-        // -- Number Text --
-        let number_final_zoom = final_text_base_zoom * 0.5;
-        actors.push(act!(text:
-            font("wendy_screenevaluation"):
-            settext(format!("{:0width$}", count, width = digits)):
-            // The number's right edge is anchored to the final calculated center X.
-            align(1.0, 0.5):
-            xy(final_judgments_center_x, world_y):
-            zoom(number_final_zoom):
-            horizalign(right):
-            diffuse(info.color[0], info.color[1], info.color[2], 1.0)
-        ));
+        // Colors
+        let bright = info.color;
+        let dim = [bright[0]*0.35, bright[1]*0.35, bright[2]*0.35, bright[3]];
 
-        // -- Label Text --
-        let label_final_zoom = final_text_base_zoom * 0.833;
+        // ---------- Numbers (right-aligned), SL-style leading-zero dim without overlap ----------
+        let full_number_str = format!("{:0width$}", count, width = digits);
+        let first_nonzero = full_number_str.find(|c: char| c != '0').unwrap_or(full_number_str.len());
+
+        let zeros_part = &full_number_str[..first_nonzero];
+        let tail_part  = &full_number_str[first_nonzero..];
+
+        let numbers_zoom = final_text_base_zoom * 0.5;
+
+        // Right-aligned anchor (world-space) for the whole number
+        let numbers_cx = final_judgments_center_x;
+
+        // Measure logical widths and scale by zoom; fallback to a safe monospace-ish guess.
+        let (zeros_w, tail_w) = font::with_font("wendy_screenevaluation", |f| {
+            let zw = (font::measure_line_width_logical(f, zeros_part) as f32) * numbers_zoom;
+            let tw = (font::measure_line_width_logical(f, tail_part)  as f32) * numbers_zoom;
+            (zw, tw)
+        }).unwrap_or_else(|| {
+            let gw = 12.0 * numbers_zoom;
+            (zeros_part.len() as f32 * gw, tail_part.len() as f32 * gw)
+        });
+
+        // 1) Bright tail: right-aligned to numbers_cx
+        if !tail_part.is_empty() {
+            actors.push(act!(text:
+                font("wendy_screenevaluation"):
+                settext(tail_part.to_string()):
+                align(1.0, 0.5):
+                xy(numbers_cx, world_y):
+                zoom(numbers_zoom):
+                horizalign(right):
+                diffuse(bright[0], bright[1], bright[2], bright[3])
+            ));
+        }
+
+        // 2) Dim zeros: right-aligned to the left edge of the tail (no overlap)
+        if !zeros_part.is_empty() {
+            actors.push(act!(text:
+                font("wendy_screenevaluation"):
+                settext(zeros_part.to_string()):
+                align(1.0, 0.5):
+                xy(numbers_cx - tail_w, world_y):
+                zoom(numbers_zoom):
+                horizalign(right):
+                diffuse(dim[0], dim[1], dim[2], dim[3])
+            ));
+        }
+
+        // ---------- Label (left-aligned) ----------
+        // SL: label offset = 80 + (digits-4)*16  (inside TapNoteJudgments, which is zoom(0.8))
         let label_local_x = 80.0 + (digits.saturating_sub(4) as f32 * 16.0);
-        // Transform the local X into final world X.
-        let world_x = final_judgments_center_x + (label_local_x * final_text_base_zoom);
+        // FIX: multiply by BOTH parent and local zooms => final_text_base_zoom
+        let label_world_x = final_judgments_center_x + (label_local_x * final_text_base_zoom);
+        let label_world_y = world_y + (1.0 * final_text_base_zoom);
+        let label_zoom = final_text_base_zoom * 0.833;
 
+        // SL keeps labels bright (we’re not implementing disabled-window dim in this file)
         actors.push(act!(text:
-            font("wendy"):
+            font("miso"):
             settext(info.label):
-            // The label's left edge is anchored to its final calculated world X.
             align(0.0, 0.5):
-            xy(world_x, world_y):
-            zoom(label_final_zoom):
-            maxwidth(72.0 * final_text_base_zoom): // Scale maxwidth accordingly
+            xy(label_world_x, label_world_y):
+            zoom(label_zoom):
+            maxwidth(72.0 * final_text_base_zoom):
             horizalign(left):
-            diffuse(info.color[0], info.color[1], info.color[2], 1.0)
+            diffuse(bright[0], bright[1], bright[2], bright[3])
         ));
     }
-
-    // In the future, other components like Banner, Holds/Mines would be built here
-    // using the same direct calculation method.
 
     actors
 }
