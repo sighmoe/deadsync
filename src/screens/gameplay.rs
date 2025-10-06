@@ -118,6 +118,7 @@ pub struct State {
     pub combo: u32,
     pub miss_combo: u32,
     pub full_combo_grade: Option<JudgeGrade>,
+    pub first_fc_attempt_broken: bool,
     pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub last_judgment: Option<JudgmentRenderInfo>,
     
@@ -223,6 +224,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         combo: 0,
         miss_combo: 0,
         full_combo_grade: None,
+        first_fc_attempt_broken: false,
         last_judgment: None,
         noteskin,
         active_color_index,
@@ -267,15 +269,24 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) {
             state.miss_combo = 0; // Any hit breaks a miss combo
             if matches!(grade, JudgeGrade::Boo) {
                 state.combo = 0;
+                // If a colored combo was active, mark the first attempt as broken.
+                if state.full_combo_grade.is_some() {
+                    state.first_fc_attempt_broken = true;
+                }
                 state.full_combo_grade = None;
             } else {
                 state.combo += 1;
                 
-                // Update full combo grade: if a worse grade is hit, the FC color downgrades
-                if let Some(current_fc_grade) = &state.full_combo_grade {
-                    state.full_combo_grade = Some(grade.clone().max(current_fc_grade.clone()));
-                } else {
-                    state.full_combo_grade = Some(grade.clone());
+                // Update full combo grade ONLY if the first attempt has not been broken yet.
+                if !state.first_fc_attempt_broken {
+                    // Update the grade. If it's the start of the combo, it becomes the new grade.
+                    // If continuing, it takes the worse of the current and new grades.
+                    let new_grade = if let Some(current_fc_grade) = &state.full_combo_grade {
+                        grade.clone().max(current_fc_grade.clone())
+                    } else {
+                        grade.clone()
+                    };
+                    state.full_combo_grade = Some(new_grade);
                 }
             }
             
@@ -377,6 +388,10 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
 
                 state.combo = 0;
                 state.miss_combo += 1;
+                // If a colored combo was active, mark the first attempt as broken.
+                if state.full_combo_grade.is_some() {
+                    state.first_fc_attempt_broken = true;
+                }
                 state.full_combo_grade = None;
                 missed = true;
             }
