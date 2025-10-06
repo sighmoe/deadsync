@@ -43,13 +43,18 @@ const RECEPTOR_GLOW_DURATION: f32 = 0.2; // How long the glow sprite is visible
 const JUDGMENT_DISPLAY_DURATION: f32 = 0.8; // How long "Perfect" etc. stays on screen
 const SHOW_COMBO_AT: u32 = 4; // From Simply Love metrics
 
-// --- JUDGMENT WINDOWS (in seconds) - From ITG ---
-pub const FANTASTIC_WINDOW: f32 = 0.0215; // W1
-const EXCELLENT_WINDOW: f32 = 0.0430; // W2
-const GREAT_WINDOW:     f32 = 0.1020; // W3
-const DECENT_WINDOW:    f32 = 0.1350; // W4
-const WAY_OFF_WINDOW:   f32 = 0.1800; // W5
-// Notes outside the WAY_OFF_WINDOW are considered a Miss.
+// --- JUDGMENT WINDOWS (in seconds) ---
+// These are the base values from StepMania's defaults.
+// A small constant is added at runtime to match ITG's precise breakpoints,
+// as discovered from reverse-engineering Simply Love's timing logic.
+const TIMING_WINDOW_ADD: f32 = 0.0015;
+
+pub const BASE_FANTASTIC_WINDOW: f32 = 0.0215; // W1 (0.0230 final)
+const BASE_EXCELLENT_WINDOW: f32 = 0.0430; // W2 (0.0445 final)
+const BASE_GREAT_WINDOW:     f32 = 0.1020; // W3 (0.1035 final)
+const BASE_DECENT_WINDOW:    f32 = 0.1350; // W4 (0.1365 final)
+const BASE_WAY_OFF_WINDOW:   f32 = 0.1800; // W5 (0.1815 final)
+// Notes outside the final WayOff window are considered a Miss.
 
 // --- DATA STRUCTURES ---
 
@@ -244,15 +249,23 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) {
         let time_error = current_time - note_time;
         let abs_time_error = time_error.abs();
 
+        // Calculate the final, effective timing windows for this hit.
+        // This structure makes it easy to add a TimingWindowScale multiplier later.
+        let fantastic_window = BASE_FANTASTIC_WINDOW + TIMING_WINDOW_ADD;
+        let excellent_window = BASE_EXCELLENT_WINDOW + TIMING_WINDOW_ADD;
+        let great_window     = BASE_GREAT_WINDOW + TIMING_WINDOW_ADD;
+        let decent_window    = BASE_DECENT_WINDOW + TIMING_WINDOW_ADD;
+        let way_off_window   = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
+
         // Check if the hit is within the widest possible timing window
-        if abs_time_error <= WAY_OFF_WINDOW {
-            let grade = if abs_time_error <= FANTASTIC_WINDOW {
+        if abs_time_error <= way_off_window {
+            let grade = if abs_time_error <= fantastic_window {
                 JudgeGrade::Fantastic
-            } else if abs_time_error <= EXCELLENT_WINDOW {
+            } else if abs_time_error <= excellent_window {
                 JudgeGrade::Excellent
-            } else if abs_time_error <= GREAT_WINDOW {
+            } else if abs_time_error <= great_window {
                 JudgeGrade::Great
-            } else if abs_time_error <= DECENT_WINDOW {
+            } else if abs_time_error <= decent_window {
                 JudgeGrade::Decent
             } else {
                 JudgeGrade::WayOff
@@ -369,12 +382,13 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
     }
 
     // --- Handle missed notes ---
-    // A note is missed if the current time has passed its time by more than the WAY_OFF_WINDOW
+    // A note is missed if the current time has passed its time by more than the final WayOff window
+    let way_off_window = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
     for col_arrows in &mut state.arrows {
         let mut missed = false;
         if let Some(arrow) = col_arrows.first() {
             let note_time = state.timing.get_time_for_beat(arrow.beat);
-            if music_time_sec - note_time > WAY_OFF_WINDOW {
+            if music_time_sec - note_time > way_off_window {
                 info!("MISS! Column {}, Beat {:.2}", arrow.column, arrow.beat);
                 let judgment = Judgment {
                     time_error_ms: ((music_time_sec - note_time) * 1000.0),
