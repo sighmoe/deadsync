@@ -364,11 +364,6 @@ fn fmt_char(ch: char) -> String {
 
 /* ======================= STEPMania SHEET SCALE HELPERS ======================= */
 
-#[inline(always)]
-fn round_i(v: f32) -> i32 {
-    v.round() as i32
-}
-
 /// Parse "(res WxH)" from a filename or path (case-insensitive). Returns sheet base res.
 #[inline(always)]
 fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
@@ -1106,15 +1101,6 @@ pub fn measure_line_width_logical(font: &Font, text: &str) -> i32 {
             g.map_or(0, |glyph| glyph.advance as i32)
         })
         .sum()
-}
-
-
-impl Font {
-    /// Wrapper retained for compatibility with existing call sites (e.g., compose.rs).
-    #[inline(always)]
-    pub fn measure_line_width(&self, text: &str) -> f32 {
-        measure_line_width(self, text)
-    }
 }
 
 /* ======================= LAYOUT HELPERS USED BY UI ======================= */

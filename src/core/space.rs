@@ -112,19 +112,6 @@ pub fn is_wide() -> bool {
 }
 
 // -----------------------------------------------------------------------------
-// Pixel size getters (in *actual* screen pixels)
-// -----------------------------------------------------------------------------
-#[inline(always)]
-pub fn screen_pixel_width() -> f32 {
-    CURRENT_PIXEL.with(|c| c.get().0 as f32)
-}
-
-#[inline(always)]
-pub fn screen_pixel_height() -> f32 {
-    CURRENT_PIXEL.with(|c| c.get().1 as f32)
-}
-
-// -----------------------------------------------------------------------------
 // WideScale helpers
 // -----------------------------------------------------------------------------
 

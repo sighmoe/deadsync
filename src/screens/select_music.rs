@@ -20,7 +20,7 @@ use std::fs;
 
 // --- engine imports ---
 use crate::core::space::widescale;
-use crate::core::song_loading::{SongData, get_song_cache, ChartData, SongPack};
+use crate::core::song_loading::{SongData, get_song_cache, SongPack};
 
 
 /* ---------------------------- transitions ---------------------------- */

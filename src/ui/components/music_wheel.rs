@@ -1,6 +1,6 @@
 use crate::act;
 use crate::core::space::globals::*;
-use crate::core::space::{is_wide, widescale};
+use crate::core::space::{widescale};
 use crate::screens::select_music::MusicWheelEntry;
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;

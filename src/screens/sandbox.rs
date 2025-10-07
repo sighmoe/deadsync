@@ -2,7 +2,6 @@ use crate::act;
 use crate::core::space::globals::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
-use crate::ui::anim;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
