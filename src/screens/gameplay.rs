@@ -949,14 +949,14 @@ fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
 
     let mut children = Vec::new();
 
-    font::with_font("wendy_screenevaluation", |font| {
+    font::with_font("wendy_screenevaluation", |metrics_font| {
         let value_zoom = 0.4 * frame_zoom;
         let label_zoom = 0.833 * frame_zoom;
         let gray = color::rgba_hex("#5A6166");
         let white = [1.0, 1.0, 1.0, 1.0];
 
         // Width of a single digit in the monospace font, scaled.
-        let digit_width = font::measure_line_width_logical(font, "0") as f32 * value_zoom;
+        let digit_width = font::measure_line_width_logical(metrics_font, "0") as f32 * value_zoom;
         if digit_width <= 0.0 { return; }
 
         // Calculate total width of the "000/000" string to position the label.
