@@ -684,7 +684,24 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     };
     actors.push(difficulty_meter_frame);
 
-    // 6. Song Title Box (SongMeter)
+    // 6. Score Display (P1)
+    // Parity with gameplay/score.lua
+    let clamped_width = screen_width().clamp(640.0, 854.0);
+    let score_x = screen_center_x() - clamped_width / 4.3;
+    let score_y = 56.0;
+
+    actors.push(act!(text:
+        font("wendy_monospace_numbers"):
+        settext("94.35"):
+        // valign(1)=bottom, horizalign(right)=right
+        align(1.0, 1.0):
+        xy(score_x, score_y):
+        zoom(0.5):
+        horizalign(right):
+        z(100)
+    ));
+
+    // 7. Song Title Box (SongMeter)
     {
         let w = widescale(310.0, 417.0);
         let h = 22.0;
@@ -746,7 +763,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         });
     }
 
-    // --- LIFE METER (P1) ---
+    // 8. Life Meter (P1)
     {
         let w = 136.0;
         let h = 18.0;
@@ -791,7 +808,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         ));
     }
 
-    // --- Bottom Bar with Profile Name ---
+    // 9. Bottom Bar with Profile Name
     actors.push(screen_bar::build(ScreenBarParams {
         title: "",
         title_placement: screen_bar::ScreenBarTitlePlacement::Center,
@@ -801,7 +818,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         left_text: Some("PerfectTaste"), center_text: None, right_text: None,
     }));
     
-    // --- Step Statistics Side Pane (P1) ---
+    // 10. Step Statistics Side Pane (P1)
     actors.extend(build_side_pane(state));
 
     actors
