@@ -132,6 +132,7 @@ pub struct State {
     pub active_color_index: i32,
     pub player_color: [f32; 4],
     pub receptor_glow_timers: [f32; 4], // Timers for glow effect on each receptor
+    pub receptor_bop_timers: [f32; 4],  // Timers for the "bop" animation on empty press
 
     // Animation timing for this screen
     pub total_elapsed_in_screen: f32,
@@ -235,6 +236,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         active_color_index,
         player_color: color::decorative_rgba(active_color_index),
         receptor_glow_timers: [0.0; 4],
+        receptor_bop_timers: [0.0; 4],
         total_elapsed_in_screen: 0.0,
         log_timer: 0.0,
     }
@@ -242,7 +244,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
 // --- INPUT HANDLING ---
 
-fn process_hit(state: &mut State, column: usize, current_time: f32) {
+fn process_hit(state: &mut State, column: usize, current_time: f32) -> bool {
     // Find the first (i.e., earliest) note in the target column
     if let Some(arrow) = state.arrows[column].first() {
         let note_time = state.timing.get_time_for_beat(arrow.beat);
@@ -309,8 +311,11 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) {
             // Trigger visual/audio feedback
             state.receptor_glow_timers[column] = RECEPTOR_GLOW_DURATION;
 
+            return true; // A note was successfully judged.
         }
     }
+    // If we reach here, no note was judged (either none was there, or it was too far off time).
+    false
 }
 
 pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
@@ -338,7 +343,11 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
             } else {
                 now.saturating_duration_since(state.song_start_instant).as_secs_f32()
             };
-            process_hit(state, col_idx, hit_time);
+            let note_was_judged = process_hit(state, col_idx, hit_time);
+            if !note_was_judged {
+                // This was an empty press, so trigger the bop animation.
+                state.receptor_bop_timers[col_idx] = 0.11;
+            }
         }
     }
     ScreenAction::None
@@ -363,6 +372,11 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
 
     // Update glow timers
     for timer in &mut state.receptor_glow_timers {
+        *timer = (*timer - delta_time).max(0.0);
+    }
+
+    // Update bop timers
+    for timer in &mut state.receptor_bop_timers {
         *timer = (*timer - delta_time).max(0.0);
     }
 
@@ -530,11 +544,11 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let banner_y = sidepane_center_y + (local_banner_y * banner_data_zoom);
         let final_zoom = 0.4 * banner_data_zoom;
 
-         actors.push(act!(sprite(banner_key):
-            align(0.5, 0.5): xy(banner_x, banner_y):
+        actors.push(act!(sprite(banner_key):
+            align(0.5, 0.5): xy(banner_x, banner_y): // Lua's xy() sets the center
             setsize(418.0, 164.0): zoom(final_zoom):
-            z(-50)
-         ));
+            z(-50) // Draw behind playfield (z=0) but above background (z=-100)
+        ));
     }
 
     if let Some(ns) = &state.noteskin {
@@ -542,12 +556,22 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         for i in 0..4 {
             let col_x_offset = ns.column_xs[i];
             
+            // Calculate the bop animation zoom multiplier
+            let bop_timer = state.receptor_bop_timers[i];
+            let bop_zoom = if bop_timer > 0.0 {
+                let t = (0.11 - bop_timer) / 0.11; // t goes from 0.0 -> 1.0 as timer expires
+                0.75 + (1.0 - 0.75) * t // linear interpolation from 0.75 back to 1.0
+            } else {
+                1.0
+            };
+
             let receptor_def = &ns.receptor_off[i];
             let uv = noteskin::get_uv_rect(receptor_def, ns.tex_receptors_dims);
             actors.push(act!(sprite(ns.tex_receptors_path.clone()):
                 align(0.5, 0.5):
                 xy(playfield_center_x + col_x_offset as f32, receptor_y):
                 zoomto(receptor_def.size[0] as f32, receptor_def.size[1] as f32):
+                zoom(bop_zoom): // Apply the bop animation zoom
                 rotationz(-receptor_def.rotation_deg as f32):
                 customtexturerect(uv[0], uv[1], uv[2], uv[3])
             ));
