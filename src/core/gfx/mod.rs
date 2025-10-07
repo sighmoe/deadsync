@@ -70,12 +70,6 @@ pub enum Backend {
     OpenGL(opengl::State),
 }
 
-/// Specifies the color space of a texture's data.
-pub enum TextureColorSpace {
-    Srgb,
-    Linear,
-}
-
 /// Creates and initializes a new graphics backend.
 pub fn create_backend(
     backend_type: BackendType,
@@ -92,16 +86,14 @@ pub fn create_backend(
 pub fn create_texture(
     backend: &mut Backend,
     image: &RgbaImage,
-    cs: TextureColorSpace,
 ) -> Result<Texture, Box<dyn Error>> {
-    let use_srgb = matches!(cs, TextureColorSpace::Srgb);
     match backend {
         Backend::Vulkan(state) => {
-            let tex = vulkan::create_texture(state, image, use_srgb)?;
+            let tex = vulkan::create_texture(state, image)?;
             Ok(Texture::Vulkan(tex))
         }
         Backend::OpenGL(state) => {
-            let tex = opengl::create_texture(&state.gl, image, use_srgb)?;
+            let tex = opengl::create_texture(&state.gl, image)?;
             Ok(Texture::OpenGL(tex))
         }
     }

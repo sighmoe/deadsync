@@ -469,11 +469,7 @@ fn transition_image_layout_cmd(
     }
 }
 
-pub fn create_texture(
-    state: &mut State,
-    image: &RgbaImage,
-    _srgb: bool,
-) -> Result<Texture, Box<dyn Error>> {
+pub fn create_texture(state: &mut State, image: &RgbaImage) -> Result<Texture, Box<dyn Error>> {
     let device_arc = state.device.as_ref().unwrap().clone();
     let device = device_arc.as_ref();
 

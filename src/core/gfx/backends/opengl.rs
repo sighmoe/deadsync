@@ -140,7 +140,7 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
     Ok(state)
 }
 
-pub fn create_texture(gl: &glow::Context, image: &RgbaImage, srgb: bool) -> Result<Texture, String> {
+pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, String> {
     unsafe {
         let t = gl.create_texture()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(t));

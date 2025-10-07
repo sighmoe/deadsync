@@ -134,7 +134,7 @@ impl App {
 
         {
             let white = image::RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255]).unwrap();
-            let white_tex = renderer::create_texture(backend, &white, renderer::TextureColorSpace::Srgb)?;
+            let white_tex = renderer::create_texture(backend, &white)?;
             self.texture_manager.insert("__white".to_string(), white_tex);
             assets::register_texture_dims("__white", 1, 1); // NEW
             info!("Loaded built-in texture: __white");
@@ -176,14 +176,14 @@ impl App {
         for h in handles {
             match h.join().expect("texture decode thread panicked") {
                 Ok((key, rgba)) => {
-                    let texture = renderer::create_texture(backend, &rgba, renderer::TextureColorSpace::Srgb)?;
+                    let texture = renderer::create_texture(backend, &rgba)?;
                     self.texture_manager.insert(key.to_string(), texture);
                     assets::register_texture_dims(key, rgba.width(), rgba.height()); // NEW
                     info!("Loaded texture: {}", key);
                 }
                 Err((key, msg)) => {
                     warn!("Failed to load texture for key '{}': {}. Using fallback.", key, msg);
-                    let texture = renderer::create_texture(backend, &fallback_image, renderer::TextureColorSpace::Srgb)?;
+                    let texture = renderer::create_texture(backend, &fallback_image)?;
                     self.texture_manager.insert(key.to_string(), texture);
                     assets::register_texture_dims(key, fallback_image.width(), fallback_image.height()); // NEW
                 }
@@ -218,8 +218,7 @@ impl App {
 
             if !self.texture_manager.contains_key(&key) {
                 let image_data = image::open(tex_path)?.to_rgba8();
-                // Fonts: linear sampling (no sRGB conversion)
-                let texture = renderer::create_texture(backend, &image_data, renderer::TextureColorSpace::Linear)?;
+                let texture = renderer::create_texture(backend, &image_data)?;
                 crate::core::assets::register_texture_dims(&key, image_data.width(), image_data.height());
                 self.texture_manager.insert(key.clone(), texture);
                 log::info!("Loaded font texture: {}", key);
@@ -273,7 +272,7 @@ impl App {
             match image::open(&path) {
                 Ok(img) => {
                     let rgba = img.to_rgba8();
-                    match renderer::create_texture(backend, &rgba, renderer::TextureColorSpace::Srgb) {
+                    match renderer::create_texture(backend, &rgba) {
                         Ok(texture) => {
                             let key = path.to_string_lossy().into_owned();
                             self.texture_manager.insert(key.clone(), texture);
@@ -322,7 +321,7 @@ impl App {
                     }
                 };
 
-                match renderer::create_texture(backend, &rgba_image, renderer::TextureColorSpace::Srgb) {
+                match renderer::create_texture(backend, &rgba_image) {
                     Ok(texture) => {
                         let key = chart.short_hash.clone();
                         self.texture_manager.insert(key.clone(), texture);
