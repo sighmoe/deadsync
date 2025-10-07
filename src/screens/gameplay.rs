@@ -972,11 +972,15 @@ fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
 
             // Part 3: The "possible" count (e.g., 123)
             let possible_str = format!("{:0width$}", count, width = digits_to_fmt);
-            let first_nonzero = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
-
             for (char_idx, ch) in possible_str.chars().rev().enumerate() {
-                let is_leading_zero = (digits_to_fmt - 1 - char_idx) < first_nonzero;
-                let color = if is_leading_zero { gray } else { white };
+                let is_dim = if *count == 0 {
+                    char_idx > 0
+                } else {
+                    let original_index = digits_to_fmt - 1 - char_idx;
+                    let first_nonzero = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
+                    original_index < first_nonzero
+                };
+                let color = if is_dim { gray } else { white };
                 children.push(act!(text:
                     font("wendy_screenevaluation"): settext(ch.to_string()):
                     align(1.0, 0.5): xy(cursor_x, item_y):
@@ -994,12 +998,17 @@ fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
             cursor_x -= digit_width;
 
             // Part 1: The "achieved" count (always "000..." for now)
-            let achieved_str = format!("{:0width$}", 0, width = digits_to_fmt);
-            for ch in achieved_str.chars().rev() {
+            let achieved_count = 0u32; // This will be dynamic in the future.
+            let achieved_str = format!("{:0width$}", achieved_count, width = digits_to_fmt);
+            for (char_idx, ch) in achieved_str.chars().rev().enumerate() {
+                // Since count is 0, only the last digit (char_idx == 0) is bright.
+                let is_dim = char_idx > 0;
+                let color = if is_dim { gray } else { white };
+
                 children.push(act!(text:
                     font("wendy_screenevaluation"): settext(ch.to_string()):
                     align(1.0, 0.5): xy(cursor_x, item_y):
-                    zoom(value_zoom): diffuse(gray[0], gray[1], gray[2], gray[3])
+                    zoom(value_zoom): diffuse(color[0], color[1], color[2], color[3])
                 ));
                 cursor_x -= digit_width;
             }
@@ -1115,13 +1124,19 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
 
             // Format number with leading zeros
             let full_number_str = format!("{:0width$}", count, width = digits);
-            let first_nonzero = full_number_str.find(|c: char| c != '0').unwrap_or(full_number_str.len());
 
             // --- Render each digit individually in a fixed-width cell ---
             for (i, ch) in full_number_str.chars().enumerate() {
-                let is_leading_zero = i < first_nonzero;
-                let color = if is_leading_zero { dim } else { bright };
-                
+                let is_dim = if count == 0 {
+                    // For a zero value, all digits are dim except the last one.
+                    i < digits - 1
+                } else {
+                    // For non-zero values, dim all digits before the first non-zero digit.
+                    let first_nonzero = full_number_str.find(|c: char| c != '0').unwrap_or(full_number_str.len());
+                    i < first_nonzero
+                };
+                let color = if is_dim { dim } else { bright };
+
                 // Position each digit's "cell" from the right edge of the number block.
                 let index_from_right = digits - 1 - i;
                 let cell_right_x = numbers_cx - (index_from_right as f32 * max_digit_w);
