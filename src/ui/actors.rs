@@ -1,9 +1,9 @@
 use crate::core::gfx::BlendMode;
 
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum Background {
     Color([f32; 4]),
+    #[allow(dead_code)]
     Texture(&'static str),
 }
 
@@ -27,7 +27,7 @@ pub enum SizeSpec {
 /// For `Solid`, the final color is `tint` (no sampling).
 #[derive(Clone, Debug)]
 pub enum SpriteSource {
-    Texture(String), // <-- CHANGED
+    Texture(String),
     Solid,
 }
 
@@ -73,17 +73,13 @@ pub enum Actor {
         content: String,
         align_text: TextAlign,   // talign: left/center/right
         z: i16,
-        // StepMania zoom semantics (scale factors)
         scale: [f32; 2],
-        // Optional “fit” targets (preserve aspect by scaling)
         fit_width: Option<f32>,
         fit_height: Option<f32>,
-        // NEW: max constraints (only scale down)
         max_width: Option<f32>,
         max_height: Option<f32>,
         max_w_pre_zoom: bool,
         max_h_pre_zoom: bool,
-        // NEW: match SM — text honors blend mode too
         blend: BlendMode,
     },
 

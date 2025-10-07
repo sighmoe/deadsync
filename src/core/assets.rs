@@ -17,8 +17,6 @@ pub fn texture_dims(key: &str) -> Option<TexMeta> {
     TEX_META.read().unwrap().get(key).copied()
 }
 
-
-
 /// Produce a stable texture key used everywhere in the engine:
 /// - Strip the leading "assets" directory if present
 /// - Normalize separators to forward slashes so keys are cross-platform

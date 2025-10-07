@@ -11,7 +11,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 // --- Add this import to access the song cache ---
 use crate::core::song_loading::get_song_cache;
 
-use crate::core::space::globals::*;
+use crate::core::space::*;
 
 /* ---------------------------- transitions ---------------------------- */
 const TRANSITION_IN_DURATION: f32 = 0.5;

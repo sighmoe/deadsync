@@ -1,7 +1,7 @@
 use crate::core::gfx::BackendType;
 use crate::ui::actors::Actor;
 use crate::act;
-use crate::core::space::globals::*;
+use crate::core::space::*;
 
 /// Three-line stats: FPS, VPF, Backend — top-right, miso, white.
 pub fn build(backend: BackendType, fps: f32, vpf: u32) -> Vec<Actor> {

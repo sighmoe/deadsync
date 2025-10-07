@@ -1,6 +1,6 @@
 use crate::ui::actors::Actor;
 use crate::act;
-use crate::core::space::globals::*;
+use crate::core::space::*;
 use crate::core::assets;
 
 /// Parameters to tweak the layout easily.

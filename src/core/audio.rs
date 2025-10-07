@@ -79,13 +79,11 @@ pub fn play_sfx(path: &str) {
 }
 
 /// Plays a music track from a file path.
-#[allow(dead_code)]
 pub fn play_music(path: PathBuf, cut: Cut, looping: bool) {
     let _ = ENGINE.command_sender.send(AudioCommand::PlayMusic(path, cut, looping));
 }
 
 /// Stops the currently playing music track.
-#[allow(dead_code)]
 pub fn stop_music() {
     let _ = ENGINE.command_sender.send(AudioCommand::StopMusic);
 }

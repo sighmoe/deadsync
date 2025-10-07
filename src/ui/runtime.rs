@@ -63,7 +63,6 @@ pub fn site_id(file: &'static str, line: u32, col: u32, extra: u64) -> u64 {
 }
 
 // Optional manual clear (e.g., on screen swaps if desired).
-#[allow(dead_code)]
 pub fn clear_all() {
     REG.with(|r| r.borrow_mut().map.clear());
 }

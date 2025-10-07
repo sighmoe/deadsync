@@ -418,67 +418,6 @@ fn parse_base_res_from_filename(path_or_name: &str) -> Option<(u32, u32)> {
     None
 }
 
-/// Compute vertical metrics in texture px, then convert height & line_spacing to draw units.
-/// Returns:
-/// (line_spacing_tex, baseline_tex, top_tex, height_draw, line_spacing_draw, vshift_tex, vshift_draw)
-#[allow(dead_code)]
-#[inline(always)]
-fn compute_vertical_metrics_draw(
-    frame_h_i: i32,
-    settings: &FontPageSettings,
-    dy: f32,
-) -> (i32, i32, i32, i32, i32, f32, f32) {
-    let frame_h_f = frame_h_i as f32;
-    let line_spacing_tex = if settings.line_spacing != -1 {
-        settings.line_spacing
-    } else {
-        frame_h_i
-    };
-    let baseline_tex = if settings.baseline != -1 {
-        settings.baseline
-    } else {
-        // SM uses int(center + lineSpacing/2); cast truncates toward zero.
-        (frame_h_f * 0.5 + line_spacing_tex as f32 * 0.5) as i32
-    };
-    let top_tex = if settings.top != -1 {
-        settings.top
-    } else {
-        // SM uses int(center - lineSpacing/2)
-        (frame_h_f * 0.5 - line_spacing_tex as f32 * 0.5) as i32
-    };
-    let height_tex = baseline_tex - top_tex;
-
-    // Convert stored font metrics to logical (draw) units
-    let height_draw = round_half_to_even_i32((height_tex as f32) * dy);
-    let line_spacing_draw = round_half_to_even_i32((line_spacing_tex as f32) * dy);
-
-    // vshift (offset.y) stored per-glyph; keep both forms
-    let vshift_tex = -(baseline_tex as f32);
-    let vshift_draw = vshift_tex * dy;
-
-    trace!(
-        " VMetrics: tex(line_spacing={}, baseline={}, top={}, height={}) -> draw(height={}, line_spacing={}), vshift_tex={:.1}, vshift_draw={:.3}",
-        line_spacing_tex,
-        baseline_tex,
-        top_tex,
-        height_tex,
-        height_draw,
-        line_spacing_draw,
-        vshift_tex,
-        vshift_draw
-    );
-
-    (
-        line_spacing_tex,
-        baseline_tex,
-        top_tex,
-        height_draw,
-        line_spacing_draw,
-        vshift_tex,
-        vshift_draw,
-    )
-}
-
 /// Round-to-nearest with ties-to-even (banker's rounding), like C's lrint with FE_TONEAREST.
 #[inline(always)]
 #[must_use]

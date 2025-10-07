@@ -3,7 +3,7 @@ use crate::core::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIO
 use crate::screens::select_music::DIFFICULTY_NAMES;
 use crate::core::parsing;
 use crate::core::song_loading::{ChartData, SongData};
-use crate::core::space::globals::*;
+use crate::core::space::*;
 use crate::core::timing::TimingData;
 use crate::core::audio;
 use crate::screens::{Screen, ScreenAction};

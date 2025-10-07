@@ -1,6 +1,6 @@
 use crate::act;
 use crate::core::audio;
-use crate::core::space::globals::*;
+use crate::core::space::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;

@@ -39,12 +39,13 @@ pub enum ObjectType {
 }
 
 /// Specifies how an object's color should be blended with the background.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlendMode {
     Alpha,
     Add,
+    #[allow(dead_code)]
     Multiply,
+    #[allow(dead_code)]
     Subtract,
 }
 
