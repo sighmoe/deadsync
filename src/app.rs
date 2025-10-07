@@ -6,7 +6,7 @@ use crate::core::assets;
 use crate::core::font;
 use crate::ui::actors::Actor;
 use crate::ui::color;
-use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, Screen as CurrentScreen, ScreenAction};
+use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, Screen as CurrentScreen, ScreenAction};
 use crate::core::song_loading::{self, ChartData, SongData};
 use winit::{
     application::ApplicationHandler,
@@ -62,6 +62,7 @@ pub struct App {
     select_music_state: select_music::State,
     preferred_difficulty_index: usize,
     sandbox_state: sandbox::State,
+    evaluation_state: evaluation::State,
     session_start_time: Option<Instant>,
     current_dynamic_banner: Option<(String, PathBuf)>,
     current_density_graph: Option<(String, String)>,
@@ -99,10 +100,14 @@ impl App {
         let mut init_state = init::init();
         init_state.active_color_index = color_index;
 
+        let mut evaluation_state = evaluation::init(); // <-- ADD THESE LINES
+        evaluation_state.active_color_index = color_index;
+
         Self {
             window: None, backend: None, backend_type, texture_manager: HashMap::new(),
             current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: None, options_state,
-            select_color_state, select_music_state, sandbox_state: sandbox::init(), input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
+            select_color_state, select_music_state, sandbox_state: sandbox::init(), evaluation_state,
+            input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height), preferred_difficulty_index: 2, // Default to Medium
             vsync_enabled, fullscreen_enabled, show_overlay, last_fps: 0.0, last_vpf: 0, 
             current_frame_vpf: 0, transition: TransitionState::Idle,
@@ -423,6 +428,7 @@ impl App {
             CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state),
             CurrentScreen::Sandbox  => sandbox::get_actors(&self.sandbox_state),
             CurrentScreen::Init     => init::get_actors(&self.init_state),
+            CurrentScreen::Evaluation => evaluation::get_actors(&self.evaluation_state),
         };
 
         if self.show_overlay {
@@ -454,6 +460,7 @@ impl App {
             CurrentScreen::SelectMusic => select_music::out_transition(),
             CurrentScreen::Sandbox => sandbox::out_transition(),
             CurrentScreen::Init => init::out_transition(),
+            CurrentScreen::Evaluation => evaluation::out_transition(),
         }
     }
 
@@ -465,6 +472,7 @@ impl App {
             CurrentScreen::SelectColor => select_color::in_transition(),
             CurrentScreen::SelectMusic => select_music::in_transition(),
             CurrentScreen::Sandbox => sandbox::in_transition(),
+            CurrentScreen::Evaluation => evaluation::in_transition(),
             CurrentScreen::Init => (vec![], 0.0), // Init screen has no "in" transition
         }
     }
@@ -600,6 +608,7 @@ impl ApplicationHandler for App {
                     CurrentScreen::Sandbox => sandbox::handle_key_press(&mut self.sandbox_state, &key_event),
                     CurrentScreen::SelectMusic => select_music::handle_key_press(&mut self.select_music_state, &key_event),
                     CurrentScreen::Init     => init::handle_key_press(&mut self.init_state, &key_event),
+                    CurrentScreen::Evaluation => evaluation::handle_key_press(&mut self.evaluation_state, &key_event),
                 };
                 if let Err(e) = self.handle_action(action.clone(), event_loop) {
                     error!("Failed to handle action: {}", e);
@@ -670,7 +679,12 @@ impl ApplicationHandler for App {
                     TransitionState::Idle => {
                         match self.current_screen {
                             CurrentScreen::Gameplay => if let Some(gs) = &mut self.gameplay_state {
-                                gameplay::update(gs, &self.input_state, delta_time)
+                                // CAPTURE THE ACTION RETURNED BY UPDATE
+                                let action = gameplay::update(gs, &self.input_state, delta_time);
+                                // HANDLE THE ACTION
+                                if let ScreenAction::Navigate(_) | ScreenAction::Exit = action.clone() {
+                                    if self.handle_action(action, event_loop).is_err() {}
+                                }
                             },
                             CurrentScreen::Init => {
                                 let action = init::update(&mut self.init_state, delta_time);
@@ -683,6 +697,12 @@ impl ApplicationHandler for App {
                             }
                             CurrentScreen::Sandbox => sandbox::update(&mut self.sandbox_state, delta_time),
                             CurrentScreen::SelectColor => select_color::update(&mut self.select_color_state, delta_time),
+                            CurrentScreen::Evaluation => {
+                                if let Some(start) = self.session_start_time {
+                                    self.evaluation_state.session_elapsed = now.duration_since(start).as_secs_f32();
+                                }
+                                evaluation::update(&mut self.evaluation_state, delta_time);
+                            },
                             CurrentScreen::SelectMusic => {
                                 if let Some(start) = self.session_start_time {
                                     self.select_music_state.session_elapsed = now.duration_since(start).as_secs_f32();
@@ -764,6 +784,15 @@ impl ApplicationHandler for App {
                         
                         let color_index = self.menu_state.active_color_index;
                         self.gameplay_state = Some(gameplay::init(song_arc, chart, color_index));
+                    }
+
+                    if target == CurrentScreen::Evaluation {
+                        let idx = self.gameplay_state.as_ref().map_or(
+                            self.evaluation_state.active_color_index,
+                            |gs| gs.active_color_index
+                        );
+                        self.evaluation_state = evaluation::init();
+                        self.evaluation_state.active_color_index = idx;
                     }
 
                     if target == CurrentScreen::SelectMusic {

@@ -137,6 +137,10 @@ pub struct State {
     // Animation timing for this screen
     pub total_elapsed_in_screen: f32,
 
+    // NEW: Fields for hold-to-exit logic
+    hold_to_exit_key: Option<KeyCode>,
+    hold_to_exit_start: Option<Instant>,
+
     // Debugging
     log_timer: f32,
 }
@@ -238,6 +242,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         receptor_glow_timers: [0.0; 4],
         receptor_bop_timers: [0.0; 4],
         total_elapsed_in_screen: 0.0,
+        hold_to_exit_key: None,
+        hold_to_exit_start: None,
         log_timer: 0.0,
     }
 }
@@ -319,34 +325,46 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) -> bool {
 }
 
 pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
-    if event.state != ElementState::Pressed {
-        return ScreenAction::None;
-    }
-    
     if let PhysicalKey::Code(key_code) = event.physical_key {
-        let column = match key_code {
-            KeyCode::Escape => return ScreenAction::Navigate(Screen::SelectMusic),
-            
-            // Player 1 controls (add more as needed)
-            KeyCode::ArrowLeft  | KeyCode::KeyD => Some(0),
-            KeyCode::ArrowDown  | KeyCode::KeyF => Some(1),
-            KeyCode::ArrowUp    | KeyCode::KeyJ => Some(2),
-            KeyCode::ArrowRight | KeyCode::KeyK => Some(3),
-            
-            _ => None,
-        };
-        
-        if let Some(col_idx) = column {
-            let now = Instant::now();
-            let hit_time = if now < state.song_start_instant {
-                -(state.song_start_instant.saturating_duration_since(now).as_secs_f32())
-            } else {
-                now.saturating_duration_since(state.song_start_instant).as_secs_f32()
-            };
-            let note_was_judged = process_hit(state, col_idx, hit_time);
-            if !note_was_judged {
-                // This was an empty press, so trigger the bop animation.
-                state.receptor_bop_timers[col_idx] = 0.11;
+        match event.state {
+            ElementState::Pressed => {
+                if event.repeat { return ScreenAction::None; } // Ignore OS repeats
+
+                // Start timing a hold for Enter or Escape
+                if key_code == KeyCode::Enter || key_code == KeyCode::Escape {
+                    state.hold_to_exit_key = Some(key_code);
+                    state.hold_to_exit_start = Some(Instant::now());
+                    return ScreenAction::None;
+                }
+
+                // Handle regular note hits
+                let column = match key_code {
+                    KeyCode::ArrowLeft  | KeyCode::KeyD => Some(0),
+                    KeyCode::ArrowDown  | KeyCode::KeyF => Some(1),
+                    KeyCode::ArrowUp    | KeyCode::KeyJ => Some(2),
+                    KeyCode::ArrowRight | KeyCode::KeyK => Some(3),
+                    _ => None,
+                };
+
+                if let Some(col_idx) = column {
+                    let now = Instant::now();
+                    let hit_time = if now < state.song_start_instant {
+                        -(state.song_start_instant.saturating_duration_since(now).as_secs_f32())
+                    } else {
+                        now.saturating_duration_since(state.song_start_instant).as_secs_f32()
+                    };
+                    let note_was_judged = process_hit(state, col_idx, hit_time);
+                    if !note_was_judged {
+                        state.receptor_bop_timers[col_idx] = 0.11;
+                    }
+                }
+            }
+            ElementState::Released => {
+                // If the released key is the one we're tracking, cancel the hold
+                if state.hold_to_exit_key == Some(key_code) {
+                    state.hold_to_exit_key = None;
+                    state.hold_to_exit_start = None;
+                }
             }
         }
     }
@@ -356,7 +374,23 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 // --- UPDATE LOOP ---
 
 #[inline(always)]
-pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
+pub fn update(state: &mut State, _input: &InputState, delta_time: f32) -> ScreenAction {
+    // Check for hold-to-exit condition at the start of the update
+    if let (Some(key), Some(start_time)) = (state.hold_to_exit_key, state.hold_to_exit_start) {
+        if start_time.elapsed() >= Duration::from_secs(1) {
+            // Reset state IMMEDIATELY to prevent re-triggering.
+            state.hold_to_exit_key = None;
+            state.hold_to_exit_start = None;
+
+            // Return the correct navigation action
+            return match key {
+                KeyCode::Enter => ScreenAction::Navigate(Screen::Evaluation),
+                KeyCode::Escape => ScreenAction::Navigate(Screen::SelectMusic),
+                _ => ScreenAction::None, // Should not happen
+            };
+        }
+    }
+
     state.total_elapsed_in_screen += delta_time;
 
     let now = Instant::now();
@@ -443,6 +477,9 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) {
         );
         state.log_timer -= 1.0;
     }
+    
+    // Return None if no action was triggered
+    ScreenAction::None
 }
 
 // --- TRANSITIONS ---
@@ -758,7 +795,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     actors.push(act!(text:
         font("wendy_monospace_numbers"):
-        settext("94.35"):
+        settext("0.00"):
         // valign(1)=bottom, horizalign(right)=right
         align(1.0, 1.0):
         xy(score_x, score_y):
