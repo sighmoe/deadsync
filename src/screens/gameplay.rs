@@ -40,7 +40,6 @@ const MIN_SECONDS_TO_MUSIC: f32 = 2.0;
 
 // Visual Feedback
 const RECEPTOR_GLOW_DURATION: f32 = 0.2; // How long the glow sprite is visible
-const JUDGMENT_DISPLAY_DURATION: f32 = 0.8; // How long "Perfect" etc. stays on screen
 const SHOW_COMBO_AT: u32 = 4; // From Simply Love metrics
 
 // --- JUDGMENT WINDOWS (in seconds) ---
@@ -729,10 +728,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             };
 
             let offset_sec = judgment.time_error_ms / 1000.0;
-            let tilt_multiplier = 1.0;
-            let offset_rot = offset_sec.abs().min(0.050) * 300.0 * tilt_multiplier;
-            let direction = if offset_sec < 0.0 { -1.0 } else { 1.0 };
-            let rot = if judgment.grade == JudgeGrade::Miss { 0.0 } else { direction * offset_rot };
 
             // Frame selection (skip white fantastic row)
             let mut frame_base = judgment.grade as usize;

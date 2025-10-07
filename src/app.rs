@@ -7,7 +7,7 @@ use crate::core::font;
 use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, Screen as CurrentScreen, ScreenAction};
-use crate::core::song_loading::{self, ChartData, SongData};
+use crate::core::song_loading::{self, ChartData};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,

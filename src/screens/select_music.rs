@@ -7,6 +7,7 @@ use crate::ui::color;
 use crate::ui::components::{heart_bg, pad_display, music_wheel};
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::ui::actors::SizeSpec;
+use crate::core::space::is_wide;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::path::PathBuf;
@@ -18,7 +19,7 @@ use log::info;
 use std::fs;
 
 // --- engine imports ---
-use crate::core::space::{is_wide, widescale};
+use crate::core::space::widescale;
 use crate::core::song_loading::{SongData, get_song_cache, ChartData, SongPack};
 
 
@@ -32,7 +33,6 @@ const BANNER_NATIVE_HEIGHT: f32 = 164.0;
 
 // --- Other UI Constants ---
 static UI_BOX_BG_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#1E282F"));
-static DIFFICULTY_DISPLAY_INNER_BOX_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#0f0f0f"));
 pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
 const SELECTION_ANIMATION_CYCLE_DURATION: f32 = 1.0;
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
@@ -1174,13 +1174,14 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     for (row_num, row_i) in (-2..=2).zip(0..5) {
         let y_off = (28.0 + 2.0) * (row_num as f32); // -60, -30, 0, +30, +60
 
+        let inner_c = color::rgba_hex("#0f0f0f");
         // Square background (#0f0f0f), 28x28
         actors.push(act!(quad:
             align(0.5, 0.5):
             xy(panel_cx, panel_cy + y_off):
             setsize(28.0, 28.0):
             z(121):
-            diffuse(0.0588, 0.0588, 0.0588, 1.0) // #0f0f0f
+            diffuse(inner_c[0], inner_c[1], inner_c[2], inner_c[3])
         ));
 
         // Meter text, centered, zoom 0.45

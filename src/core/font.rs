@@ -675,7 +675,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
     let raw_line_map = harvest_raw_line_entries_from_text(&ini_text);
 
     let prefix = ini_path.file_stem().unwrap().to_str().unwrap();
-    let mut texture_paths = list_texture_pages(font_dir, prefix)?;
+    let texture_paths = list_texture_pages(font_dir, prefix)?;
     if texture_paths.is_empty() {
         return Err(format!("No texture pages found for font '{}'", ini_path_str).into());
     }
@@ -923,7 +923,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
         // SM extra pixels (+1/+1, left forced even)
         let mut draw_left = settings.draw_extra_pixels_left + 1;
-        let mut draw_right = settings.draw_extra_pixels_right + 1;
+        let draw_right = settings.draw_extra_pixels_right + 1;
         if draw_left % 2 != 0 {
             draw_left += 1;
         }
