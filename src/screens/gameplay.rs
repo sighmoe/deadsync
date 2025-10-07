@@ -495,6 +495,48 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
     let pixels_per_second = screen_height() / SCROLL_SPEED_SECONDS;
 
+    // --- Banner (1:1 with Simply Love, including parent frame logic) ---
+    if let Some(banner_path) = &state.song.banner_path {
+        // The key in the texture_manager for a dynamic banner is its path.
+        let banner_key = banner_path.to_string_lossy().into_owned();
+        let wide = is_wide();
+
+        // --- Replicate the parent ActorFrame positioning from default.lua ---
+
+        // 1. Root side-pane position (for Player 1)
+        let sidepane_center_x = screen_width() * 0.75;
+        let sidepane_center_y = screen_center_y() + 80.0;
+
+        // 2. 'BannerAndData' container zoom (same logic as judgment pane)
+        let note_field_is_centered = (playfield_center_x - screen_center_x()).abs() < 1.0;
+        let is_ultrawide = screen_width() / screen_height() > (21.0 / 9.0);
+        let banner_data_zoom = if note_field_is_centered && wide && !is_ultrawide {
+            let ar = screen_width() / screen_height();
+            let t = ((ar - (16.0 / 10.0)) / ((16.0 / 9.0) - (16.0 / 10.0))).clamp(0.0, 1.0);
+            0.825 + (0.925 - 0.825) * t
+        } else {
+            1.0
+        };
+
+        // 3. Banner's local position from Banner.lua, with override
+        let mut local_banner_x = 70.0;
+        if note_field_is_centered && wide {
+            local_banner_x = 72.0;
+        }
+        let local_banner_y = -200.0;
+
+        // 4. Calculate final world position and zoom
+        let banner_x = sidepane_center_x + (local_banner_x * banner_data_zoom);
+        let banner_y = sidepane_center_y + (local_banner_y * banner_data_zoom);
+        let final_zoom = 0.4 * banner_data_zoom;
+
+         actors.push(act!(sprite(banner_key):
+            align(0.5, 0.5): xy(banner_x, banner_y):
+            setsize(418.0, 164.0): zoom(final_zoom):
+            z(-50)
+         ));
+    }
+
     if let Some(ns) = &state.noteskin {
         // 1. Receptors + glow
         for i in 0..4 {
