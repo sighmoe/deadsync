@@ -924,7 +924,7 @@ fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
 
     // 2. Local offsets for this specific pane (from HoldsMinesRolls.lua) for Player 1.
     let local_x = 155.0;
-    let local_y = -140.0;
+    let local_y = -112.0;
 
     // 3. Calculate final world position for the frame's anchor by applying local offsets
     //    relative to the parent, scaled by the parent's zoom.
