@@ -886,6 +886,146 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     
     // 10. Step Statistics Side Pane (P1)
     actors.extend(build_side_pane(state));
+ 
+    // 11. Holds/Mines/Rolls Pane (P1)
+    actors.extend(build_holds_mines_rolls_pane(state));
+
+    actors
+}
+
+/// Builds the Holds/Mines/Rolls pane, positioned below the banner in the side pane.
+fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
+    // This pane is only shown for single player on a wide screen, mirroring the most common SL case.
+    if !is_wide() {
+        return vec![];
+    }
+    let mut actors = Vec::new();
+
+    // --- Parent Positioning (from default.lua and HoldsMinesRolls.lua) ---
+    // 1. Get the side pane's root position and zoom, which this pane is a child of.
+    //    This is the same logic as the banner and judgment counters.
+    let sidepane_center_x = screen_width() * 0.75;
+    let sidepane_center_y = screen_center_y() + 80.0;
+
+    let logical_screen_width = screen_width();
+    let clamped_width = logical_screen_width.clamp(640.0, 854.0);
+    let nf_center_x = screen_center_x() - (clamped_width * 0.25);
+    let note_field_is_centered = (nf_center_x - screen_center_x()).abs() < 1.0;
+
+    let is_ultrawide = screen_width() / screen_height() > (21.0 / 9.0);
+
+    let banner_data_zoom = if note_field_is_centered && is_wide() && !is_ultrawide {
+        let ar = screen_width() / screen_height();
+        let t = ((ar - (16.0 / 10.0)) / ((16.0 / 9.0) - (16.0 / 10.0))).clamp(0.0, 1.0);
+        0.825 + (0.925 - 0.825) * t
+    } else {
+        1.0
+    };
+
+    // 2. Local offsets for this specific pane (from HoldsMinesRolls.lua) for Player 1.
+    let local_x = 155.0;
+    let local_y = -140.0;
+
+    // 3. Calculate final world position for the frame's anchor by applying local offsets
+    //    relative to the parent, scaled by the parent's zoom.
+    let frame_cx = sidepane_center_x + (local_x * banner_data_zoom);
+    let frame_cy = sidepane_center_y + (local_y * banner_data_zoom);
+
+    // The children within this frame will be scaled by this parent zoom factor.
+    let frame_zoom = banner_data_zoom;
+
+    // --- Data & Formatting ---
+    let categories = [
+        ("Holds", state.chart.stats.holds),
+        ("Mines", state.chart.stats.mines),
+        ("Rolls", state.chart.stats.rolls),
+    ];
+
+    let largest_count = categories.iter().map(|(_, count)| *count).max().unwrap_or(0);
+    let digits_needed = if largest_count == 0 { 1 } else { (largest_count as f32).log10().floor() as usize + 1 };
+    let digits_to_fmt = digits_needed.clamp(3, 4);
+
+    let row_height = 28.0 * frame_zoom;
+
+    let mut children = Vec::new();
+
+    font::with_font("wendy_screenevaluation", |font| {
+        let value_zoom = 0.4 * frame_zoom;
+        let label_zoom = 0.833 * frame_zoom;
+        let gray = color::rgba_hex("#5A6166");
+        let white = [1.0, 1.0, 1.0, 1.0];
+
+        // Width of a single digit in the monospace font, scaled.
+        let digit_width = font::measure_line_width_logical(font, "0") as f32 * value_zoom;
+        if digit_width <= 0.0 { return; }
+
+        // Calculate total width of the "000/000" string to position the label.
+        // The width of '/' is approximated as one digit.
+        let value_block_width = ((digits_to_fmt * 2) + 1) as f32 * digit_width;
+
+        for (i, (label_text, count)) in categories.iter().enumerate() {
+            let item_y = (i as f32 - 1.0) * row_height; // y relative to frame center
+
+            // Value text (e.g., "000/123") is right-aligned at the frame's center.
+            // We build it from right-to-left.
+            let mut cursor_x = 0.0;
+
+            // Part 3: The "possible" count (e.g., 123)
+            let possible_str = format!("{:0width$}", count, width = digits_to_fmt);
+            let first_nonzero = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
+
+            for (char_idx, ch) in possible_str.chars().rev().enumerate() {
+                let is_leading_zero = (digits_to_fmt - 1 - char_idx) < first_nonzero;
+                let color = if is_leading_zero { gray } else { white };
+                children.push(act!(text:
+                    font("wendy_screenevaluation"): settext(ch.to_string()):
+                    align(1.0, 0.5): xy(cursor_x, item_y):
+                    zoom(value_zoom): diffuse(color[0], color[1], color[2], color[3])
+                ));
+                cursor_x -= digit_width;
+            }
+
+            // Part 2: The slash
+            children.push(act!(text:
+                font("wendy_screenevaluation"): settext("/"):
+                align(1.0, 0.5): xy(cursor_x, item_y):
+                zoom(value_zoom): diffuse(gray[0], gray[1], gray[2], gray[3])
+            ));
+            cursor_x -= digit_width;
+
+            // Part 1: The "achieved" count (always "000..." for now)
+            let achieved_str = format!("{:0width$}", 0, width = digits_to_fmt);
+            for ch in achieved_str.chars().rev() {
+                children.push(act!(text:
+                    font("wendy_screenevaluation"): settext(ch.to_string()):
+                    align(1.0, 0.5): xy(cursor_x, item_y):
+                    zoom(value_zoom): diffuse(gray[0], gray[1], gray[2], gray[3])
+                ));
+                cursor_x -= digit_width;
+            }
+
+            // Now render the label, positioned relative to the value block.
+            // In Lua, it's `x(-10 - offset)`.
+            let label_x = -value_block_width - (10.0 * frame_zoom);
+            children.push(act!(text:
+                font("miso"): settext(*label_text):
+                align(1.0, 0.5): xy(label_x, item_y):
+                zoom(label_zoom): diffuse(white[0], white[1], white[2], white[3])
+            ));
+        }
+    });
+
+    // We don't have live judgment updates yet, so the "achieved" part is always 0.
+    // The structure is now in place for when that data becomes available.
+
+    actors.push(Actor::Frame {
+        align: [0.5, 0.5],
+        offset: [frame_cx, frame_cy],
+        size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)], // Frame is just a grouping anchor
+        children,
+        background: None,
+        z: 120, // Same Z as the main stat pane
+    });
 
     actors
 }
@@ -1001,7 +1141,7 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
             let label_world_y = world_y + (1.0 * final_text_base_zoom);
             let label_zoom = final_text_base_zoom * 0.833;
     
-            // SL keeps labels bright (we’re not implementing disabled-window dim in this file)
+            // SL keeps labels bright
             actors.push(act!(text:
                 font("miso"):
                 settext(info.label):
