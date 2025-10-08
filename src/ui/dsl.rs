@@ -112,8 +112,6 @@ fn build_sprite_like<'a>(
 
     // StepMania zoom (scale factors). Keep signs until we fold to flips.
     let (mut sx, mut sy) = (1.0_f32, 1.0_f32);
-    // NEW: if size remains unknown, we pass this to compose.
-    let mut scale_carry = [1.0_f32, 1.0_f32];
 
     // fold mods in order
     for m in mods {
@@ -253,13 +251,13 @@ fn build_sprite_like<'a>(
     if sy < 0.0 { fy = !fy; sy = -sy; }
 
     // If size is already known, apply zoom now. Else, carry to compose.
-    if w != 0.0 || h != 0.0 {
+    let scale_carry = if w != 0.0 || h != 0.0 {
         w *= sx;
         h *= sy;
-        scale_carry = [1.0, 1.0];
+        [1.0, 1.0]
     } else {
-        scale_carry = [sx, sy];
-    }
+        [sx, sy]
+    };
 
     Actor::Sprite {
         align: [hx, vy],
