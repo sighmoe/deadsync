@@ -402,7 +402,6 @@ fn music_decoder_thread_loop(
             let drop_frames = (preroll_out_frames as usize).min(frames);
             let drop_samples = drop_frames * out_ch;
             if drop_samples > 0 { out_tmp.drain(0..drop_samples); }
-            preroll_out_frames = 0;
         }
 
         let _ = cap_out_frames(&mut out_tmp, out_ch, &mut frames_left_out);
