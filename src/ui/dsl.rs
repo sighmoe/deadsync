@@ -305,7 +305,6 @@ pub fn quad<'a>(mods: &[Mod<'a>], f: &'static str, l: u32, c: u32) -> Actor {
 pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     let (mut x, mut y) = (0.0, 0.0);
     let (mut hx, mut vy) = (0.5, 0.5);
-    let px = 16.0_f32; // internal base pixel height (no public `px` command)
     let mut color = [1.0, 1.0, 1.0, 1.0];
     let mut font: &'static str = "miso";
     let mut content: Cow<'a, str> = Cow::Borrowed("");
@@ -395,7 +394,6 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
     Actor::Text {
         align: [hx, vy],
         offset: [x, y],
-        px,
         color,
         font,
         content: content.into_owned(),
@@ -406,7 +404,6 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
         fit_height: fit_h,
         max_width: max_w,
         max_height: max_h,
-        // NEW flags for order semantics
         max_w_pre_zoom,
         max_h_pre_zoom,
         blend,

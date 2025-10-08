@@ -231,7 +231,6 @@ fn build_actor_recursive(
         actors::Actor::Text {
             align,
             offset,
-            px: _,
             color,
             font,
             content,

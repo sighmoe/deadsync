@@ -67,7 +67,6 @@ pub enum Actor {
     Text {
         align: [f32; 2],         // halign/valign pivot inside line box
         offset: [f32; 2],        // parent top-left space
-        px: f32,                 // base pixel height (before zoom)
         color: [f32; 4],
         font: &'static str,
         content: String,

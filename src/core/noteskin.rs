@@ -58,7 +58,7 @@ pub struct Noteskin {
     pub receptor_off: Vec<SpriteDefinition>,
     pub receptor_glow: Vec<SpriteDefinition>,
     pub column_xs: Vec<i32>,
-    pub hold_y_offsets: [Vec<i32>; 2],
+    #[allow(dead_code)] pub hold_y_offsets: [Vec<i32>; 2], //unused right now, but it's intentional
     pub field_left_x: i32,
     pub field_right_x: i32,
 }
