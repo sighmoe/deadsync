@@ -28,7 +28,6 @@ fn lerp_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
 pub struct MusicWheelParams<'a> {
     pub entries: &'a [MusicWheelEntry],
     pub selected_index: usize,
-    pub active_color_index: i32,
     pub selection_animation_timer: f32,
     pub pack_song_counts: &'a HashMap<String, usize>,
 }

@@ -1210,7 +1210,6 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     actors.extend(music_wheel::build(music_wheel::MusicWheelParams {
         entries: &state.entries,
         selected_index: state.selected_index,
-        active_color_index: state.active_color_index,
         selection_animation_timer: state.selection_animation_timer,
         pack_song_counts: &pack_song_counts,
     }));
