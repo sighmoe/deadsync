@@ -20,7 +20,8 @@ use std::fs;
 
 // --- engine imports ---
 use crate::core::space::widescale;
-use crate::core::song_loading::{SongData, get_song_cache, SongPack};
+use crate::gameplay::song::{SongData, get_song_cache, SongPack};
+use crate::gameplay::chart::ChartData;
 
 
 /* ---------------------------- transitions ---------------------------- */
@@ -75,7 +76,6 @@ pub struct State {
     time_since_selection_change: f32,
 }
 
-// ... (init, handle_key_press, update, etc. functions remain unchanged) ...
 /// Helper function to check if a specific difficulty index has a playable chart
 pub(crate) fn is_difficulty_playable(song: &Arc<SongData>, difficulty_index: usize) -> bool {
     if difficulty_index >= DIFFICULTY_NAMES.len() { return false; }

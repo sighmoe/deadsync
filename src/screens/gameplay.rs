@@ -1,10 +1,11 @@
 use crate::core::input::InputState;
-use crate::core::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
+use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
 use crate::screens::select_music::DIFFICULTY_NAMES;
-use crate::core::parsing;
-use crate::core::song_loading::{ChartData, SongData};
+use crate::gameplay::parsing::notes as note_parser; // Renamed to avoid ambiguity
+use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType}; // Import NoteType directly
+use crate::gameplay::song::SongData;
 use crate::core::space::*;
-use crate::core::timing::TimingData;
+use crate::gameplay::timing::TimingData;
 use crate::core::audio;
 use crate::screens::{Screen, ScreenAction};
 use crate::core::space::{is_wide, widescale};
@@ -20,7 +21,6 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-// FIX: for precise width measurement of zero/tail without overlap
 use crate::core::font;
 
 
@@ -171,13 +171,13 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         &chart.notes,
     ));
 
-    let parsed_notes = parsing::simfile::parse_chart_notes(&chart.notes);
+    let parsed_notes = note_parser::parse_chart_notes(&chart.notes); // CHANGED: Use the alias
     let notes: Vec<Note> = parsed_notes.into_iter().filter_map(|(row_index, column, raw_note_type)| {
         timing.get_beat_for_row(row_index).map(|beat| {
             let note_type = match raw_note_type {
-                parsing::simfile::NoteType::Tap => NoteType::Tap,
-                parsing::simfile::NoteType::Hold => NoteType::Hold,
-                parsing::simfile::NoteType::Roll => NoteType::Roll,
+                ChartNoteType::Tap => NoteType::Tap, // CHANGED: Use the alias
+                ChartNoteType::Hold => NoteType::Hold, // CHANGED: Use the alias
+                ChartNoteType::Roll => NoteType::Roll, // CHANGED: Use the alias
             };
             Note { beat, column, note_type }
         })
