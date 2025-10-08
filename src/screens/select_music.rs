@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::core::font;
+use crate::ui::font; // CHANGED
 use log::info;
 use std::fs;
 

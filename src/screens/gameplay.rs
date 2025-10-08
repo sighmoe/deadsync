@@ -1,8 +1,8 @@
 use crate::core::input::InputState;
 use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
 use crate::screens::select_music::DIFFICULTY_NAMES;
-use crate::gameplay::parsing::notes as note_parser; // Renamed to avoid ambiguity
-use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType}; // Import NoteType directly
+use crate::gameplay::parsing::notes as note_parser;
+use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::song::SongData;
 use crate::core::space::*;
 use crate::gameplay::timing::TimingData;
@@ -21,7 +21,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::core::font;
+use crate::ui::font; // CHANGED
 
 
 // --- CONSTANTS ---

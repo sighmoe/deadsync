@@ -1,7 +1,8 @@
 use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;
-use crate::core::{assets, font};
+use crate::core::assets;
+use crate::ui::font; // CHANGED
 use crate::ui::actors::{self, Actor, SizeSpec};
 use cgmath::{Deg, Matrix4, Vector2, Vector3};
 
