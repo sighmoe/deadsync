@@ -635,7 +635,7 @@ pub fn draw(
 
     // Reserve ring space and write instances directly while building runs.
     let base_first_instance = ensure_instance_ring_capacity(state, needed_instances)?;
-    struct Run { set: vk::DescriptorSet, start: u32, count: u32, blend: BlendMode }
+    struct Run { set: vk::DescriptorSet, start: u32, count: u32 }
 
     let mut runs: Vec<Run> = Vec::new();
     let mut written: u32 = 0;
@@ -645,7 +645,6 @@ pub fn draw(
         let dst_base = state.instance_ring_ptr.add(base_first_instance as usize);
 
         let mut last_set = vk::DescriptorSet::null();
-        let mut last_blend = BlendMode::Alpha;
 
         for obj in &render_list.objects {
             let (texture_id, tint, uv_scale, uv_offset, edge_fade) = match &obj.object_type {
@@ -679,11 +678,10 @@ pub fn draw(
                 },
             );
 
-            // Start or extend a run (group by descriptor set and blend).
-            if runs.is_empty() || set != last_set || obj.blend != last_blend {
-                runs.push(Run { set, start: written, count: 1, blend: obj.blend });
+            // Start or extend a run (group by descriptor set).
+            if runs.is_empty() || set != last_set {
+                runs.push(Run { set, start: written, count: 1 });
                 last_set = set;
-                last_blend = obj.blend;
             } else {
                 if let Some(r) = runs.last_mut() {
                     r.count += 1;
