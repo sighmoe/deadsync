@@ -52,17 +52,15 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
     (vec![actor], TRANSITION_OUT_DURATION)
 }
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
+pub fn get_actors(_state: &State) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(10);
-    let cx = screen_center_x();
-    let cy = screen_center_y();
 
     actors.push(act!(text:
-        align(0.5, 0.0): xy(cx, 20.0):
+        align(0.5, 0.0): xy(screen_center_x(), 20.0):
         zoomtoheight(15.0): font("wendy"): settext("Actor System Sandbox"): horizalign(center)
     ));
     actors.push(act!(text:
-        align(0.5, 0.0): xy(cx, 60.0):
+        align(0.5, 0.0): xy(screen_center_x(), 60.0):
         zoomtoheight(15.0): font("miso"): settext("Press ESC or F4 to return to Menu"): horizalign(center)
     ));
     //actors.push(act!(text:

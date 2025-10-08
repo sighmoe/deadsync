@@ -275,9 +275,8 @@ fn build_actor_recursive(
                         o
                     };
                     obj.blend = *blend;
-                    if let renderer::ObjectType::Sprite { tint, .. } = &mut obj.object_type {
-                        *tint = *color;
-                    }
+                    let renderer::ObjectType::Sprite { tint, .. } = &mut obj.object_type;
+                    *tint = *color;
                 }
                 out.extend(objects);
             }
