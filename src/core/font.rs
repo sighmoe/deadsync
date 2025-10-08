@@ -1017,19 +1017,6 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
 /* ======================= API ======================= */
 
-/// Functional helper (pure): compute total advance for a line (draw units).
-#[inline(always)]
-pub fn measure_line_width(font: &Font, text: &str) -> f32 {
-    text.chars()
-        .map(|c| {
-            font.glyph_map
-                .get(&c)
-                .or(font.default_glyph.as_ref())
-                .map_or(0.0, |g| g.advance)
-        })
-        .sum()
-}
-
 /// StepMania parity: calculates the logical width of a line by summing the integer advances.
 #[inline(always)]
 pub fn measure_line_width_logical(font: &Font, text: &str) -> i32 {
