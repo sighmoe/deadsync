@@ -110,10 +110,8 @@ pub struct State {
     
     // Gameplay state
     pub song_start_instant: Instant, // The wall-clock moment music t=0 begins (after the initial delay).
-    pub start_delay: f32, // The calculated initial pause duration.
     pub current_beat: f32,
     pub current_music_time: f32, // Time calculated at the start of each update frame.
-    pub music_started: bool,
     pub note_cursor: usize,
     pub arrows: [Vec<Arrow>; 4], // Active on-screen arrows per column
     
@@ -199,15 +197,13 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
     // 4. Immediately tell the audio engine to start playing, but with a negative
     //    start time. The audio engine will fill the beginning with silence.
-    let music_started = if let Some(music_path) = &song.music_path {
+    if let Some(music_path) = &song.music_path {
         info!("Starting music with a preroll delay of {:.2}s", start_delay);
         let cut = audio::Cut { start_sec: (-start_delay) as f64, length_sec: f64::INFINITY };
         audio::play_music(music_path.clone(), cut, false);
-        true
     } else {
         warn!("No music path found for song '{}'", song.title);
-        true // Set to true to prevent trying again every frame
-    };
+    }
 
     State {
         song,
@@ -215,10 +211,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         timing,
         notes,
         song_start_instant,
-        start_delay,
         current_beat: 0.0,
         current_music_time: -start_delay, // At screen t=0, music time is negative
-        music_started,
         note_cursor: 0,
         arrows: [vec![], vec![], vec![], vec![]],
         judgment_counts: HashMap::from([
