@@ -91,6 +91,7 @@ pub struct Note {
 pub struct Arrow {
     pub beat: f32,
     pub column: usize,
+    #[allow(dead_code)] // will be used for holds and rolls
     pub note_type: NoteType,
 }
 
