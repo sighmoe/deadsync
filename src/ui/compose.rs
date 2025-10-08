@@ -769,7 +769,6 @@ fn layout_text(
     // 9) Place the block, compute baseline (unchanged)
     let block_left_sm = parent.x + offset[0] - align[0] * block_w_px;
     let block_top_sm  = parent.y + offset[1] - align[1] * block_h_px;
-    let block_center_x = block_left_sm + 0.5 * block_w_px;
     let block_center_y = block_top_sm  + 0.5 * block_h_px;
 
     let i_y0 = lrint_ties_even(-block_h_px * 0.5);
