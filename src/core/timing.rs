@@ -9,7 +9,6 @@ pub struct TimingData {
     /// A pre-calculated mapping from a beat to its precise time in seconds.
     beat_to_time: Arc<Vec<BeatTimePoint>>,
     stops_at_beat: Vec<(f32, f32)>,
-    song_offset_sec: f32,
     global_offset_sec: f32,
 }
 
@@ -88,7 +87,6 @@ impl TimingData {
             row_to_beat: Arc::new(row_to_beat),
             beat_to_time: Arc::new(beat_to_time),
             stops_at_beat,
-            song_offset_sec,
             global_offset_sec,
         }
     }
