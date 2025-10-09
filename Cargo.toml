@@ -1,7 +1,12 @@
 [package]
-name = "new_engine"
-version = "0.0.15"
+name = "deadsync"
+version = "0.1.0"
+authors = ["Patrik Nilsson <perfecttaste@pm.me>"]
 edition = "2024"
+description = "Rust-based ITG engine with switchable Vulkan/OpenGL backends, designed for accurate sync and competitive performance."
+license = "GPL-3.0"
+repository = "https://github.com/pnn64/deadsync"
+keywords = ["deadsync", "stepmania", "itg", "inthegroove", "rhythmgame", "vulkan"]
 
 [dependencies]
 winit = "0.30.12"
