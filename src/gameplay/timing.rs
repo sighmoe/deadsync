@@ -1,4 +1,4 @@
-use rssp::bpm::{parse_bpm_map, normalize_float_digits}; // CHANGED: Removed incorrect `parsing` import
+use rssp::bpm::{parse_bpm_map, normalize_float_digits};
 use log::info;
 use std::sync::Arc;
 
@@ -61,7 +61,7 @@ impl TimingData {
         }
 
         let stops_str = chart_stops.filter(|s| !s.is_empty()).unwrap_or(global_stops);
-        let stops_at_beat = match parsing::simfile::parse_stops(stops_str) {
+        let stops_at_beat = match parse_stops(stops_str) {
             Ok(stops) => stops,
             Err(_) => vec![],
         };
@@ -166,21 +166,16 @@ impl TimingData {
     }
 }
 
-
-mod parsing {
-    pub(super) mod simfile {
-        pub fn parse_stops(s: &str) -> Result<Vec<(f32, f32)>, &'static str> {
-            if s.is_empty() { return Ok(Vec::new()); }
-            s.split(',')
-                .map(|pair| {
-                    let mut parts = pair.split('=');
-                    let beat_str = parts.next().ok_or("Missing beat")?.trim();
-                    let duration_str = parts.next().ok_or("Missing duration")?.trim();
-                    let beat = beat_str.parse::<f32>().map_err(|_| "Invalid beat")?;
-                    let duration = duration_str.parse::<f32>().map_err(|_| "Invalid duration")?;
-                    Ok((beat, duration))
-                })
-                .collect()
-        }
-    }
+fn parse_stops(s: &str) -> Result<Vec<(f32, f32)>, &'static str> {
+    if s.is_empty() { return Ok(Vec::new()); }
+    s.split(',')
+        .map(|pair| {
+            let mut parts = pair.split('=');
+            let beat_str = parts.next().ok_or("Missing beat")?.trim();
+            let duration_str = parts.next().ok_or("Missing duration")?.trim();
+            let beat = beat_str.parse::<f32>().map_err(|_| "Invalid beat")?;
+            let duration = duration_str.parse::<f32>().map_err(|_| "Invalid duration")?;
+            Ok((beat, duration))
+        })
+        .collect()
 }
