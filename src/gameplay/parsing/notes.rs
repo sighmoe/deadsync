@@ -1,12 +1,5 @@
+use crate::gameplay::chart::NoteType;
 use log::info;
-
-// Define a public enum for the parsing result. This decouples the parser from the gameplay screen.
-#[derive(Clone, Debug)]
-pub enum NoteType {
-    Tap,
-    Hold,
-    Roll,
-}
 
 /// Parses the raw, minimized `#NOTES:` data block from `rssp`.
 ///

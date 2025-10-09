@@ -14,13 +14,15 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::core::font;
+use crate::ui::font;
 use log::info;
 use std::fs;
 
 // --- engine imports ---
 use crate::core::space::widescale;
-use crate::core::song_loading::{SongData, get_song_cache, SongPack};
+use crate::gameplay::song::{SongData, get_song_cache, SongPack};
+// use crate::gameplay::chart::ChartData; // <-- This import is unused, you can remove it.
+use crate::assets::AssetManager;
 
 
 /* ---------------------------- transitions ---------------------------- */
@@ -75,7 +77,6 @@ pub struct State {
     time_since_selection_change: f32,
 }
 
-// ... (init, handle_key_press, update, etc. functions remain unchanged) ...
 /// Helper function to check if a specific difficulty index has a playable chart
 pub(crate) fn is_difficulty_playable(song: &Arc<SongData>, difficulty_index: usize) -> bool {
     if difficulty_index >= DIFFICULTY_NAMES.len() { return false; }
@@ -533,7 +534,7 @@ fn format_session_time(seconds_total: f32) -> String {
     }
 }
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
+pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { // <-- CHANGED
     let mut actors = Vec::with_capacity(256);
 
     actors.extend(state.bg.build(heart_bg::Params {
@@ -762,7 +763,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         let step_artist_text = selected_chart_data.as_ref().map_or("".to_string(), |c| c.step_artist.clone());
         let peak_nps_text = selected_chart_data.as_ref().map_or("Peak NPS: --".to_string(), |c| format!("Peak NPS: {:.1}", c.max_nps));
         let breakdown_text = if let Some(chart) = &selected_chart_data {
-            font::with_font("miso", |miso_font| {
+            asset_manager.with_font("miso", |miso_font| {
                 let panel_w = if is_wide() { 286.0 } else { 276.0 };
                 let text_zoom = 0.8;
                 let horizontal_padding = 16.0; // 8px padding on each side

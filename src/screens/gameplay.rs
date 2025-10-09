@@ -1,10 +1,11 @@
 use crate::core::input::InputState;
-use crate::core::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
+use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
 use crate::screens::select_music::DIFFICULTY_NAMES;
-use crate::core::parsing;
-use crate::core::song_loading::{ChartData, SongData};
+use crate::gameplay::parsing::notes as note_parser;
+use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
+use crate::gameplay::song::SongData;
 use crate::core::space::*;
-use crate::core::timing::TimingData;
+use crate::gameplay::timing::TimingData;
 use crate::core::audio;
 use crate::screens::{Screen, ScreenAction};
 use crate::core::space::{is_wide, widescale};
@@ -20,8 +21,8 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-// FIX: for precise width measurement of zero/tail without overlap
-use crate::core::font;
+use crate::ui::font;
+use crate::assets::AssetManager;
 
 
 // --- CONSTANTS ---
@@ -171,13 +172,13 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         &chart.notes,
     ));
 
-    let parsed_notes = parsing::simfile::parse_chart_notes(&chart.notes);
+    let parsed_notes = note_parser::parse_chart_notes(&chart.notes); // CHANGED: Use the alias
     let notes: Vec<Note> = parsed_notes.into_iter().filter_map(|(row_index, column, raw_note_type)| {
         timing.get_beat_for_row(row_index).map(|beat| {
             let note_type = match raw_note_type {
-                parsing::simfile::NoteType::Tap => NoteType::Tap,
-                parsing::simfile::NoteType::Hold => NoteType::Hold,
-                parsing::simfile::NoteType::Roll => NoteType::Roll,
+                ChartNoteType::Tap => NoteType::Tap, // CHANGED: Use the alias
+                ChartNoteType::Hold => NoteType::Hold, // CHANGED: Use the alias
+                ChartNoteType::Roll => NoteType::Roll, // CHANGED: Use the alias
             };
             Note { beat, column, note_type }
         })
@@ -529,7 +530,7 @@ static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyL
 
 // --- DRAWING ---
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
+pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let mut actors = Vec::new();
     
     // --- Playfield Positioning (1:1 with Simply Love) ---
@@ -912,16 +913,16 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     }));
     
     // 10. Step Statistics Side Pane (P1)
-    actors.extend(build_side_pane(state));
+    actors.extend(build_side_pane(state, asset_manager));
  
     // 11. Holds/Mines/Rolls Pane (P1)
-    actors.extend(build_holds_mines_rolls_pane(state));
+    actors.extend(build_holds_mines_rolls_pane(state, asset_manager));
 
     actors
 }
 
 /// Builds the Holds/Mines/Rolls pane, positioned below the banner in the side pane.
-fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
+fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { // <-- CHANGED
     // This pane is only shown for single player on a wide screen, mirroring the most common SL case.
     if !is_wide() {
         return vec![];
@@ -976,7 +977,7 @@ fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
 
     let mut children = Vec::new();
 
-    font::with_font("wendy_screenevaluation", |metrics_font| {
+    asset_manager.with_font("wendy_screenevaluation", |metrics_font| {
         let value_zoom = 0.4 * frame_zoom;
         let label_zoom = 0.833 * frame_zoom;
         let gray = color::rgba_hex("#5A6166");
@@ -1067,7 +1068,7 @@ fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
 }
 
 /// Builds the entire right-side statistics pane, including judgment counters.
-fn build_side_pane(state: &State) -> Vec<Actor> {
+fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { // <-- CHANGED
     // Only show this pane in single-player on a wide screen, mirroring the SL theme's behavior.
     if !is_wide() {
         return vec![];
@@ -1132,7 +1133,7 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
 
     // This block is wrapped in `with_font` to get access to the font metrics needed to
     // simulate a monospace layout with a proportional font, preventing jitter.
-    font::with_font("wendy_screenevaluation", |f| {
+    asset_manager.with_font("wendy_screenevaluation", |f| {
         let numbers_zoom = final_text_base_zoom * 0.5;
         // Determine the width of the widest digit ('0') to use as our fixed cell width.
         let max_digit_w = (font::measure_line_width_logical(f, "0") as f32) * numbers_zoom;

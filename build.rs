@@ -11,7 +11,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=src/core/gfx/shaders");
     println!("cargo:rerun-if-changed=assets");
 
-    // FIX: Compiler::new() returns a Result, so we can use `?` directly.
     let mut compiler = Compiler::new()?;
 
     // OUT_DIR used by include_bytes! in Vulkan source

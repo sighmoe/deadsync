@@ -1,10 +1,4 @@
 pub mod gfx;
 pub mod input;
 pub mod space;
-pub mod song_loading;
-pub mod noteskin;
-pub mod timing;
-pub mod parsing;
 pub mod audio;
-pub mod assets;
-pub mod font;
