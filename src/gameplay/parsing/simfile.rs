@@ -5,7 +5,7 @@ use crate::gameplay::{
 use log::{info, warn};
 use rssp::{analyze, AnalysisOptions};
 use std::fs;
-use std::path::{Path, PathBuf}; // REMOVED UNUSED PathBuf
+use std::path::{Path};
 use std::sync::Arc;
 
 /// Scans the provided root directory (e.g., "songs/") for simfiles,

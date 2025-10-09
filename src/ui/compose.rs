@@ -1,7 +1,7 @@
 use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;
-use crate::core::assets;
+use crate::assets;
 use crate::ui::font; // CHANGED
 use crate::ui::actors::{self, Actor, SizeSpec};
 use cgmath::{Deg, Matrix4, Vector2, Vector3};
@@ -792,7 +792,7 @@ fn layout_text(
         if let Some(&d) = cache.get(key) {
             return d;
         }
-        let d = crate::core::assets::texture_dims(key)
+        let d = assets::texture_dims(key)
             .map_or((1.0_f32, 1.0_f32), |meta| (meta.w as f32, meta.h as f32));
         cache.insert(key, d);
         d

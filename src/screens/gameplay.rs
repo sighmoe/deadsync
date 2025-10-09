@@ -21,7 +21,8 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::ui::font; // CHANGED
+use crate::ui::font;
+use crate::assets::AssetManager;
 
 
 // --- CONSTANTS ---
@@ -529,7 +530,7 @@ static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyL
 
 // --- DRAWING ---
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
+pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let mut actors = Vec::new();
     
     // --- Playfield Positioning (1:1 with Simply Love) ---
@@ -912,16 +913,16 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     }));
     
     // 10. Step Statistics Side Pane (P1)
-    actors.extend(build_side_pane(state));
+    actors.extend(build_side_pane(state, asset_manager));
  
     // 11. Holds/Mines/Rolls Pane (P1)
-    actors.extend(build_holds_mines_rolls_pane(state));
+    actors.extend(build_holds_mines_rolls_pane(state, asset_manager));
 
     actors
 }
 
 /// Builds the Holds/Mines/Rolls pane, positioned below the banner in the side pane.
-fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
+fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { // <-- CHANGED
     // This pane is only shown for single player on a wide screen, mirroring the most common SL case.
     if !is_wide() {
         return vec![];
@@ -976,7 +977,7 @@ fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
 
     let mut children = Vec::new();
 
-    font::with_font("wendy_screenevaluation", |metrics_font| {
+    asset_manager.with_font("wendy_screenevaluation", |metrics_font| {
         let value_zoom = 0.4 * frame_zoom;
         let label_zoom = 0.833 * frame_zoom;
         let gray = color::rgba_hex("#5A6166");
@@ -1067,7 +1068,7 @@ fn build_holds_mines_rolls_pane(state: &State) -> Vec<Actor> {
 }
 
 /// Builds the entire right-side statistics pane, including judgment counters.
-fn build_side_pane(state: &State) -> Vec<Actor> {
+fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { // <-- CHANGED
     // Only show this pane in single-player on a wide screen, mirroring the SL theme's behavior.
     if !is_wide() {
         return vec![];
@@ -1132,7 +1133,7 @@ fn build_side_pane(state: &State) -> Vec<Actor> {
 
     // This block is wrapped in `with_font` to get access to the font metrics needed to
     // simulate a monospace layout with a proportional font, preventing jitter.
-    font::with_font("wendy_screenevaluation", |f| {
+    asset_manager.with_font("wendy_screenevaluation", |f| {
         let numbers_zoom = final_text_base_zoom * 0.5;
         // Determine the width of the widest digit ('0') to use as our fixed cell width.
         let max_digit_w = (font::measure_line_width_logical(f, "0") as f32) * numbers_zoom;
