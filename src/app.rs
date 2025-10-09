@@ -2,12 +2,12 @@ use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList
 use crate::core::input;
 use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
-use crate::core::assets;
-use crate::core::font;
+use crate::assets::AssetManager;
 use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, Screen as CurrentScreen, ScreenAction};
-use crate::core::song_loading::{self, ChartData};
+use crate::gameplay::parsing::simfile as song_loading;
+// use crate::gameplay::chart::ChartData; // <-- REMOVED (unused)
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -16,9 +16,8 @@ use winit::{
     window::Window,
 };
 
-use log::{error, info, warn};
-use image;
-use std::{collections::HashMap, error::Error, path::{Path, PathBuf}, sync::Arc, time::Instant};
+use log::{error, info};
+use std::{error::Error, sync::Arc, time::Instant};
 
 /* -------------------- transition timing constants -------------------- */
 const FADE_OUT_DURATION: f32 = 0.4;
@@ -39,7 +38,7 @@ pub struct App {
     window: Option<Arc<Window>>,
     backend: Option<renderer::Backend>,
     backend_type: BackendType,
-    texture_manager: HashMap<String, renderer::Texture>,
+    asset_manager: AssetManager,
     current_screen: CurrentScreen,
     menu_state: menu::State,
     gameplay_state: Option<gameplay::State>,
@@ -64,8 +63,6 @@ pub struct App {
     sandbox_state: sandbox::State,
     evaluation_state: evaluation::State,
     session_start_time: Option<Instant>,
-    current_dynamic_banner: Option<(String, PathBuf)>,
-    current_density_graph: Option<(String, String)>,
     display_width: u32,
     display_height: u32,
 }
@@ -100,11 +97,11 @@ impl App {
         let mut init_state = init::init();
         init_state.active_color_index = color_index;
 
-        let mut evaluation_state = evaluation::init(); // <-- ADD THESE LINES
+        let mut evaluation_state = evaluation::init();
         evaluation_state.active_color_index = color_index;
 
         Self {
-            window: None, backend: None, backend_type, texture_manager: HashMap::new(),
+            window: None, backend: None, backend_type, asset_manager: AssetManager::new(),
             current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: None, options_state,
             select_color_state, select_music_state, sandbox_state: sandbox::init(), evaluation_state,
             input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
@@ -112,235 +109,8 @@ impl App {
             vsync_enabled, fullscreen_enabled, show_overlay, last_fps: 0.0, last_vpf: 0, 
             current_frame_vpf: 0, transition: TransitionState::Idle,
             session_start_time: None,
-            current_dynamic_banner: None,
-            current_density_graph: None,
             display_width,
             display_height,
-        }
-    }
-
-    fn load_textures(&mut self) -> Result<(), Box<dyn Error>> {
-        info!("Loading textures...");
-        let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
-
-        #[inline(always)]
-        fn fallback_rgba() -> image::RgbaImage {
-            let data: [u8; 16] = [
-                255, 0,   255, 255,   128, 128, 128, 255,
-                128, 128, 128, 255,   255, 0,   255, 255,
-            ];
-            image::RgbaImage::from_raw(2, 2, data.to_vec()).expect("fallback image")
-        }
-
-        {
-            let white = image::RgbaImage::from_raw(1, 1, vec![255, 255, 255, 255]).unwrap();
-            let white_tex = renderer::create_texture(backend, &white)?;
-            self.texture_manager.insert("__white".to_string(), white_tex);
-            assets::register_texture_dims("__white", 1, 1); // NEW
-            info!("Loaded built-in texture: __white");
-        }
-
-        let textures_to_load: Vec<(&'static str, &'static str)> = vec![
-            ("logo.png", "logo.png"), ("init_arrow.png", "init_arrow.png"),
-            ("dance.png", "dance.png"), ("meter_arrow.png", "meter_arrow.png"), ("rounded-square.png", "rounded-square.png"),
-            ("swoosh.png", "swoosh.png"),
-            ("heart.png", "heart.png"), ("banner1.png", "_fallback/banner1.png"),
-            ("banner2.png", "_fallback/banner2.png"), ("banner3.png", "_fallback/banner3.png"),
-            ("banner4.png", "_fallback/banner4.png"), ("banner5.png", "_fallback/banner5.png"),
-            ("banner6.png", "_fallback/banner6.png"), ("banner7.png", "_fallback/banner7.png"),
-            ("banner8.png", "_fallback/banner8.png"), ("banner9.png", "_fallback/banner9.png"),
-            ("banner10.png", "_fallback/banner10.png"), ("banner11.png", "_fallback/banner11.png"),
-            ("banner12.png", "_fallback/banner12.png"),
-            ("noteskins/metal/tex notes.png", "noteskins/metal/tex notes.png"),
-            ("noteskins/metal/tex receptors.png", "noteskins/metal/tex receptors.png"),
-            ("noteskins/metal/tex glow.png", "noteskins/metal/tex glow.png"),
-            ("judgements/Love 2x7 (doubleres).png", "judgements/Love 2x7 (doubleres).png"),
-        ];
-
-        let mut handles = Vec::with_capacity(textures_to_load.len());
-        for &(key, relative_path) in &textures_to_load {
-            let path = if relative_path.starts_with("noteskins/") {
-                Path::new("assets").join(relative_path)
-            } else {
-                Path::new("assets/graphics").join(relative_path)
-            };
-            handles.push(std::thread::spawn(move || {
-                match image::open(&path) {
-                    Ok(img) => Ok::<(&'static str, image::RgbaImage), (&'static str, String)>((key, img.to_rgba8())),
-                    Err(e) => Err((key, e.to_string())),
-                }
-            }));
-        }
-
-        let fallback_image = std::sync::Arc::new(fallback_rgba());
-        for h in handles {
-            match h.join().expect("texture decode thread panicked") {
-                Ok((key, rgba)) => {
-                    let texture = renderer::create_texture(backend, &rgba)?;
-                    self.texture_manager.insert(key.to_string(), texture);
-                    assets::register_texture_dims(key, rgba.width(), rgba.height()); // NEW
-                    info!("Loaded texture: {}", key);
-                }
-                Err((key, msg)) => {
-                    warn!("Failed to load texture for key '{}': {}. Using fallback.", key, msg);
-                    let texture = renderer::create_texture(backend, &fallback_image)?;
-                    self.texture_manager.insert(key.to_string(), texture);
-                    assets::register_texture_dims(key, fallback_image.width(), fallback_image.height()); // NEW
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn load_fonts(&mut self) -> Result<(), Box<dyn Error>> {
-        for &name in &["wendy", "miso", "wendy_monospace_numbers", "wendy_screenevaluation", "wendy_combo"] {
-            self.load_font_asset(name)?;
-        }
-        Ok(())
-    }
-
-    fn load_font_asset(&mut self, name: &'static str) -> Result<(), Box<dyn std::error::Error>> {
-        let ini_path_str = match name {
-            "wendy" => "assets/fonts/wendy/_wendy small.ini".to_string(),
-            "miso"  => "assets/fonts/miso/_miso light.ini".to_string(),
-            "wendy_monospace_numbers" => "assets/fonts/wendy/_wendy monospace numbers.ini".to_string(),
-            "wendy_screenevaluation" => "assets/fonts/wendy/_ScreenEvaluation numbers.ini".to_string(),
-            "wendy_combo" => "assets/fonts/_combo/wendy/Wendy.ini".to_string(),
-            _ => return Err(format!("Unknown font name: {}", name).into()),
-        };
-
-        let load_data = font::parse(&ini_path_str)?;
-        let backend = self.backend.as_mut().ok_or("Backend not initialized")?;
-
-        for tex_path in &load_data.required_textures {
-            // Must match font::parse: use canonical key
-            let key = crate::core::assets::canonical_texture_key(tex_path);
-
-            if !self.texture_manager.contains_key(&key) {
-                let image_data = image::open(tex_path)?.to_rgba8();
-                let texture = renderer::create_texture(backend, &image_data)?;
-                crate::core::assets::register_texture_dims(&key, image_data.width(), image_data.height());
-                self.texture_manager.insert(key.clone(), texture);
-                log::info!("Loaded font texture: {}", key);
-            }
-        }
-
-        font::register_font(name, load_data.font);
-        log::info!("Loaded font '{}' from '{}'", name, ini_path_str);
-        Ok(())
-    }
-
-    fn destroy_current_dynamic_banner(&mut self) {
-        if let Some((key, _path)) = self.current_dynamic_banner.take() {
-            if let Some(backend) = self.backend.as_mut() {
-                if let renderer::Backend::Vulkan(vk_state) = backend {
-                    if let Some(device) = &vk_state.device {
-                        unsafe { let _ = device.device_wait_idle(); }
-                    }
-                }
-            }
-            self.texture_manager.remove(&key);
-        }
-    }
-
-    fn destroy_current_density_graph(&mut self) {
-        if let Some((key, _hash)) = self.current_density_graph.take() {
-            if let Some(backend) = self.backend.as_mut() {
-                if let renderer::Backend::Vulkan(vk_state) = backend {
-                    if let Some(device) = &vk_state.device {
-                        unsafe { let _ = device.device_wait_idle(); }
-                    }
-                }
-            }
-            self.texture_manager.remove(&key);
-        }
-    }
-
-    fn set_dynamic_banner(&mut self, path_opt: Option<PathBuf>) -> String {
-        if let Some(path) = path_opt {
-            if self.current_dynamic_banner.as_ref().map_or(false, |(_, p)| p == &path) {
-                return self.current_dynamic_banner.as_ref().unwrap().0.clone();
-            }
-
-            self.destroy_current_dynamic_banner();
-
-            let backend = match self.backend.as_mut() {
-                Some(b) => b,
-                None => return "banner1.png".to_string(),
-            };
-
-            match image::open(&path) {
-                Ok(img) => {
-                    let rgba = img.to_rgba8();
-                    match renderer::create_texture(backend, &rgba) {
-                        Ok(texture) => {
-                            let key = path.to_string_lossy().into_owned();
-                            self.texture_manager.insert(key.clone(), texture);
-                            assets::register_texture_dims(&key, rgba.width(), rgba.height()); // NEW
-                            self.current_dynamic_banner = Some((key.clone(), path));
-                            key
-                        }
-                        Err(e) => {
-                            warn!("Failed to create GPU texture for {:?}: {}. Using fallback.", path, e);
-                            "banner1.png".to_string()
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to open banner image {:?}: {}. Using fallback.", path, e);
-                    "banner1.png".to_string()
-                }
-            }
-        } else {
-            self.destroy_current_dynamic_banner();
-            "banner1.png".to_string()
-        }
-    }
-
-    fn set_density_graph(&mut self, chart_opt: Option<&ChartData>) -> String {
-        const FALLBACK_KEY: &str = "__white";
-
-        if let Some(chart) = chart_opt {
-            if self.current_density_graph.as_ref().map_or(false, |(_, h)| h == &chart.short_hash) {
-                return self.current_density_graph.as_ref().unwrap().0.clone();
-            }
-
-            self.destroy_current_density_graph();
-            
-            if let Some(graph_data) = &chart.density_graph {
-                let backend = match self.backend.as_mut() {
-                    Some(b) => b,
-                    None => return FALLBACK_KEY.to_string(),
-                };
-
-                let rgba_image = match image::RgbaImage::from_raw(graph_data.width, graph_data.height, graph_data.data.clone()) {
-                    Some(img) => img,
-                    None => {
-                        warn!("Failed to create RgbaImage from raw graph data for chart hash '{}'. Using fallback.", chart.short_hash);
-                        return FALLBACK_KEY.to_string();
-                    }
-                };
-
-                match renderer::create_texture(backend, &rgba_image) {
-                    Ok(texture) => {
-                        let key = chart.short_hash.clone();
-                        self.texture_manager.insert(key.clone(), texture);
-                        assets::register_texture_dims(&key, rgba_image.width(), rgba_image.height()); // NEW
-                        self.current_density_graph = Some((key.clone(), chart.short_hash.clone()));
-                        key
-                    }
-                    Err(e) => {
-                        warn!("Failed to create GPU texture for density graph ('{}'): {}. Using fallback.", chart.short_hash, e);
-                        FALLBACK_KEY.to_string()
-                    }
-                }
-            } else {
-                self.destroy_current_density_graph();
-                FALLBACK_KEY.to_string()
-            }
-        } else {
-            self.destroy_current_density_graph();
-            FALLBACK_KEY.to_string()
         }
     }
 
@@ -350,8 +120,6 @@ impl App {
                 let from = self.current_screen;
                 let to = screen;
 
-                // Special case: The Init screen handles its own out-transition (the bar squish).
-                // We just need to switch the screen and start the Menu's in-transition.
                 if from == CurrentScreen::Init && to == CurrentScreen::Menu {
                     info!("Instant navigation Init→Menu (out-transition handled by Init screen)");
                     self.current_screen = screen;
@@ -385,14 +153,14 @@ impl App {
                 event_loop.exit();
             }
             ScreenAction::RequestBanner(_) => {}
-            ScreenAction::RequestDensityGraph(_) => {} // This action is handled in RedrawRequested
+            ScreenAction::RequestDensityGraph(_) => {}
             ScreenAction::None => {}
         }
         Ok(())
     }
 
     fn build_screen(&self, actors: &[Actor], clear_color: [f32; 4], total_elapsed: f32) -> RenderList {
-        font::with_fonts(|fonts| {
+        self.asset_manager.with_fonts(|fonts| {
             crate::ui::compose::build_screen(actors, clear_color, &self.metrics, fonts, total_elapsed)
         })
     }
@@ -416,18 +184,18 @@ impl App {
         }
 
         let mut actors = match self.current_screen {
-            CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier),
+            CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier), // <-- CHANGED
             CurrentScreen::Gameplay => {
                 if let Some(gs) = &self.gameplay_state {
-                    gameplay::get_actors(gs)
+                    gameplay::get_actors(gs, &self.asset_manager)
                 } else { vec![] }
             },
             CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
             CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, screen_alpha_multiplier),
-            CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state),
+            CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state, &self.asset_manager),
             CurrentScreen::Sandbox  => sandbox::get_actors(&self.sandbox_state),
             CurrentScreen::Init     => init::get_actors(&self.init_state),
-            CurrentScreen::Evaluation => evaluation::get_actors(&self.evaluation_state),
+            CurrentScreen::Evaluation => evaluation::get_actors(&self.evaluation_state), // <-- CHANGED
         };
 
         if self.show_overlay {
@@ -435,8 +203,6 @@ impl App {
             actors.extend(overlay);
         }
 
-        // The new tween-based transition actors handle fades.
-        // We add them here from the state.
         match &self.transition {
             TransitionState::FadingOut { actors: out_actors, .. } => {
                 actors.extend(out_actors.clone());
@@ -472,7 +238,7 @@ impl App {
             CurrentScreen::SelectMusic => select_music::in_transition(),
             CurrentScreen::Sandbox => sandbox::in_transition(),
             CurrentScreen::Evaluation => evaluation::in_transition(),
-            CurrentScreen::Init => (vec![], 0.0), // Init screen has no "in" transition
+            CurrentScreen::Init => (vec![], 0.0),
         }
     }
 
@@ -525,11 +291,12 @@ impl App {
         let sz = window.inner_size();
         self.metrics = crate::core::space::metrics_for_window(sz.width, sz.height);
         crate::core::space::set_current_metrics(self.metrics);
-        let backend = create_backend(self.backend_type, window.clone(), self.vsync_enabled)?;
+        let mut backend = create_backend(self.backend_type, window.clone(), self.vsync_enabled)?;
+        
+        self.asset_manager.load_initial_assets(&mut backend)?;
+
         self.window = Some(window);
         self.backend = Some(backend);
-        self.load_textures()?;
-        self.load_fonts()?;
         info!("Starting event loop...");
         Ok(())
     }
@@ -621,10 +388,8 @@ impl ApplicationHandler for App {
                 let total_elapsed = now.duration_since(self.start_time).as_secs_f32();
                 crate::ui::runtime::tick(delta_time);
 
-                // This value will be populated only when the FadingOut transition finishes.
                 let mut finished_fading_out_to: Option<CurrentScreen> = None;
 
-                // Handle state updates and most transitions within the match.
                 match &mut self.transition {
                     TransitionState::FadingOut { elapsed, duration, target, .. } => {
                         *elapsed += delta_time;
@@ -678,9 +443,7 @@ impl ApplicationHandler for App {
                     TransitionState::Idle => {
                         match self.current_screen {
                             CurrentScreen::Gameplay => if let Some(gs) = &mut self.gameplay_state {
-                                // CAPTURE THE ACTION RETURNED BY UPDATE
                                 let action = gameplay::update(gs, &self.input_state, delta_time);
-                                // HANDLE THE ACTION
                                 if let ScreenAction::Navigate(_) | ScreenAction::Exit = action.clone() {
                                     if self.handle_action(action, event_loop).is_err() {}
                                 }
@@ -706,27 +469,27 @@ impl ApplicationHandler for App {
                                 if let Some(start) = self.session_start_time {
                                     self.select_music_state.session_elapsed = now.duration_since(start).as_secs_f32();
                                 }
-                            let action = select_music::update(&mut self.select_music_state, delta_time);
-                                match action {
-                                    ScreenAction::RequestBanner(path_opt) => {
-                                        if let Some(path) = path_opt {
-                                            // If a specific banner path is provided (from a song or pack), load it.
-                                            let key = self.set_dynamic_banner(Some(path));
-                                            self.select_music_state.current_banner_key = key;
-                                        } else {
-                                            // Otherwise, fall back to a theme-colored banner.
-                                            self.destroy_current_dynamic_banner(); // Ensure no custom banner is active.
-                                            let color_index = self.select_music_state.active_color_index;
-                                            let banner_num = color_index.rem_euclid(12) + 1; // Wrap index to 1-12 range
-                                            let key = format!("banner{}.png", banner_num);
-                                            self.select_music_state.current_banner_key = key;
+                                let action = select_music::update(&mut self.select_music_state, delta_time);
+                                if let Some(backend) = self.backend.as_mut() {
+                                    match action {
+                                        ScreenAction::RequestBanner(path_opt) => {
+                                            if let Some(path) = path_opt {
+                                                let key = self.asset_manager.set_dynamic_banner(backend, Some(path));
+                                                self.select_music_state.current_banner_key = key;
+                                            } else {
+                                                self.asset_manager.destroy_dynamic_assets(backend);
+                                                let color_index = self.select_music_state.active_color_index;
+                                                let banner_num = color_index.rem_euclid(12) + 1;
+                                                let key = format!("banner{}.png", banner_num);
+                                                self.select_music_state.current_banner_key = key;
+                                            }
                                         }
+                                        ScreenAction::RequestDensityGraph(chart_opt) => {
+                                            let key = self.asset_manager.set_density_graph(backend, chart_opt.as_ref());
+                                            self.select_music_state.current_graph_key = key;
+                                        }
+                                        _ => { let _ = self.handle_action(action, event_loop); },
                                     }
-                                    ScreenAction::RequestDensityGraph(chart_opt) => {
-                                        let key = self.set_density_graph(chart_opt.as_ref());
-                                        self.select_music_state.current_graph_key = key;
-                                    }
-                                    _ => { let _ = self.handle_action(action, event_loop); },
                                 }
                             }
                             _ => {}
@@ -795,13 +558,11 @@ impl ApplicationHandler for App {
                     }
 
                     if target == CurrentScreen::SelectMusic {
-                        // Start the session timer if it hasn't been started yet.
                         if self.session_start_time.is_none() {
                             self.session_start_time = Some(Instant::now());
                             info!("Session timer started.");
                         }
 
-                        // If we are coming from anywhere EXCEPT gameplay, reset the music wheel state.
                         if prev != CurrentScreen::Gameplay {
                             let current_color_index = self.select_music_state.active_color_index;
                             self.select_music_state = select_music::init();
@@ -825,7 +586,7 @@ impl ApplicationHandler for App {
                 self.update_fps_title(&window, now);
 
                 if let Some(backend) = &mut self.backend {
-                    match renderer::draw(backend, &screen, &self.texture_manager) {
+                    match renderer::draw(backend, &screen, &self.asset_manager.textures) {
                         Ok(vpf) => self.current_frame_vpf = vpf,
                         Err(e) => {
                             error!("Failed to draw frame: {}", e);
@@ -845,10 +606,9 @@ impl ApplicationHandler for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.destroy_current_dynamic_banner();
-        self.destroy_current_density_graph();
         if let Some(backend) = &mut self.backend {
-            renderer::dispose_textures(backend, &mut self.texture_manager);
+            self.asset_manager.destroy_dynamic_assets(backend);
+            renderer::dispose_textures(backend, &mut self.asset_manager.textures);
             renderer::cleanup(backend);
         }
     }

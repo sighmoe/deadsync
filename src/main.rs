@@ -3,6 +3,8 @@ mod ui;
 mod screens;
 mod app;
 mod config;
+mod gameplay;
+mod assets;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     config::load();

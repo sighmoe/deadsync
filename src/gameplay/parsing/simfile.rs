@@ -1,61 +1,12 @@
+use crate::gameplay::{
+    chart::ChartData,
+    song::{set_song_cache, SongData, SongPack},
+};
 use log::{info, warn};
 use rssp::{analyze, AnalysisOptions};
-use rssp::graph::GraphImageData;
 use std::fs;
-use std::path::{Path, PathBuf};
-use rssp::stats::ArrowStats;
-use std::sync::{Arc, Mutex};
-use once_cell::sync::Lazy;
-
-// --- Data Structures representing a loaded song ---
-
-#[derive(Clone, Debug)]
-pub struct SongData {
-    pub title: String,
-    pub subtitle: String,
-    pub artist: String,
-    pub banner_path: Option<PathBuf>,
-    pub background_path: Option<PathBuf>,
-    pub music_path: Option<PathBuf>,
-    pub offset: f32,
-    pub sample_start: Option<f32>,
-    pub sample_length: Option<f32>,
-    pub min_bpm: f64,
-    pub max_bpm: f64,
-    pub normalized_bpms: String,
-    pub total_length_seconds: i32,
-    pub charts: Vec<ChartData>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ChartData {
-    pub chart_type: String,
-    pub difficulty: String,
-    pub meter: u32,
-    pub step_artist: String,
-    pub notes: Vec<u8>, // This is the minimized raw data we will parse
-    pub density_graph: Option<GraphImageData>,
-    pub short_hash: String,
-    pub stats: ArrowStats,
-    pub total_streams: u32,
-    pub max_nps: f64,
-    pub detailed_breakdown: String,
-    pub partial_breakdown: String,
-    pub simple_breakdown: String,
-    pub total_measures: usize,
-}
-
-#[derive(Clone, Debug)]
-pub struct SongPack {
-    pub name: String,
-    pub songs: Vec<Arc<SongData>>,
-}
-
-// --- Global Song Cache ---
-
-// This static variable will hold all loaded song data. It's initialized once
-// when first accessed, and the Mutex ensures safe access.
-static SONG_CACHE: Lazy<Mutex<Vec<SongPack>>> = Lazy::new(|| Mutex::new(Vec::new()));
+use std::path::{Path};
+use std::sync::Arc;
 
 /// Scans the provided root directory (e.g., "songs/") for simfiles,
 /// parses them, and populates the global cache. This should be run once at startup.
@@ -140,7 +91,7 @@ pub fn scan_and_load_songs(root_path_str: &'static str) {
     loaded_packs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
     info!("Finished scan. Found {} packs.", loaded_packs.len());
-    *SONG_CACHE.lock().unwrap() = loaded_packs;
+    set_song_cache(loaded_packs);
 }
 
 /// Helper function to parse a single simfile.
@@ -216,9 +167,4 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
         total_length_seconds: summary.total_length,
         charts,
     })
-}
-
-/// Provides safe, read-only access to the global song cache.
-pub fn get_song_cache() -> std::sync::MutexGuard<'static, Vec<SongPack>> {
-    SONG_CACHE.lock().unwrap()
 }

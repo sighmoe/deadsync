@@ -8,8 +8,7 @@ pub mod sandbox;
 pub mod evaluation;
 use std::path::PathBuf;
 
-use crate::core::song_loading::ChartData;
-
+use crate::gameplay::chart::ChartData;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScreenAction {
     None,
