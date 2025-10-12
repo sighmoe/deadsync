@@ -177,20 +177,34 @@ pub fn init() -> State {
     info!("Initializing SelectMusic screen, reading from song cache...");
     let mut all_entries = vec![];
     let song_cache = get_song_cache();
+    let mut total_filtered_songs = 0;
 
     for (i, pack) in song_cache.iter().enumerate() {
-        all_entries.push(MusicWheelEntry::PackHeader {
-            name: pack.name.clone(),
-            original_index: i,
-            banner_path: find_pack_banner(pack),
-        });
-        for song in &pack.songs {
-            all_entries.push(MusicWheelEntry::Song(song.clone()));
+        // Filter songs for this pack to only include those with "dance-single" charts.
+        let single_dance_songs: Vec<Arc<SongData>> = pack.songs
+            .iter()
+            .filter(|song| {
+                song.charts.iter().any(|chart| chart.chart_type.eq_ignore_ascii_case("dance-single"))
+            })
+            .cloned()
+            .collect();
+        
+        // Only add the pack header and its songs if there are any "dance-single" songs in it.
+        if !single_dance_songs.is_empty() {
+            all_entries.push(MusicWheelEntry::PackHeader {
+                name: pack.name.clone(),
+                original_index: i,
+                banner_path: find_pack_banner(pack),
+            });
+            total_filtered_songs += single_dance_songs.len();
+            for song in single_dance_songs {
+                all_entries.push(MusicWheelEntry::Song(song));
+            }
         }
     }
     
-    let total_songs: usize = song_cache.iter().map(|p| p.songs.len()).sum();
-    info!("Read {} packs and {} total songs from cache.", song_cache.len(), total_songs);
+    let total_songs_before_filter: usize = song_cache.iter().map(|p| p.songs.len()).sum();
+    info!("Read {} packs and {} total songs from cache. After filtering for dance-single, {} songs remain.", song_cache.len(), total_songs_before_filter, total_filtered_songs);
 
     let mut state = State {
         all_entries,
