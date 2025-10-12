@@ -498,6 +498,20 @@ fn apply_range_mapping(
                 }
             }
         }
+        "basic-japanese" => {
+            // This charmap corresponds to the Unicode block U+3000..=U+30FF.
+            // StepMania hardcodes this mapping. It does not use the optional hex_range.
+            let start_cp = 0x3000;
+            let end_cp = 0x30FF;
+            for i in 0..=(end_cp - start_cp) {
+                if let Some(ch) = char::from_u32(start_cp + i) {
+                    // Skip the ZERO WIDTH NO-BREAK SPACE character, which is M_SKIP in StepMania's charmap system.
+                    if ch != '\u{FEFF}' {
+                        map.insert(ch, first_frame + i as usize);
+                    }
+                }
+            }
+        }
         "numbers" => {
             // Include both 'x' and 'X'; many SM fonts expect upper-case as well.
             // Also include the multiplication sign × for completeness.
