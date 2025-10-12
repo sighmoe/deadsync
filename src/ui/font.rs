@@ -36,6 +36,7 @@ pub struct Font {
     pub default_glyph: Option<Glyph>,
     pub line_spacing: i32, // draw units (from main/default page)
     pub height: i32,       // draw units (baseline - top)
+    pub fallback_font_name: Option<&'static str>,
 }
 
 pub struct FontLoadData {
@@ -951,6 +952,7 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         default_glyph,
         height: default_page_metrics.0,
         line_spacing: default_page_metrics.1,
+        fallback_font_name: None,
     };
 
     if !font.glyph_map.contains_key(&' ') {
@@ -991,11 +993,17 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
 /// StepMania parity: calculates the logical width of a line by summing the integer advances.
 #[inline(always)]
-pub fn measure_line_width_logical(font: &Font, text: &str) -> i32 {
+pub fn measure_line_width_logical(
+    font: &Font,
+    text: &str,
+    all_fonts: &HashMap<&'static str, Font>,
+) -> i32 {
+    let fallback_font = font.fallback_font_name.and_then(|name| all_fonts.get(name));
     text.chars()
         .map(|c| {
-            let g = font.glyph_map.get(&c).or(font.default_glyph.as_ref());
-            // truncate; SM advances are ints already
+            let g = font.glyph_map.get(&c)
+                .or_else(|| fallback_font.and_then(|f| f.glyph_map.get(&c)))
+                .or(font.default_glyph.as_ref());
             g.map_or(0, |glyph| glyph.advance as i32)
         })
         .sum()

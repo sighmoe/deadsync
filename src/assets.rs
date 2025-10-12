@@ -219,17 +219,25 @@ impl AssetManager {
     }
 
     fn load_initial_fonts(&mut self, backend: &mut Backend) -> Result<(), Box<dyn Error>> {
-        for &name in &["wendy", "miso", "wendy_monospace_numbers", "wendy_screenevaluation", "wendy_combo"] {
+        for &name in &["wendy", "miso", "cjk", "emoji", "game", "wendy_monospace_numbers", "wendy_screenevaluation", "wendy_combo" ] {
             let ini_path_str = match name {
                 "wendy" => "assets/fonts/wendy/_wendy small.ini",
                 "miso"  => "assets/fonts/miso/_miso light.ini",
+                "cjk" => "assets/fonts/cjk/_jfonts 16px.ini",
+                "emoji" => "assets/fonts/emoji/_emoji 16px.ini",
+                "game" => "assets/fonts/game/_game chars 16px.ini",
                 "wendy_monospace_numbers" => "assets/fonts/wendy/_wendy monospace numbers.ini",
                 "wendy_screenevaluation" => "assets/fonts/wendy/_ScreenEvaluation numbers.ini",
                 "wendy_combo" => "assets/fonts/_combo/wendy/Wendy.ini",
                 _ => return Err(format!("Unknown font name: {}", name).into()),
             };
 
-            let FontLoadData { font, required_textures } = font::parse(ini_path_str)?;
+            let FontLoadData { mut font, required_textures } = font::parse(ini_path_str)?;
+
+            if name == "miso" {
+                font.fallback_font_name = Some("cjk");
+                info!("Font 'miso' configured to use 'cjk' as fallback.");
+            }
 
             for tex_path in &required_textures {
                 let key = canonical_texture_key(tex_path);

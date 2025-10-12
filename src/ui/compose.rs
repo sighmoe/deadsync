@@ -1,8 +1,9 @@
+// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/deadsync/src/ui/compose.rs =====
 use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;
 use crate::assets;
-use crate::ui::font; // CHANGED
+use crate::ui::font;
 use crate::ui::actors::{self, Actor, SizeSpec};
 use cgmath::{Deg, Matrix4, Vector2, Vector3};
 
@@ -63,15 +64,15 @@ fn estimate_object_count(
             }
             Actor::Text { content, font, .. } => {
                 if let Some(fm) = fonts.get(font) {
+                    let fallback_font = fm.fallback_font_name.and_then(|name| fonts.get(name));
                     total += content
                         .chars()
                         .filter(|&c| {
                             if c == '\n' {
                                 return false;
                             }
-                            // Count if explicitly mapped OR we have a default glyph.
-                            // (Previously skipped unmapped SPACE; SM still draws advance/default.)
-                            let mapped = fm.glyph_map.contains_key(&c);
+                            let mapped = fm.glyph_map.contains_key(&c)
+                                || fallback_font.map_or(false, |f| f.glyph_map.contains_key(&c));
                             mapped || fm.default_glyph.is_some()
                         })
                         .count();
@@ -250,6 +251,7 @@ fn build_actor_recursive(
             if let Some(fm) = fonts.get(font) {
                 let mut objects = layout_text(
                     fm,
+                    fonts,
                     content,
                     0.0,                 // _px_size unused
                     *scale,
@@ -689,6 +691,7 @@ fn quantize_up_even_px(v: f32) -> f32 {
 
 fn layout_text(
     font: &font::Font,
+    fonts: &std::collections::HashMap<&'static str, font::Font>,
     text: &str,
     _px_size: f32,
     scale: [f32; 2],
@@ -714,7 +717,7 @@ fn layout_text(
     }
 
     // 1) Logical (integer) widths like SM: sum integer advances (default glyph if unmapped).
-    let logical_line_widths: Vec<i32> = lines.iter().map(|l| font::measure_line_width_logical(font, l)).collect();
+    let logical_line_widths: Vec<i32> = lines.iter().map(|l| font::measure_line_width_logical(font, l, fonts)).collect();
     let max_logical_width = logical_line_widths.iter().copied().max().unwrap_or(0) as f32;
 
     // 2) Unscaled block cap height + line spacing in logical units
@@ -798,6 +801,8 @@ fn layout_text(
         d
     }
 
+    let fallback_font = font.fallback_font_name.and_then(|name| fonts.get(name));
+
     let mut objects = Vec::new();
 
     for (i, line) in lines.iter().enumerate() {
@@ -807,8 +812,11 @@ fn layout_text(
         let mut pen_ux: i32 = 0;
 
         for ch in line.chars() {
-            let mapped = font.glyph_map.get(&ch);
-            let glyph = match mapped.or(font.default_glyph.as_ref()) {
+            let glyph = font.glyph_map.get(&ch)
+                .or_else(|| fallback_font.and_then(|f| f.glyph_map.get(&ch)))
+                .or(font.default_glyph.as_ref());
+            
+            let glyph = match glyph {
                 Some(g) => g,
                 None => continue, // no glyph and no default; skip entirely
             };
@@ -816,7 +824,7 @@ fn layout_text(
             let quad_w = glyph.size[0] * sx;
             let quad_h = glyph.size[1] * sy;
 
-            let draw_quad = !(ch == ' ' && mapped.is_none());
+            let draw_quad = !(ch == ' ' && font.glyph_map.get(&ch).is_none() && fallback_font.and_then(|f| f.glyph_map.get(&ch)).is_none());
 
             let pen_x_draw = pen_start_x + (pen_ux as f32) * sx;
 

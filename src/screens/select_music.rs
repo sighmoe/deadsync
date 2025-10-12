@@ -697,7 +697,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { /
                 setsize(box_width, 50.0):
                 diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], UI_BOX_BG_COLOR[3])
             ),
-            // Inner Frame for Text (unchanged structure)
+            // Inner Frame for Text
             Actor::Frame {
                 align: [0.0, 0.0],
                 offset: [-110.0, -6.0],
@@ -763,28 +763,28 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { /
         let step_artist_text = selected_chart_data.as_ref().map_or("".to_string(), |c| c.step_artist.clone());
         let peak_nps_text = selected_chart_data.as_ref().map_or("Peak NPS: --".to_string(), |c| format!("Peak NPS: {:.1}", c.max_nps));
         let breakdown_text = if let Some(chart) = &selected_chart_data {
-            asset_manager.with_font("miso", |miso_font| {
+            asset_manager.with_fonts(|all_fonts| asset_manager.with_font("miso", |miso_font| -> Option<String> {
                 let panel_w = if is_wide() { 286.0 } else { 276.0 };
                 let text_zoom = 0.8;
                 let horizontal_padding = 16.0; // 8px padding on each side
                 let max_allowed_width = panel_w - horizontal_padding;
 
                 let check_width = |text: &str| {
-                    let logical_width = font::measure_line_width_logical(miso_font, text) as f32;
+                    let logical_width = font::measure_line_width_logical(miso_font, text, all_fonts) as f32;
                     let final_width = logical_width * text_zoom;
                     final_width <= max_allowed_width
                 };
         
                 if check_width(&chart.detailed_breakdown) {
-                    chart.detailed_breakdown.clone()
+                    Some(chart.detailed_breakdown.clone())
                 } else if check_width(&chart.partial_breakdown) {
-                    chart.partial_breakdown.clone()
+                    Some(chart.partial_breakdown.clone())
                 } else if check_width(&chart.simple_breakdown) {
-                    chart.simple_breakdown.clone()
+                    Some(chart.simple_breakdown.clone())
                 } else {
-                    format!("{} Total", chart.total_streams)
+                    Some(format!("{} Total", chart.total_streams))
                 }
-            }).unwrap_or_else(|| chart.simple_breakdown.clone()) // Fallback if font isn't found
+            })).flatten().unwrap_or_else(|| chart.simple_breakdown.clone()) // Fallback if font isn't found
         } else {
             "".to_string()
         };

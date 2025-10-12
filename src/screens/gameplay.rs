@@ -977,14 +977,14 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
 
     let mut children = Vec::new();
 
-    asset_manager.with_font("wendy_screenevaluation", |metrics_font| {
+    asset_manager.with_fonts(|all_fonts| asset_manager.with_font("wendy_screenevaluation", |metrics_font| {
         let value_zoom = 0.4 * frame_zoom;
         let label_zoom = 0.833 * frame_zoom;
         let gray = color::rgba_hex("#5A6166");
         let white = [1.0, 1.0, 1.0, 1.0];
 
         // Width of a single digit in the monospace font, scaled.
-        let digit_width = font::measure_line_width_logical(metrics_font, "0") as f32 * value_zoom;
+        let digit_width = font::measure_line_width_logical(metrics_font, "0", all_fonts) as f32 * value_zoom;
         if digit_width <= 0.0 { return; }
 
         // Calculate total width of the "000/000" string to position the label.
@@ -1050,7 +1050,7 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
                 zoom(label_zoom): diffuse(white[0], white[1], white[2], white[3])
             ));
         }
-    });
+    }));
 
     // We don't have live judgment updates yet, so the "achieved" part is always 0.
     // The structure is now in place for when that data becomes available.
@@ -1133,10 +1133,10 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { 
 
     // This block is wrapped in `with_font` to get access to the font metrics needed to
     // simulate a monospace layout with a proportional font, preventing jitter.
-    asset_manager.with_font("wendy_screenevaluation", |f| {
+    asset_manager.with_fonts(|all_fonts| asset_manager.with_font("wendy_screenevaluation", |f| {
         let numbers_zoom = final_text_base_zoom * 0.5;
         // Determine the width of the widest digit ('0') to use as our fixed cell width.
-        let max_digit_w = (font::measure_line_width_logical(f, "0") as f32) * numbers_zoom;
+        let max_digit_w = (font::measure_line_width_logical(f, "0", all_fonts) as f32) * numbers_zoom;
         if max_digit_w <= 0.0 { return; } // Avoid division by zero if font fails
 
         for (index, grade) in JUDGMENT_ORDER.iter().enumerate() {
@@ -1196,7 +1196,7 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { 
                 diffuse(bright[0], bright[1], bright[2], bright[3])
             ));
         }
-    });
+    }));
 
     actors
 }
