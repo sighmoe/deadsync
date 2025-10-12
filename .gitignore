@@ -1,5 +1,6 @@
 /target
 /songs
+/save
 Cargo.lock
 deadsync.ini
 prompt.txt
