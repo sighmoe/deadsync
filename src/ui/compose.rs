@@ -801,8 +801,6 @@ fn layout_text(
         d
     }
 
-    let fallback_font = font.fallback_font_name.and_then(|name| fonts.get(name));
-
     let mut objects = Vec::new();
 
     for (i, line) in lines.iter().enumerate() {
@@ -812,9 +810,7 @@ fn layout_text(
         let mut pen_ux: i32 = 0;
 
         for ch in line.chars() {
-            let glyph = font.glyph_map.get(&ch)
-                .or_else(|| fallback_font.and_then(|f| f.glyph_map.get(&ch)))
-                .or(font.default_glyph.as_ref());
+            let glyph = font::find_glyph(font, ch, fonts);
             
             let glyph = match glyph {
                 Some(g) => g,
@@ -824,7 +820,7 @@ fn layout_text(
             let quad_w = glyph.size[0] * sx;
             let quad_h = glyph.size[1] * sy;
 
-            let draw_quad = !(ch == ' ' && font.glyph_map.get(&ch).is_none() && fallback_font.and_then(|f| f.glyph_map.get(&ch)).is_none());
+            let draw_quad = !(ch == ' ' && font.glyph_map.get(&ch).is_none());
 
             let pen_x_draw = pen_start_x + (pen_ux as f32) * sx;
 

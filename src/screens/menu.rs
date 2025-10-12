@@ -221,11 +221,11 @@ pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
             }
             
             let text = if disabled_services.is_empty() {
-                "GrooveStats connected".to_string()
+                "✔ GrooveStats".to_string()
             } else if disabled_services.len() == 3 {
-                "GrooveStats not connected".to_string()
+                "❌ GrooveStats".to_string()
             } else {
-                "GrooveStats?".to_string()
+                "⚠ GrooveStats".to_string()
             };
 
             let services_to_show = if disabled_services.len() == 3 { Vec::new() } else { disabled_services };

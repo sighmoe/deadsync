@@ -1005,6 +1005,26 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
 
 /* ======================= API ======================= */
 
+/// Traverses the font fallback chain to find a glyph for a given character.
+pub fn find_glyph<'a>(
+    start_font: &'a Font,
+    c: char,
+    all_fonts: &'a HashMap<&'static str, Font>,
+) -> Option<&'a Glyph> {
+    let mut current_font = Some(start_font);
+    while let Some(font) = current_font {
+        // Check the current font's glyph map.
+        if let Some(glyph) = font.glyph_map.get(&c) {
+            return Some(glyph);
+        }
+        // If not found, move to the next font in the chain.
+        current_font = font.fallback_font_name.and_then(|name| all_fonts.get(name));
+    }
+    // If the character was not found in any font in the chain,
+    // return the default glyph of the *original* starting font.
+    start_font.default_glyph.as_ref()
+}
+
 /// StepMania parity: calculates the logical width of a line by summing the integer advances.
 #[inline(always)]
 pub fn measure_line_width_logical(
@@ -1012,12 +1032,9 @@ pub fn measure_line_width_logical(
     text: &str,
     all_fonts: &HashMap<&'static str, Font>,
 ) -> i32 {
-    let fallback_font = font.fallback_font_name.and_then(|name| all_fonts.get(name));
     text.chars()
         .map(|c| {
-            let g = font.glyph_map.get(&c)
-                .or_else(|| fallback_font.and_then(|f| f.glyph_map.get(&c)))
-                .or(font.default_glyph.as_ref());
+            let g = find_glyph(font, c, all_fonts);
             g.map_or(0, |glyph| glyph.advance as i32)
         })
         .sum()

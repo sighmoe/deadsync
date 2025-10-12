@@ -239,6 +239,11 @@ impl AssetManager {
                 info!("Font 'miso' configured to use 'cjk' as fallback.");
             }
 
+            if name == "cjk" {
+                font.fallback_font_name = Some("emoji");
+                info!("Font 'cjk' configured to use 'emoji' as fallback.");
+            }
+
             for tex_path in &required_textures {
                 let key = canonical_texture_key(tex_path);
                 if !self.textures.contains_key(&key) {
