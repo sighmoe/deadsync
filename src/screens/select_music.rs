@@ -23,6 +23,7 @@ use crate::core::space::widescale;
 use crate::gameplay::song::{SongData, get_song_cache, SongPack};
 // use crate::gameplay::chart::ChartData; // <-- This import is unused, you can remove it.
 use crate::assets::AssetManager;
+use crate::config::Profile;
 
 
 /* ---------------------------- transitions ---------------------------- */
@@ -548,7 +549,7 @@ fn format_session_time(seconds_total: f32) -> String {
     }
 }
 
-pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { // <-- CHANGED
+pub fn get_actors(state: &State, asset_manager: &AssetManager, profile: &Profile) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(256);
 
     actors.extend(state.bg.build(heart_bg::Params {
@@ -570,7 +571,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { /
         position: ScreenBarPosition::Bottom,
         transparent: false,
         fg_color: [1.0; 4],
-        left_text: Some("PerfectTaste"), center_text: None, right_text: Some("PRESS START"),
+        left_text: Some(&profile.display_name), center_text: None, right_text: Some("PRESS START"),
     }));
  
     // Calculate the color for the currently selected difficulty based on the active theme color

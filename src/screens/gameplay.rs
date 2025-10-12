@@ -21,6 +21,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use crate::config::Profile;
 use crate::ui::font;
 use crate::assets::AssetManager;
 
@@ -530,7 +531,7 @@ static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyL
 
 // --- DRAWING ---
 
-pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
+pub fn get_actors(state: &State, asset_manager: &AssetManager, profile: &Profile) -> Vec<Actor> {
     let mut actors = Vec::new();
     
     // --- Playfield Positioning (1:1 with Simply Love) ---
@@ -908,8 +909,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         title_placement: screen_bar::ScreenBarTitlePlacement::Center,
         position: screen_bar::ScreenBarPosition::Bottom,
         transparent: true,
-        fg_color: [1.0; 4],
-        left_text: Some("PerfectTaste"), center_text: None, right_text: None,
+        fg_color: [1.0; 4], left_text: Some(&profile.display_name), center_text: None, right_text: None,
     }));
     
     // 10. Step Statistics Side Pane (P1)

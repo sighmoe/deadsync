@@ -7,7 +7,7 @@ use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, Screen as CurrentScreen, ScreenAction};
 use crate::gameplay::parsing::simfile as song_loading;
-// use crate::gameplay::chart::ChartData; // <-- REMOVED (unused)
+use crate::config::{self, Profile};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -65,6 +65,7 @@ pub struct App {
     session_start_time: Option<Instant>,
     display_width: u32,
     display_height: u32,
+    profile: Profile,
 }
 
 impl App {
@@ -110,7 +111,7 @@ impl App {
             current_frame_vpf: 0, transition: TransitionState::Idle,
             session_start_time: None,
             display_width,
-            display_height,
+            display_height, profile: config::get_profile(),
         }
     }
 
@@ -184,18 +185,18 @@ impl App {
         }
 
         let mut actors = match self.current_screen {
-            CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier), // <-- CHANGED
+            CurrentScreen::Menu     => menu::get_actors(&self.menu_state, screen_alpha_multiplier),
             CurrentScreen::Gameplay => {
                 if let Some(gs) = &self.gameplay_state {
-                    gameplay::get_actors(gs, &self.asset_manager)
+                    gameplay::get_actors(gs, &self.asset_manager, &self.profile)
                 } else { vec![] }
             },
             CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
             CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, screen_alpha_multiplier),
-            CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state, &self.asset_manager),
+            CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state, &self.asset_manager, &self.profile),
             CurrentScreen::Sandbox  => sandbox::get_actors(&self.sandbox_state),
             CurrentScreen::Init     => init::get_actors(&self.init_state),
-            CurrentScreen::Evaluation => evaluation::get_actors(&self.evaluation_state), // <-- CHANGED
+            CurrentScreen::Evaluation => evaluation::get_actors(&self.evaluation_state, &self.profile),
         };
 
         if self.show_overlay {
