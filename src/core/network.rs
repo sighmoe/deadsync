@@ -48,6 +48,14 @@ fn set_status(new_status: ConnectionStatus) {
     *CONNECTION_STATUS.lock().unwrap() = new_status;
 }
 
+/// Exposes the globally configured ureq Agent for other network requests.
+pub fn get_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(REQUEST_TIMEOUT))
+        .build()
+        .into()
+}
+
 pub fn init() {
     info!("Initializing network check...");
     thread::spawn(|| {
@@ -58,11 +66,7 @@ pub fn init() {
 fn perform_check() {
     info!("Performing GrooveStats connectivity check...");
 
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(REQUEST_TIMEOUT))
-        .build()
-        .into();
-
+    let agent = get_agent();
     match agent.get(API_URL).call() {
         Ok(resp) => {
             let mut body = resp.into_body();

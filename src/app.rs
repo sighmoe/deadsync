@@ -2,6 +2,7 @@ use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList
 use crate::core::input;
 use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
+use crate::gameplay::{profile, scores};
 use crate::assets::AssetManager;
 use crate::ui::actors::Actor;
 use crate::ui::color;
@@ -15,7 +16,7 @@ use winit::{
     window::Window,
 };
 
-use log::{error, info};
+use log::{error, warn, info};
 use std::{error::Error, sync::Arc, time::Instant};
 
 /* -------------------- transition timing constants -------------------- */
@@ -153,6 +154,16 @@ impl App {
             }
             ScreenAction::RequestBanner(_) => {}
             ScreenAction::RequestDensityGraph(_) => {}
+            ScreenAction::FetchOnlineGrade(hash) => {
+                info!("Fetching online grade for chart hash: {}", hash);
+                let profile = profile::get();
+                // Spawn a thread to perform the network request without blocking the main thread.
+                std::thread::spawn(move || {
+                    if let Err(e) = scores::fetch_and_store_grade(profile, hash) {
+                        warn!("Failed to fetch online grade: {}", e);
+                    }
+                });
+            }
             ScreenAction::None => {}
         }
         Ok(())
@@ -355,6 +366,20 @@ impl ApplicationHandler for App {
                                 event_loop.exit();
                             }
                             return;
+                        }
+                    }
+                    if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F7) = key_event.physical_key {
+                        if self.current_screen == CurrentScreen::SelectMusic {
+                            if let Some(select_music::MusicWheelEntry::Song(song)) = self.select_music_state.entries.get(self.select_music_state.selected_index) {
+                                let difficulty_name = select_music::DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
+                                if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
+                                    let action = ScreenAction::FetchOnlineGrade(chart.short_hash.clone());
+                                    if let Err(e) = self.handle_action(action, event_loop) {
+                                        error!("Failed to handle FetchOnlineGrade action: {}", e);
+                                    }
+                                    return; // Action handled, no further processing needed for this key press.
+                                }
+                            }
                         }
                     }
                 }

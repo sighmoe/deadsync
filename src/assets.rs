@@ -181,6 +181,7 @@ impl AssetManager {
             ("noteskins/metal/tex receptors.png", "noteskins/metal/tex receptors.png"),
             ("noteskins/metal/tex glow.png", "noteskins/metal/tex glow.png"),
             ("judgements/Love 2x7 (doubleres).png", "judgements/Love 2x7 (doubleres).png"),
+            ("grades/grades 1x19.png", "grades/grades 1x19.png"),
         ];
 
         let mut handles = Vec::with_capacity(textures_to_load.len());

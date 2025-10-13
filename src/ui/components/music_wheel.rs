@@ -4,6 +4,7 @@ use crate::core::space::{widescale};
 use crate::screens::select_music::MusicWheelEntry;
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;
+use crate::gameplay::scores;
 use std::collections::HashMap;
 
 // --- Colors ---
@@ -30,6 +31,8 @@ pub struct MusicWheelParams<'a> {
     pub selected_index: usize,
     pub selection_animation_timer: f32,
     pub pack_song_counts: &'a HashMap<String, usize>,
+    pub preferred_difficulty_index: usize,
+    pub selected_difficulty_index: usize,    
 }
 
 pub fn build(p: MusicWheelParams) -> Vec<Actor> {
@@ -178,6 +181,41 @@ pub fn build(p: MusicWheelParams) -> Vec<Actor> {
                         z(2)
                     ));
                 }
+
+                // --- Grade Sprite (Now with real data) ---
+                let mut grade_actor = {
+                    let grade_x = widescale(10.0, 17.0); // widescale(38.0, 50.0) - sl_shift
+                    let grade_y = half_item_h;
+                    let grade_zoom = widescale(0.18, 0.3);
+                    
+                    act!(sprite("grades/grades 1x19.png"):
+                        align(0.5, 0.5): xy(grade_x, grade_y): zoom(grade_zoom): z(2): visible(false)
+                    )
+                };
+
+                // Find the relevant chart to check for a grade
+                if let Some(MusicWheelEntry::Song(info)) = p.entries.get(list_index) {
+                    // For the selected item, use the *actual* selected difficulty.
+                    // For all other items, use the player's *preferred* difficulty.
+                    let difficulty_index_to_check = if is_selected_slot {
+                        p.selected_difficulty_index
+                    } else {
+                        p.preferred_difficulty_index
+                    };
+                    
+                    let difficulty_name = crate::screens::select_music::DIFFICULTY_NAMES[difficulty_index_to_check];
+
+                    if let Some(chart) = info.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
+                        if let Some(grade) = scores::get_grade(&chart.short_hash) {
+                            if let Actor::Sprite { visible, cell, .. } = &mut grade_actor {
+                                *visible = true;
+                                *cell = Some((grade.to_sprite_state(), u32::MAX));
+                            }
+                        }
+                    }
+                }
+
+                slot_children.push(grade_actor);
             }
 
             // Container: left-anchored at SL highlight-left

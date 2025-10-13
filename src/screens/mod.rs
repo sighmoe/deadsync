@@ -16,6 +16,7 @@ pub enum ScreenAction {
     Exit,
     RequestBanner(Option<PathBuf>),
     RequestDensityGraph(Option<ChartData>),
+    FetchOnlineGrade(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

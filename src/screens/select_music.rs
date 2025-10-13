@@ -1229,6 +1229,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         selected_index: state.selected_index,
         selection_animation_timer: state.selection_animation_timer,
         pack_song_counts: &pack_song_counts,
+        preferred_difficulty_index: state.preferred_difficulty_index,
+        selected_difficulty_index: state.selected_difficulty_index,
     }));
 
     // --- Pulsating Meter Arrow (P1) ---

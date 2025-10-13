@@ -1,0 +1,132 @@
+use crate::core::network;
+use crate::gameplay::profile::Profile;
+use log::{info, warn};
+use once_cell::sync::Lazy;
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::error::Error;
+use std::sync::Mutex;
+
+const API_URL: &str = "https://api.groovestats.com/player-leaderboards.php";
+
+// --- Grade Definitions ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grade {
+    Quint, Tier01, Tier02, Tier03, Tier04, Tier05, Tier06, Tier07, Tier08,
+    Tier09, Tier10, Tier11, Tier12, Tier13, Tier14, Tier15, Tier16, Failed,
+}
+
+impl Grade {
+    /// Converts a grade to the corresponding frame index on the "grades 1x19.png" spritesheet.
+    pub fn to_sprite_state(&self) -> u32 {
+        match self {
+            Grade::Quint => 0,
+            Grade::Tier01 => 1, Grade::Tier02 => 2, Grade::Tier03 => 3, Grade::Tier04 => 4,
+            Grade::Tier05 => 5, Grade::Tier06 => 6, Grade::Tier07 => 7, Grade::Tier08 => 8,
+            Grade::Tier09 => 9, Grade::Tier10 => 10, Grade::Tier11 => 11, Grade::Tier12 => 12,
+            Grade::Tier13 => 13, Grade::Tier14 => 14, Grade::Tier15 => 15, Grade::Tier16 => 16,
+            Grade::Failed => 17,
+        }
+    }
+}
+
+// --- Global Grade Cache ---
+
+static GRADE_CACHE: Lazy<Mutex<HashMap<String, Grade>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+pub fn get_grade(chart_hash: &str) -> Option<Grade> {
+    GRADE_CACHE.lock().unwrap().get(chart_hash).copied()
+}
+
+pub fn set_grade(chart_hash: String, grade: Grade) {
+    info!("Caching grade {:?} for chart hash {}", grade, chart_hash);
+    GRADE_CACHE.lock().unwrap().insert(chart_hash, grade);
+}
+
+// --- API Response Structs ---
+
+#[derive(Deserialize, Debug)]
+struct ApiResponse {
+    player1: Option<Player1>,
+}
+
+#[derive(Deserialize, Debug)]
+struct Player1 {
+    gsLeaderboard: Option<Vec<GrooveScore>>,
+}
+
+#[derive(Deserialize, Debug)]
+struct GrooveScore {
+    name: String,
+    score: f64, // 0..10000
+}
+
+// --- Grade Calculation ---
+
+fn score_to_grade(score: f64) -> Grade {
+    let percent = score / 10000.0;
+    if percent >= 1.00 { Grade::Tier01 } // Note: We don't have enough info to detect Quints (W0) yet.
+    else if percent >= 0.99 { Grade::Tier02 }
+    else if percent >= 0.98 { Grade::Tier03 }
+    else if percent >= 0.96 { Grade::Tier04 }
+    else if percent >= 0.94 { Grade::Tier05 }
+    else if percent >= 0.92 { Grade::Tier06 }
+    else if percent >= 0.89 { Grade::Tier07 }
+    else if percent >= 0.86 { Grade::Tier08 }
+    else if percent >= 0.83 { Grade::Tier09 }
+    else if percent >= 0.80 { Grade::Tier10 }
+    else if percent >= 0.76 { Grade::Tier11 }
+    else if percent >= 0.72 { Grade::Tier12 }
+    else if percent >= 0.68 { Grade::Tier13 }
+    else if percent >= 0.64 { Grade::Tier14 }
+    else if percent >= 0.60 { Grade::Tier15 }
+    else if percent >= 0.55 { Grade::Tier16 }
+    else { Grade::Failed }
+}
+
+// --- Public Fetch Function ---
+
+pub fn fetch_and_store_grade(profile: Profile, chart_hash: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if profile.groovestats_api_key.is_empty() || profile.groovestats_username.is_empty() {
+        return Err("GrooveStats API key or username is not set in profile.ini.".into());
+    }
+
+    info!(
+        "Requesting scores for '{}' on chart '{}'...",
+        profile.groovestats_username, chart_hash
+    );
+
+    let agent = network::get_agent();
+    let response = agent
+        .get(API_URL)
+        .header("x-api-key-player-1", &profile.groovestats_api_key)
+        .query("chartHashP1", &chart_hash)
+        .call()?;
+
+    if response.status() != 200 {
+        return Err(format!("API returned status {}", response.status()).into());
+    }
+
+    let api_response: ApiResponse = response.into_body().read_json()?;
+
+    let player_score = api_response
+        .player1
+        .and_then(|p1| p1.gsLeaderboard)
+        .and_then(|scores| {
+            scores.into_iter().find(|s| s.name.eq_ignore_ascii_case(&profile.groovestats_username))
+        });
+
+    if let Some(score_data) = player_score {
+        let grade = score_to_grade(score_data.score);
+        set_grade(chart_hash, grade);
+    } else {
+        warn!(
+            "No score found for player '{}' on chart '{}'. Caching as Failed.",
+            profile.groovestats_username, chart_hash
+        );
+        set_grade(chart_hash, Grade::Failed);
+    }
+
+    Ok(())
+}
