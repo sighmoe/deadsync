@@ -7,7 +7,7 @@ use crate::ui::components::{heart_bg, pad_display, screen_bar};
 use crate::ui::components::screen_bar::{ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::core::space::widescale;
 
-use crate::config::Profile;
+use crate::gameplay::profile;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -83,8 +83,9 @@ fn format_session_time(seconds_total: f32) -> String {
     }
 }
 
-pub fn get_actors(state: &State, profile: &Profile) -> Vec<Actor> {
+pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(20);
+    let profile = profile::get();
 
     // 1. Background
     actors.extend(state.bg.build(heart_bg::Params {

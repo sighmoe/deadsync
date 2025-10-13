@@ -23,7 +23,7 @@ use crate::core::space::widescale;
 use crate::gameplay::song::{SongData, get_song_cache, SongPack};
 // use crate::gameplay::chart::ChartData; // <-- This import is unused, you can remove it.
 use crate::assets::AssetManager;
-use crate::config::Profile;
+use crate::gameplay::profile;
 
 
 /* ---------------------------- transitions ---------------------------- */
@@ -549,8 +549,9 @@ fn format_session_time(seconds_total: f32) -> String {
     }
 }
 
-pub fn get_actors(state: &State, asset_manager: &AssetManager, profile: &Profile) -> Vec<Actor> {
+pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(256);
+    let profile = profile::get();
 
     actors.extend(state.bg.build(heart_bg::Params {
         active_color_index: state.active_color_index,

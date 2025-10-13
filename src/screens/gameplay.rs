@@ -21,7 +21,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::config::Profile;
+use crate::gameplay::profile;
 use crate::ui::font;
 use crate::assets::AssetManager;
 
@@ -531,9 +531,10 @@ static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyL
 
 // --- DRAWING ---
 
-pub fn get_actors(state: &State, asset_manager: &AssetManager, profile: &Profile) -> Vec<Actor> {
+pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let mut actors = Vec::new();
-    
+    let profile = profile::get();
+
     // --- Playfield Positioning (1:1 with Simply Love) ---
     let logical_screen_width = screen_width();
     let clamped_width = logical_screen_width.clamp(640.0, 854.0);
