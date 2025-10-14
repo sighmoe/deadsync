@@ -243,23 +243,29 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
                 align(1.0, 0.5): xy(labels_frame_origin_x + label_local_x, frame_origin_y + label_local_y): zoom(0.833): z(101)
             ));
 
-            // Number (Achieved / Possible)
-            let achieved = 0; // Hardcoded: Actual radar values not yet tracked in gameplay
+            let achieved = 0;
             let possible_clamped = (*possible).min(999);
             
-            let possible_str = format!("{:03}", possible_clamped);
-            let achieved_str = format!("{:03}", achieved);
-
             let number_local_y = (i as f32 * 35.0) + 53.0;
             let number_final_y = frame_origin_y + (number_local_y * numbers_frame_zoom);
             
-            let possible_base_x = numbers_frame_origin_x + (-114.0 * numbers_frame_zoom);
-            let mut cursor_x = possible_base_x;
+            // --- Actor Group: "Achieved / Possible" (Right-aligned at local x = -114) ---
+            let right_anchor_x = numbers_frame_origin_x + (-114.0 * numbers_frame_zoom);
+            let mut cursor_x = right_anchor_x; // Start drawing from the right edge.
 
+            // 1. Draw "possible" number (right-most part)
+            let possible_str = format!("{:03}", possible_clamped);
             let first_nonzero_possible = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
-            for (char_idx, ch) in possible_str.chars().rev().enumerate() {
-                let is_dim = if possible_clamped == 0 { char_idx > 0 } else { (3 - 1 - char_idx) < first_nonzero_possible };
+
+            for (char_idx_from_right, ch) in possible_str.chars().rev().enumerate() {
+                let is_dim = if possible_clamped == 0 { 
+                    char_idx_from_right > 0 
+                } else { 
+                    let idx_from_left = 2 - char_idx_from_right;
+                    idx_from_left < first_nonzero_possible
+                };
                 let color = if is_dim { gray_color_possible } else { white_color };
+                
                 actors.push(act!(text: font("wendy_screenevaluation"): settext(ch.to_string()):
                     align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
                     diffuse(color[0], color[1], color[2], color[3]): z(101)
@@ -267,24 +273,34 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
                 cursor_x -= digit_width;
             }
 
+            // 2. Draw slash
             actors.push(act!(text: font("wendy_screenevaluation"): settext("/"):
                 align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
                 diffuse(gray_color_possible[0], gray_color_possible[1], gray_color_possible[2], gray_color_possible[3]): z(101)
             ));
             cursor_x -= digit_width;
-            
-            let achieved_base_x = numbers_frame_origin_x + (-180.0 * numbers_frame_zoom);
-            cursor_x = achieved_base_x;
 
+            // 3. Draw "achieved" number (left-most part)
+            let achieved_str = format!("{:03}", achieved);
             let first_nonzero_achieved = achieved_str.find(|c: char| c != '0').unwrap_or(achieved_str.len());
-            for (char_idx, ch) in achieved_str.chars().rev().enumerate() {
-                let is_dim = if achieved == 0 { char_idx > 0 } else { (3 - 1 - char_idx) < first_nonzero_achieved };
+
+            // The 'achieved' block must have its own right-anchor for alignment within the group.
+            let achieved_block_right_x = cursor_x; 
+
+            for (char_idx_from_right, ch) in achieved_str.chars().rev().enumerate() {
+                 let is_dim = if achieved == 0 { 
+                    char_idx_from_right > 0
+                } else { 
+                    let idx_from_left = 2 - char_idx_from_right;
+                    idx_from_left < first_nonzero_achieved 
+                };
                 let color = if is_dim { gray_color_achieved } else { white_color };
+                let x_pos = achieved_block_right_x - (char_idx_from_right as f32 * digit_width);
+
                 actors.push(act!(text: font("wendy_screenevaluation"): settext(ch.to_string()):
-                    align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
+                    align(1.0, 0.5): xy(x_pos, number_final_y): zoom(final_numbers_zoom):
                     diffuse(color[0], color[1], color[2], color[3]): z(101)
                 ));
-                cursor_x -= digit_width;
             }
         }
     }));
@@ -427,7 +443,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     // Difficulty Text and Meter Block
     {
         let difficulty_color = color::difficulty_rgba(&score_info.chart.difficulty, state.active_color_index);
-        let difficulty_text = format!("single / {}", score_info.chart.difficulty);
+        let difficulty_text = format!("Single / {}", score_info.chart.difficulty);
         actors.push(act!(text: font("miso"): settext(difficulty_text): align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 64.0): zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0) ));
         actors.push(act!(quad: align(0.5, 0.5): xy(p1_frame_x - 134.5, cy - 71.0): zoomto(30.0, 30.0): z(101): diffuse(difficulty_color[0], difficulty_color[1], difficulty_color[2], 1.0) ));
         actors.push(act!(text: font("wendy"): settext(score_info.chart.meter.to_string()): align(0.5, 0.5): xy(p1_frame_x - 134.5, cy - 71.0): zoom(0.4): z(102): diffuse(0.0, 0.0, 0.0, 1.0) ));
