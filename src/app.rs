@@ -97,7 +97,7 @@ impl App {
         let mut init_state = init::init();
         init_state.active_color_index = color_index;
 
-        let mut evaluation_state = evaluation::init();
+        let mut evaluation_state = evaluation::init(None);
         evaluation_state.active_color_index = color_index;
 
         Self {
@@ -205,7 +205,7 @@ impl App {
             CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state, &self.asset_manager),
             CurrentScreen::Sandbox  => sandbox::get_actors(&self.sandbox_state),
             CurrentScreen::Init     => init::get_actors(&self.init_state),
-            CurrentScreen::Evaluation => evaluation::get_actors(&self.evaluation_state),
+            CurrentScreen::Evaluation => evaluation::get_actors(&self.evaluation_state, &self.asset_manager),
         };
 
         if self.show_overlay {
@@ -371,7 +371,7 @@ impl ApplicationHandler for App {
                     if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F7) = key_event.physical_key {
                         if self.current_screen == CurrentScreen::SelectMusic {
                             if let Some(select_music::MusicWheelEntry::Song(song)) = self.select_music_state.entries.get(self.select_music_state.selected_index) {
-                                let difficulty_name = select_music::DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
+                                let difficulty_name = color::DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
                                 if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
                                     let action = ScreenAction::FetchOnlineGrade(chart.short_hash.clone());
                                     if let Err(e) = self.handle_action(action, event_loop) {
@@ -563,7 +563,7 @@ impl ApplicationHandler for App {
                                 select_music::MusicWheelEntry::Song(s) => s,
                                 _ => panic!("Cannot start gameplay on a pack header"),
                             };
-                            let difficulty_name = select_music::DIFFICULTY_NAMES[sm_state.selected_difficulty_index];
+                            let difficulty_name = color::DIFFICULTY_NAMES[sm_state.selected_difficulty_index];
                             let chart_ref = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).unwrap();
                             (song.clone(), Arc::new(chart_ref.clone()))
                         };
@@ -573,12 +573,13 @@ impl ApplicationHandler for App {
                     }
 
                     if target == CurrentScreen::Evaluation {
-                        let idx = self.gameplay_state.as_ref().map_or(
+                        let gameplay_results = self.gameplay_state.take();
+                        let color_idx = gameplay_results.as_ref().map_or(
                             self.evaluation_state.active_color_index,
                             |gs| gs.active_color_index
                         );
-                        self.evaluation_state = evaluation::init();
-                        self.evaluation_state.active_color_index = idx;
+                        self.evaluation_state = evaluation::init(gameplay_results);
+                        self.evaluation_state.active_color_index = color_idx;
                     }
 
                     if target == CurrentScreen::SelectMusic {

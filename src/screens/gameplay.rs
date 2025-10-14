@@ -1,6 +1,5 @@
 use crate::core::input::InputState;
 use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
-use crate::screens::select_music::DIFFICULTY_NAMES;
 use crate::gameplay::parsing::notes as note_parser;
 use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::song::SongData;
@@ -9,7 +8,7 @@ use crate::gameplay::timing::TimingData;
 use crate::core::audio;
 use crate::screens::{Screen, ScreenAction};
 use crate::core::space::{is_wide, widescale};
-use crate::ui::actors::{Actor, SizeSpec};
+use crate::ui::{actors::{Actor, SizeSpec}, color::DIFFICULTY_NAMES};
 use crate::act;
 use crate::ui::color;
 use crate::ui::components::screen_bar;

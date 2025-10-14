@@ -11,11 +11,11 @@ const API_URL: &str = "https://api.groovestats.com/player-leaderboards.php";
 
 // --- Grade Definitions ---
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[allow(dead_code)] // Quint will be used eventually for W0 tracking
 pub enum Grade {
     Quint, Tier01, Tier02, Tier03, Tier04, Tier05, Tier06, Tier07, Tier08,
-    Tier09, Tier10, Tier11, Tier12, Tier13, Tier14, Tier15, Tier16, Failed,
+    Tier09, Tier10, Tier11, Tier12, Tier13, Tier14, Tier15, Tier16, Tier17, Failed,
 }
 
 impl Grade {
@@ -27,7 +27,7 @@ impl Grade {
             Grade::Tier05 => 5, Grade::Tier06 => 6, Grade::Tier07 => 7, Grade::Tier08 => 8,
             Grade::Tier09 => 9, Grade::Tier10 => 10, Grade::Tier11 => 11, Grade::Tier12 => 12,
             Grade::Tier13 => 13, Grade::Tier14 => 14, Grade::Tier15 => 15, Grade::Tier16 => 16,
-            Grade::Failed => 17,
+            Grade::Tier17 => 17, Grade::Failed => 18,
         }
     }
 }
@@ -73,25 +73,27 @@ struct GrooveScore {
 
 // --- Grade Calculation ---
 
-fn score_to_grade(score: f64) -> Grade {
+pub fn score_to_grade(score: f64) -> Grade {
     let percent = score / 10000.0;
-    if percent >= 1.00 { Grade::Tier01 } // Note: We don't have enough info to detect Quints (W0) yet.
-    else if percent >= 0.99 { Grade::Tier02 }
-    else if percent >= 0.98 { Grade::Tier03 }
-    else if percent >= 0.96 { Grade::Tier04 }
-    else if percent >= 0.94 { Grade::Tier05 }
-    else if percent >= 0.92 { Grade::Tier06 }
-    else if percent >= 0.89 { Grade::Tier07 }
-    else if percent >= 0.86 { Grade::Tier08 }
-    else if percent >= 0.83 { Grade::Tier09 }
-    else if percent >= 0.80 { Grade::Tier10 }
-    else if percent >= 0.76 { Grade::Tier11 }
-    else if percent >= 0.72 { Grade::Tier12 }
-    else if percent >= 0.68 { Grade::Tier13 }
-    else if percent >= 0.64 { Grade::Tier14 }
-    else if percent >= 0.60 { Grade::Tier15 }
-    else if percent >= 0.55 { Grade::Tier16 }
-    else { Grade::Failed }
+    if percent >= 1.00 { Grade::Tier01 }    // Note: We don't have enough info to detect Quints (W0) yet.
+    else if percent >= 0.99 { Grade::Tier02 } // three-stars
+    else if percent >= 0.98 { Grade::Tier03 } // two-stars
+    else if percent >= 0.96 { Grade::Tier04 } // one-star
+    else if percent >= 0.94 { Grade::Tier05 } // s-plus
+    else if percent >= 0.92 { Grade::Tier06 } // s
+    else if percent >= 0.89 { Grade::Tier07 } // s-minus
+    else if percent >= 0.86 { Grade::Tier08 } // a-plus
+    else if percent >= 0.83 { Grade::Tier09 } // a
+    else if percent >= 0.80 { Grade::Tier10 } // a-minus
+    else if percent >= 0.76 { Grade::Tier11 } // b-plus
+    else if percent >= 0.72 { Grade::Tier12 } // b
+    else if percent >= 0.68 { Grade::Tier13 } // b-minus
+    else if percent >= 0.64 { Grade::Tier14 } // c-plus
+    else if percent >= 0.60 { Grade::Tier15 } // c
+    else if percent >= 0.55 { Grade::Tier16 } // c-minus
+    else { Grade::Tier17 } // d
+    // Grade::Failed is not score-based; it's determined by gameplay failure (e.g., lifebar empty),
+    // which is not yet implemented. This function will never return Grade::Failed.
 }
 
 // --- Public Fetch Function ---

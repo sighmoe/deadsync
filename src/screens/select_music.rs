@@ -3,7 +3,7 @@ use crate::core::audio;
 use crate::core::space::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
-use crate::ui::color;
+use crate::ui::color::{self, DIFFICULTY_NAMES};
 use crate::ui::components::{heart_bg, pad_display, music_wheel};
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::ui::actors::SizeSpec;
@@ -36,7 +36,6 @@ const BANNER_NATIVE_HEIGHT: f32 = 164.0;
 
 // --- Other UI Constants ---
 static UI_BOX_BG_COLOR: LazyLock<[f32; 4]> = LazyLock::new(|| color::rgba_hex("#1E282F"));
-pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
 const SELECTION_ANIMATION_CYCLE_DURATION: f32 = 1.0;
 const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
 const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(200);

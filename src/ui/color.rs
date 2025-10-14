@@ -80,6 +80,21 @@ pub const JUDGMENT_HEX: [&str; 6] = [
     "#FF3030", // Miss
 ];
 
+// NEW: Difficulty names for color mapping
+pub const DIFFICULTY_NAMES: [&str; 5] = ["Beginner", "Easy", "Medium", "Hard", "Challenge"];
+
+/// Returns the Simply Love color for a given difficulty, based on an active theme color index.
+#[inline(always)]
+pub fn difficulty_rgba(difficulty_name: &str, active_color_index: i32) -> [f32; 4] {
+    let difficulty_index = DIFFICULTY_NAMES
+        .iter()
+        .position(|&name| name.eq_ignore_ascii_case(difficulty_name))
+        .unwrap_or(2); // Default to Medium if not found
+
+    let color_index = active_color_index - (4 - difficulty_index) as i32;
+    simply_love_rgba(color_index)
+}
+
 #[inline(always)]
 fn wrap(n: usize, i: i32) -> usize {
     (i.rem_euclid(n as i32)) as usize
