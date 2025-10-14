@@ -320,7 +320,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     diffuse(score_bg_color[0], score_bg_color[1], score_bg_color[2], 1.0)
                 ),
                 // Percentage Text, positioned relative to the frame's center.
-                act!(text: font("wendy"): settext(percent_text): align(1.0, 0.5): xy(1.5, 0.0): zoom(0.585): horizalign(right)),
+                act!(text: font("wendy_white"): settext(percent_text): align(1.0, 0.5): xy(1.5, 0.0): zoom(0.585): horizalign(right)),
             ],
         };
         actors.push(score_display_frame);

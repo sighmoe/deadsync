@@ -220,7 +220,7 @@ impl AssetManager {
     }
 
     fn load_initial_fonts(&mut self, backend: &mut Backend) -> Result<(), Box<dyn Error>> {
-        for &name in &["wendy", "miso", "cjk", "emoji", "game", "wendy_monospace_numbers", "wendy_screenevaluation", "wendy_combo" ] {
+        for &name in &["wendy", "miso", "cjk", "emoji", "game", "wendy_monospace_numbers", "wendy_screenevaluation", "wendy_combo", "wendy_white" ] {
             let ini_path_str = match name {
                 "wendy" => "assets/fonts/wendy/_wendy small.ini",
                 "miso"  => "assets/fonts/miso/_miso light.ini",
@@ -230,6 +230,7 @@ impl AssetManager {
                 "wendy_monospace_numbers" => "assets/fonts/wendy/_wendy monospace numbers.ini",
                 "wendy_screenevaluation" => "assets/fonts/wendy/_ScreenEvaluation numbers.ini",
                 "wendy_combo" => "assets/fonts/_combo/wendy/Wendy.ini",
+                "wendy_white" => "assets/fonts/wendy/_wendy white.ini",
                 _ => return Err(format!("Unknown font name: {}", name).into()),
             };
 
