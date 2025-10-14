@@ -13,6 +13,7 @@ const GROOVESTATS_INI_PATH: &str = "save/profiles/00000000/groovestats.ini";
 #[derive(Debug, Clone)]
 pub struct Profile {
     pub display_name: String,
+    pub player_initials: String,
     pub groovestats_api_key: String,
     pub groovestats_is_pad_player: bool,
     pub groovestats_username: String,
@@ -22,6 +23,7 @@ impl Default for Profile {
     fn default() -> Self {
         Self {
             display_name: "Player 1".to_string(),
+            player_initials: "P1".to_string(),
             groovestats_api_key: "".to_string(),
             groovestats_is_pad_player: false,
             groovestats_username: "".to_string(),
@@ -41,6 +43,7 @@ fn create_default_files() -> Result<(), std::io::Error> {
     if !Path::new(PROFILE_INI_PATH).exists() {
         let mut profile_conf = Ini::new();
         profile_conf.set("userprofile", "DisplayName", Some("Player 1".to_string()));
+        profile_conf.set("userprofile", "PlayerInitials", Some("P1".to_string()));
         profile_conf.write(PROFILE_INI_PATH)?;
     }
 
@@ -73,6 +76,8 @@ pub fn load() {
     if profile_conf.load(PROFILE_INI_PATH).is_ok() {
         profile.display_name =
             profile_conf.get("userprofile", "DisplayName").unwrap_or(default_profile.display_name.clone());
+        profile.player_initials =
+            profile_conf.get("userprofile", "PlayerInitials").unwrap_or(default_profile.player_initials.clone());
     } else {
         warn!("Failed to load '{}', using default display name.", PROFILE_INI_PATH);
     }

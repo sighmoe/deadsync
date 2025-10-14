@@ -206,10 +206,10 @@ pub fn build(p: MusicWheelParams) -> Vec<Actor> {
                     let difficulty_name = crate::screens::select_music::DIFFICULTY_NAMES[difficulty_index_to_check];
 
                     if let Some(chart) = info.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
-                        if let Some(grade) = scores::get_grade(&chart.short_hash) {
+                        if let Some(cached_score) = scores::get_cached_score(&chart.short_hash) {
                             if let Actor::Sprite { visible, cell, .. } = &mut grade_actor {
                                 *visible = true;
-                                *cell = Some((grade.to_sprite_state(), u32::MAX));
+                                *cell = Some((cached_score.grade.to_sprite_state(), u32::MAX));
                             }
                         }
                     }

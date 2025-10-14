@@ -12,6 +12,7 @@ const API_URL: &str = "https://api.groovestats.com/player-leaderboards.php";
 // --- Grade Definitions ---
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Quint will be used eventually for W0 tracking
 pub enum Grade {
     Quint, Tier01, Tier02, Tier03, Tier04, Tier05, Tier06, Tier07, Tier08,
     Tier09, Tier10, Tier11, Tier12, Tier13, Tier14, Tier15, Tier16, Failed,
@@ -31,17 +32,24 @@ impl Grade {
     }
 }
 
+/// A struct to hold both the calculated grade and the precise score percentage.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CachedScore {
+    pub grade: Grade,
+    pub score_percent: f64, // Stored as 0.0 to 1.0
+}
+
 // --- Global Grade Cache ---
 
-static GRADE_CACHE: Lazy<Mutex<HashMap<String, Grade>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static GRADE_CACHE: Lazy<Mutex<HashMap<String, CachedScore>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
-pub fn get_grade(chart_hash: &str) -> Option<Grade> {
+pub fn get_cached_score(chart_hash: &str) -> Option<CachedScore> {
     GRADE_CACHE.lock().unwrap().get(chart_hash).copied()
 }
 
-pub fn set_grade(chart_hash: String, grade: Grade) {
-    info!("Caching grade {:?} for chart hash {}", grade, chart_hash);
-    GRADE_CACHE.lock().unwrap().insert(chart_hash, grade);
+pub fn set_cached_score(chart_hash: String, score: CachedScore) {
+    info!("Caching score {:?} for chart hash {}", score, chart_hash);
+    GRADE_CACHE.lock().unwrap().insert(chart_hash, score);
 }
 
 // --- API Response Structs ---
@@ -53,7 +61,8 @@ struct ApiResponse {
 
 #[derive(Deserialize, Debug)]
 struct Player1 {
-    gsLeaderboard: Option<Vec<GrooveScore>>,
+    #[serde(rename = "gsLeaderboard")]
+    gs_leaderboard: Option<Vec<GrooveScore>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -112,20 +121,28 @@ pub fn fetch_and_store_grade(profile: Profile, chart_hash: String) -> Result<(),
 
     let player_score = api_response
         .player1
-        .and_then(|p1| p1.gsLeaderboard)
+        .and_then(|p1| p1.gs_leaderboard)
         .and_then(|scores| {
             scores.into_iter().find(|s| s.name.eq_ignore_ascii_case(&profile.groovestats_username))
         });
 
     if let Some(score_data) = player_score {
         let grade = score_to_grade(score_data.score);
-        set_grade(chart_hash, grade);
+        let cached_score = CachedScore {
+            grade,
+            score_percent: score_data.score / 10000.0,
+        };
+        set_cached_score(chart_hash, cached_score);
     } else {
         warn!(
             "No score found for player '{}' on chart '{}'. Caching as Failed.",
             profile.groovestats_username, chart_hash
         );
-        set_grade(chart_hash, Grade::Failed);
+        let cached_score = CachedScore {
+            grade: Grade::Failed,
+            score_percent: 0.0,
+        };
+        set_cached_score(chart_hash, cached_score);
     }
 
     Ok(())

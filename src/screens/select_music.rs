@@ -21,9 +21,9 @@ use std::fs;
 // --- engine imports ---
 use crate::core::space::widescale;
 use crate::gameplay::song::{SongData, get_song_cache, SongPack};
-// use crate::gameplay::chart::ChartData; // <-- This import is unused, you can remove it.
 use crate::assets::AssetManager;
 use crate::gameplay::profile;
+use crate::gameplay::scores;
 
 
 /* ---------------------------- transitions ---------------------------- */
@@ -1026,26 +1026,42 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             ));
         }
         
-        // --- High Score Placeholders ---
-        // Machine High Score
-        actors.push(act!(text: font("miso"): settext("----"):
+        // --- High Scores ---
+        // NEW LOGIC: Default to "----", then fill with initials if a score is found.
+        let (score_name, score_percent) = if let Some(chart) = &selected_chart_data {
+             if let Some(cached_score) = scores::get_cached_score(&chart.short_hash) {
+                 // A 'Failed' grade from GS means no score was found. Don't show 0.00%.
+                 if cached_score.grade != scores::Grade::Failed {
+                     (profile.player_initials.clone(), format!("{:.2}%", cached_score.score_percent * 100.0))
+                 } else {
+                     ("----".to_string(), "??.??%".to_string())
+                 }
+             } else {
+                ("----".to_string(), "??.??%".to_string())
+             }
+        } else {
+            ("----".to_string(), "??.??%".to_string())
+        };
+
+         // Machine High Score (displays player score for now)
+        actors.push(act!(text: font("miso"): settext(score_name.clone()):
             align(0.5, 0.5): // Centered, like default BitmapText in SM
             xy(pane_cx + cols_x[2] - (50.0 * text_zoom), pane_top + rows_y[0]):
             maxwidth(30.0): zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
         ));
-        actors.push(act!(text: font("miso"): settext("??.??%"):
+        actors.push(act!(text: font("miso"): settext(score_percent.clone()):
             align(1.0, 0.5): // Right-aligned
             xy(pane_cx + cols_x[2] + (25.0 * text_zoom), pane_top + rows_y[0]):
             zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
         ));
 
         // Player High Score
-        actors.push(act!(text: font("miso"): settext("----"):
+        actors.push(act!(text: font("miso"): settext(score_name):
             align(0.5, 0.5): // Centered, like default BitmapText in SM
             xy(pane_cx + cols_x[2] - (50.0 * text_zoom), pane_top + rows_y[1]):
             maxwidth(30.0): zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
         ));
-        actors.push(act!(text: font("miso"): settext("??.??%"):
+        actors.push(act!(text: font("miso"): settext(score_percent):
             align(1.0, 0.5): // Right-aligned
             xy(pane_cx + cols_x[2] + (25.0 * text_zoom), pane_top + rows_y[1]):
             zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
