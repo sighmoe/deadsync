@@ -138,16 +138,17 @@ static JUDGMENT_ORDER: [JudgeGrade; 6] = [
 struct JudgmentDisplayInfo {
     label: &'static str,
     color: [f32; 4],
+    dim_color: [f32; 4],
 }
 
 static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyLock::new(|| {
     HashMap::from([
-        (JudgeGrade::Fantastic, JudgmentDisplayInfo { label: "FANTASTIC", color: color::rgba_hex(color::JUDGMENT_HEX[0]) }),
-        (JudgeGrade::Excellent, JudgmentDisplayInfo { label: "EXCELLENT", color: color::rgba_hex(color::JUDGMENT_HEX[1]) }),
-        (JudgeGrade::Great,     JudgmentDisplayInfo { label: "GREAT",     color: color::rgba_hex(color::JUDGMENT_HEX[2]) }),
-        (JudgeGrade::Decent,    JudgmentDisplayInfo { label: "DECENT",    color: color::rgba_hex(color::JUDGMENT_HEX[3]) }),
-        (JudgeGrade::WayOff,    JudgmentDisplayInfo { label: "WAY OFF",   color: color::rgba_hex(color::JUDGMENT_HEX[4]) }),
-        (JudgeGrade::Miss,      JudgmentDisplayInfo { label: "MISS",      color: color::rgba_hex(color::JUDGMENT_HEX[5]) }),
+        (JudgeGrade::Fantastic, JudgmentDisplayInfo { label: "FANTASTIC", color: color::rgba_hex(color::JUDGMENT_HEX[0]), dim_color: color::rgba_hex("#08363E") }),
+        (JudgeGrade::Excellent, JudgmentDisplayInfo { label: "EXCELLENT", color: color::rgba_hex(color::JUDGMENT_HEX[1]), dim_color: color::rgba_hex("#3C2906") }),
+        (JudgeGrade::Great,     JudgmentDisplayInfo { label: "GREAT",     color: color::rgba_hex(color::JUDGMENT_HEX[2]), dim_color: color::rgba_hex("#1B3516") }),
+        (JudgeGrade::Decent,    JudgmentDisplayInfo { label: "DECENT",    color: color::rgba_hex(color::JUDGMENT_HEX[3]), dim_color: color::rgba_hex("#301844") }),
+        (JudgeGrade::WayOff,    JudgmentDisplayInfo { label: "WAY OFF",   color: color::rgba_hex(color::JUDGMENT_HEX[4]), dim_color: color::rgba_hex("#352319") }),
+        (JudgeGrade::Miss,      JudgmentDisplayInfo { label: "MISS",      color: color::rgba_hex(color::JUDGMENT_HEX[5]), dim_color: color::rgba_hex("#440C0C") }),
     ])
 });
 
@@ -201,7 +202,7 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
 
             // Number (digit by digit for dimming)
             let bright_color = info.color;
-            let dim_color = [bright_color[0] * 0.35, bright_color[1] * 0.35, bright_color[2] * 0.35, bright_color[3]];
+            let dim_color = info.dim_color;
             let number_str = format!("{:0width$}", count, width = digits_to_fmt);
             let first_nonzero = number_str.find(|c: char| c != '0').unwrap_or(number_str.len());
             
@@ -231,7 +232,8 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
             ("rolls", score_info.chart.stats.rolls),
         ];
 
-        let gray_color = color::rgba_hex("#5A6166");
+        let gray_color_possible = color::rgba_hex("#5A6166");
+        let gray_color_achieved = color::rgba_hex("#444444");
         let white_color = [1.0, 1.0, 1.0, 1.0];
 
         for (i, (label, possible)) in radar_categories.iter().enumerate() {
@@ -257,7 +259,7 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
             let first_nonzero_possible = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
             for (char_idx, ch) in possible_str.chars().rev().enumerate() {
                 let is_dim = if possible_clamped == 0 { char_idx > 0 } else { (3 - 1 - char_idx) < first_nonzero_possible };
-                let color = if is_dim { gray_color } else { white_color };
+                let color = if is_dim { gray_color_possible } else { white_color };
                 actors.push(act!(text: font("wendy_screenevaluation"): settext(ch.to_string()):
                     align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
                     diffuse(color[0], color[1], color[2], color[3]): z(101)
@@ -267,7 +269,7 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
 
             actors.push(act!(text: font("wendy_screenevaluation"): settext("/"):
                 align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
-                diffuse(gray_color[0], gray_color[1], gray_color[2], gray_color[3]): z(101)
+                diffuse(gray_color_possible[0], gray_color_possible[1], gray_color_possible[2], gray_color_possible[3]): z(101)
             ));
             cursor_x -= digit_width;
             
@@ -277,7 +279,7 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
             let first_nonzero_achieved = achieved_str.find(|c: char| c != '0').unwrap_or(achieved_str.len());
             for (char_idx, ch) in achieved_str.chars().rev().enumerate() {
                 let is_dim = if achieved == 0 { char_idx > 0 } else { (3 - 1 - char_idx) < first_nonzero_achieved };
-                let color = if is_dim { gray_color } else { white_color };
+                let color = if is_dim { gray_color_achieved } else { white_color };
                 actors.push(act!(text: font("wendy_screenevaluation"): settext(ch.to_string()):
                     align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
                     diffuse(color[0], color[1], color[2], color[3]): z(101)
