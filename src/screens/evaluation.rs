@@ -128,6 +128,169 @@ fn format_session_time(seconds_total: f32) -> String {
     }
 }
 
+// --- Statics and helper function for the P1 stats pane ---
+
+static JUDGMENT_ORDER: [JudgeGrade; 6] = [
+    JudgeGrade::Fantastic, JudgeGrade::Excellent, JudgeGrade::Great,
+    JudgeGrade::Decent, JudgeGrade::WayOff, JudgeGrade::Miss,
+];
+
+struct JudgmentDisplayInfo {
+    label: &'static str,
+    color: [f32; 4],
+}
+
+static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyLock::new(|| {
+    HashMap::from([
+        (JudgeGrade::Fantastic, JudgmentDisplayInfo { label: "FANTASTIC", color: color::rgba_hex(color::JUDGMENT_HEX[0]) }),
+        (JudgeGrade::Excellent, JudgmentDisplayInfo { label: "EXCELLENT", color: color::rgba_hex(color::JUDGMENT_HEX[1]) }),
+        (JudgeGrade::Great,     JudgmentDisplayInfo { label: "GREAT",     color: color::rgba_hex(color::JUDGMENT_HEX[2]) }),
+        (JudgeGrade::Decent,    JudgmentDisplayInfo { label: "DECENT",    color: color::rgba_hex(color::JUDGMENT_HEX[3]) }),
+        (JudgeGrade::WayOff,    JudgmentDisplayInfo { label: "WAY OFF",   color: color::rgba_hex(color::JUDGMENT_HEX[4]) }),
+        (JudgeGrade::Miss,      JudgmentDisplayInfo { label: "MISS",      color: color::rgba_hex(color::JUDGMENT_HEX[5]) }),
+    ])
+});
+
+/// Builds the entire P1 (left side) stats pane including judgments and radar counts.
+fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
+    let Some(score_info) = &state.score_info else { return vec![]; };
+    let mut actors = Vec::new();
+    let cy = screen_center_y();
+
+    // The base offset for all P1 panes from the screen center.
+    let p1_side_offset = screen_center_x() - 155.0;
+
+    // --- Calculate label shift for large numbers ---
+    let max_judgment_count = JUDGMENT_ORDER.iter()
+        .map(|grade| score_info.judgment_counts.get(grade).cloned().unwrap_or(0))
+        .max().unwrap_or(0);
+    
+    let (label_shift_x, label_zoom) = if max_judgment_count > 9999 {
+        let length = (max_judgment_count as f32).log10().floor() as i32 + 1;
+        (-11.0 * (length - 4) as f32, 0.833 - 0.1 * (length - 4) as f32)
+    } else {
+        (0.0, 0.833)
+    };
+
+    let digits_needed = if max_judgment_count == 0 { 1 } else { (max_judgment_count as f32).log10().floor() as usize + 1 };
+    let digits_to_fmt = digits_needed.max(4);
+
+    asset_manager.with_fonts(|all_fonts| asset_manager.with_font("wendy_screenevaluation", |metrics_font| {
+        let numbers_frame_zoom = 0.8;
+        let final_numbers_zoom = numbers_frame_zoom * 0.5;
+        let digit_width = font::measure_line_width_logical(metrics_font, "0", all_fonts) as f32 * final_numbers_zoom;
+        if digit_width <= 0.0 { return; }
+
+        // --- Judgment Labels & Numbers ---
+        let labels_frame_origin_x = p1_side_offset + 50.0;
+        let numbers_frame_origin_x = p1_side_offset + 90.0;
+        let frame_origin_y = cy - 24.0;
+
+        for (i, grade) in JUDGMENT_ORDER.iter().enumerate() {
+            let info = JUDGMENT_INFO.get(grade).unwrap();
+            let count = score_info.judgment_counts.get(grade).cloned().unwrap_or(0);
+            
+            // Label
+            let label_local_x = 28.0 + label_shift_x;
+            let label_local_y = (i as f32 * 28.0) - 16.0;
+            actors.push(act!(text: font("miso"): settext(info.label):
+                align(1.0, 0.5): xy(labels_frame_origin_x + label_local_x, frame_origin_y + label_local_y):
+                maxwidth(76.0): zoom(label_zoom):
+                diffuse(info.color[0], info.color[1], info.color[2], info.color[3]): z(101)
+            ));
+
+            // Number (digit by digit for dimming)
+            let bright_color = info.color;
+            let dim_color = [bright_color[0] * 0.35, bright_color[1] * 0.35, bright_color[2] * 0.35, bright_color[3]];
+            let number_str = format!("{:0width$}", count, width = digits_to_fmt);
+            let first_nonzero = number_str.find(|c: char| c != '0').unwrap_or(number_str.len());
+            
+            let number_local_x = 64.0;
+            let number_local_y = (i as f32 * 35.0) - 20.0;
+            let number_final_y = frame_origin_y + (number_local_y * numbers_frame_zoom);
+            let number_base_x = numbers_frame_origin_x + (number_local_x * numbers_frame_zoom);
+            
+            for (char_idx, ch) in number_str.chars().enumerate() {
+                let is_dim = if count == 0 { char_idx < digits_to_fmt - 1 } else { char_idx < first_nonzero };
+                let color = if is_dim { dim_color } else { bright_color };
+                let index_from_right = digits_to_fmt - 1 - char_idx;
+                let cell_right_x = number_base_x - (index_from_right as f32 * digit_width);
+                
+                actors.push(act!(text: font("wendy_screenevaluation"): settext(ch.to_string()):
+                    align(1.0, 0.5): xy(cell_right_x, number_final_y): zoom(final_numbers_zoom):
+                    diffuse(color[0], color[1], color[2], color[3]): z(101)
+                ));
+            }
+        }
+        
+        // --- RADAR LABELS & NUMBERS ---
+        let radar_categories = [
+            ("HANDS", score_info.chart.stats.hands),
+            ("HOLDS", score_info.chart.stats.holds),
+            ("MINES", score_info.chart.stats.mines),
+            ("ROLLS", score_info.chart.stats.rolls),
+        ];
+
+        let gray_color = color::rgba_hex("#5A6166");
+        let white_color = [1.0, 1.0, 1.0, 1.0];
+
+        for (i, (label, possible)) in radar_categories.iter().enumerate() {
+            let label_local_x = -160.0;
+            let label_local_y = (i as f32 * 28.0) + 41.0;
+            actors.push(act!(text: font("miso"): settext(*label):
+                align(1.0, 0.5): xy(labels_frame_origin_x + label_local_x, frame_origin_y + label_local_y): zoom(0.833): z(101)
+            ));
+
+            // Number (Achieved / Possible)
+            let achieved = 0; // Hardcoded: Actual radar values not yet tracked in gameplay
+            let possible_clamped = (*possible).min(999);
+            
+            let possible_str = format!("{:03}", possible_clamped);
+            let achieved_str = format!("{:03}", achieved);
+
+            let number_local_y = (i as f32 * 35.0) + 53.0;
+            let number_final_y = frame_origin_y + (number_local_y * numbers_frame_zoom);
+
+            let possible_base_x = numbers_frame_origin_x + (-114.0 * numbers_frame_zoom);
+            let mut cursor_x = possible_base_x;
+
+            let first_nonzero_possible = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
+            for (char_idx, ch) in possible_str.chars().rev().enumerate() {
+                let is_dim = if possible_clamped == 0 { char_idx > 0 } else { (3 - 1 - char_idx) < first_nonzero_possible };
+                let color = if is_dim { gray_color } else { white_color };
+                actors.push(act!(text: font("wendy_screenevaluation"): settext(ch.to_string()):
+                    align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
+                    diffuse(color[0], color[1], color[2], color[3]): z(101)
+                ));
+                cursor_x -= digit_width;
+            }
+
+            actors.push(act!(text: font("wendy_screenevaluation"): settext("/"):
+                align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
+                diffuse(gray_color[0], gray_color[1], gray_color[2], gray_color[3]): z(101)
+            ));
+            cursor_x -= digit_width;
+            
+            let achieved_base_x = numbers_frame_origin_x + (-180.0 * numbers_frame_zoom);
+            cursor_x = achieved_base_x;
+
+            let first_nonzero_achieved = achieved_str.find(|c: char| c != '0').unwrap_or(achieved_str.len());
+            for (char_idx, ch) in achieved_str.chars().rev().enumerate() {
+                let is_dim = if achieved == 0 { char_idx > 0 } else { (3 - 1 - char_idx) < first_nonzero_achieved };
+                let color = if is_dim { gray_color } else { white_color };
+                actors.push(act!(text: font("wendy_screenevaluation"): settext(ch.to_string()):
+                    align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
+                    diffuse(color[0], color[1], color[2], color[3]): z(101)
+                ));
+                cursor_x -= digit_width;
+            }
+        }
+    }));
+
+    actors
+}
+
+
 pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(20);
     let profile = profile::get();
@@ -172,9 +335,18 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         ));
         return actors;
     };
+    
+    let cy = screen_center_y();
 
-    // --- Corrected coordinates: 0,0 is top-left, 480 is bottom ---
-    let cy = screen_center_y(); // This is the logical center (240)
+    // --- Pane Background Quad (P1) ---
+    let pane_bg_color = color::rgba_hex("#1E282F");
+    actors.push(act!(quad:
+        align(0.5, 0.0): // center-top
+        xy(screen_center_x() - 155.0, cy - 56.0):
+        setsize(300.0, 270.0):
+        diffuse(pane_bg_color[0], pane_bg_color[1], pane_bg_color[2], 1.0):
+        z(100)
+    ));
 
     // --- Title, Banner, and Song Features (Center Column) ---
     {
@@ -197,30 +369,9 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             offset: [screen_center_x(), 46.0],
             size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
             children: vec![
-                // Banner (drawn first, behind title)
-                act!(sprite(banner_key):
-                    align(0.5, 0.5):
-                    xy(0.0, 66.0):
-                    setsize(418.0, 164.0):
-                    zoom(0.7):
-                    z(0)
-                ),
-                // Quad behind title
-                act!(quad:
-                    align(0.5, 0.5):
-                    xy(0.0, 0.0):
-                    setsize(418.0, 25.0):
-                    zoom(0.7):
-                    diffuse(0.117, 0.157, 0.184, 1.0): // #1E282F
-                    z(1)
-                ),
-                // Title text
-                act!(text:
-                    font("miso"): settext(full_title):
-                    align(0.5, 0.5): xy(0.0, 0.0):
-                    maxwidth(418.0 * 0.7):
-                    z(2)
-                ),
+                act!(sprite(banner_key): align(0.5, 0.5): xy(0.0, 66.0): setsize(418.0, 164.0): zoom(0.7): z(0)),
+                act!(quad: align(0.5, 0.5): xy(0.0, 0.0): setsize(418.0, 25.0): zoom(0.7): diffuse(0.117, 0.157, 0.184, 1.0): z(1)),
+                act!(text: font("miso"): settext(full_title): align(0.5, 0.5): xy(0.0, 0.0): maxwidth(418.0 * 0.7): z(2)),
             ],
             background: None,
             z: 50,
@@ -231,9 +382,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         let bpm_text = {
             let min = score_info.song.min_bpm.round() as i32;
             let max = score_info.song.max_bpm.round() as i32;
-            if (score_info.song.min_bpm - score_info.song.max_bpm).abs() < 1e-6 {
-                format!("{} bpm", min)
-            } else { format!("{} - {} bpm", min, max) }
+            if (score_info.song.min_bpm - score_info.song.max_bpm).abs() < 1e-6 { format!("{} bpm", min) } else { format!("{} - {} bpm", min, max) }
         };
 
         let length_text = {
@@ -263,40 +412,19 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let p1_frame_x = screen_center_x() - 155.0;
 
     // Letter Grade
-    actors.push(act!(sprite("grades/grades 1x19.png"):
-        align(0.5, 0.5): xy(p1_frame_x - 70.0, cy - 134.0):
-        zoom(0.4): z(101):
-        setstate(score_info.grade.to_sprite_state())
-    ));
+    actors.push(act!(sprite("grades/grades 1x19.png"): align(0.5, 0.5): xy(p1_frame_x - 70.0, cy - 134.0): zoom(0.4): z(101): setstate(score_info.grade.to_sprite_state()) ));
 
     // Difficulty Text and Meter Block
     {
         let difficulty_color = color::difficulty_rgba(&score_info.chart.difficulty, state.active_color_index);
         let difficulty_text = format!("single / {}", score_info.chart.difficulty);
-        
-        actors.push(act!(text:
-            font("miso"): settext(difficulty_text):
-            align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 64.0):
-            zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0)
-        ));
-        actors.push(act!(quad:
-            align(0.5, 0.5): xy(p1_frame_x - 134.5, cy - 71.0):
-            zoomto(30.0, 30.0): z(101):
-            diffuse(difficulty_color[0], difficulty_color[1], difficulty_color[2], 1.0)
-        ));
-        actors.push(act!(text:
-            font("wendy"): settext(score_info.chart.meter.to_string()):
-            align(0.5, 0.5): xy(p1_frame_x - 134.5, cy - 71.0):
-            zoom(0.4): z(102): diffuse(0.0, 0.0, 0.0, 1.0)
-        ));
+        actors.push(act!(text: font("miso"): settext(difficulty_text): align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 64.0): zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0) ));
+        actors.push(act!(quad: align(0.5, 0.5): xy(p1_frame_x - 134.5, cy - 71.0): zoomto(30.0, 30.0): z(101): diffuse(difficulty_color[0], difficulty_color[1], difficulty_color[2], 1.0) ));
+        actors.push(act!(text: font("wendy"): settext(score_info.chart.meter.to_string()): align(0.5, 0.5): xy(p1_frame_x - 134.5, cy - 71.0): zoom(0.4): z(102): diffuse(0.0, 0.0, 0.0, 1.0) ));
     }
 
     // Step Artist
-    actors.push(act!(text:
-        font("miso"): settext(score_info.chart.step_artist.clone()):
-        align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 80.0):
-        zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0)
-    ));
+    actors.push(act!(text: font("miso"): settext(score_info.chart.step_artist.clone()): align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 80.0): zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0) ));
 
     // --- Player 1 Score Percentage Display ---
     {
@@ -305,80 +433,29 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         let score_bg_color = color::rgba_hex("#101519");
 
         let score_display_frame = Actor::Frame {
-            // This frame's center is positioned relative to the P1 side.
             align: [0.5, 0.5],
             offset: [p1_frame_x, score_frame_y],
             size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
             background: None,
-            z: 101, // Keep it on the same layer as other P1 UI
+            z: 101,
             children: vec![
-                // Background Quad, positioned relative to the frame's center.
-                act!(quad:
-                    align(0.0, 0.5): // left-aligned
-                    xy(-150.0, 0.0):
-                    setsize(158.5, 60.0):
-                    diffuse(score_bg_color[0], score_bg_color[1], score_bg_color[2], 1.0)
-                ),
-                // Percentage Text, positioned relative to the frame's center.
+                act!(quad: align(0.0, 0.5): xy(-150.0, 0.0): setsize(158.5, 60.0): diffuse(score_bg_color[0], score_bg_color[1], score_bg_color[2], 1.0) ),
                 act!(text: font("wendy_white"): settext(percent_text): align(1.0, 0.5): xy(1.5, 0.0): zoom(0.585): horizalign(right)),
             ],
         };
         actors.push(score_display_frame);
     }
-
-    // --- Player 1 Lower Stats Pane Background ---
-    // This replicates the large quad for a single player from the Lua.
-    {
-        let pane_width = (300.0 * 2.0) + 10.0; // Two small panes plus spacing
-        let pane_x_left = screen_center_x() - 305.0; // Centered group's left edge
-
-        // The top of this pane should align with the top of the score percentage box's background.
-        // Score pane bg is centered at (cy - 26) with height 60, so its top is at (cy - 26) - 30 = cy - 56.
-        let pane_y_top = screen_center_y() - 56.0;
-
-        // The bottom edge should align with the visually correct result from the first attempt,
-        // which placed the top of a 180px pane at `cy + 34`.
-        let pane_y_bottom = (screen_center_y() + 34.0) + 180.0;
-
-        // The correct height is the distance between these two visual boundaries.
-        let pane_height = pane_y_bottom - pane_y_top;
-        let pane_bg_color = color::rgba_hex("#1E282F");
-
-        actors.push(act!(quad:
-            align(0.0, 0.0): // top-left alignment
-            xy(pane_x_left, pane_y_top):
-            zoomto(pane_width, pane_height):
-            diffuse(pane_bg_color[0], pane_bg_color[1], pane_bg_color[2], 1.0):
-            z(100) // Below stats text, above main background
-        ));
-    }
+    
+    // --- P1 Stats Pane (Judgments & Radar) ---
+    actors.extend(build_p1_stats_pane(state, asset_manager));
 
     // --- "ITG" text and Pads (top right) ---
     {
         let itg_text_x = screen_width() - widescale(55.0, 62.0);
-        actors.push(act!(text:
-            font("wendy"): settext("ITG"):
-            align(1.0, 0.5): xy(itg_text_x, 15.0):
-            zoom(widescale(0.5, 0.6)): z(121):
-            diffuse(1.0, 1.0, 1.0, 1.0):
-        ));
-
+        actors.push(act!(text: font("wendy"): settext("ITG"): align(1.0, 0.5): xy(itg_text_x, 15.0): zoom(widescale(0.5, 0.6)): z(121): diffuse(1.0, 1.0, 1.0, 1.0) ));
         let final_pad_zoom = 0.24 * widescale(0.435, 0.525);
-
-        actors.push(pad_display::build(pad_display::PadDisplayParams {
-            center_x: screen_width() - widescale(35.0, 41.0),
-            center_y: widescale(22.0, 23.5),
-            zoom: final_pad_zoom,
-            z: 121,
-            is_active: true,
-        }));
-        actors.push(pad_display::build(pad_display::PadDisplayParams {
-            center_x: screen_width() - widescale(15.0, 17.0),
-            center_y: widescale(22.0, 23.5),
-            zoom: final_pad_zoom,
-            z: 121,
-            is_active: false,
-        }));
+        actors.push(pad_display::build(pad_display::PadDisplayParams { center_x: screen_width() - widescale(35.0, 41.0), center_y: widescale(22.0, 23.5), zoom: final_pad_zoom, z: 121, is_active: true, }));
+        actors.push(pad_display::build(pad_display::PadDisplayParams { center_x: screen_width() - widescale(15.0, 17.0), center_y: widescale(22.0, 23.5), zoom: final_pad_zoom, z: 121, is_active: false, }));
     }
 
     // 3. Bottom Bar
