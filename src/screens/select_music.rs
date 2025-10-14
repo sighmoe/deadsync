@@ -533,7 +533,7 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 
 fn format_session_time(seconds_total: f32) -> String {
     if seconds_total < 0.0 {
-        return "0:00".to_string();
+        return "00:00".to_string();
     }
     let seconds_total = seconds_total as u64;
 
@@ -544,7 +544,7 @@ fn format_session_time(seconds_total: f32) -> String {
     if hours > 0 {
         format!("{}:{:02}:{:02}", hours, minutes, seconds)
     } else {
-        format!("{}:{:02}", minutes, seconds)
+        format!("{:02}:{:02}", minutes, seconds)
     }
 }
 
