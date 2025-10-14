@@ -3,7 +3,7 @@ use crate::core::audio;
 use crate::core::space::*;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
-use crate::ui::color::{self, DIFFICULTY_NAMES};
+use crate::ui::color;
 use crate::ui::components::{heart_bg, pad_display, music_wheel};
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::ui::actors::SizeSpec;
@@ -79,8 +79,8 @@ pub struct State {
 
 /// Helper function to check if a specific difficulty index has a playable chart
 pub(crate) fn is_difficulty_playable(song: &Arc<SongData>, difficulty_index: usize) -> bool {
-    if difficulty_index >= DIFFICULTY_NAMES.len() { return false; }
-    let target_difficulty_name = DIFFICULTY_NAMES[difficulty_index];
+    if difficulty_index >= color::FILE_DIFFICULTY_NAMES.len() { return false; }
+    let target_difficulty_name = color::FILE_DIFFICULTY_NAMES[difficulty_index];
     song.charts.iter().any(|c| {
         c.difficulty.eq_ignore_ascii_case(target_difficulty_name) && !c.notes.is_empty()
     })
@@ -329,7 +329,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                         if state.last_difficulty_nav_key == Some(key_code) && state.last_difficulty_nav_time.map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW) {
                             if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
                                 let mut new_idx = state.selected_difficulty_index;
-                                while new_idx < DIFFICULTY_NAMES.len() - 1 {
+                                while new_idx < color::FILE_DIFFICULTY_NAMES.len() - 1 {
                                     new_idx += 1;
                                     if is_difficulty_playable(song, new_idx) {
                                         state.selected_difficulty_index = new_idx;
@@ -434,7 +434,7 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
 
             // Iterate through difficulties in canonical order (Beginner -> Challenge)
             // to ensure tie-breaking favors easier charts.
-            for i in 0..DIFFICULTY_NAMES.len() {
+            for i in 0..color::FILE_DIFFICULTY_NAMES.len() {
                 if is_difficulty_playable(song, i) {
                     let diff = (i as i32 - preferred_difficulty as i32).abs();
                     if diff < min_diff {
@@ -488,7 +488,7 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
     // --- DYNAMIC TEXTURE REQUEST LOGIC ---
     // Request a new density graph if the selected chart has changed.
     let chart_to_display = selected_song.as_ref().and_then(|song| {
-        let difficulty_name = DIFFICULTY_NAMES[state.selected_difficulty_index];
+        let difficulty_name = color::FILE_DIFFICULTY_NAMES[state.selected_difficulty_index];
         song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).cloned()
     });
     
@@ -770,7 +770,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     // --- Get data for the selected chart ---
         let selected_entry = state.entries.get(state.selected_index);
         let selected_chart_data = if let Some(MusicWheelEntry::Song(song)) = selected_entry {
-            song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(DIFFICULTY_NAMES[state.selected_difficulty_index])).cloned()
+            song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(color::FILE_DIFFICULTY_NAMES[state.selected_difficulty_index])).cloned()
         } else {
             None
         };
@@ -1195,7 +1195,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     // Prepare meters per difficulty (Beginner..Challenge)
     let mut meters: [Option<i32>; 5] = [None, None, None, None, None];
     if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
-        for (i, name) in DIFFICULTY_NAMES.iter().enumerate() {
+        for (i, name) in color::FILE_DIFFICULTY_NAMES.iter().enumerate() {
             if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(name)) {
                 meters[i] = Some(chart.meter as i32);
             }

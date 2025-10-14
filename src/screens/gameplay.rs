@@ -8,7 +8,7 @@ use crate::gameplay::timing::TimingData;
 use crate::core::audio;
 use crate::screens::{Screen, ScreenAction};
 use crate::core::space::{is_wide, widescale};
-use crate::ui::{actors::{Actor, SizeSpec}, color::DIFFICULTY_NAMES};
+use crate::ui::actors::{Actor, SizeSpec};
 use crate::act;
 use crate::ui::color;
 use crate::ui::components::screen_bar;
@@ -748,7 +748,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let x = screen_center_x() - widescale(292.5, 342.5);
     let y = 56.0;
 
-    let difficulty_index = DIFFICULTY_NAMES
+    let difficulty_index = color::FILE_DIFFICULTY_NAMES
         .iter()
         .position(|&name| name.eq_ignore_ascii_case(&state.chart.difficulty))
         .unwrap_or(2);

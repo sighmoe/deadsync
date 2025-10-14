@@ -371,7 +371,7 @@ impl ApplicationHandler for App {
                     if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F7) = key_event.physical_key {
                         if self.current_screen == CurrentScreen::SelectMusic {
                             if let Some(select_music::MusicWheelEntry::Song(song)) = self.select_music_state.entries.get(self.select_music_state.selected_index) {
-                                let difficulty_name = color::DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
+                                let difficulty_name = color::FILE_DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
                                 if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
                                     let action = ScreenAction::FetchOnlineGrade(chart.short_hash.clone());
                                     if let Err(e) = self.handle_action(action, event_loop) {
@@ -563,7 +563,7 @@ impl ApplicationHandler for App {
                                 select_music::MusicWheelEntry::Song(s) => s,
                                 _ => panic!("Cannot start gameplay on a pack header"),
                             };
-                            let difficulty_name = color::DIFFICULTY_NAMES[sm_state.selected_difficulty_index];
+                            let difficulty_name = color::FILE_DIFFICULTY_NAMES[sm_state.selected_difficulty_index];
                             let chart_ref = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).unwrap();
                             (song.clone(), Arc::new(chart_ref.clone()))
                         };

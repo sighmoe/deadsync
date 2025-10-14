@@ -203,7 +203,7 @@ pub fn build(p: MusicWheelParams) -> Vec<Actor> {
                         p.preferred_difficulty_index
                     };
                     
-                    let difficulty_name = crate::ui::color::DIFFICULTY_NAMES[difficulty_index_to_check];
+                    let difficulty_name = crate::ui::color::FILE_DIFFICULTY_NAMES[difficulty_index_to_check];
 
                     if let Some(chart) = info.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
                         if let Some(cached_score) = scores::get_cached_score(&chart.short_hash) {
