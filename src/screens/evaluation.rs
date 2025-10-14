@@ -225,10 +225,10 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
         
         // --- RADAR LABELS & NUMBERS ---
         let radar_categories = [
-            ("HANDS", score_info.chart.stats.hands),
-            ("HOLDS", score_info.chart.stats.holds),
-            ("MINES", score_info.chart.stats.mines),
-            ("ROLLS", score_info.chart.stats.rolls),
+            ("hands", score_info.chart.stats.hands),
+            ("holds", score_info.chart.stats.holds),
+            ("mines", score_info.chart.stats.mines),
+            ("rolls", score_info.chart.stats.rolls),
         ];
 
         let gray_color = color::rgba_hex("#5A6166");
@@ -250,7 +250,7 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
 
             let number_local_y = (i as f32 * 35.0) + 53.0;
             let number_final_y = frame_origin_y + (number_local_y * numbers_frame_zoom);
-
+            
             let possible_base_x = numbers_frame_origin_x + (-114.0 * numbers_frame_zoom);
             let mut cursor_x = possible_base_x;
 
@@ -336,17 +336,25 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         return actors;
     };
     
-    let cy = screen_center_y();
+    // --- Lower Stats Pane Background ---
+    {
+        let pane_width = (300.0 * 2.0) + 10.0;
+        let pane_x_left = screen_center_x() - 305.0;
+        let pane_y_top = screen_center_y() - 56.0;
+        let pane_y_bottom = (screen_center_y() + 34.0) + 180.0;
+        let pane_height = pane_y_bottom - pane_y_top;
+        let pane_bg_color = color::rgba_hex("#1E282F");
 
-    // --- Pane Background Quad (P1) ---
-    let pane_bg_color = color::rgba_hex("#1E282F");
-    actors.push(act!(quad:
-        align(0.5, 0.0): // center-top
-        xy(screen_center_x() - 155.0, cy - 56.0):
-        setsize(300.0, 270.0):
-        diffuse(pane_bg_color[0], pane_bg_color[1], pane_bg_color[2], 1.0):
-        z(100)
-    ));
+        actors.push(act!(quad:
+            align(0.0, 0.0):
+            xy(pane_x_left, pane_y_top):
+            zoomto(pane_width, pane_height):
+            diffuse(pane_bg_color[0], pane_bg_color[1], pane_bg_color[2], 1.0):
+            z(100)
+        ));
+    }
+
+    let cy = screen_center_y();
 
     // --- Title, Banner, and Song Features (Center Column) ---
     {
