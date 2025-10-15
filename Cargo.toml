@@ -1,6 +1,6 @@
 [package]
 name = "deadsync"
-version = "0.1.18"
+version = "0.1.20"
 authors = ["Patrik Nilsson <perfecttaste@pm.me>"]
 edition = "2024"
 description = "Rust-based ITG engine with switchable Vulkan/OpenGL backends, designed for accurate sync and competitive performance."
@@ -34,7 +34,7 @@ cpal = "0.16.0"
 lewton = "0.10.2"
 
 # Fonts
-regex = "1.11.3"
+regex = "1.12.2"
 
 # Networking
 ureq = { version = "3.1.2", features = ["json", "rustls"] }
