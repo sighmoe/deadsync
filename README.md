@@ -15,7 +15,7 @@ Follow these steps to get the game running:
 
 1.  **Clone the Repository:**
     ```sh
-    git clone https://github.com/pnn64/deadsync.git
+    git clone --recurse-submodules https://github.com/pnn64/deadsync.git
     cd deadsync
     ```
 
