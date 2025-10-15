@@ -580,6 +580,38 @@ impl ApplicationHandler for App {
                         );
                         self.evaluation_state = evaluation::init(gameplay_results);
                         self.evaluation_state.active_color_index = color_idx;
+
+                        // --- NEW: Generate and cache the density graph texture ---
+                        if let Some(backend) = self.backend.as_mut() {
+                            if let Some(score_info) = &self.evaluation_state.score_info {
+                                // Re-generate the graph data at the desired size for this screen.
+                                // The Lua code uses `GraphWidth` and `GraphHeight` metrics.
+                                // Let's use dimensions that fit the layout well.
+                                let graph_width = 1800;  // Matches wide mode in select_music
+                                let graph_height = 256; // Taller for this screen's layout
+                                let graph_data = rssp::graph::generate_density_graph_rgba_data(
+                                    &score_info.chart.measure_nps_vec,
+                                    score_info.chart.max_nps,
+                                    graph_width,
+                                    graph_height,
+                                    &rssp::graph::ColorScheme::Default,
+                                ).ok();
+
+                                // Create a new ChartData variant just for texture creation, as the API expects it.
+                                let texture_request_chart = if let Some(data) = graph_data {
+                                    Some(crate::gameplay::chart::ChartData {
+                                        short_hash: format!("{}_eval", score_info.chart.short_hash),
+                                        density_graph: Some(data),
+                                        ..score_info.chart.as_ref().clone() // clone other fields
+                                    })
+                                } else {
+                                    None
+                                };
+                                
+                                let key = self.asset_manager.set_density_graph(backend, texture_request_chart.as_ref());
+                                self.evaluation_state.density_graph_texture_key = key;
+                            }
+                        }
                     }
 
                     if target == CurrentScreen::SelectMusic {

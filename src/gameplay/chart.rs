@@ -17,6 +17,7 @@ pub struct ChartData {
     pub partial_breakdown: String,
     pub simple_breakdown: String,
     pub total_measures: usize,
+    pub measure_nps_vec: Vec<f64>,
 }
 
 // Define a public enum for the parsing result. This decouples the parser from the gameplay screen.

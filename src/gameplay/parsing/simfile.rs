@@ -127,6 +127,7 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
                 detailed_breakdown: c.detailed,
                 partial_breakdown: c.partial,
                 simple_breakdown: c.simple,
+                measure_nps_vec: c.measure_nps_vec, // <-- ADD THIS LINE
             }
         })
         .collect();

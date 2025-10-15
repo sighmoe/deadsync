@@ -39,6 +39,7 @@ pub struct State {
     bg: heart_bg::State,
     pub session_elapsed: f32, // To display the timer
     pub score_info: Option<ScoreInfo>,
+    pub density_graph_texture_key: String,
 }
 
 pub fn init(gameplay_results: Option<gameplay::State>) -> State {
@@ -72,6 +73,7 @@ pub fn init(gameplay_results: Option<gameplay::State>) -> State {
         bg: heart_bg::State::new(),
         session_elapsed: 0.0,
         score_info,
+        density_graph_texture_key: "__white".to_string(),
     }
 }
 
@@ -478,6 +480,45 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     
     // --- P1 Stats Pane (Judgments & Radar) ---
     actors.extend(build_p1_stats_pane(state, asset_manager));
+
+    // --- DENSITY GRAPH PANE (Corrected Layout) ---
+    {
+        const GRAPH_WIDTH: f32 = 610.0;
+        const GRAPH_HEIGHT: f32 = 64.0;
+
+        let frame_center_x = screen_center_x();
+        let frame_center_y = screen_center_y() + 124.0;
+        
+        let graph_frame = Actor::Frame {
+            align: [0.5, 0.0], // Center-Top alignment for the main frame
+            offset: [frame_center_x, frame_center_y],
+            size: [SizeSpec::Px(GRAPH_WIDTH), SizeSpec::Px(GRAPH_HEIGHT)],
+            z: 101, // On top of the main lower pane, but below text overlays
+            background: Some(crate::ui::actors::Background::Color(color::rgba_hex("#101519"))),
+            children: vec![
+                // The NPS histogram is positioned with its origin at the bottom-left of the frame,
+                // and then shifted to be centered horizontally.
+                // Lua: `addx(-GraphWidth/2):addy(GraphHeight)`
+                // This is equivalent to `align(0.0, 1.0)` (bottom-left) and `xy` at the center of the frame.
+                act!(sprite(state.density_graph_texture_key.clone()):
+                    align(0.0, 1.0): // bottom-left
+                    xy(0.0, GRAPH_HEIGHT): // position at the bottom-left of the frame
+                    setsize(GRAPH_WIDTH, GRAPH_HEIGHT):
+                    diffusealpha(0.5): // 50% opacity like the theme
+                    z(1)
+                ),
+                // The horizontal zero-line, centered vertically in the panel.
+                act!(quad:
+                    align(0.5, 0.5): 
+                    xy(GRAPH_WIDTH / 2.0, GRAPH_HEIGHT / 2.0):
+                    setsize(GRAPH_WIDTH, 1.0):
+                    diffusealpha(0.1): 
+                    z(2)
+                ),
+            ],
+        };
+        actors.push(graph_frame);
+    }
 
     // --- "ITG" text and Pads (top right) ---
     {
