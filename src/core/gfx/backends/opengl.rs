@@ -320,9 +320,56 @@ fn create_opengl_context(
 ) -> Result<(Surface<WindowSurface>, PossiblyCurrentContext, glow::Context), Box<dyn Error>> {
     let display_handle = window.display_handle()?.as_raw();
 
-    info!("Using WGL display for OpenGL context.");
-    let preference_wgl = DisplayApiPreference::Wgl(None);
-    let display = unsafe { Display::new(display_handle, preference_wgl)? };
+    #[cfg(target_os = "windows")]
+    let (display, vsync_logic) = {
+        info!("Using WGL for OpenGL context.");
+        let preference = DisplayApiPreference::Wgl(None);
+        let display = unsafe { Display::new(display_handle, preference)? };
+
+        // This closure captures the display and will be called later to set VSync.
+        let vsync_logic = move |display: &Display| {
+            info!("Attempting to set VSync via wglSwapIntervalEXT...");
+            type SwapIntervalFn = extern "system" fn(i32) -> i32;
+            let proc_name = CStr::from_bytes_with_nul(b"wglSwapIntervalEXT\0").unwrap();
+            let proc = display.get_proc_address(proc_name);
+            if !proc.is_null() {
+                let f: SwapIntervalFn = unsafe { std::mem::transmute(proc) };
+                let interval = if vsync_enabled { 1 } else { 0 };
+                if f(interval) != 0 {
+                    info!("Successfully set VSync to: {}", if vsync_enabled { "on" } else { "off" });
+                } else {
+                    warn!("wglSwapIntervalEXT call failed. VSync state may not be as requested.");
+                }
+            } else {
+                warn!("wglSwapIntervalEXT function not found. Cannot control VSync.");
+            }
+        };
+        (display, vsync_logic)
+    };
+    
+    #[cfg(not(target_os = "windows"))]
+    let (display, vsync_logic) = {
+        info!("Using EGL for OpenGL context.");
+        let preference = DisplayApiPreference::Egl;
+        let display = unsafe { Display::new(display_handle, preference)? };
+        
+        // On non-windows, we use glutin's modern API which is more reliable.
+        let vsync_logic = move |display: &Display, surface: &Surface<WindowSurface>, context: &PossiblyCurrentContext| {
+            use glutin::surface::SwapInterval;
+            let interval = if vsync_enabled {
+                SwapInterval::Wait(std::num::NonZeroU32::new(1).unwrap())
+            } else {
+                SwapInterval::DontWait
+            };
+
+            if let Err(e) = surface.set_swap_interval(&context, interval) {
+                warn!("Failed to set swap interval (VSync): {:?}", e);
+            } else {
+                info!("Successfully set VSync to: {}", if vsync_enabled { "on" } else { "off" });
+            }
+        };
+        (display, vsync_logic)
+    };
 
     let template = ConfigTemplateBuilder::new()
         .with_alpha_size(8)
@@ -346,21 +393,11 @@ fn create_opengl_context(
     let context = unsafe { display.create_context(&config, &context_attributes)? }
         .make_current(&surface)?;
 
-    info!("Attempting to set VSync via wglSwapIntervalEXT...");
-    type SwapIntervalFn = extern "system" fn(i32) -> i32;
-    let proc_name = CStr::from_bytes_with_nul(b"wglSwapIntervalEXT\0").unwrap();
-    let proc = display.get_proc_address(proc_name);
-    if !proc.is_null() {
-        let f: SwapIntervalFn = unsafe { std::mem::transmute(proc) };
-        let interval = if vsync_enabled { 1 } else { 0 };
-        if f(interval) != 0 {
-            info!("Successfully set VSync to: {}", if vsync_enabled { "on" } else { "off" });
-        } else {
-            warn!("wglSwapIntervalEXT call failed. VSync state may not be as requested.");
-        }
-    } else {
-        warn!("wglSwapIntervalEXT function not found. Cannot control VSync.");
-    }
+    // Call the platform-specific VSync logic.
+    #[cfg(target_os = "windows")]
+    vsync_logic(&display);
+    #[cfg(not(target_os = "windows"))]
+    vsync_logic(&display, &surface, &context);
 
     unsafe {
         let gl = glow::Context::from_loader_function_cstr(|s: &CStr| display.get_proc_address(s));
