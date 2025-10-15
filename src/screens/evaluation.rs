@@ -493,8 +493,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             align: [0.5, 0.0], // Center-Top alignment for the main frame
             offset: [frame_center_x, frame_center_y],
             size: [SizeSpec::Px(GRAPH_WIDTH), SizeSpec::Px(GRAPH_HEIGHT)],
-            z: 101, // On top of the main lower pane, but below text overlays
-            background: Some(crate::ui::actors::Background::Color(color::rgba_hex("#101519"))),
+            z: 101,
+            background: None,
             children: vec![
                 // The NPS histogram is positioned with its origin at the bottom-left of the frame,
                 // and then shifted to be centered horizontally.
@@ -503,9 +503,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 act!(sprite(state.density_graph_texture_key.clone()):
                     align(0.0, 1.0): // bottom-left
                     xy(0.0, GRAPH_HEIGHT): // position at the bottom-left of the frame
-                    setsize(GRAPH_WIDTH, GRAPH_HEIGHT):
-                    diffusealpha(0.5): // 50% opacity like the theme
-                    z(1)
+                    setsize(GRAPH_WIDTH, GRAPH_HEIGHT): z(1)
                 ),
                 // The horizontal zero-line, centered vertically in the panel.
                 act!(quad:

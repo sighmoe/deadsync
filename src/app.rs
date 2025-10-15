@@ -589,12 +589,20 @@ impl ApplicationHandler for App {
                                 // Let's use dimensions that fit the layout well.
                                 let graph_width = 1800;  // Matches wide mode in select_music
                                 let graph_height = 256; // Taller for this screen's layout
+
+                                // Define colors
+                                let bg_color     = [16, 21, 25];  // #101519
+                                let top_color    = [54, 25, 67];  // #361943
+                                let bottom_color = [38, 84, 91];  // #26545b
+
                                 let graph_data = rssp::graph::generate_density_graph_rgba_data(
                                     &score_info.chart.measure_nps_vec,
                                     score_info.chart.max_nps,
                                     graph_width,
                                     graph_height,
-                                    &rssp::graph::ColorScheme::Default,
+                                    bottom_color,
+                                    top_color,
+                                    bg_color,
                                 ).ok();
 
                                 // Create a new ChartData variant just for texture creation, as the API expects it.
