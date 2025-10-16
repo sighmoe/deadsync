@@ -27,7 +27,7 @@ impl Default for Config {
             show_stats: false,
             display_width: 1600,
             display_height: 900,
-            video_renderer: BackendType::Vulkan,
+            video_renderer: BackendType::OpenGL,
             simply_love_color: 2, // Corresponds to DEFAULT_COLOR_INDEX
             global_offset_seconds: -0.008,
         }
