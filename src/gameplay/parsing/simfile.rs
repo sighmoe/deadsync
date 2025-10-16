@@ -110,7 +110,7 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
                 "  Chart '{}' [{}] loaded with {} bytes of note data.",
                 c.difficulty_str,
                 c.rating_str,
-                c.notes.len()
+                c.minimized_note_data.len()
             );
             ChartData {
                 chart_type: c.step_type_str,
