@@ -109,6 +109,7 @@ pub struct TweenState {
     pub fade_r: f32,
     pub fade_t: f32,
     pub fade_b: f32,
+    pub scale: [f32; 2],
 }
 
 impl Default for TweenState {
@@ -123,6 +124,7 @@ impl Default for TweenState {
             rot_z: 0.0, // NEW
             fade_l: 0.0, fade_r: 0.0, fade_t: 0.0, fade_b: 0.0,
             crop_l: 0.0, crop_r: 0.0, crop_t: 0.0, crop_b: 0.0,
+            scale: [1.0, 1.0],
         }
     }
 }
@@ -231,6 +233,8 @@ enum PreparedKind {
     Y { from: f32, to: f32 },
     WX { from: f32, to: f32 },
     HY { from: f32, to: f32 },
+    ScaleX { from: f32, to: f32 },
+    ScaleY { from: f32, to: f32 },
     Tint { from: [f32; 4], to: [f32; 4] },
     Visible(bool),
     FlipX(bool),
@@ -254,6 +258,8 @@ impl OpPrepared {
             PreparedKind::Y { from, to }  => s.y = from + (to - from) * a,
             PreparedKind::WX { from, to } => s.w = from + (to - from) * a,
             PreparedKind::HY { from, to } => s.h = from + (to - from) * a,
+            PreparedKind::ScaleX { from, to } => s.scale[0] = from + (to - from) * a,
+            PreparedKind::ScaleY { from, to } => s.scale[1] = from + (to - from) * a,
             PreparedKind::Tint { from, to } => {
                 for i in 0..4 { s.tint[i] = from[i] + (to[i] - from[i]) * a; }
             }
@@ -325,17 +331,17 @@ impl Segment {
                     self.prepared.push(OpPrepared { kind: PreparedKind::HY { from: s.h, to } });
                 }
                 BuildOp::ZoomBoth(t) => {
-                    let (fx, fy) = match t { Target::Abs(v) => (v, v), Target::Rel(dv) => (1.0 + dv, 1.0 + dv) };
-                    self.prepared.push(OpPrepared { kind: PreparedKind::WX { from: s.w, to: s.w * fx } });
-                    self.prepared.push(OpPrepared { kind: PreparedKind::HY { from: s.h, to: s.h * fy } });
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.scale[0] + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::ScaleX { from: s.scale[0], to } });
+                    self.prepared.push(OpPrepared { kind: PreparedKind::ScaleY { from: s.scale[1], to } });
                 }
                 BuildOp::ZoomX(t) => {
-                    let f = match t { Target::Abs(v) => v, Target::Rel(dv) => 1.0 + dv };
-                    self.prepared.push(OpPrepared { kind: PreparedKind::WX { from: s.w, to: s.w * f } });
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.scale[0] + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::ScaleX { from: s.scale[0], to } });
                 }
                 BuildOp::ZoomY(t) => {
-                    let f = match t { Target::Abs(v) => v, Target::Rel(dv) => 1.0 + dv };
-                    self.prepared.push(OpPrepared { kind: PreparedKind::HY { from: s.h, to: s.h * f } });
+                    let to = match t { Target::Abs(v) => v, Target::Rel(dv) => s.scale[1] + dv };
+                    self.prepared.push(OpPrepared { kind: PreparedKind::ScaleY { from: s.scale[1], to } });
                 }
                 BuildOp::Tint(tr, tg, tb, ta) => {
                     let to0 = match tr { Target::Abs(v) => v, Target::Rel(dv) => s.tint[0] + dv };

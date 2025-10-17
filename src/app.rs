@@ -4,7 +4,6 @@ use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
 use crate::gameplay::{profile, scores};
 use crate::assets::AssetManager;
-use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, Screen as CurrentScreen, ScreenAction, Screen};
 use crate::gameplay::parsing::simfile as song_loading;
@@ -19,9 +18,10 @@ use winit::{
 use log::{error, warn, info};
 use std::{error::Error, sync::Arc, time::Instant};
 
+use crate::ui::actors::Actor;
 /* -------------------- gamepad -------------------- */
 use crate::core::gamepad;
-use crate::core::gamepad::{PadEvent, PadDir, PadButton, FaceBtn};
+use crate::core::gamepad::{GpSystemEvent, PadEvent, PadDir, PadButton, FaceBtn};
 use gilrs::{Gilrs, GamepadId};
 
 /* -------------------- transition timing constants -------------------- */
@@ -74,6 +74,7 @@ pub struct App {
     gilrs: Option<Gilrs>,
     active_gamepad_id: Option<GamepadId>,
     gamepad_state: gamepad::GamepadState,
+    gamepad_overlay_state: Option<(String, Instant)>,
 }
 
 impl App {
@@ -124,6 +125,7 @@ impl App {
             gilrs: gamepad::try_init(),
             active_gamepad_id: None,
             gamepad_state: gamepad::GamepadState::default(),
+            gamepad_overlay_state: None,
         }
     }
 
@@ -223,6 +225,12 @@ impl App {
         if self.show_overlay {
             let overlay = crate::ui::components::stats_overlay::build(self.backend_type, self.last_fps, self.last_vpf);
             actors.extend(overlay);
+        }
+
+        // Gamepad connection overlay (always on top of screen, but below transitions)
+        if let Some((msg, _)) = &self.gamepad_overlay_state {
+            let params = crate::ui::components::gamepad_overlay::Params { message: msg };
+            actors.extend(crate::ui::components::gamepad_overlay::build(params));
         }
 
         match &self.transition {
@@ -620,12 +628,28 @@ impl App {
 
     #[inline(always)]
     fn poll_gamepad_and_dispatch(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(g) = &mut self.gilrs {
-            let want_f7 = matches!(self.current_screen, CurrentScreen::SelectMusic);
-            let events = gamepad::poll_and_collect(g, &mut self.active_gamepad_id, &mut self.gamepad_state, want_f7);
-            for ev in events {
-                self.handle_pad_event(event_loop, ev);
-            }
+        let Some(g) = &mut self.gilrs else { return; };
+
+        let want_f7 = matches!(self.current_screen, CurrentScreen::SelectMusic);
+        let (pad_events, sys_events) =
+            gamepad::poll_and_collect(g, &mut self.active_gamepad_id, &mut self.gamepad_state, want_f7);
+
+        for ev in sys_events {
+            let msg = match ev {
+                GpSystemEvent::Connected { name, id } => {
+                    info!("Gamepad connected: {} (ID: {})", name, usize::from(id));
+                    format!("Connected: {} (ID: {})", name, usize::from(id))
+                }
+                GpSystemEvent::Disconnected { name, id } => {
+                    info!("Gamepad disconnected: {} (ID: {})", name, usize::from(id));
+                    format!("Disconnected: {} (ID: {})", name, usize::from(id))
+                }
+            };
+            self.gamepad_overlay_state = Some((msg, Instant::now()));
+        }
+
+        for ev in pad_events {
+            self.handle_pad_event(event_loop, ev);
         }
     }
 }
@@ -672,6 +696,17 @@ impl ApplicationHandler for App {
                 self.last_frame_time = now;
                 let total_elapsed = now.duration_since(self.start_time).as_secs_f32();
                 crate::ui::runtime::tick(delta_time);
+
+                // --- Manage gamepad overlay lifetime ---
+                if let Some((_, start_time)) = self.gamepad_overlay_state {
+                    // Corresponds to the animation durations in gamepad_overlay.rs
+                    const HOLD_DURATION: f32 = 3.33;
+                    const FADE_OUT_DURATION: f32 = 0.25;
+                    const TOTAL_DURATION: f32 = HOLD_DURATION + FADE_OUT_DURATION;
+                    if now.duration_since(start_time).as_secs_f32() > TOTAL_DURATION {
+                        self.gamepad_overlay_state = None;
+                    }
+                }
 
                 let mut finished_fading_out_to: Option<CurrentScreen> = None;
 

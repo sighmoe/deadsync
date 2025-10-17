@@ -203,6 +203,7 @@ fn build_sprite_like<'a>(
         init.rot_z = rot;
         init.fade_l = fl; init.fade_r = fr; init.fade_t = ft; init.fade_b = fb;
         init.crop_l = cl; init.crop_r = cr; init.crop_t = ct; init.crop_b = cb;
+        init.scale = [sx, sy];
 
         #[inline(always)]
         fn auto_salt(src: &SpriteSource, init: &anim::TweenState, steps: &[anim::Step]) -> u64 {
@@ -230,6 +231,7 @@ fn build_sprite_like<'a>(
             mix(&mut h, f32b(init.fade_t)); mix(&mut h, f32b(init.fade_b));
             mix(&mut h, f32b(init.crop_l)); mix(&mut h, f32b(init.crop_r));
             mix(&mut h, f32b(init.crop_t)); mix(&mut h, f32b(init.crop_b));
+            mix(&mut h, f32b(init.scale[0])); mix(&mut h, f32b(init.scale[1]));
             for s in steps { mix(&mut h, s.fingerprint64()); }
             h
         }
@@ -244,6 +246,7 @@ fn build_sprite_like<'a>(
         rot = s.rot_z;
         fl = s.fade_l; fr = s.fade_r; ft = s.fade_t; fb = s.fade_b;
         cl = s.crop_l; cr = s.crop_r; ct = s.crop_t; cb = s.crop_b;
+        sx = s.scale[0]; sy = s.scale[1];
     }
 
     // SM semantics: negative zoom => flips, keep positive magnitudes
@@ -302,7 +305,7 @@ pub fn quad<'a>(mods: &[Mod<'a>], f: &'static str, l: u32, c: u32) -> Actor {
 /* ============================== TEXT =============================== */
 
 #[inline(always)]
-pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
+pub fn text<'a>(mods: &[Mod<'a>], file: &'static str, line: u32, col: u32) -> Actor {
     let (mut x, mut y) = (0.0, 0.0);
     let (mut hx, mut vy) = (0.5, 0.5);
     let mut color = [1.0, 1.0, 1.0, 1.0];
@@ -322,6 +325,7 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
 
     // text respects blend mode
     let mut blend = BlendMode::Alpha;
+    let mut tw: Option<&[anim::Step]> = None;
 
     for m in mods {
         match m {
@@ -385,10 +389,40 @@ pub fn text<'a>(mods: &[Mod<'a>]) -> Actor {
 
             // blend mode
             Mod::Blend(bm) => { blend = *bm; }
+            Mod::Tween(steps) => { tw = Some(steps); }
 
             // ignore sprite-only/text-irrelevant
             _ => {}
         }
+    }
+
+    if let Some(steps) = tw {
+        let mut init = anim::TweenState::default();
+        init.x = x;
+        init.y = y;
+        init.tint = color;
+        init.scale = [sx, sy];
+
+        // Create a salt for the tween state based on the text content to ensure
+        // different text gets a different animation state.
+        let salt = {
+            let mut h = 0xcbf29ce484222325u64;
+            for b in content.as_bytes() {
+                h ^= *b as u64;
+                h = h.wrapping_mul(0x100000001b3);
+            }
+            h
+        };
+
+        let sid = runtime::site_id(file, line, col, salt);
+        let s = runtime::materialize(sid, init, steps);
+
+        // Apply tweened state
+        x = s.x;
+        y = s.y;
+        color = s.tint;
+        sx = s.scale[0];
+        sy = s.scale[1];
     }
 
     Actor::Text {
@@ -473,10 +507,12 @@ macro_rules! act {
     }};
     (text: $($tail:tt)+) => {{
         let mut __mods = ::std::vec::Vec::new();
-        let mut __tw: ::std::vec::Vec<$crate::ui::anim::Step> = ::std::vec::Vec::new(); // typed
-        let mut __cur: ::core::option::Option<$crate::ui::anim::SegmentBuilder> = None; // ignored
+        let mut __tw = ::std::vec::Vec::new();
+        let mut __cur: ::core::option::Option<$crate::ui::anim::SegmentBuilder> = None;
         $crate::__dsl_apply!( ($($tail)+) __mods __tw __cur _dummy_site );
-        $crate::ui::dsl::text(&__mods)
+        if let ::core::option::Option::Some(seg)=__cur.take(){__tw.push(seg.build());}
+        if !__tw.is_empty(){ __mods.push($crate::ui::dsl::Mod::Tween(&__tw)); }
+        $crate::ui::dsl::text(&__mods, file!(), line!(), column!())
     }};
 }
 
@@ -603,7 +639,12 @@ macro_rules! __dsl_apply_one {
         }
     }};
     (diffusealpha ($a:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        $mods.push($crate::ui::dsl::Mod::Alpha(($a) as f32));
+        if let ::core::option::Option::Some(mut seg) = $cur.take() {
+            seg = seg.alpha(($a) as f32);
+            $cur = ::core::option::Option::Some(seg);
+        } else {
+            $mods.push($crate::ui::dsl::Mod::Alpha(($a) as f32));
+        }
     }};
 
     // --- StepMania zoom semantics (scale) ---
@@ -725,10 +766,6 @@ macro_rules! __dsl_apply_one {
     }};
     (setallstatedelays ($s:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
         $mods.push($crate::ui::dsl::Mod::StateDelay(($s) as f32));
-    }};
-    // --- SM/ITG Sprite: choose frame ---
-    (setstate ($i:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{
-        $mods.push($crate::ui::dsl::Mod::State(($i) as u32));
     }};
     // --- SM/ITG Sprite: explicit UVs (normalized, top-left origin) ---
     (customtexturerect ($u0:expr, $v0:expr, $u1:expr, $v1:expr) $mods:ident $tw:ident $cur:ident $site:ident) => {{

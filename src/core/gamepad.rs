@@ -16,6 +16,13 @@ pub enum PadEvent {
     Face { btn: FaceBtn, pressed: bool },
 }
 
+#[derive(Debug)]
+pub enum GpSystemEvent {
+    Connected { name: String, id: GamepadId },
+    Disconnected { name: String, id: GamepadId },
+}
+
+
 #[derive(Default, Clone, Copy)]
 pub struct GamepadState {
     pub up: bool,
@@ -52,29 +59,52 @@ pub fn poll_and_collect(
     active_id: &mut Option<GamepadId>,
     state: &mut GamepadState,
     want_f7: bool,
-) -> Vec<PadEvent> {
+) -> (Vec<PadEvent>, Vec<GpSystemEvent>) {
     let mut out = Vec::with_capacity(16);
+    let mut sys_out = Vec::with_capacity(2);
 
     while let Some(Event { id, event, .. }) = gilrs.next_event() {
-        if active_id.is_none() { *active_id = Some(id); }
+        // --- System Events (Connect/Disconnect) ---
+        // These are processed for ANY gamepad, not just the active one.
+        match event {
+            EventType::Connected => {
+                let name = gilrs.gamepad(id).name().to_string();
+                sys_out.push(GpSystemEvent::Connected { name, id });
+                if active_id.is_none() {
+                    *active_id = Some(id);
+                }
+                continue; // Don't process this event as an input.
+            }
+            EventType::Disconnected => {
+                let name = gilrs.gamepad(id).name().to_string();
+                sys_out.push(GpSystemEvent::Disconnected { name, id });
+                if Some(id) == *active_id {
+                    *active_id = None;
+                    // Release all buttons for the disconnected pad.
+                    if state.up    { out.push(PadEvent::Dir { dir: PadDir::Up,    pressed: false }); }
+                    if state.down  { out.push(PadEvent::Dir { dir: PadDir::Down,  pressed: false }); }
+                    if state.left  { out.push(PadEvent::Dir { dir: PadDir::Left,  pressed: false }); }
+                    if state.right { out.push(PadEvent::Dir { dir: PadDir::Right, pressed: false }); }
+                    *state = GamepadState::default();
+                }
+                continue; // Don't process this event as an input.
+            }
+            _ => {}
+        }
+        
+        // --- Input Events (Buttons/Axes) ---
+        // From here on, we only care about the active gamepad.
+        // If no pad is active, the first one to send an input event becomes active.
+        if active_id.is_none() {
+            *active_id = Some(id);
+        }
+
+        // Ignore input events from non-active gamepads.
         if Some(id) != *active_id {
-            if matches!(event, EventType::Disconnected) {}
             continue;
         }
 
         match event {
-            EventType::Connected => { *active_id = Some(id); }
-            EventType::Disconnected => {
-                *active_id = None;
-
-                if state.up    { out.push(PadEvent::Dir { dir: PadDir::Up,    pressed: false }); }
-                if state.down  { out.push(PadEvent::Dir { dir: PadDir::Down,  pressed: false }); }
-                if state.left  { out.push(PadEvent::Dir { dir: PadDir::Left,  pressed: false }); }
-                if state.right { out.push(PadEvent::Dir { dir: PadDir::Right, pressed: false }); }
-
-                *state = GamepadState::default();
-            }
-
             EventType::ButtonPressed(btn, _) => {
                 match btn {
                     // Face buttons → Face events
@@ -164,7 +194,7 @@ pub fn poll_and_collect(
         }
     }
 
-    out
+    (out, sys_out)
 }
 
 #[inline(always)]
