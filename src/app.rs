@@ -19,6 +19,11 @@ use winit::{
 use log::{error, warn, info};
 use std::{error::Error, sync::Arc, time::Instant};
 
+/* -------------------- gamepad -------------------- */
+use crate::core::gamepad;
+use crate::core::gamepad::{PadEvent, PadDir, PadButton, FaceBtn};
+use gilrs::{Gilrs, GamepadId};
+
 /* -------------------- transition timing constants -------------------- */
 const FADE_OUT_DURATION: f32 = 0.4;
 const MENU_ACTORS_FADE_DURATION: f32 = 0.65;
@@ -64,6 +69,11 @@ pub struct App {
     session_start_time: Option<Instant>,
     display_width: u32,
     display_height: u32,
+
+    /* gamepad */
+    gilrs: Option<Gilrs>,
+    active_gamepad_id: Option<GamepadId>,
+    gamepad_state: gamepad::GamepadState,
 }
 
 impl App {
@@ -110,6 +120,10 @@ impl App {
             session_start_time: None,
             display_width,
             display_height,
+
+            gilrs: gamepad::try_init(),
+            active_gamepad_id: None,
+            gamepad_state: gamepad::GamepadState::default(),
         }
     }
 
@@ -156,7 +170,6 @@ impl App {
             ScreenAction::FetchOnlineGrade(hash) => {
                 info!("Fetching online grade for chart hash: {}", hash);
                 let profile = profile::get();
-                // Spawn a thread to perform the network request without blocking the main thread.
                 std::thread::spawn(move || {
                     if let Err(e) = scores::fetch_and_store_grade(profile, hash) {
                         warn!("Failed to fetch online grade: {}", e);
@@ -251,7 +264,6 @@ impl App {
         }
     }
 
-
     #[inline(always)]
     fn update_fps_title(&mut self, window: &Window, now: Instant) {
         self.frame_count += 1;
@@ -309,6 +321,198 @@ impl App {
         info!("Starting event loop...");
         Ok(())
     }
+
+    /* -------------------- keyboard path stays as-is -------------------- */
+
+    #[inline(always)]
+    fn handle_virtual_key_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        key_event: winit::event::KeyEvent,
+    ) {
+        let is_transitioning = !matches!(self.transition, TransitionState::Idle);
+
+        // IMPORTANT: do NOT mirror keyboard arrows into InputState while in Gameplay.
+        // Gameplay judges directly from KeyEvent; InputState is reserved for gamepad.
+        if self.current_screen != CurrentScreen::Gameplay {
+            input::handle_keyboard_input(&key_event, &mut self.input_state);
+        }
+
+        if key_event.state == winit::event::ElementState::Pressed {
+            if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F3) = key_event.physical_key {
+                self.show_overlay = !self.show_overlay;
+                log::info!("Overlay {}", if self.show_overlay { "ON" } else { "OFF" });
+            }
+            if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F4) = key_event.physical_key {
+                if self.current_screen == CurrentScreen::Menu {
+                    let _ = self.handle_action(ScreenAction::Navigate(CurrentScreen::Sandbox), event_loop);
+                    return;
+                }
+            }
+            if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) = key_event.physical_key {
+                if self.current_screen == CurrentScreen::Menu {
+                    if let Err(e) = self.handle_action(ScreenAction::Exit, event_loop) {
+                        log::error!("Failed to handle exit action: {}", e);
+                        event_loop.exit();
+                    }
+                    return;
+                }
+            }
+            if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F7) = key_event.physical_key {
+                if self.current_screen == CurrentScreen::SelectMusic {
+                    if let Some(select_music::MusicWheelEntry::Song(song)) =
+                        self.select_music_state.entries.get(self.select_music_state.selected_index)
+                    {
+                        let difficulty_name =
+                            color::FILE_DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
+                        if let Some(chart) = song
+                            .charts
+                            .iter()
+                            .find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name))
+                        {
+                            let action = ScreenAction::FetchOnlineGrade(chart.short_hash.clone());
+                            if let Err(e) = self.handle_action(action, event_loop) {
+                                log::error!("Failed to handle FetchOnlineGrade action: {}", e);
+                            }
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        if is_transitioning {
+            return;
+        }
+
+        let action = match self.current_screen {
+            CurrentScreen::Menu => menu::handle_key_press(&mut self.menu_state, &key_event),
+            CurrentScreen::Gameplay => {
+                if let Some(gs) = &mut self.gameplay_state {
+                    gameplay::handle_key_press(gs, &key_event)
+                } else {
+                    ScreenAction::None
+                }
+            }
+            CurrentScreen::Options => options::handle_key_press(&mut self.options_state, &key_event),
+            CurrentScreen::SelectColor => select_color::handle_key_press(&mut self.select_color_state, &key_event),
+            CurrentScreen::Sandbox => sandbox::handle_key_press(&mut self.sandbox_state, &key_event),
+            CurrentScreen::SelectMusic => select_music::handle_key_press(&mut self.select_music_state, &key_event),
+            CurrentScreen::Init => init::handle_key_press(&mut self.init_state, &key_event),
+            CurrentScreen::Evaluation => evaluation::handle_key_press(&mut self.evaluation_state, &key_event),
+        };
+        if let Err(e) = self.handle_action(action.clone(), event_loop) {
+            log::error!("Failed to handle action: {}", e);
+            event_loop.exit();
+        }
+    }
+
+    /* -------------------- new: gamepad helpers -------------------- */
+
+    #[inline(always)]
+    fn apply_dir_from_pad(&mut self, event_loop: &ActiveEventLoop, dir: PadDir, pressed: bool) {
+        // 1) always update InputState so gameplay sees it
+        match dir {
+            PadDir::Up    => self.input_state.up = pressed,
+            PadDir::Down  => self.input_state.down = pressed,
+            PadDir::Left  => self.input_state.left = pressed,
+            PadDir::Right => self.input_state.right = pressed,
+        }
+
+        // 2) SelectMusic reacts like arrow keys
+        if matches!(self.current_screen, CurrentScreen::SelectMusic) {
+            let action = select_music::handle_pad_dir(&mut self.select_music_state, dir, pressed);
+            if let Err(e) = self.handle_action(action, event_loop) {
+                error!("Failed to handle pad-dir action: {}", e);
+                event_loop.exit();
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn handle_pad_event(&mut self, event_loop: &ActiveEventLoop, ev: PadEvent) {
+        match ev {
+            // D-pad / left-stick: unified path
+            PadEvent::Dir { dir, pressed } => {
+                self.apply_dir_from_pad(event_loop, dir, pressed);
+            }
+
+            // Face buttons → arrows DURING GAMEPLAY ONLY (Y↑, X←, B→, A↓)
+            PadEvent::Face { btn, pressed } => {
+                if let CurrentScreen::Gameplay = self.current_screen {
+                    let dir = match btn {
+                        FaceBtn::NorthY => PadDir::Up,
+                        FaceBtn::WestX  => PadDir::Left,
+                        FaceBtn::EastB  => PadDir::Right,
+                        FaceBtn::SouthA => PadDir::Down,
+                    };
+                    self.apply_dir_from_pad(event_loop, dir, pressed);
+                }
+            }
+
+            PadEvent::Button { btn, pressed } => {
+                match btn {
+                    // A/Start confirm
+                    PadButton::Confirm if pressed => {
+                        match self.current_screen {
+                            CurrentScreen::SelectMusic => {
+                                let action = select_music::handle_pad_button(&mut self.select_music_state, btn, true);
+                                if let Err(e) = self.handle_action(action, event_loop) {
+                                    error!("Failed to handle confirm on SelectMusic: {}", e);
+                                    event_loop.exit();
+                                }
+                            }
+                            CurrentScreen::Menu => {
+                                let _ = self.handle_action(ScreenAction::Navigate(CurrentScreen::SelectMusic), event_loop);
+                            }
+                            _ => { /* ignore elsewhere */ }
+                        }
+                    }
+
+                    // Back is ONLY View/Select (NOT B)
+                    PadButton::Back if pressed => {
+                        if self.current_screen == CurrentScreen::Menu {
+                            if let Err(e) = self.handle_action(ScreenAction::Exit, event_loop) {
+                                error!("Failed to exit: {}", e);
+                                event_loop.exit();
+                            }
+                        } else {
+                            let _ = self.handle_action(ScreenAction::Navigate(CurrentScreen::Menu), event_loop);
+                        }
+                    }
+
+                    // Y→F7 only on SelectMusic
+                    PadButton::F7 if pressed => {
+                        if let CurrentScreen::SelectMusic = self.current_screen {
+                            if let Some(select_music::MusicWheelEntry::Song(song)) =
+                                self.select_music_state.entries.get(self.select_music_state.selected_index)
+                            {
+                                let difficulty_name = color::FILE_DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
+                                if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
+                                    let action = ScreenAction::FetchOnlineGrade(chart.short_hash.clone());
+                                    if let Err(e) = self.handle_action(action, event_loop) {
+                                        error!("Failed to fetch online grade: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn poll_gamepad_and_dispatch(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(g) = &mut self.gilrs {
+            let want_f7 = matches!(self.current_screen, CurrentScreen::SelectMusic);
+            let events = gamepad::poll_and_collect(g, &mut self.active_gamepad_id, &mut self.gamepad_state, want_f7);
+            for ev in events {
+                self.handle_pad_event(event_loop, ev);
+            }
+        }
+    }
 }
 
 impl ApplicationHandler for App {
@@ -329,7 +533,6 @@ impl ApplicationHandler for App {
     ) {
         let Some(window) = self.window.as_ref().cloned() else { return; };
         if window_id != window.id() { return; }
-        let is_transitioning = !matches!(self.transition, TransitionState::Idle);
 
         match event {
             WindowEvent::CloseRequested => {
@@ -346,63 +549,7 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
-                input::handle_keyboard_input(&key_event, &mut self.input_state);
-                if key_event.state == winit::event::ElementState::Pressed {
-                    if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F3) = key_event.physical_key {
-                        self.show_overlay = !self.show_overlay;
-                        info!("Overlay {}", if self.show_overlay { "ON" } else { "OFF" });
-                    }
-                    if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F4) = key_event.physical_key {
-                        if self.current_screen == CurrentScreen::Menu {
-                            let _ = self.handle_action(ScreenAction::Navigate(CurrentScreen::Sandbox), event_loop);
-                            return;
-                        }
-                    }
-                    if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) = key_event.physical_key {
-                        if self.current_screen == CurrentScreen::Menu {
-                            if let Err(e) = self.handle_action(ScreenAction::Exit, event_loop) {
-                                error!("Failed to handle exit action: {}", e);
-                                event_loop.exit();
-                            }
-                            return;
-                        }
-                    }
-                    if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F7) = key_event.physical_key {
-                        if self.current_screen == CurrentScreen::SelectMusic {
-                            if let Some(select_music::MusicWheelEntry::Song(song)) = self.select_music_state.entries.get(self.select_music_state.selected_index) {
-                                let difficulty_name = color::FILE_DIFFICULTY_NAMES[self.select_music_state.selected_difficulty_index];
-                                if let Some(chart) = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)) {
-                                    let action = ScreenAction::FetchOnlineGrade(chart.short_hash.clone());
-                                    if let Err(e) = self.handle_action(action, event_loop) {
-                                        error!("Failed to handle FetchOnlineGrade action: {}", e);
-                                    }
-                                    return; // Action handled, no further processing needed for this key press.
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if is_transitioning { return; }
-
-                let action = match self.current_screen {
-                    CurrentScreen::Menu     => menu::handle_key_press(&mut self.menu_state, &key_event),
-                    CurrentScreen::Gameplay => {
-                        if let Some(gs) = &mut self.gameplay_state {
-                            gameplay::handle_key_press(gs, &key_event)
-                        } else { ScreenAction::None }
-                    },
-                    CurrentScreen::Options  => options::handle_key_press(&mut self.options_state, &key_event),
-                    CurrentScreen::SelectColor => select_color::handle_key_press(&mut self.select_color_state, &key_event),
-                    CurrentScreen::Sandbox => sandbox::handle_key_press(&mut self.sandbox_state, &key_event),
-                    CurrentScreen::SelectMusic => select_music::handle_key_press(&mut self.select_music_state, &key_event),
-                    CurrentScreen::Init     => init::handle_key_press(&mut self.init_state, &key_event),
-                    CurrentScreen::Evaluation => evaluation::handle_key_press(&mut self.evaluation_state, &key_event),
-                };
-                if let Err(e) = self.handle_action(action.clone(), event_loop) {
-                    error!("Failed to handle action: {}", e);
-                    event_loop.exit();
-                }
+                self.handle_virtual_key_event(event_loop, key_event);
             }
             WindowEvent::RedrawRequested => {
                 let now = Instant::now();
@@ -509,12 +656,11 @@ impl ApplicationHandler for App {
                                         }
                                         ScreenAction::RequestDensityGraph(chart_opt) => {
                                             let graph_request = if let Some(chart) = chart_opt {
-                                                // Define colors and dimensions for the select_music screen graph.
                                                 let graph_width = 1024;
                                                 let graph_height = 256;
-                                                let bottom_color = [0, 184, 204];   // Cyan
-                                                let top_color    = [130, 0, 161];   // Purple
-                                                let bg_color     = [30, 40, 47];    // Dark blue-gray
+                                                let bottom_color = [0, 184, 204];
+                                                let top_color    = [130, 0, 161];
+                                                let bg_color     = [30, 40, 47];
 
                                                 let graph_data = rssp::graph::generate_density_graph_rgba_data(
                                                     &chart.measure_nps_vec,
@@ -602,14 +748,13 @@ impl ApplicationHandler for App {
                         self.evaluation_state = evaluation::init(gameplay_results);
                         self.evaluation_state.active_color_index = color_idx;
 
-                        // --- NEW: Generate and cache the density graph texture ---
                         if let Some(backend) = self.backend.as_mut() {
                             let graph_request = if let Some(score_info) = &self.evaluation_state.score_info {
                                  let graph_width = 1024;
                                  let graph_height = 256;
-                                 let bg_color     = [16, 21, 25];  // #101519
-                                 let top_color    = [54, 25, 67];  // #361943
-                                 let bottom_color = [38, 84, 91];  // #26545b
+                                 let bg_color     = [16, 21, 25];
+                                 let top_color    = [54, 25, 67];
+                                 let bottom_color = [38, 84, 91];
  
                                  let graph_data = rssp::graph::generate_density_graph_rgba_data(
                                      &score_info.chart.measure_nps_vec,
@@ -620,7 +765,6 @@ impl ApplicationHandler for App {
                                      bg_color,
                                  ).ok();
                                  
-                                // The key must be unique for this screen to avoid conflicts with select_music's graph.
                                 let key = format!("{}_eval", score_info.chart.short_hash);
                                 graph_data.map(|data| (key, data))
                             } else {
@@ -678,7 +822,10 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Pump gamepad → pad events → handlers
+        self.poll_gamepad_and_dispatch(event_loop);
+
         if let Some(window) = &self.window {
             window.request_redraw();
         }

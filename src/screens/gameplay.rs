@@ -139,6 +139,7 @@ pub struct State {
     // NEW: Fields for hold-to-exit logic
     hold_to_exit_key: Option<KeyCode>,
     hold_to_exit_start: Option<Instant>,
+    prev_inputs: [bool; 4],
 
     // Debugging
     log_timer: f32,
@@ -239,6 +240,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         total_elapsed_in_screen: 0.0,
         hold_to_exit_key: None,
         hold_to_exit_start: None,
+        prev_inputs: [false; 4],
         log_timer: 0.0,
     }
 }
@@ -369,51 +371,58 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 // --- UPDATE LOOP ---
 
 #[inline(always)]
-pub fn update(state: &mut State, _input: &InputState, delta_time: f32) -> ScreenAction {
-    // Check for hold-to-exit condition at the start of the update
+pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenAction {
+    // Hold-to-exit
     if let (Some(key), Some(start_time)) = (state.hold_to_exit_key, state.hold_to_exit_start) {
-        if start_time.elapsed() >= Duration::from_secs(1) {
-            // Reset state IMMEDIATELY to prevent re-triggering.
+        if start_time.elapsed() >= std::time::Duration::from_secs(1) {
             state.hold_to_exit_key = None;
             state.hold_to_exit_start = None;
-
-            // Return the correct navigation action
             return match key {
-                KeyCode::Enter => ScreenAction::Navigate(Screen::Evaluation),
-                KeyCode::Escape => ScreenAction::Navigate(Screen::SelectMusic),
-                _ => ScreenAction::None, // Should not happen
+                winit::keyboard::KeyCode::Enter => ScreenAction::Navigate(Screen::Evaluation),
+                winit::keyboard::KeyCode::Escape => ScreenAction::Navigate(Screen::SelectMusic),
+                _ => ScreenAction::None,
             };
         }
     }
 
     state.total_elapsed_in_screen += delta_time;
 
-    let now = Instant::now();
+    // Music time + beat
+    let now = std::time::Instant::now();
     let music_time_sec = if now < state.song_start_instant {
         -(state.song_start_instant.saturating_duration_since(now).as_secs_f32())
     } else {
         now.saturating_duration_since(state.song_start_instant).as_secs_f32()
     };
     state.current_music_time = music_time_sec;
-    
-    // Update current beat
     state.current_beat = state.timing.get_beat_for_time(music_time_sec);
 
-    // Update glow timers
+    // --- Edge-triggered hits from InputState (gamepad/dir mapping) ---
+    // Map InputState to columns: [Left, Down, Up, Right] → [0,1,2,3]
+    let current_inputs = [input.left, input.down, input.up, input.right];
+    let prev_inputs = state.prev_inputs; // COPY to avoid immutable borrow of state during process_hit
+
+    for (col, (now_down, was_down)) in current_inputs.iter().copied().zip(prev_inputs).enumerate() {
+        if now_down && !was_down {
+            let judged = process_hit(state, col, music_time_sec);
+            if !judged {
+                state.receptor_bop_timers[col] = 0.11;
+            }
+        }
+    }
+    state.prev_inputs = current_inputs;
+
+    // Glow + bop timers
     for timer in &mut state.receptor_glow_timers {
         *timer = (*timer - delta_time).max(0.0);
     }
-
-    // Update bop timers
     for timer in &mut state.receptor_bop_timers {
         *timer = (*timer - delta_time).max(0.0);
     }
 
-    // --- Add notes from the main list to the active on-screen arrows ---
-    // Look ahead in time to see which notes should be on screen
+    // Spawn arrows in lookahead window
     let lookahead_time = music_time_sec + SCROLL_SPEED_SECONDS;
     let lookahead_beat = state.timing.get_beat_for_time(lookahead_time);
-    
     while state.note_cursor < state.notes.len() && state.notes[state.note_cursor].beat < lookahead_beat {
         let note = &state.notes[state.note_cursor];
         state.arrows[note.column].push(Arrow {
@@ -424,28 +433,23 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) -> Screen
         state.note_cursor += 1;
     }
 
-    // --- Handle missed notes ---
-    // A note is missed if the current time has passed its time by more than the final WayOff window
+    // Handle missed notes
     let way_off_window = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
     for col_arrows in &mut state.arrows {
         let mut missed = false;
         if let Some(arrow) = col_arrows.first() {
             let note_time = state.timing.get_time_for_beat(arrow.beat);
             if music_time_sec - note_time > way_off_window {
-                info!("MISS! Column {}, Beat {:.2}", arrow.column, arrow.beat);
+                log::info!("MISS! Column {}, Beat {:.2}", arrow.column, arrow.beat);
                 let judgment = Judgment {
                     time_error_ms: ((music_time_sec - note_time) * 1000.0),
                     grade: JudgeGrade::Miss,
                 };
                 state.judgments.push(judgment.clone());
-                // Increment the miss counter
                 *state.judgment_counts.entry(JudgeGrade::Miss).or_insert(0) += 1;
-
-                state.last_judgment = Some(JudgmentRenderInfo { judgment, judged_at: Instant::now() });
-
+                state.last_judgment = Some(JudgmentRenderInfo { judgment, judged_at: std::time::Instant::now() });
                 state.combo = 0;
                 state.miss_combo += 1;
-                // If a colored combo was active, mark the first attempt as broken.
                 if state.full_combo_grade.is_some() {
                     state.first_fc_attempt_broken = true;
                 }
@@ -458,11 +462,11 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) -> Screen
         }
     }
 
-    // --- Debug Logging ---
+    // Debug
     state.log_timer += delta_time;
     if state.log_timer >= 1.0 {
         let active_arrows: usize = state.arrows.iter().map(|v| v.len()).sum();
-        info!(
+        log::info!(
             "Beat: {:.2}, Time: {:.2}, Combo: {}, Misses: {}, Active Arrows: {}",
             state.current_beat,
             music_time_sec,
@@ -472,8 +476,7 @@ pub fn update(state: &mut State, _input: &InputState, delta_time: f32) -> Screen
         );
         state.log_timer -= 1.0;
     }
-    
-    // Return None if no action was triggered
+
     ScreenAction::None
 }
 

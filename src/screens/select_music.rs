@@ -8,6 +8,7 @@ use crate::ui::components::{heart_bg, pad_display, music_wheel};
 use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::ui::actors::SizeSpec;
 use crate::core::space::is_wide;
+use crate::core::gamepad::{PadDir, PadButton};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::path::PathBuf;
@@ -387,6 +388,160 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
         }
     }
     ScreenAction::None
+}
+
+// Handle D-pad / left-stick as if arrow keys were used.
+pub fn handle_pad_dir(state: &mut State, dir: PadDir, pressed: bool) -> ScreenAction {
+    use winit::keyboard::KeyCode;
+
+    if pressed {
+        match dir {
+            PadDir::Right => {
+                let n = state.entries.len();
+                if n > 0 {
+                    state.selected_index = (state.selected_index + 1) % n;
+                    state.selection_animation_timer = 0.0;
+                    state.nav_key_held_direction = Some(NavDirection::Right);
+                    state.nav_key_held_since = Some(Instant::now());
+                    state.nav_key_last_scrolled_at = Some(Instant::now());
+                    state.time_since_selection_change = 0.0;
+                }
+            }
+            PadDir::Left => {
+                let n = state.entries.len();
+                if n > 0 {
+                    state.selected_index = (state.selected_index + n - 1) % n;
+                    state.selection_animation_timer = 0.0;
+                    state.nav_key_held_direction = Some(NavDirection::Left);
+                    state.nav_key_held_since = Some(Instant::now());
+                    state.nav_key_last_scrolled_at = Some(Instant::now());
+                    state.time_since_selection_change = 0.0;
+                }
+            }
+            PadDir::Up => {
+                // Mirror ArrowUp pressed (double-tap → easier)
+                let is_song_selected =
+                    state.entries.get(state.selected_index).is_some_and(|e| matches!(e, MusicWheelEntry::Song(_)));
+                if is_song_selected {
+                    let now = Instant::now();
+                    let kc = KeyCode::ArrowUp;
+                    if state.last_difficulty_nav_key == Some(kc)
+                        && state
+                            .last_difficulty_nav_time
+                            .map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW)
+                    {
+                        if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
+                            let mut new_idx = state.selected_difficulty_index;
+                            while new_idx > 0 {
+                                new_idx -= 1;
+                                if is_difficulty_playable(song, new_idx) {
+                                    state.selected_difficulty_index = new_idx;
+                                    state.preferred_difficulty_index = new_idx;
+                                    audio::play_sfx("assets/sounds/easier.ogg");
+                                    break;
+                                }
+                            }
+                        }
+                        state.last_difficulty_nav_key = None;
+                        state.last_difficulty_nav_time = None;
+                    } else {
+                        state.last_difficulty_nav_key = Some(kc);
+                        state.last_difficulty_nav_time = Some(now);
+                    }
+                    state.active_chord_keys.insert(kc);
+                }
+            }
+            PadDir::Down => {
+                // Mirror ArrowDown pressed (double-tap → harder)
+                let is_song_selected =
+                    state.entries.get(state.selected_index).is_some_and(|e| matches!(e, MusicWheelEntry::Song(_)));
+                if is_song_selected {
+                    let now = Instant::now();
+                    let kc = KeyCode::ArrowDown;
+                    if state.last_difficulty_nav_key == Some(kc)
+                        && state
+                            .last_difficulty_nav_time
+                            .map_or(false, |t| now.duration_since(t) < DOUBLE_TAP_WINDOW)
+                    {
+                        if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
+                            let mut new_idx = state.selected_difficulty_index;
+                            while new_idx < crate::ui::color::FILE_DIFFICULTY_NAMES.len() - 1 {
+                                new_idx += 1;
+                                if is_difficulty_playable(song, new_idx) {
+                                    state.selected_difficulty_index = new_idx;
+                                    state.preferred_difficulty_index = new_idx;
+                                    audio::play_sfx("assets/sounds/harder.ogg");
+                                    break;
+                                }
+                            }
+                        }
+                        state.last_difficulty_nav_key = None;
+                        state.last_difficulty_nav_time = None;
+                    } else {
+                        state.last_difficulty_nav_key = Some(kc);
+                        state.last_difficulty_nav_time = Some(now);
+                    }
+                    state.active_chord_keys.insert(kc);
+                }
+            }
+        }
+    } else {
+        // releases
+        match dir {
+            PadDir::Up => { state.active_chord_keys.remove(&winit::keyboard::KeyCode::ArrowUp); }
+            PadDir::Down => { state.active_chord_keys.remove(&winit::keyboard::KeyCode::ArrowDown); }
+            PadDir::Left | PadDir::Right => {
+                state.nav_key_held_direction = None;
+                state.nav_key_held_since = None;
+                state.nav_key_last_scrolled_at = None;
+            }
+        }
+    }
+    ScreenAction::None
+}
+
+// Handle A/Start (Confirm) and B/Select (Back) on this screen.
+// (F7/Y is handled in app.rs directly for the online-grade fetch.)
+pub fn handle_pad_button(state: &mut State, btn: PadButton, pressed: bool) -> ScreenAction {
+    if !pressed { return ScreenAction::None; }
+    match btn {
+        PadButton::Confirm => {
+            if let Some(entry) = state.entries.get(state.selected_index).cloned() {
+                match entry {
+                    MusicWheelEntry::Song(_song) => {
+                        // same as Enter on a song
+                        return ScreenAction::Navigate(Screen::Gameplay);
+                    }
+                    MusicWheelEntry::PackHeader { name, .. } => {
+                        // toggle expand/collapse (same as Enter on pack)
+                        audio::play_sfx("assets/sounds/expand.ogg");
+                        let target = name.clone();
+                        if state.expanded_pack_name.as_ref() == Some(&target) {
+                            state.expanded_pack_name = None;
+                        } else {
+                            state.expanded_pack_name = Some(target.clone());
+                        }
+                        // local function in this module
+                        rebuild_displayed_entries(state);
+
+                        // refocus header
+                        if let Some(new_sel) = state.entries.iter().position(|e| {
+                            if let MusicWheelEntry::PackHeader { name: n, .. } = e { n == &target } else { false }
+                        }) {
+                            state.selected_index = new_sel;
+                        } else {
+                            state.selected_index = 0;
+                        }
+                        state.time_since_selection_change = 0.0;
+                        return ScreenAction::None;
+                    }
+                }
+            }
+            ScreenAction::None
+        }
+        PadButton::Back => ScreenAction::Navigate(Screen::Menu),
+        PadButton::F7 => ScreenAction::None, // handled in app.rs
+    }
 }
 
 pub fn update(state: &mut State, dt: f32) -> ScreenAction {
