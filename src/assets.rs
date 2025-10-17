@@ -315,41 +315,41 @@ impl AssetManager {
         }
     }
 
-    pub fn set_density_graph(&mut self, backend: &mut Backend, chart_opt: Option<&crate::gameplay::chart::ChartData>) -> String {
+    pub fn set_density_graph(
+        &mut self,
+        backend: &mut Backend,
+        data: Option<(String, rssp::graph::GraphImageData)>,
+    ) -> String {
         const FALLBACK_KEY: &str = "__white";
 
-        if let Some(chart) = chart_opt {
-            if self.current_density_graph.as_ref().map_or(false, |(_, h)| h == &chart.short_hash) {
+        if let Some((key, graph_data)) = data {
+            // The cache check key is the second item in the tuple.
+            if self.current_density_graph.as_ref().map_or(false, |(_, cache_key)| cache_key == &key) {
                 return self.current_density_graph.as_ref().unwrap().0.clone();
             }
 
             self.destroy_current_density_graph(backend);
-            
-            if let Some(graph_data) = &chart.density_graph {
-                let rgba_image = match RgbaImage::from_raw(graph_data.width, graph_data.height, graph_data.data.clone()) {
-                    Some(img) => img,
-                    None => {
-                        warn!("Failed to create RgbaImage from raw graph data for chart hash '{}'.", chart.short_hash);
-                        return FALLBACK_KEY.to_string();
-                    }
-                };
 
-                match renderer::create_texture(backend, &rgba_image) {
-                    Ok(texture) => {
-                        let key = chart.short_hash.clone();
-                        self.textures.insert(key.clone(), texture);
-                        register_texture_dims(&key, rgba_image.width(), rgba_image.height());
-                        self.current_density_graph = Some((key.clone(), chart.short_hash.clone()));
-                        key
-                    }
-                    Err(e) => {
-                        warn!("Failed to create GPU texture for density graph ('{}'): {}.", chart.short_hash, e);
-                        FALLBACK_KEY.to_string()
-                    }
+            let rgba_image = match RgbaImage::from_raw(graph_data.width, graph_data.height, graph_data.data) {
+                Some(img) => img,
+                None => {
+                    warn!("Failed to create RgbaImage from raw graph data for key '{}'.", key);
+                    return FALLBACK_KEY.to_string();
                 }
-            } else {
-                self.destroy_current_density_graph(backend);
-                FALLBACK_KEY.to_string()
+            };
+
+            match renderer::create_texture(backend, &rgba_image) {
+                Ok(texture) => {
+                    // The texture key is the same as the cache key.
+                    self.textures.insert(key.clone(), texture);
+                    register_texture_dims(&key, rgba_image.width(), rgba_image.height());
+                    self.current_density_graph = Some((key.clone(), key.clone()));
+                    key
+                }
+                Err(e) => {
+                    warn!("Failed to create GPU texture for density graph ('{}'): {}.", key, e);
+                    FALLBACK_KEY.to_string()
+                }
             }
         } else {
             self.destroy_current_density_graph(backend);

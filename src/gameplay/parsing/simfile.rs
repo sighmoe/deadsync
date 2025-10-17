@@ -118,7 +118,6 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
                 meter: c.rating_str.parse().unwrap_or(0),
                 step_artist: c.step_artist_str.join(", "),
                 notes: c.minimized_note_data,
-                density_graph: c.density_graph,
                 short_hash: c.short_hash,
                 stats: c.stats,
                 total_streams: c.total_streams,
@@ -127,7 +126,7 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
                 detailed_breakdown: c.detailed,
                 partial_breakdown: c.partial,
                 simple_breakdown: c.simple,
-                measure_nps_vec: c.measure_nps_vec, // <-- ADD THIS LINE
+                measure_nps_vec: c.measure_nps_vec,
             }
         })
         .collect();

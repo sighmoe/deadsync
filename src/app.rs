@@ -23,7 +23,6 @@ use std::{error::Error, sync::Arc, time::Instant};
 const FADE_OUT_DURATION: f32 = 0.4;
 const MENU_ACTORS_FADE_DURATION: f32 = 0.65;
 
-
 /* -------------------- transition state machine -------------------- */
 #[derive(Debug)]
 enum TransitionState {
@@ -509,7 +508,29 @@ impl ApplicationHandler for App {
                                             }
                                         }
                                         ScreenAction::RequestDensityGraph(chart_opt) => {
-                                            let key = self.asset_manager.set_density_graph(backend, chart_opt.as_ref());
+                                            let graph_request = if let Some(chart) = chart_opt {
+                                                // Define colors and dimensions for the select_music screen graph.
+                                                let graph_width = 1024;
+                                                let graph_height = 256;
+                                                let bottom_color = [0, 184, 204];   // Cyan
+                                                let top_color    = [130, 0, 161];   // Purple
+                                                let bg_color     = [30, 40, 47];    // Dark blue-gray
+
+                                                let graph_data = rssp::graph::generate_density_graph_rgba_data(
+                                                    &chart.measure_nps_vec,
+                                                    chart.max_nps,
+                                                    graph_width, graph_height,
+                                                    bottom_color,
+                                                    top_color,
+                                                    bg_color,
+                                                ).ok();
+                                                
+                                                graph_data.map(|data| (chart.short_hash, data))
+                                            } else {
+                                                None
+                                            };
+
+                                            let key = self.asset_manager.set_density_graph(backend, graph_request);
                                             self.select_music_state.current_graph_key = key;
                                         }
                                         _ => { let _ = self.handle_action(action, event_loop); },
@@ -583,42 +604,35 @@ impl ApplicationHandler for App {
 
                         // --- NEW: Generate and cache the density graph texture ---
                         if let Some(backend) = self.backend.as_mut() {
-                            if let Some(score_info) = &self.evaluation_state.score_info {
-                                // Re-generate the graph data at the desired size for this screen.
-                                // The Lua code uses `GraphWidth` and `GraphHeight` metrics.
-                                // Let's use dimensions that fit the layout well.
-                                let graph_width = 1800;  // Matches wide mode in select_music
-                                let graph_height = 256; // Taller for this screen's layout
-
-                                // Define colors
-                                let bg_color     = [16, 21, 25];  // #101519
-                                let top_color    = [54, 25, 67];  // #361943
-                                let bottom_color = [38, 84, 91];  // #26545b
-
-                                let graph_data = rssp::graph::generate_density_graph_rgba_data(
-                                    &score_info.chart.measure_nps_vec,
-                                    score_info.chart.max_nps,
-                                    graph_width,
-                                    graph_height,
-                                    bottom_color,
-                                    top_color,
-                                    bg_color,
-                                ).ok();
-
-                                // Create a new ChartData variant just for texture creation, as the API expects it.
-                                let texture_request_chart = if let Some(data) = graph_data {
-                                    Some(crate::gameplay::chart::ChartData {
-                                        short_hash: format!("{}_eval", score_info.chart.short_hash),
-                                        density_graph: Some(data),
-                                        ..score_info.chart.as_ref().clone() // clone other fields
-                                    })
-                                } else {
-                                    None
-                                };
-                                
-                                let key = self.asset_manager.set_density_graph(backend, texture_request_chart.as_ref());
-                                self.evaluation_state.density_graph_texture_key = key;
-                            }
+                            let graph_request = if let Some(score_info) = &self.evaluation_state.score_info {
+                                 let graph_width = 1024;
+                                 let graph_height = 256;
+                                 let bg_color     = [16, 21, 25];  // #101519
+                                 let top_color    = [54, 25, 67];  // #361943
+                                 let bottom_color = [38, 84, 91];  // #26545b
+ 
+                                 let graph_data = rssp::graph::generate_density_graph_rgba_data(
+                                     &score_info.chart.measure_nps_vec,
+                                     score_info.chart.max_nps,
+                                     graph_width, graph_height,
+                                     bottom_color,
+                                     top_color,
+                                     bg_color,
+                                 ).ok();
+                                 
+                                // The key must be unique for this screen to avoid conflicts with select_music's graph.
+                                let key = format!("{}_eval", score_info.chart.short_hash);
+                                graph_data.map(|data| (key, data))
+                            } else {
+                                None
+                            };
+                            
+                            let key = if let Some((key, data)) = graph_request {
+                                self.asset_manager.set_density_graph(backend, Some((key, data)))
+                            } else {
+                                self.asset_manager.set_density_graph(backend, None)
+                            };
+                            self.evaluation_state.density_graph_texture_key = key;
                         }
                     }
 
