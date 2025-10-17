@@ -578,8 +578,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     // --- Player 1 Upper Content Frame ---
     let p1_frame_x = screen_center_x() - 155.0;
 
-    // Letter Grade
-    actors.push(act!(sprite("grades/grades 1x19.png"): align(0.5, 0.5): xy(p1_frame_x - 70.0, cy - 134.0): zoom(0.4): z(101): setstate(score_info.grade.to_sprite_state()) ));
+    // Letter Grade (0.4 for parity with individual pngs)
+    actors.push(act!(sprite("grades/grades 1x19.png"): align(0.5, 0.5): xy(p1_frame_x - 70.0, cy - 134.0): zoom(1.0): z(101): setstate(score_info.grade.to_sprite_state()) ));
 
     // Difficulty Text and Meter Block
     {
@@ -596,6 +596,41 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
     // Step Artist
     actors.push(act!(text: font("miso"): settext(score_info.chart.step_artist.clone()): align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 81.0): zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0) ));
+
+    // --- Breakdown Text (under grade) ---
+    let breakdown_text = {
+        let chart = &score_info.chart;
+        // This logic mimics the Lua script's loop to find the best-fitting text.
+        asset_manager.with_fonts(|all_fonts| asset_manager.with_font("miso", |miso_font| -> String {
+            let width_constraint = 155.0;
+            let text_zoom = 0.7;
+            // The max width is applied to the final zoomed width, so we check if the logical width
+            // will fit once scaled down.
+            let max_allowed_logical_width = width_constraint / text_zoom;
+
+            let check_width = |text: &str| {
+                let logical_width = font::measure_line_width_logical(miso_font, text, all_fonts) as f32;
+                logical_width <= max_allowed_logical_width
+            };
+
+            if check_width(&chart.detailed_breakdown) {
+                chart.detailed_breakdown.clone()
+            } else if check_width(&chart.partial_breakdown) {
+                chart.partial_breakdown.clone()
+            } else {
+                // If even the simplest doesn't fit, we still use it and let `maxwidth` clamp it.
+                // This matches the Lua script which doesn't have a final fallback beyond level 3.
+                chart.simple_breakdown.clone()
+            }
+        })).unwrap_or_else(|| score_info.chart.simple_breakdown.clone()) // Fallback if font is not loaded
+    };
+
+    // Position based on P1, left-aligned. The y-value is from the original theme.
+    actors.push(act!(text: font("miso"): settext(breakdown_text):
+        align(0.0, 0.5): xy(p1_frame_x - 150.0, cy - 95.0): zoom(0.7):
+        maxwidth(155.0): horizalign(left): z(101): diffuse(1.0, 1.0, 1.0, 1.0)
+    ));
+
 
     // --- Player 1 Score Percentage Display ---
     {
