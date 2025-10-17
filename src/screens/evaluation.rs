@@ -344,13 +344,13 @@ fn build_p2_timing_pane(_state: &State) -> Vec<Actor> {
 
     // Early/Late text
     let early_late_y = topbar_height + 5.0;
-    children.push(act!(text: font("miso"): settext("Early"):
+    children.push(act!(text: font("wendy"): settext("Early"):
         align(0.0, 0.0): xy(10.0, early_late_y):
-        zoom(0.5): diffuse(1.0, 1.0, 1.0, 0.5)
+        zoom(0.3):
     ));
-    children.push(act!(text: font("miso"): settext("Late"):
+    children.push(act!(text: font("wendy"): settext("Late"):
         align(1.0, 0.0): xy(pane_width - 10.0, early_late_y):
-        zoom(0.5): horizalign(right)
+        zoom(0.3): horizalign(right)
     ));
 
     // Bottom bar judgment labels
@@ -386,28 +386,27 @@ fn build_p2_timing_pane(_state: &State) -> Vec<Actor> {
     }
 
     // Top bar stats
-    let top_label_y = 4.0;
-    let top_value_y = 15.0;
+    let top_label_y = 2.0;
+    let top_value_y = 13.0;
     let value_text = "0.0ms".to_string(); // Static placeholder
     let label_zoom = 0.575;
     let value_zoom = 0.8;
-    let gray_color = [0.8, 0.8, 0.8, 1.0];
 
     let labels_and_x = [
-        ("Mean Error", 40.0),
-        ("Mean Offset", 40.0 + (pane_width - 80.0) / 3.0),
-        ("Std. Dev.", 40.0 + (pane_width - 80.0) / 3.0 * 2.0),
-        ("Max Error", pane_width - 40.0),
+        ("mean abs error", 40.0),
+        ("mean", 40.0 + (pane_width - 80.0) / 3.0),
+        ("std dev * 3", 40.0 + (pane_width - 80.0) / 3.0 * 2.0),
+        ("max error", pane_width - 40.0),
     ];
 
     for (label, x) in labels_and_x {
         children.push(act!(text: font("miso"): settext(label):
             align(0.5, 0.0): xy(x, top_label_y):
-            zoom(label_zoom): diffuse(gray_color[0], gray_color[1], gray_color[2], gray_color[3])
+            zoom(label_zoom)
         ));
         children.push(act!(text: font("miso"): settext(value_text.clone()):
             align(0.5, 0.0): xy(x, top_value_y):
-            zoom(value_zoom): diffuse(1.0, 1.0, 1.0, 1.0)
+            zoom(value_zoom)
         ));
     }
 
@@ -590,13 +589,13 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
         let difficulty_color = color::difficulty_rgba(&score_info.chart.difficulty, state.active_color_index);
         let difficulty_text = format!("Single / {}", difficulty_display_name);
-        actors.push(act!(text: font("miso"): settext(difficulty_text): align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 64.0): zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0) ));
+        actors.push(act!(text: font("miso"): settext(difficulty_text): align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 65.0): zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0) ));
         actors.push(act!(quad: align(0.5, 0.5): xy(p1_frame_x - 134.5, cy - 71.0): zoomto(30.0, 30.0): z(101): diffuse(difficulty_color[0], difficulty_color[1], difficulty_color[2], 1.0) ));
         actors.push(act!(text: font("wendy"): settext(score_info.chart.meter.to_string()): align(0.5, 0.5): xy(p1_frame_x - 134.5, cy - 71.0): zoom(0.4): z(102): diffuse(0.0, 0.0, 0.0, 1.0) ));
     }
 
     // Step Artist
-    actors.push(act!(text: font("miso"): settext(score_info.chart.step_artist.clone()): align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 80.0): zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0) ));
+    actors.push(act!(text: font("miso"): settext(score_info.chart.step_artist.clone()): align(0.0, 0.5): xy(p1_frame_x - 115.0, cy - 81.0): zoom(0.7): z(101): diffuse(1.0, 1.0, 1.0, 1.0) ));
 
     // --- Player 1 Score Percentage Display ---
     {
