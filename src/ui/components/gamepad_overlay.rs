@@ -4,7 +4,6 @@ use crate::ui::actors::Actor;
 use crate::ui::color;
 
 // --- Constants to match StepMania's SystemMessage display ---
-const BAR_H: f32 = 30.0;
 const FADE_IN_DURATION: f32 = 0.0; // SM appears instantly
 const HOLD_DURATION: f32 = 3.33;
 const FADE_OUT_DURATION: f32 = 0.25;

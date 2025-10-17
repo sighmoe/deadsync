@@ -936,7 +936,7 @@ impl ApplicationHandler for App {
                             info!("Session timer started.");
                         }
 
-                        if prev != CurrentScreen::Gameplay {
+                        if prev != CurrentScreen::Gameplay && prev != CurrentScreen::Evaluation {
                             let current_color_index = self.select_music_state.active_color_index;
                             self.select_music_state = select_music::init();
                             self.select_music_state.active_color_index = current_color_index;
