@@ -310,6 +310,118 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
     actors
 }
 
+/// Builds the timing statistics pane for P2 (or P1 in single player).
+fn build_p2_timing_pane(_state: &State) -> Vec<Actor> {
+    let pane_width = 300.0;
+    let pane_height = 180.0;
+    let topbar_height = 26.0;
+    let bottombar_height = 13.0;
+
+    let frame_x = screen_center_x() + 5.0;
+    let frame_y = screen_center_y() - 56.0;
+
+    let mut children = Vec::new();
+    let bar_bg_color = color::rgba_hex("#101519");
+
+    // Top and Bottom bars
+    children.push(act!(quad:
+        align(0.0, 0.0): xy(0.0, 0.0):
+        setsize(pane_width, topbar_height):
+        diffuse(bar_bg_color[0], bar_bg_color[1], bar_bg_color[2], 1.0)
+    ));
+    children.push(act!(quad:
+        align(0.0, 1.0): xy(0.0, pane_height):
+        setsize(pane_width, bottombar_height):
+        diffuse(bar_bg_color[0], bar_bg_color[1], bar_bg_color[2], 1.0)
+    ));
+
+    // Center line of graph area
+    children.push(act!(quad:
+        align(0.5, 0.0): xy(pane_width / 2.0, topbar_height):
+        setsize(1.0, pane_height - topbar_height - bottombar_height):
+        diffuse(1.0, 1.0, 1.0, 0.666)
+    ));
+
+    // Early/Late text
+    let early_late_y = topbar_height + 5.0;
+    children.push(act!(text: font("miso"): settext("Early"):
+        align(0.0, 0.0): xy(10.0, early_late_y):
+        zoom(0.5): diffuse(1.0, 1.0, 1.0, 0.5)
+    ));
+    children.push(act!(text: font("miso"): settext("Late"):
+        align(1.0, 0.0): xy(pane_width - 10.0, early_late_y):
+        zoom(0.5): horizalign(right)
+    ));
+
+    // Bottom bar judgment labels
+    let bottom_bar_center_y = pane_height - (bottombar_height / 2.0);
+    let judgment_labels = [("Fan", 0), ("Ex", 1), ("Gr", 2), ("Dec", 3), ("WO", 4)];
+    let timing_windows = [21.5, 43.0, 102.0, 135.0, 180.0]; // ms
+    let worst_window = timing_windows[timing_windows.len() - 1];
+
+    for (i, (label, grade_idx)) in judgment_labels.iter().enumerate() {
+        let color = color::rgba_hex(color::JUDGMENT_HEX[*grade_idx]);
+        let window_ms = if i > 0 { timing_windows[i-1] } else { 0.0 };
+        let next_window_ms = timing_windows[i];
+        let mid_point_ms = (window_ms + next_window_ms) / 2.0;
+        
+        // Scale position from ms to pane coordinates
+        let x_offset = (mid_point_ms / worst_window) * (pane_width / 2.0);
+
+        if i == 0 { // "Fan" is centered
+            children.push(act!(text: font("miso"): settext(*label):
+                align(0.5, 0.5): xy(pane_width / 2.0, bottom_bar_center_y):
+                zoom(0.65): diffuse(color[0], color[1], color[2], color[3])
+            ));
+        } else { // Others are symmetric
+            children.push(act!(text: font("miso"): settext(*label):
+                align(0.5, 0.5): xy(pane_width / 2.0 - x_offset, bottom_bar_center_y):
+                zoom(0.65): diffuse(color[0], color[1], color[2], color[3])
+            ));
+            children.push(act!(text: font("miso"): settext(*label):
+                align(0.5, 0.5): xy(pane_width / 2.0 + x_offset, bottom_bar_center_y):
+                zoom(0.65): diffuse(color[0], color[1], color[2], color[3])
+            ));
+        }
+    }
+
+    // Top bar stats
+    let top_label_y = 4.0;
+    let top_value_y = 15.0;
+    let value_text = "0.0ms".to_string(); // Static placeholder
+    let label_zoom = 0.575;
+    let value_zoom = 0.8;
+    let gray_color = [0.8, 0.8, 0.8, 1.0];
+
+    let labels_and_x = [
+        ("Mean Error", 40.0),
+        ("Mean Offset", 40.0 + (pane_width - 80.0) / 3.0),
+        ("Std. Dev.", 40.0 + (pane_width - 80.0) / 3.0 * 2.0),
+        ("Max Error", pane_width - 40.0),
+    ];
+
+    for (label, x) in labels_and_x {
+        children.push(act!(text: font("miso"): settext(label):
+            align(0.5, 0.0): xy(x, top_label_y):
+            zoom(label_zoom): diffuse(gray_color[0], gray_color[1], gray_color[2], gray_color[3])
+        ));
+        children.push(act!(text: font("miso"): settext(value_text.clone()):
+            align(0.5, 0.0): xy(x, top_value_y):
+            zoom(value_zoom): diffuse(1.0, 1.0, 1.0, 1.0)
+        ));
+    }
+
+    vec![Actor::Frame {
+        align: [0.0, 0.0],
+        offset: [frame_x, frame_y],
+        size: [SizeSpec::Px(pane_width), SizeSpec::Px(pane_height)],
+        children,
+        background: None,
+        z: 101,
+    }]
+}
+
+
 /// Builds the modifiers display pane for P1.
 fn build_modifiers_pane(_state: &State) -> Vec<Actor> {
     // These positions are derived from the original ActorFrame layout to place
@@ -508,6 +620,9 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     
     // --- P1 Stats Pane (Judgments & Radar) ---
     actors.extend(build_p1_stats_pane(state, asset_manager));
+
+    // --- P2 Timing Pane (repurposed for single player) ---
+    actors.extend(build_p2_timing_pane(state));
 
     // --- NEW: P1 Modifiers Pane ---
     actors.extend(build_modifiers_pane(state));
