@@ -24,7 +24,6 @@ use crate::gameplay::profile;
 use crate::ui::font;
 use crate::assets::AssetManager;
 
-
 // --- CONSTANTS ---
 
 // Transitions
@@ -137,8 +136,8 @@ pub struct State {
     pub total_elapsed_in_screen: f32,
 
     // NEW: Fields for hold-to-exit logic
-    hold_to_exit_key: Option<KeyCode>,
-    hold_to_exit_start: Option<Instant>,
+    pub hold_to_exit_key: Option<KeyCode>,
+    pub hold_to_exit_start: Option<Instant>,
     prev_inputs: [bool; 4],
 
     // Debugging
@@ -325,10 +324,18 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     if let PhysicalKey::Code(key_code) = event.physical_key {
         match event.state {
             ElementState::Pressed => {
-                if event.repeat { return ScreenAction::None; } // Ignore OS repeats
+                if event.repeat {
+                    return ScreenAction::None;
+                } // Ignore OS repeats
 
-                // Start timing a hold for Enter or Escape
-                if key_code == KeyCode::Enter || key_code == KeyCode::Escape {
+                if key_code == KeyCode::Escape {
+                    state.hold_to_exit_key = Some(key_code);
+                    state.hold_to_exit_start = Some(Instant::now());
+                    return ScreenAction::None;
+                }
+
+                // In gameplay, Enter is distinct from Escape for holds
+                if key_code == KeyCode::Enter {
                     state.hold_to_exit_key = Some(key_code);
                     state.hold_to_exit_start = Some(Instant::now());
                     return ScreenAction::None;

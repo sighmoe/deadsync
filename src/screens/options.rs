@@ -54,12 +54,12 @@ const HEART_NATIVE_H: f32 = 566.0;
 const HEART_ASPECT: f32 = HEART_NATIVE_W / HEART_NATIVE_H;
 
 /// A simple item model with help text for the description box.
-struct Item<'a> {
+pub struct Item<'a> {
     name: &'a str,
     help: &'a [&'a str],
 }
 
-const ITEMS: &[Item] = &[
+pub const ITEMS: &[Item] = &[
     Item { name: "System Options",                  help: &["Game", "Theme", "Language", "Announcer", "Default NoteSkin", "Editor Noteskin"] },
     Item { name: "Configure Keyboard/Pad Mappings", help: &["Bind keys/buttons for each player."] },
     Item { name: "Test Input",                      help: &["View live input state for debugging."] },

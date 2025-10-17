@@ -27,7 +27,7 @@ const EDGE_MIN_RATIO: f32 = 0.17;            // edge zoom = ZOOM_CENTER * EDGE_M
 const WHEEL_Z_BASE: i16 = 105;               // above BG, below bars
 
 // Background cross-fade (to mimic Simply Love's slight delay)
-const BG_FADE_DURATION: f32 = 0.20; // seconds, linear fade
+pub const BG_FADE_DURATION: f32 = 0.20; // seconds, linear fade
 
 // -----------------------------------------------------------------------------
 // OPTIONAL PER-SLOT OVERRIDES (symmetric L/R, keyed by distance from center):

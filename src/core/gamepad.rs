@@ -6,7 +6,7 @@ pub enum PadDir { Up, Down, Left, Right }
 #[derive(Clone, Copy, Debug)]
 pub enum PadButton { Confirm, Back, F7 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FaceBtn { SouthA, EastB, WestX, NorthY }
 
 #[derive(Clone, Copy, Debug)]

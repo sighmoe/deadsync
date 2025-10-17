@@ -6,7 +6,7 @@ use crate::gameplay::{profile, scores};
 use crate::assets::AssetManager;
 use crate::ui::actors::Actor;
 use crate::ui::color;
-use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, Screen as CurrentScreen, ScreenAction};
+use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, Screen as CurrentScreen, ScreenAction, Screen};
 use crate::gameplay::parsing::simfile as song_loading;
 use winit::{
     application::ApplicationHandler,
@@ -411,7 +411,7 @@ impl App {
 
     #[inline(always)]
     fn apply_dir_from_pad(&mut self, event_loop: &ActiveEventLoop, dir: PadDir, pressed: bool) {
-        // 1) always update InputState so gameplay sees it
+        // 1) always update InputState so gameplay can read it for arrow hits
         match dir {
             PadDir::Up    => self.input_state.up = pressed,
             PadDir::Down  => self.input_state.down = pressed,
@@ -419,7 +419,7 @@ impl App {
             PadDir::Right => self.input_state.right = pressed,
         }
 
-        // 2) SelectMusic reacts like arrow keys
+        // 2) SelectMusic has complex wheel logic that is handled in its own module.
         if matches!(self.current_screen, CurrentScreen::SelectMusic) {
             let action = select_music::handle_pad_dir(&mut self.select_music_state, dir, pressed);
             if let Err(e) = self.handle_action(action, event_loop) {
@@ -431,13 +431,60 @@ impl App {
 
     #[inline(always)]
     fn handle_pad_event(&mut self, event_loop: &ActiveEventLoop, ev: PadEvent) {
+        let is_transitioning = !matches!(self.transition, TransitionState::Idle);
+        if is_transitioning || self.current_screen == CurrentScreen::Init {
+            return;
+        }
+
         match ev {
-            // D-pad / left-stick: unified path
             PadEvent::Dir { dir, pressed } => {
                 self.apply_dir_from_pad(event_loop, dir, pressed);
+
+                // Handle simple navigation for other menu screens directly here.
+                if pressed {
+                    match self.current_screen {
+                        CurrentScreen::Menu => {
+                            let delta: isize = match dir { PadDir::Up => -1, PadDir::Down => 1, _ => 0 };
+                            if delta != 0 {
+                                crate::core::audio::play_sfx("assets/sounds/change.ogg");
+                                let n = crate::screens::menu::OPTION_COUNT as isize;
+                                let cur = self.menu_state.selected_index as isize;
+                                self.menu_state.selected_index = ((cur + delta + n) % n) as usize;
+                            }
+                        }
+                        CurrentScreen::Options => {
+                            let delta: isize = match dir { PadDir::Up => -1, PadDir::Down => 1, _ => 0 };
+                            if delta != 0 {
+                                let total = crate::screens::options::ITEMS.len();
+                                if total > 0 {
+                                    self.options_state.selected = ((self.options_state.selected as isize + delta + total as isize) % total as isize) as usize;
+                                }
+                            }
+                        }
+                        CurrentScreen::SelectColor => {
+                            let delta: i32 = match dir { PadDir::Left => -1, PadDir::Right => 1, _ => 0 };
+                            if delta != 0 {
+                                let state = &mut self.select_color_state;
+                                let num_colors = crate::ui::color::DECORATIVE_HEX.len() as i32;
+                                state.active_color_index += delta;
+                                crate::config::update_simply_love_color(state.active_color_index.rem_euclid(num_colors));
+                                
+                                let showing_now = if state.bg_fade_t < crate::screens::select_color::BG_FADE_DURATION {
+                                    let a = (state.bg_fade_t / crate::screens::select_color::BG_FADE_DURATION).clamp(0.0, 1.0);
+                                    if (1.0 - a) >= a { state.bg_from_index } else { state.bg_to_index }
+                                } else {
+                                    state.bg_to_index
+                                };
+                                state.bg_from_index = showing_now;
+                                state.bg_to_index = state.active_color_index;
+                                state.bg_fade_t = 0.0;
+                            }
+                        }
+                        _ => {},
+                    }
+                }
             }
 
-            // Face buttons → arrows DURING GAMEPLAY ONLY (Y↑, X←, B→, A↓)
             PadEvent::Face { btn, pressed } => {
                 if let CurrentScreen::Gameplay = self.current_screen {
                     let dir = match btn {
@@ -447,41 +494,109 @@ impl App {
                         FaceBtn::SouthA => PadDir::Down,
                     };
                     self.apply_dir_from_pad(event_loop, dir, pressed);
-                }
+                } else if pressed && btn == FaceBtn::SouthA {
+                    // A button acts as Confirm/Enter in menus
+                    let mut play_sound = true;
+                    let action = match self.current_screen {
+                        CurrentScreen::Menu => match self.menu_state.selected_index {
+                            0 => ScreenAction::Navigate(Screen::SelectColor), // "GAMEPLAY" -> SelectColor
+                            1 => ScreenAction::Navigate(Screen::Options),
+                            2 => ScreenAction::Exit,
+                            _ => ScreenAction::None,
+                        },
+                        CurrentScreen::Options => {
+                            if self.options_state.selected == crate::screens::options::ITEMS.len() - 1 {
+                                ScreenAction::Navigate(Screen::Menu)
+                            } else {
+                                play_sound = false; // Don't play sound on non-functional options
+                                ScreenAction::None
+                            }
+                        },
+                        CurrentScreen::SelectColor => ScreenAction::Navigate(Screen::SelectMusic),
+                        CurrentScreen::SelectMusic => {
+                            play_sound = false; // select_music handles its own sounds
+                            select_music::handle_pad_button(&mut self.select_music_state, PadButton::Confirm, true)
+                        },
+                        CurrentScreen::Evaluation => {
+                            play_sound = false; // No sound when leaving eval
+                            ScreenAction::Navigate(Screen::SelectMusic)
+                        },
+                        _ => { play_sound = false; ScreenAction::None }
+                    };
+                    if play_sound { crate::core::audio::play_sfx("assets/sounds/start.ogg"); }
+                    if let Err(e) = self.handle_action(action, event_loop) { error!("Failed to handle A-button action: {}", e); }
+                } 
             }
 
             PadEvent::Button { btn, pressed } => {
                 match btn {
-                    // A/Start confirm
                     PadButton::Confirm if pressed => {
-                        match self.current_screen {
+                        let mut play_sound = true;
+                        let action = match self.current_screen {
+                            CurrentScreen::Menu => match self.menu_state.selected_index {
+                                0 => ScreenAction::Navigate(Screen::SelectColor),
+                                1 => ScreenAction::Navigate(Screen::Options),
+                                2 => ScreenAction::Exit,
+                                _ => ScreenAction::None,
+                            },
+                            CurrentScreen::Options => {
+                                if self.options_state.selected == crate::screens::options::ITEMS.len() - 1 {
+                                    ScreenAction::Navigate(Screen::Menu)
+                                } else {
+                                    play_sound = false;
+                                    ScreenAction::None
+                                }
+                            },
+                            CurrentScreen::SelectColor => ScreenAction::Navigate(Screen::SelectMusic),
                             CurrentScreen::SelectMusic => {
-                                let action = select_music::handle_pad_button(&mut self.select_music_state, btn, true);
-                                if let Err(e) = self.handle_action(action, event_loop) {
-                                    error!("Failed to handle confirm on SelectMusic: {}", e);
-                                    event_loop.exit();
+                                play_sound = false; // select_music handles its own sounds
+                                select_music::handle_pad_button(&mut self.select_music_state, PadButton::Confirm, true)
+                            },
+                            CurrentScreen::Gameplay => {
+                                if let Some(gs) = &mut self.gameplay_state {
+                                    gs.hold_to_exit_key = Some(winit::keyboard::KeyCode::Enter);
+                                    gs.hold_to_exit_start = Some(Instant::now());
+                                }
+                                play_sound = false;
+                                ScreenAction::None
+                            },
+                            CurrentScreen::Evaluation => {
+                                play_sound = false;
+                                ScreenAction::Navigate(Screen::SelectMusic)
+                            },
+                            _ => {
+                                play_sound = false;
+                                ScreenAction::None
+                            }
+                        };
+
+                        if play_sound { crate::core::audio::play_sfx("assets/sounds/start.ogg"); }
+                        if let Err(e) = self.handle_action(action, event_loop) { error!("Failed to handle Start-button action: {}", e); }
+                    }
+                    PadButton::Confirm if !pressed => {
+                        if self.current_screen == CurrentScreen::Gameplay {
+                             if let Some(gs) = &mut self.gameplay_state {
+                                if gs.hold_to_exit_key == Some(winit::keyboard::KeyCode::Enter) {
+                                    gs.hold_to_exit_key = None;
+                                    gs.hold_to_exit_start = None;
                                 }
                             }
-                            CurrentScreen::Menu => {
-                                let _ = self.handle_action(ScreenAction::Navigate(CurrentScreen::SelectMusic), event_loop);
-                            }
-                            _ => { /* ignore elsewhere */ }
                         }
                     }
-
-                    // Back is ONLY View/Select (NOT B)
                     PadButton::Back if pressed => {
-                        if self.current_screen == CurrentScreen::Menu {
-                            if let Err(e) = self.handle_action(ScreenAction::Exit, event_loop) {
-                                error!("Failed to exit: {}", e);
-                                event_loop.exit();
-                            }
-                        } else {
-                            let _ = self.handle_action(ScreenAction::Navigate(CurrentScreen::Menu), event_loop);
+                        crate::core::audio::play_sfx("assets/sounds/back.ogg");
+                        let action = match self.current_screen {
+                            CurrentScreen::Menu => ScreenAction::Exit,
+                            CurrentScreen::Evaluation => ScreenAction::Navigate(Screen::SelectMusic),
+                            CurrentScreen::Gameplay => ScreenAction::Navigate(Screen::SelectMusic),
+                            // Default for Options, SelectColor, SelectMusic, Sandbox is to go back to Menu
+                            _ => ScreenAction::Navigate(CurrentScreen::Menu),
+                        };
+                        if let Err(e) = self.handle_action(action, event_loop) {
+                                 error!("Failed to handle back button action: {}", e);
+                                 event_loop.exit();
                         }
                     }
-
-                    // Y→F7 only on SelectMusic
                     PadButton::F7 if pressed => {
                         if let CurrentScreen::SelectMusic = self.current_screen {
                             if let Some(select_music::MusicWheelEntry::Song(song)) =
