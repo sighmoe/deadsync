@@ -310,6 +310,34 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
     actors
 }
 
+/// Builds the modifiers display pane for P1.
+fn build_modifiers_pane(_state: &State) -> Vec<Actor> {
+    // These positions are derived from the original ActorFrame layout to place
+    // the text in the exact same world-space position without the frame.
+    let p1_side_offset = screen_center_x() - 155.0;
+    let frame_center_y = screen_center_y() + 200.5;
+    let font_zoom = 0.7;
+
+    // The text's top-left corner was positioned at xy(-140, -5) relative to the
+    // frame's center. We now calculate that absolute position directly.
+    let text_x = p1_side_offset - 140.0;
+    let text_y = frame_center_y - 5.0;
+
+    // The original large background pane is at z=100. This text needs to be on top.
+    let text_z = 101;
+
+    let modifier_text = act!(text:
+        font("miso"):
+        settext("Overhead"): // Static text as requested
+        align(0.0, 0.0):
+        xy(text_x, text_y):
+        zoom(font_zoom):
+        z(text_z):
+        diffuse(1.0, 1.0, 1.0, 1.0)
+    );
+
+    vec![modifier_text]
+}
 
 pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let mut actors = Vec::with_capacity(20);
@@ -480,6 +508,9 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     
     // --- P1 Stats Pane (Judgments & Radar) ---
     actors.extend(build_p1_stats_pane(state, asset_manager));
+
+    // --- NEW: P1 Modifiers Pane ---
+    actors.extend(build_modifiers_pane(state));
 
     // --- DENSITY GRAPH PANE (Corrected Layout) ---
     {
