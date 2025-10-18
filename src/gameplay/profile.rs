@@ -3,12 +3,51 @@ use log::{info, warn};
 use once_cell::sync::Lazy;
 use std::fs;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Mutex;
 
 // --- Profile Data ---
 const PROFILE_DIR: &str = "save/profiles/00000000";
 const PROFILE_INI_PATH: &str = "save/profiles/00000000/profile.ini";
 const GROOVESTATS_INI_PATH: &str = "save/profiles/00000000/groovestats.ini";
+
+// This enum is now part of the profile system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackgroundFilter {
+    Off,
+    Dark,
+    Darker,
+    Darkest,
+}
+
+impl Default for BackgroundFilter {
+    fn default() -> Self { BackgroundFilter::Dark }
+}
+
+impl FromStr for BackgroundFilter {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "off" => Ok(Self::Off),
+            "dark" => Ok(Self::Dark),
+            "darker" => Ok(Self::Darker),
+            "darkest" => Ok(Self::Darkest),
+            _ => Err(format!("'{}' is not a valid BackgroundFilter setting", s)),
+        }
+    }
+}
+
+impl core::fmt::Display for BackgroundFilter {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Off => write!(f, "Off"),
+            Self::Dark => write!(f, "Dark"),
+            Self::Darker => write!(f, "Darker"),
+            Self::Darkest => write!(f, "Darkest"),
+        }
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct Profile {
@@ -17,6 +56,7 @@ pub struct Profile {
     pub groovestats_api_key: String,
     pub groovestats_is_pad_player: bool,
     pub groovestats_username: String,
+    pub background_filter: BackgroundFilter,
 }
 
 impl Default for Profile {
@@ -27,6 +67,7 @@ impl Default for Profile {
             groovestats_api_key: "".to_string(),
             groovestats_is_pad_player: false,
             groovestats_username: "".to_string(),
+            background_filter: BackgroundFilter::default(),
         }
     }
 }
@@ -42,8 +83,10 @@ fn create_default_files() -> Result<(), std::io::Error> {
     // Create profile.ini
     if !Path::new(PROFILE_INI_PATH).exists() {
         let mut profile_conf = Ini::new();
-        profile_conf.set("userprofile", "DisplayName", Some("Player 1".to_string()));
-        profile_conf.set("userprofile", "PlayerInitials", Some("P1".to_string()));
+        let default_profile = Profile::default();
+        profile_conf.set("userprofile", "DisplayName", Some(default_profile.display_name));
+        profile_conf.set("userprofile", "PlayerInitials", Some(default_profile.player_initials));
+        profile_conf.set("PlayerOptions", "BackgroundFilter", Some(default_profile.background_filter.to_string()));
         profile_conf.write(PROFILE_INI_PATH)?;
     }
 
@@ -78,6 +121,9 @@ pub fn load() {
             profile_conf.get("userprofile", "DisplayName").unwrap_or(default_profile.display_name.clone());
         profile.player_initials =
             profile_conf.get("userprofile", "PlayerInitials").unwrap_or(default_profile.player_initials.clone());
+        profile.background_filter = profile_conf.get("PlayerOptions", "BackgroundFilter")
+            .and_then(|s| BackgroundFilter::from_str(&s).ok())
+            .unwrap_or(default_profile.background_filter);
     } else {
         warn!("Failed to load '{}', using default display name.", PROFILE_INI_PATH);
     }

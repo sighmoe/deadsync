@@ -842,8 +842,12 @@ impl ApplicationHandler for App {
                     let prev = self.current_screen;
                     self.current_screen = target;
                     
-                    if prev == CurrentScreen::Gameplay {
+                    // When leaving gameplay, stop music and unload the dynamic background
+                    if prev == CurrentScreen::Gameplay { 
                         crate::core::audio::stop_music();
+                        if let Some(backend) = self.backend.as_mut() {
+                            self.asset_manager.set_dynamic_background(backend, None);
+                        }
                     }
 
                     if prev == CurrentScreen::SelectMusic {
@@ -886,7 +890,12 @@ impl ApplicationHandler for App {
                         };
                         
                         let color_index = self.menu_state.active_color_index;
-                        self.gameplay_state = Some(gameplay::init(song_arc, chart, color_index));
+                        let mut gs = gameplay::init(song_arc, chart, color_index);
+                        // Load dynamic background
+                        if let Some(backend) = self.backend.as_mut() {
+                            gs.background_texture_key = self.asset_manager.set_dynamic_background(backend, gs.song.background_path.clone());
+                        }
+                        self.gameplay_state = Some(gs);
                     }
 
                     if target == CurrentScreen::Evaluation {

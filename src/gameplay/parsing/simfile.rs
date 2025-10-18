@@ -5,7 +5,7 @@ use crate::gameplay::{
 use log::{info, warn};
 use rssp::{analyze, AnalysisOptions};
 use std::fs;
-use std::path::{Path};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Scans the provided root directory (e.g., "songs/") for simfiles,
@@ -133,14 +133,68 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
 
     let simfile_dir = path.parent().ok_or_else(|| "Could not determine simfile directory".to_string())?;
 
-    let banner_path = if !summary.banner_path.is_empty() {
-        Some(simfile_dir.join(summary.banner_path))
+    // --- Background Path Logic (with autodetection) ---
+    let mut background_path_opt: Option<PathBuf> = if !summary.background_path.is_empty() {
+        let p = simfile_dir.join(&summary.background_path);
+        if p.exists() { Some(p) } else { None }
     } else {
         None
     };
 
-    let background_path = if !summary.background_path.is_empty() {
-        Some(simfile_dir.join(summary.background_path))
+    if background_path_opt.is_none() {
+        info!("'{}' - BG path is missing or empty, attempting autodetection.", summary.title_str);
+        if let Ok(entries) = fs::read_dir(simfile_dir) {
+            let image_files: Vec<PathBuf> = entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_file() &&
+                    p.extension().and_then(|s| s.to_str()).map_or(false, |ext| {
+                        matches!(ext.to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "bmp")
+                    })
+                })
+                .collect();
+            
+            let mut found_bg: Option<String> = None;
+
+            // Hint-based search first
+            for file in &image_files {
+                if let Some(file_name) = file.file_name().and_then(|s| s.to_str()) {
+                    let file_name_lower = file_name.to_lowercase();
+                    if file_name_lower.contains("background") || file_name_lower.contains("bg") {
+                        found_bg = Some(file_name.to_string());
+                        break;
+                    }
+                }
+            }
+
+            // Dimension-based search if no hint match
+            if found_bg.is_none() {
+                for file in &image_files {
+                    if let Some(file_name) = file.file_name().and_then(|s| s.to_str()) {
+                         if let Ok((w, h)) = image::image_dimensions(file) {
+                             if w >= 320 && h >= 240 {
+                                let aspect = if h > 0 { w as f32 / h as f32 } else { 0.0 };
+                                if aspect < 2.0 { // Banners are usually wider than 2:1
+                                    found_bg = Some(file_name.to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if let Some(bg_filename) = found_bg {
+                info!("Autodetected background: '{}'", bg_filename);
+                background_path_opt = Some(simfile_dir.join(bg_filename));
+            }
+        }
+    }
+
+    let banner_path = if !summary.banner_path.is_empty() {
+        let p = simfile_dir.join(&summary.banner_path);
+        if p.exists() { Some(p) } else { None }
     } else {
         None
     };
@@ -155,8 +209,8 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
         title: summary.title_str,
         subtitle: summary.subtitle_str,
         artist: summary.artist_str,
-        banner_path,
-        background_path,
+        banner_path, // Keep original logic for banner
+        background_path: background_path_opt,
         offset: summary.offset as f32,
         sample_start: if summary.sample_start > 0.0 { Some(summary.sample_start as f32) } else { None },
         sample_length: if summary.sample_length > 0.0 { Some(summary.sample_length as f32) } else { None },

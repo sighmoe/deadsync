@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-// --- Texture Metadata (moved from core/assets.rs) ---
+// --- Texture Metadata ---
 
 #[derive(Clone, Copy, Debug)]
 pub struct TexMeta {
@@ -108,6 +108,7 @@ pub struct AssetManager {
     fonts: HashMap<&'static str, Font>,
     current_dynamic_banner: Option<(String, PathBuf)>,
     current_density_graph: Option<(String, String)>,
+    current_dynamic_background: Option<(String, PathBuf)>,
 }
 
 impl AssetManager {
@@ -117,6 +118,7 @@ impl AssetManager {
             fonts: HashMap::new(),
             current_dynamic_banner: None,
             current_density_graph: None,
+            current_dynamic_background: None,
         }
     }
 
@@ -277,6 +279,12 @@ impl AssetManager {
             }
             self.textures.remove(&key);
         }
+        if let Some((key, _)) = self.current_dynamic_background.take() {
+            if let Backend::Vulkan(vk_state) = backend {
+                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
+            }
+            self.textures.remove(&key);
+        }
     }
 
     pub fn set_dynamic_banner(&mut self, backend: &mut Backend, path_opt: Option<PathBuf>) -> String {
@@ -357,6 +365,44 @@ impl AssetManager {
         }
     }
 
+    pub fn set_dynamic_background(&mut self, backend: &mut Backend, path_opt: Option<PathBuf>) -> String {
+        const FALLBACK_KEY: &str = "__white";
+
+        if let Some(path) = path_opt {
+            if self.current_dynamic_background.as_ref().map_or(false, |(_, p)| p == &path) {
+                return self.current_dynamic_background.as_ref().unwrap().0.clone();
+            }
+
+            self.destroy_current_dynamic_background(backend);
+
+            match image::open(&path) {
+                Ok(img) => {
+                    let rgba = img.to_rgba8();
+                    match renderer::create_texture(backend, &rgba) {
+                        Ok(texture) => {
+                            let key = path.to_string_lossy().into_owned();
+                            self.textures.insert(key.clone(), texture);
+                            register_texture_dims(&key, rgba.width(), rgba.height());
+                            self.current_dynamic_background = Some((key.clone(), path));
+                            key
+                        }
+                        Err(e) => {
+                            warn!("Failed to create GPU texture for background {:?}: {}. Using fallback.", path, e);
+                            FALLBACK_KEY.to_string()
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to open background image {:?}: {}. Using fallback.", path, e);
+                    FALLBACK_KEY.to_string()
+                }
+            }
+        } else {
+            self.destroy_current_dynamic_background(backend);
+            FALLBACK_KEY.to_string()
+        }
+    }
+
     fn destroy_current_dynamic_banner(&mut self, backend: &mut Backend) {
         if let Some((key, _)) = self.current_dynamic_banner.take() {
             if let Backend::Vulkan(vk_state) = backend {
@@ -368,6 +414,15 @@ impl AssetManager {
 
     fn destroy_current_density_graph(&mut self, backend: &mut Backend) {
         if let Some((key, _)) = self.current_density_graph.take() {
+            if let Backend::Vulkan(vk_state) = backend {
+                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
+            }
+            self.textures.remove(&key);
+        }
+    }
+
+    fn destroy_current_dynamic_background(&mut self, backend: &mut Backend) {
+        if let Some((key, _)) = self.current_dynamic_background.take() {
             if let Backend::Vulkan(vk_state) = backend {
                 if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
             }

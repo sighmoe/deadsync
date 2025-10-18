@@ -11,8 +11,7 @@ use crate::core::space::{is_wide, widescale};
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::act;
 use crate::ui::color;
-use crate::ui::components::screen_bar;
-use crate::screens::gameplay::screen_bar::ScreenBarParams;
+use crate::ui::components::screen_bar::{self, ScreenBarParams};
 use log::{info, warn};
 use std::collections::HashMap;
 use std::path::Path;
@@ -112,6 +111,7 @@ pub struct JudgmentRenderInfo {
 pub struct State {
     // Song & Chart data
     pub song: Arc<SongData>,
+    pub background_texture_key: String,
     pub chart: Arc<ChartData>,
     pub timing: Arc<TimingData>,
     pub notes: Vec<Note>,
@@ -220,6 +220,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     State {
         song,
         chart,
+        background_texture_key: "__white".to_string(),
         timing,
         notes,
         song_start_instant,
@@ -584,6 +585,38 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
     (vec![actor], TRANSITION_OUT_DURATION)
 }
 
+// --- DRAWING ---
+
+fn build_background(state: &State) -> Actor {
+    let sw = screen_width();
+    let sh = screen_height();
+    let screen_aspect = if sh > 0.0 { sw / sh } else { 16.0/9.0 };
+
+    let (tex_w, tex_h) = if let Some(meta) = crate::assets::texture_dims(&state.background_texture_key) {
+        (meta.w as f32, meta.h as f32)
+    } else {
+        (1.0, 1.0) // fallback, will just fill screen
+    };
+
+    let tex_aspect = if tex_h > 0.0 { tex_w / tex_h } else { 1.0 };
+    
+    if screen_aspect > tex_aspect {
+        // screen is wider, match width to cover
+        act!(sprite(state.background_texture_key.clone()):
+            align(0.5, 0.5): xy(screen_center_x(), screen_center_y()):
+            zoomtowidth(sw):
+            z(-100)
+        )
+    } else {
+        // screen is taller/equal, match height to cover
+        act!(sprite(state.background_texture_key.clone()):
+            align(0.5, 0.5): xy(screen_center_x(), screen_center_y()):
+            zoomtoheight(sh):
+            z(-100)
+        )
+    }
+}
+
 // --- Statics for Judgment Counter Display ---
 
 static JUDGMENT_ORDER: [JudgeGrade; 6] = [
@@ -611,12 +644,29 @@ static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyL
     ])
 });
 
-// --- DRAWING ---
-
 pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let mut actors = Vec::new();
     let profile = profile::get();
 
+    // --- Background and Filter ---
+    actors.push(build_background(state));
+
+    let filter_alpha = match profile.background_filter {
+        crate::gameplay::profile::BackgroundFilter::Off => 0.0,
+        crate::gameplay::profile::BackgroundFilter::Dark => 0.5,
+        crate::gameplay::profile::BackgroundFilter::Darker => 0.75,
+        crate::gameplay::profile::BackgroundFilter::Darkest => 0.95,
+    };
+
+    if filter_alpha > 0.0 {
+        actors.push(act!(quad:
+            align(0.5, 0.5): xy(screen_center_x(), screen_center_y()):
+            zoomto(screen_width(), screen_height()):
+            diffuse(0.0, 0.0, 0.0, filter_alpha):
+            z(-99) // Draw just above the background
+        ));
+    }
+    
     // --- Playfield Positioning (1:1 with Simply Love) ---
     let logical_screen_width = screen_width();
     let clamped_width = logical_screen_width.clamp(640.0, 854.0);
