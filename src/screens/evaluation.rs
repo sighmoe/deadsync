@@ -32,7 +32,6 @@ pub struct ScoreInfo {
     pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub score_percent: f64,
     pub grade: scores::Grade,
-    pub numerical_score: u64,
 }
 
 pub struct State {
@@ -45,17 +44,19 @@ pub struct State {
 
 pub fn init(gameplay_results: Option<gameplay::State>) -> State {
     let score_info = gameplay_results.map(|gs| {
-        // --- NEW: Use pre-calculated values from gameplay::State ---
         let score_percent = if gs.possible_grade_points > 0 {
             (gs.earned_grade_points as f64 / gs.possible_grade_points as f64).max(0.0)
         } else {
             0.0
         };
 
-        // Use the public function from scores to determine the grade from the percentage.
-        let _grade = scores::score_to_grade(score_percent * 10000.0);
-        // TEMPORARY: Always show the Failed grade until pass/fail logic is implemented.
-        let grade = scores::Grade::Failed;
+        // If the song was completed naturally, calculate the grade.
+        // Otherwise, it's an automatic fail.
+        let grade = if gs.song_completed_naturally {
+            scores::score_to_grade(score_percent * 10000.0)
+        } else {
+            scores::Grade::Failed
+        };
 
         ScoreInfo {
             song: gs.song.clone(),
@@ -63,7 +64,6 @@ pub fn init(gameplay_results: Option<gameplay::State>) -> State {
             judgment_counts: gs.judgment_counts.clone(),
             score_percent,
             grade,
-            numerical_score: gs.score,
         }
     });
 

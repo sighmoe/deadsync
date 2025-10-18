@@ -96,6 +96,7 @@ pub struct Note {
 pub struct Arrow {
     pub beat: f32,
     pub column: usize,
+    #[allow(dead_code)]
     pub note_type: NoteType,
     // NEW: Add an index back to the main `notes` Vec to link visual arrows to their data
     pub note_index: usize,
@@ -131,14 +132,10 @@ pub struct State {
     pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub last_judgment: Option<JudgmentRenderInfo>,
 
-    // NEW: Scoring fields
-    pub score: u64,
-    max_possible_score: u64,
-    num_taps_and_holds: u64,
-    taps_hit: u64,
-    point_bonus: i64,
+    // Grade/Percent scoring
     pub earned_grade_points: i32,
     pub possible_grade_points: i32,
+    pub song_completed_naturally: bool,
     
     // Visuals
     pub noteskin: Option<Noteskin>,
@@ -150,7 +147,7 @@ pub struct State {
     // Animation timing for this screen
     pub total_elapsed_in_screen: f32,
 
-    // NEW: Fields for hold-to-exit logic
+    // Hold-to-exit logic
     pub hold_to_exit_key: Option<KeyCode>,
     pub hold_to_exit_start: Option<Instant>,
     prev_inputs: [bool; 4],
@@ -187,38 +184,31 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         &chart.notes,
     ));
 
-    let parsed_notes = note_parser::parse_chart_notes(&chart.notes); // CHANGED: Use the alias
+    let parsed_notes = note_parser::parse_chart_notes(&chart.notes);
     let notes: Vec<Note> = parsed_notes.iter().filter_map(|(row_index, column, raw_note_type)| {
         timing.get_beat_for_row(*row_index).map(|beat| {
             let note_type = match raw_note_type {
-                ChartNoteType::Tap => NoteType::Tap, // CHANGED: Use the alias
-                ChartNoteType::Hold => NoteType::Hold, // CHANGED: Use the alias
-                ChartNoteType::Roll => NoteType::Roll, // CHANGED: Use the alias
+                ChartNoteType::Tap => NoteType::Tap,
+                ChartNoteType::Hold => NoteType::Hold,
+                ChartNoteType::Roll => NoteType::Roll,
             };
             Note { beat, column: *column, note_type, row_index: *row_index, result: None }
         })
     }).collect();
 
     let num_taps_and_holds = notes.len() as u64;
-    // For now, possible grade points are based on taps/hold heads only, matching evaluation.rs.
-    // Each is worth 2 points for a W1/W2.
-    let possible_grade_points = (num_taps_and_holds * 2) as i32;
+    // Possible grade points are based on taps/hold heads only.
+    // The max score is W1 (Fantastic), which has a PercentScoreWeight of 5.
+    let possible_grade_points = (num_taps_and_holds * 5) as i32;
 
     info!("Parsed {} notes from chart data.", notes.len());
 
     // --- StepMania Timing Logic Implementation ---
-    // 1. Find the time of the first note relative to the music file's start.
     let first_note_beat = notes.first().map_or(0.0, |n| n.beat);
     let first_second = timing.get_time_for_beat(first_note_beat);
-
-    // 2. Calculate the required preroll delay to meet theme metrics.
     let start_delay = (MIN_SECONDS_TO_STEP - first_second).max(MIN_SECONDS_TO_MUSIC);
-    
-    // 3. Schedule the visual clock's "time zero" to be `start_delay` seconds in the future.
     let song_start_instant = Instant::now() + Duration::from_secs_f32(start_delay);
 
-    // 4. Immediately tell the audio engine to start playing, but with a negative
-    //    start time. The audio engine will fill the beginning with silence.
     if let Some(music_path) = &song.music_path {
         info!("Starting music with a preroll delay of {:.2}s", start_delay);
         let cut = audio::Cut { start_sec: (-start_delay) as f64, length_sec: f64::INFINITY };
@@ -234,7 +224,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         notes,
         song_start_instant,
         current_beat: 0.0,
-        current_music_time: -start_delay, // At screen t=0, music time is negative
+        current_music_time: -start_delay,
         note_spawn_cursor: 0,
         judged_row_cursor: 0,
         arrows: [vec![], vec![], vec![], vec![]],
@@ -251,15 +241,9 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         full_combo_grade: None,
         first_fc_attempt_broken: false,
         last_judgment: None,
-
-        score: 0,
-        max_possible_score: 10_000_000,
-        num_taps_and_holds,
-        taps_hit: 0,
-        point_bonus: 10_000_000,
         earned_grade_points: 0,
         possible_grade_points,
-
+        song_completed_naturally: false,
         noteskin,
         active_color_index,
         player_color: color::decorative_rgba(active_color_index),
@@ -275,14 +259,10 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
 // --- INPUT HANDLING ---
 
-// Finds the note to be judged and stores the result, but does not finalize it.
-// Returns true if a note was judged and its visual arrow should be removed.
 fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
-    // Find the first (earliest) visual arrow in this column.
     if let Some(arrow_to_judge) = state.arrows[column].first().cloned() {
         let note_index = arrow_to_judge.note_index;
         let (note_beat, note_row_index) = {
-            // Immutable borrow to get data
             let note = &state.notes[note_index];
             (note.beat, note.row_index)
         };
@@ -290,14 +270,12 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
         let time_error = current_time - note_time;
         let abs_time_error = time_error.abs();
 
-        // Calculate the final, effective timing windows for this hit.
         let fantastic_window = BASE_FANTASTIC_WINDOW + TIMING_WINDOW_ADD;
         let excellent_window = BASE_EXCELLENT_WINDOW + TIMING_WINDOW_ADD;
         let great_window     = BASE_GREAT_WINDOW + TIMING_WINDOW_ADD;
         let decent_window    = BASE_DECENT_WINDOW + TIMING_WINDOW_ADD;
         let way_off_window   = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
 
-        // Check if the hit is within the widest possible timing window
         if abs_time_error <= way_off_window {
             let grade = if abs_time_error <= fantastic_window {
                 JudgeGrade::Fantastic
@@ -311,29 +289,22 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
                 JudgeGrade::WayOff
             };
 
-            // Create the judgment but DO NOT finalize it yet.
             let judgment = Judgment {
                 time_error_ms: time_error * 1000.0,
                 grade,
                 row: note_row_index,
             };
 
-            // Store the result on the main Note object.
             state.notes[note_index].result = Some(judgment);
-
             info!("JUDGED (pending): Row {}, Col {}, Error: {:.2}ms, Grade: {:?}",
                   note_row_index, column, time_error * 1000.0, grade);
             
-            // Remove the note that was hit
             state.arrows[column].remove(0);
-
-            // Trigger visual/audio feedback
             state.receptor_glow_timers[column] = RECEPTOR_GLOW_DURATION;
 
-            return true; // A note was successfully judged.
+            return true;
         }
     }
-    // If we reach here, no note was judged (either none was there, or it was too far off time).
     false
 }
 
@@ -341,24 +312,14 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     if let PhysicalKey::Code(key_code) = event.physical_key {
         match event.state {
             ElementState::Pressed => {
-                if event.repeat {
-                    return ScreenAction::None;
-                } // Ignore OS repeats
+                if event.repeat { return ScreenAction::None; }
 
-                if key_code == KeyCode::Escape {
+                if key_code == KeyCode::Escape || key_code == KeyCode::Enter {
                     state.hold_to_exit_key = Some(key_code);
                     state.hold_to_exit_start = Some(Instant::now());
                     return ScreenAction::None;
                 }
 
-                // In gameplay, Enter is distinct from Escape for holds
-                if key_code == KeyCode::Enter {
-                    state.hold_to_exit_key = Some(key_code);
-                    state.hold_to_exit_start = Some(Instant::now());
-                    return ScreenAction::None;
-                }
-
-                // Handle regular note hits
                 let column = match key_code {
                     KeyCode::ArrowLeft  | KeyCode::KeyD => Some(0),
                     KeyCode::ArrowDown  | KeyCode::KeyF => Some(1),
@@ -374,14 +335,12 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                     } else {
                         now.saturating_duration_since(state.song_start_instant).as_secs_f32()
                     };
-                    let note_was_judged = judge_a_tap(state, col_idx, hit_time);
-                    if !note_was_judged {
+                    if !judge_a_tap(state, col_idx, hit_time) {
                         state.receptor_bop_timers[col_idx] = 0.11;
                     }
                 }
             }
             ElementState::Released => {
-                // If the released key is the one we're tracking, cancel the hold
                 if state.hold_to_exit_key == Some(key_code) {
                     state.hold_to_exit_key = None;
                     state.hold_to_exit_start = None;
@@ -392,54 +351,23 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
-/// Called once a row is fully judged. Selects the representative judgment and
-/// updates global state like combo, score, and life.
 fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
     if judgments_in_row.is_empty() { return; }
 
-    // --- NEW: Score each note in the row ---
     for judgment in &judgments_in_row {
-        // 1. Update Grade Points (for percentage display)
+        // Update Grade Points (for percentage display) using PercentScoreWeight values.
         let grade_points = match judgment.grade {
-            JudgeGrade::Fantastic => 2,
-            JudgeGrade::Excellent => 2,
-            JudgeGrade::Great     => 1,
+            JudgeGrade::Fantastic => 5,
+            JudgeGrade::Excellent => 4,
+            JudgeGrade::Great     => 2,
             JudgeGrade::Decent    => 0,
-            JudgeGrade::WayOff    => -4,
-            JudgeGrade::Miss      => -8,
+            JudgeGrade::WayOff    => -6,
+            JudgeGrade::Miss      => -12,
         };
         state.earned_grade_points += grade_points;
-        
-        // 2. Update "Aaron-in-Japan" numerical score
-        if state.num_taps_and_holds > 0 {
-            state.taps_hit += 1;
-            let n = state.taps_hit;
-            let p = match judgment.grade {
-                JudgeGrade::Fantastic => 10,
-                JudgeGrade::Excellent => 9, // Assumes W1 is enabled, which is ITG/Deadsync style
-                JudgeGrade::Great     => 5,
-                _                     => 0, // Decent, WayOff, Miss are 0 points
-            };
-
-            let N = state.num_taps_and_holds;
-            let sum = (N * (N + 1)) / 2;
-            let Z = state.max_possible_score / 10;
-
-            if p > 0 {
-                // Formula from ScoreKeeperNormal.cpp: int(int64_t(p) * n * Z / S)
-                let note_score = (p as u64 * n * Z) / sum;
-                state.score += note_score;
-            }
-
-            // Subtract from bonus regardless of hit. The max score for any note is p=10.
-            let max_note_score = (10u64 * n * Z) / sum;
-            state.point_bonus -= max_note_score as i64;
-        }
     }
 
-    // --- Select the representative judgment for the row (ITG logic) ---
-    // 1. Prioritize Misses.
-    // 2. Otherwise, pick the judgment with the largest time offset (latest hit).
+    // Select the representative judgment for the row (ITG logic)
     let mut representative_judgment = None;
     let mut has_miss = false;
     let mut latest_offset = f32::NEG_INFINITY;
@@ -448,7 +376,7 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
         if judgment.grade == JudgeGrade::Miss {
             representative_judgment = Some(judgment.clone());
             has_miss = true;
-            break; // A miss overrides everything else.
+            break;
         }
         if judgment.time_error_ms > latest_offset {
             latest_offset = judgment.time_error_ms;
@@ -462,24 +390,11 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
     info!("FINALIZED: Row {}, Grade: {:?}, Offset: {:.2}ms",
           final_judgment.row, final_grade, final_judgment.time_error_ms);
 
-    // --- Update global state based on this single representative judgment ---
+    // Update global state based on this single representative judgment
     state.last_judgment = Some(JudgmentRenderInfo { judgment: final_judgment, judged_at: Instant::now() });
     *state.judgment_counts.entry(final_grade).or_insert(0) += 1;
 
     state.miss_combo = 0;
-
-    // --- NEW: Check for end of song to apply bonus ---
-    // This logic runs after combo logic, so full_combo_grade is up to date.
-    if state.taps_hit == state.num_taps_and_holds {
-        // We just judged the last note(s). Check if it's a full combo.
-        if state.full_combo_grade.is_some() {
-            state.score += state.point_bonus.max(0) as u64;
-            // In case of rounding differences, cap at max.
-            if state.score > state.max_possible_score {
-                state.score = state.max_possible_score;
-            }
-        }
-    }
 
     if has_miss || matches!(final_grade, JudgeGrade::WayOff) {
         state.combo = 0;
@@ -503,15 +418,12 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
 
 fn update_judged_rows(state: &mut State) {
     loop {
-        // Find the maximum row index in the chart.
         let max_row_index = state.notes.iter().map(|n| n.row_index).max().unwrap_or(0);
         
-        // If we've processed all rows, stop.
         if state.judged_row_cursor > max_row_index {
             break;
         }
 
-        // Check if all notes on the current row are judged using an immutable borrow.
         let is_row_complete = {
             let notes_on_row: Vec<&Note> = state.notes.iter()
                 .filter(|n| n.row_index == state.judged_row_cursor).collect();
@@ -519,31 +431,23 @@ fn update_judged_rows(state: &mut State) {
         };
 
         if is_row_complete {
-            // If complete, collect the results by cloning them (breaking the borrow).
             let judgments_on_row: Vec<Judgment> = state.notes.iter()
                 .filter(|n| n.row_index == state.judged_row_cursor)
                 .filter_map(|n| n.result.clone())
                 .collect();
             
-            // Now we can mutably borrow state to finalize the row.
             finalize_row_judgment(state, judgments_on_row);
             state.judged_row_cursor += 1;
         } else {
-            // The row is not yet complete, so we stop checking for this frame.
             break;
         }
     }
 }
 
-/// Calculates the time at which the gameplay should end and transition out.
 fn get_music_end_time(state: &State) -> f32 {
     let last_note_beat = state.notes.last().map_or(0.0, |n| n.beat);
     let last_step_seconds = state.timing.get_time_for_beat(last_note_beat);
-
-    // Add the widest possible window for a late hit.
     let last_hittable_second = last_step_seconds + (BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD);
-    
-    // Add the outro transition time.
     last_hittable_second + TRANSITION_OUT_DURATION
 }
 
@@ -551,11 +455,11 @@ fn get_music_end_time(state: &State) -> f32 {
 
 #[inline(always)]
 pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenAction {
-    // Hold-to-exit
     if let (Some(key), Some(start_time)) = (state.hold_to_exit_key, state.hold_to_exit_start) {
         if start_time.elapsed() >= std::time::Duration::from_secs(1) {
             state.hold_to_exit_key = None;
             state.hold_to_exit_start = None;
+            // IMPORTANT: Quitting via hold-to-exit does NOT set song_completed_naturally to true.
             return match key {
                 winit::keyboard::KeyCode::Enter => ScreenAction::Navigate(Screen::Evaluation),
                 winit::keyboard::KeyCode::Escape => ScreenAction::Navigate(Screen::SelectMusic),
@@ -566,7 +470,6 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
 
     state.total_elapsed_in_screen += delta_time;
 
-    // Music time + beat
     let now = std::time::Instant::now();
     let music_time_sec = if now < state.song_start_instant {
         -(state.song_start_instant.saturating_duration_since(now).as_secs_f32())
@@ -576,37 +479,27 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     state.current_music_time = music_time_sec;
     state.current_beat = state.timing.get_beat_for_time(music_time_sec);
 
-    // --- Check for end of song ---
-    let music_end_time = get_music_end_time(state);
-    if state.current_music_time >= music_end_time {
+    if state.current_music_time >= get_music_end_time(state) {
         info!("Music end time reached. Transitioning to evaluation.");
+        state.song_completed_naturally = true;
         return ScreenAction::Navigate(Screen::Evaluation);
     }
 
-    // --- Edge-triggered hits from InputState (gamepad/dir mapping) ---
-    // Map InputState to columns: [Left, Down, Up, Right] → [0,1,2,3]
     let current_inputs = [input.left, input.down, input.up, input.right];
-    let prev_inputs = state.prev_inputs; // COPY to avoid immutable borrow of state during process_hit
+    let prev_inputs = state.prev_inputs;
 
     for (col, (now_down, was_down)) in current_inputs.iter().copied().zip(prev_inputs).enumerate() {
         if now_down && !was_down {
-            let judged = judge_a_tap(state, col, music_time_sec);
-            if !judged {
+            if !judge_a_tap(state, col, music_time_sec) {
                 state.receptor_bop_timers[col] = 0.11;
             }
         }
     }
     state.prev_inputs = current_inputs;
 
-    // Glow + bop timers
-    for timer in &mut state.receptor_glow_timers {
-        *timer = (*timer - delta_time).max(0.0);
-    }
-    for timer in &mut state.receptor_bop_timers {
-        *timer = (*timer - delta_time).max(0.0);
-    }
+    for timer in &mut state.receptor_glow_timers { *timer = (*timer - delta_time).max(0.0); }
+    for timer in &mut state.receptor_bop_timers { *timer = (*timer - delta_time).max(0.0); }
 
-    // Spawn arrows in lookahead window
     let lookahead_time = music_time_sec + SCROLL_SPEED_SECONDS;
     let lookahead_beat = state.timing.get_beat_for_time(lookahead_time);
     while state.note_spawn_cursor < state.notes.len() && state.notes[state.note_spawn_cursor].beat < lookahead_beat {
@@ -620,30 +513,26 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
         state.note_spawn_cursor += 1;
     }
 
-    // Handle missed notes
     let way_off_window = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
     for col_arrows in &mut state.arrows {
         let mut missed = false;
-        if let Some(arrow) = col_arrows.first().cloned() { // Clone to avoid borrow issues
+        if let Some(arrow) = col_arrows.first().cloned() {
             let note_index = arrow.note_index;
-            let (note_row_index, note_result_is_none, note_beat) = { // Get all needed info
+            let (note_row_index, note_result_is_none, note_beat) = {
                 let note = &state.notes[note_index];
                 (note.row_index, note.result.is_none(), note.beat)
             };
 
             let note_time = state.timing.get_time_for_beat(note_beat);
-            if music_time_sec - note_time > way_off_window {
-                // Only mark as missed if it hasn't been judged yet (e.g., by an early hit).
-                if note_result_is_none {
-                    let judgment = Judgment {
-                        time_error_ms: ((music_time_sec - note_time) * 1000.0),
-                        grade: JudgeGrade::Miss,
-                        row: note_row_index,
-                    };
-                    state.notes[note_index].result = Some(judgment);
-                    info!("MISSED (pending): Row {}, Col {}, Beat {:.2}",
-                          note_row_index, arrow.column, arrow.beat);
-                }
+            if music_time_sec - note_time > way_off_window && note_result_is_none {
+                let judgment = Judgment {
+                    time_error_ms: ((music_time_sec - note_time) * 1000.0),
+                    grade: JudgeGrade::Miss,
+                    row: note_row_index,
+                };
+                state.notes[note_index].result = Some(judgment);
+                info!("MISSED (pending): Row {}, Col {}, Beat {:.2}",
+                      note_row_index, arrow.column, arrow.beat);
                 missed = true;
             }
         }
@@ -652,10 +541,8 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
         }
     }
 
-    // Check for and finalize any completed rows.
     update_judged_rows(state);
 
-    // Debug
     state.log_timer += delta_time;
     if state.log_timer >= 1.0 {
         let active_arrows: usize = state.arrows.iter().map(|v| v.len()).sum();
@@ -697,7 +584,7 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
     (vec![actor], TRANSITION_OUT_DURATION)
 }
 
-// --- NEW: Statics for Judgment Counter Display ---
+// --- Statics for Judgment Counter Display ---
 
 static JUDGMENT_ORDER: [JudgeGrade; 6] = [
     JudgeGrade::Fantastic,
@@ -740,59 +627,43 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
     // --- Banner (1:1 with Simply Love, including parent frame logic) ---
     if let Some(banner_path) = &state.song.banner_path {
-        // The key in the texture_manager for a dynamic banner is its path.
         let banner_key = banner_path.to_string_lossy().into_owned();
         let wide = is_wide();
 
-        // --- Replicate the parent ActorFrame positioning from default.lua ---
-
-        // 1. Root side-pane position (for Player 1)
         let sidepane_center_x = screen_width() * 0.75;
         let sidepane_center_y = screen_center_y() + 80.0;
-
-        // 2. 'BannerAndData' container zoom (same logic as judgment pane)
         let note_field_is_centered = (playfield_center_x - screen_center_x()).abs() < 1.0;
         let is_ultrawide = screen_width() / screen_height() > (21.0 / 9.0);
         let banner_data_zoom = if note_field_is_centered && wide && !is_ultrawide {
             let ar = screen_width() / screen_height();
             let t = ((ar - (16.0 / 10.0)) / ((16.0 / 9.0) - (16.0 / 10.0))).clamp(0.0, 1.0);
             0.825 + (0.925 - 0.825) * t
-        } else {
-            1.0
-        };
-
-        // 3. Banner's local position from Banner.lua, with override
+        } else { 1.0 };
         let mut local_banner_x = 70.0;
-        if note_field_is_centered && wide {
-            local_banner_x = 72.0;
-        }
+        if note_field_is_centered && wide { local_banner_x = 72.0; }
         let local_banner_y = -200.0;
 
-        // 4. Calculate final world position and zoom
         let banner_x = sidepane_center_x + (local_banner_x * banner_data_zoom);
         let banner_y = sidepane_center_y + (local_banner_y * banner_data_zoom);
         let final_zoom = 0.4 * banner_data_zoom;
 
         actors.push(act!(sprite(banner_key):
-            align(0.5, 0.5): xy(banner_x, banner_y): // Lua's xy() sets the center
+            align(0.5, 0.5): xy(banner_x, banner_y):
             setsize(418.0, 164.0): zoom(final_zoom):
-            z(-50) // Draw behind playfield (z=0) but above background (z=-100)
+            z(-50)
         ));
     }
 
     if let Some(ns) = &state.noteskin {
-        // 1. Receptors + glow
+        // Receptors + glow
         for i in 0..4 {
             let col_x_offset = ns.column_xs[i];
             
-            // Calculate the bop animation zoom multiplier
             let bop_timer = state.receptor_bop_timers[i];
             let bop_zoom = if bop_timer > 0.0 {
-                let t = (0.11 - bop_timer) / 0.11; // t goes from 0.0 -> 1.0 as timer expires
-                0.75 + (1.0 - 0.75) * t // linear interpolation from 0.75 back to 1.0
-            } else {
-                1.0
-            };
+                let t = (0.11 - bop_timer) / 0.11;
+                0.75 + (1.0 - 0.75) * t
+            } else { 1.0 };
 
             let receptor_def = &ns.receptor_off[i];
             let uv = noteskin::get_uv_rect(receptor_def, ns.tex_receptors_dims);
@@ -800,7 +671,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 align(0.5, 0.5):
                 xy(playfield_center_x + col_x_offset as f32, receptor_y):
                 zoomto(receptor_def.size[0] as f32, receptor_def.size[1] as f32):
-                zoom(bop_zoom): // Apply the bop animation zoom
+                zoom(bop_zoom):
                 rotationz(-receptor_def.rotation_deg as f32):
                 customtexturerect(uv[0], uv[1], uv[2], uv[3])
             ));
@@ -815,16 +686,15 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     xy(playfield_center_x + col_x_offset as f32, receptor_y):
                     zoomto(glow_def.size[0] as f32, glow_def.size[1] as f32):
                     rotationz(-glow_def.rotation_deg as f32):
-                    customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], glow_uv[3]):
+                    customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], uv[3]):
                     diffuse(1.0, 1.0, 1.0, alpha):
                     blend(add)
                 ));
             }
         }
 
-        // 2. Active arrows
+        // Active arrows
         let current_time = state.current_music_time;
-
         for column_arrows in &state.arrows {
             for arrow in column_arrows {
                 let arrow_time = state.timing.get_time_for_beat(arrow.beat);
@@ -837,16 +707,12 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 
                 let beat_fraction = arrow.beat.fract();
                 let quantization = match (beat_fraction * 192.0).round() as u32 {
-                    0 | 192 => Quantization::Q4th,
-                    96 => Quantization::Q8th,
-                    48 | 144 => Quantization::Q16th,
-                    24 | 72 | 120 | 168 => Quantization::Q32nd,
-                    64 | 128 => Quantization::Q12th,
-                    32 | 160 => Quantization::Q24th,
+                    0 | 192 => Quantization::Q4th, 96 => Quantization::Q8th,
+                    48 | 144 => Quantization::Q16th, 24 | 72 | 120 | 168 => Quantization::Q32nd,
+                    64 | 128 => Quantization::Q12th, 32 | 160 => Quantization::Q24th,
                     _ => Quantization::Q192nd,
                 };
 
-                // The noteskin frame index is based on column, not player.
                 let note_idx = (arrow.column % 4) * NUM_QUANTIZATIONS + quantization as usize;
                 if let Some(note_def) = ns.notes.get(note_idx) {
                     let uv = noteskin::get_uv_rect(note_def, ns.tex_notes_dims);
@@ -863,7 +729,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         }
     }
     
-    // 3. Combo
+    // Combo
     if state.miss_combo >= SHOW_COMBO_AT {
         actors.push(act!(text:
             font("wendy_combo"): settext(state.miss_combo.to_string()):
@@ -880,9 +746,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 JudgeGrade::Great     => (color::rgba_hex("#C9FFC9"), color::rgba_hex("#94FEC1")),
                 _                     => ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]),
             }
-        } else {
-            ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0])
-        };
+        } else { ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]) };
 
         let effect_period = 0.8;
         let t = (state.total_elapsed_in_screen / effect_period).fract();
@@ -904,7 +768,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         ));
     }
     
-    // 4. Judgment Sprite (Love)
+    // Judgment Sprite (Love)
     if let Some(render_info) = &state.last_judgment {
         let judgment = &render_info.judgment;
         let elapsed = render_info.judged_at.elapsed().as_secs_f32();
@@ -922,254 +786,140 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             };
 
             let offset_sec = judgment.time_error_ms / 1000.0;
-
-            // Frame selection (skip white fantastic row)
             let mut frame_base = judgment.grade as usize;
-            if judgment.grade >= JudgeGrade::Excellent {
-                frame_base += 1;
-            }
+            if judgment.grade >= JudgeGrade::Excellent { frame_base += 1; }
             let frame_offset = if offset_sec < 0.0 { 0 } else { 1 };
             let linear_index = (frame_base * 2 + frame_offset) as u32;
 
             actors.push(act!(sprite("judgements/Love 2x7 (doubleres).png"):
                 align(0.5, 0.5): xy(playfield_center_x, screen_center_y() - 30.0):
-                z(200):
-                zoomtoheight(64.0):
-                setstate(linear_index):
-                zoom(zoom)
+                z(200): zoomtoheight(64.0): setstate(linear_index): zoom(zoom)
             ));
         }
     }
 
-    // 5. Difficulty Box
+    // Difficulty Box
     let x = screen_center_x() - widescale(292.5, 342.5);
     let y = 56.0;
 
     let difficulty_index = color::FILE_DIFFICULTY_NAMES
-        .iter()
-        .position(|&name| name.eq_ignore_ascii_case(&state.chart.difficulty))
-        .unwrap_or(2);
-
+        .iter().position(|&name| name.eq_ignore_ascii_case(&state.chart.difficulty)).unwrap_or(2);
     let difficulty_color_index = state.active_color_index - (4 - difficulty_index) as i32;
     let difficulty_color = color::simply_love_rgba(difficulty_color_index);
-
     let meter_text = state.chart.meter.to_string();
 
-    let difficulty_meter_frame = Actor::Frame {
-        align: [0.5, 0.5],
-        offset: [x, y],
-        size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
+    actors.push(Actor::Frame {
+        align: [0.5, 0.5], offset: [x, y], size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
         children: vec![
             act!(quad:
-                align(0.5, 0.5): xy(0.0, 0.0):
-                zoomto(30.0, 30.0):
+                align(0.5, 0.5): xy(0.0, 0.0): zoomto(30.0, 30.0):
                 diffuse(difficulty_color[0], difficulty_color[1], difficulty_color[2], 1.0)
             ),
             act!(text:
-                font("wendy"): settext(meter_text):
-                align(0.5, 0.5): xy(0.0, 0.0):
+                font("wendy"): settext(meter_text): align(0.5, 0.5): xy(0.0, 0.0):
                 zoom(0.4): diffuse(0.0, 0.0, 0.0, 1.0)
             )
         ],
-        background: None,
-        z: 100,
-    };
-    actors.push(difficulty_meter_frame);
+        background: None, z: 100,
+    });
 
-    // 6. Score Display (P1)
-    // Parity with gameplay/score.lua
+    // Score Display (P1)
     let clamped_width = screen_width().clamp(640.0, 854.0);
     let score_x = screen_center_x() - clamped_width / 4.3;
     let score_y = 56.0;
 
-    // --- NEW: Calculate percentage and numerical score strings ---
     let score_percent = if state.possible_grade_points > 0 {
         (state.earned_grade_points as f32 / state.possible_grade_points as f32).max(0.0) * 100.0
-    } else {
-        0.0
-    };
+    } else { 0.0 };
     let percent_text = format!("{:.2}", score_percent);
-    let score_text = format!("{:08}", state.score);
 
-    // Percentage display
     actors.push(act!(text:
-        font("wendy_monospace_numbers"):
-        settext(percent_text):
-        // valign(1)=bottom, horizalign(right)=right
-        align(1.0, 1.0):
-        xy(score_x, score_y):
-        zoom(0.5):
-        horizalign(right):
-        z(100)
+        font("wendy_monospace_numbers"): settext(percent_text):
+        align(1.0, 1.0): xy(score_x, score_y):
+        zoom(0.5): horizalign(right): z(100)
     ));
 
-    // 7. Song Title Box (SongMeter)
+    // Song Title Box (SongMeter)
     {
         let w = widescale(310.0, 417.0);
         let h = 22.0;
         let box_cx = screen_center_x();
         let box_cy = 20.0;
-
         let mut frame_children = Vec::new();
 
-        frame_children.push(act!(quad:
-            align(0.5, 0.5): xy(w / 2.0, h / 2.0):
-            zoomto(w, h):
-            diffuse(1.0, 1.0, 1.0, 1.0):
-            z(0)
-        ));
-        frame_children.push(act!(quad:
-            align(0.5, 0.5): xy(w / 2.0, h / 2.0):
-            zoomto(w - 4.0, h - 4.0):
-            diffuse(0.0, 0.0, 0.0, 1.0):
-            z(1)
-        ));
+        frame_children.push(act!(quad: align(0.5, 0.5): xy(w / 2.0, h / 2.0): zoomto(w, h): diffuse(1.0, 1.0, 1.0, 1.0): z(0) ));
+        frame_children.push(act!(quad: align(0.5, 0.5): xy(w / 2.0, h / 2.0): zoomto(w - 4.0, h - 4.0): diffuse(0.0, 0.0, 0.0, 1.0): z(1) ));
 
         if state.song.total_length_seconds > 0 && state.current_music_time >= 0.0 {
             let progress = (state.current_music_time / state.song.total_length_seconds as f32).clamp(0.0, 1.0);
-            let stream_max_w = w - 4.0;
-            let stream_h = h - 4.0;
-            let stream_current_w = stream_max_w * progress;
-
             frame_children.push(act!(quad:
-                align(0.0, 0.5):
-                xy(2.0, h / 2.0):
-                zoomto(stream_current_w, stream_h):
-                diffuse(state.player_color[0], state.player_color[1], state.player_color[2], 1.0):
-                z(2)
+                align(0.0, 0.5): xy(2.0, h / 2.0): zoomto((w - 4.0) * progress, h - 4.0):
+                diffuse(state.player_color[0], state.player_color[1], state.player_color[2], 1.0): z(2)
             ));
         }
 
-        let full_title = if state.song.subtitle.trim().is_empty() {
-            state.song.title.clone()
-        } else {
-            format!("{} {}", state.song.title, state.song.subtitle)
-        };
-
+        let full_title = if state.song.subtitle.trim().is_empty() { state.song.title.clone() } else { format!("{} {}", state.song.title, state.song.subtitle) };
         frame_children.push(act!(text:
-            font("miso"): settext(full_title):
-            align(0.5, 0.5): xy(w / 2.0, h / 2.0):
-            zoom(0.8):
-            maxwidth(screen_width() / 2.5 - 10.0):
-            horizalign(center):
-            z(3)
+            font("miso"): settext(full_title): align(0.5, 0.5): xy(w / 2.0, h / 2.0):
+            zoom(0.8): maxwidth(screen_width() / 2.5 - 10.0): horizalign(center): z(3)
         ));
 
         actors.push(Actor::Frame {
-            align: [0.5, 0.5],
-            offset: [box_cx, box_cy],
-            size: [SizeSpec::Px(w), SizeSpec::Px(h)],
-            background: None,
-            z: 150,
-            children: frame_children,
+            align: [0.5, 0.5], offset: [box_cx, box_cy], size: [SizeSpec::Px(w), SizeSpec::Px(h)],
+            background: None, z: 150, children: frame_children,
         });
     }
 
-    // 8. Life Meter (P1)
+    // Life Meter (P1)
     {
-        let w = 136.0;
-        let h = 18.0;
+        let w = 136.0; let h = 18.0;
         let meter_cx = screen_center_x() - widescale(238.0, 288.0);
         let meter_cy = 20.0;
 
-        actors.push(act!(quad:
-            align(0.5, 0.5):
-            xy(meter_cx, meter_cy):
-            zoomto(w + 4.0, h + 4.0):
-            diffuse(1.0, 1.0, 1.0, 1.0):
-            z(150)
-        ));
-        actors.push(act!(quad:
-            align(0.5, 0.5):
-            xy(meter_cx, meter_cy):
-            zoomto(w, h):
-            diffuse(0.0, 0.0, 0.0, 1.0):
-            z(151)
-        ));
+        actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w + 4.0, h + 4.0): diffuse(1.0, 1.0, 1.0, 1.0): z(150) ));
+        actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w, h): diffuse(0.0, 0.0, 0.0, 1.0): z(151) ));
+        actors.push(act!(quad: align(0.0, 0.5): xy(meter_cx - w / 2.0, meter_cy): zoomto(w, h): diffuse(state.player_color[0], state.player_color[1], state.player_color[2], state.player_color[3]): z(152) ));
 
-        let fill_color = state.player_color;
-        actors.push(act!(quad:
-            align(0.0, 0.5):
-            xy(meter_cx - w / 2.0, meter_cy):
-            zoomto(w, h):
-            diffuse(fill_color[0], fill_color[1], fill_color[2], fill_color[3]):
-            z(152)
-        ));
-
-        let current_bpm = state.timing.get_bpm_for_beat(state.current_beat);
-        let bps = current_bpm / 60.0;
-        let velocity_x = -(bps * 0.5);
-
+        let bps = state.timing.get_bpm_for_beat(state.current_beat) / 60.0;
         actors.push(act!(sprite("swoosh.png"):
-            align(0.0, 0.5):
-            xy(meter_cx - w / 2.0, meter_cy):
-            zoomto(w, h):
-            diffusealpha(0.2):
-            texcoordvelocity(velocity_x, 0.0):
-            z(153)
+            align(0.0, 0.5): xy(meter_cx - w / 2.0, meter_cy): zoomto(w, h): diffusealpha(0.2):
+            texcoordvelocity(-(bps * 0.5), 0.0): z(153)
         ));
     }
 
-    // 9. Bottom Bar with Profile Name
     actors.push(screen_bar::build(ScreenBarParams {
-        title: "",
-        title_placement: screen_bar::ScreenBarTitlePlacement::Center,
-        position: screen_bar::ScreenBarPosition::Bottom,
-        transparent: true,
-        fg_color: [1.0; 4], left_text: Some(&profile.display_name), center_text: None, right_text: None,
+        title: "", title_placement: screen_bar::ScreenBarTitlePlacement::Center, position: screen_bar::ScreenBarPosition::Bottom,
+        transparent: true, fg_color: [1.0; 4], left_text: Some(&profile.display_name), center_text: None, right_text: None,
     }));
     
-    // 10. Step Statistics Side Pane (P1)
     actors.extend(build_side_pane(state, asset_manager));
- 
-    // 11. Holds/Mines/Rolls Pane (P1)
     actors.extend(build_holds_mines_rolls_pane(state, asset_manager));
 
     actors
 }
 
-/// Builds the Holds/Mines/Rolls pane, positioned below the banner in the side pane.
-fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { // <-- CHANGED
-    // This pane is only shown for single player on a wide screen, mirroring the most common SL case.
-    if !is_wide() {
-        return vec![];
-    }
+fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
+    if !is_wide() { return vec![]; }
     let mut actors = Vec::new();
 
-    // --- Parent Positioning (from default.lua and HoldsMinesRolls.lua) ---
-    // 1. Get the side pane's root position and zoom, which this pane is a child of.
-    //    This is the same logic as the banner and judgment counters.
     let sidepane_center_x = screen_width() * 0.75;
     let sidepane_center_y = screen_center_y() + 80.0;
-
     let logical_screen_width = screen_width();
     let clamped_width = logical_screen_width.clamp(640.0, 854.0);
     let nf_center_x = screen_center_x() - (clamped_width * 0.25);
     let note_field_is_centered = (nf_center_x - screen_center_x()).abs() < 1.0;
-
     let is_ultrawide = screen_width() / screen_height() > (21.0 / 9.0);
-
     let banner_data_zoom = if note_field_is_centered && is_wide() && !is_ultrawide {
         let ar = screen_width() / screen_height();
         let t = ((ar - (16.0 / 10.0)) / ((16.0 / 9.0) - (16.0 / 10.0))).clamp(0.0, 1.0);
         0.825 + (0.925 - 0.825) * t
-    } else {
-        1.0
-    };
-
-    // 2. Local offsets for this specific pane (from HoldsMinesRolls.lua) for Player 1.
+    } else { 1.0 };
     let local_x = 155.0;
     let local_y = -112.0;
-
-    // 3. Calculate final world position for the frame's anchor by applying local offsets
-    //    relative to the parent, scaled by the parent's zoom.
     let frame_cx = sidepane_center_x + (local_x * banner_data_zoom);
     let frame_cy = sidepane_center_y + (local_y * banner_data_zoom);
-
-    // The children within this frame will be scaled by this parent zoom factor.
     let frame_zoom = banner_data_zoom;
 
-    // --- Data & Formatting ---
     let categories = [
         ("Holds", state.chart.stats.holds),
         ("Mines", state.chart.stats.mines),
@@ -1179,9 +929,7 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
     let largest_count = categories.iter().map(|(_, count)| *count).max().unwrap_or(0);
     let digits_needed = if largest_count == 0 { 1 } else { (largest_count as f32).log10().floor() as usize + 1 };
     let digits_to_fmt = digits_needed.clamp(3, 4);
-
     let row_height = 28.0 * frame_zoom;
-
     let mut children = Vec::new();
 
     asset_manager.with_fonts(|all_fonts| asset_manager.with_font("wendy_screenevaluation", |metrics_font| {
@@ -1189,28 +937,17 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
         let label_zoom = 0.833 * frame_zoom;
         let gray = color::rgba_hex("#5A6166");
         let white = [1.0, 1.0, 1.0, 1.0];
-
-        // Width of a single digit in the monospace font, scaled.
         let digit_width = font::measure_line_width_logical(metrics_font, "0", all_fonts) as f32 * value_zoom;
-        if digit_width <= 0.0 { return; } // Avoid division by zero if font fails
-
-        // Calculate total width of the "000/000" string to position the label.
-        // The width of '/' is approximated as one digit.
+        if digit_width <= 0.0 { return; }
         let value_block_width = ((digits_to_fmt * 2) + 1) as f32 * digit_width;
 
         for (i, (label_text, count)) in categories.iter().enumerate() {
-            let item_y = (i as f32 - 1.0) * row_height; // y relative to frame center
-
-            // Value text (e.g., "000/123") is right-aligned at the frame's center.
-            // We build it from right-to-left.
+            let item_y = (i as f32 - 1.0) * row_height;
             let mut cursor_x = 0.0;
 
-            // Part 3: The "possible" count (e.g., 123)
             let possible_str = format!("{:0width$}", count, width = digits_to_fmt);
             for (char_idx, ch) in possible_str.chars().rev().enumerate() {
-                let is_dim = if *count == 0 {
-                    char_idx > 0
-                } else {
+                let is_dim = if *count == 0 { char_idx > 0 } else {
                     let original_index = digits_to_fmt - 1 - char_idx;
                     let first_nonzero = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
                     original_index < first_nonzero
@@ -1224,22 +961,12 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
                 cursor_x -= digit_width;
             }
 
-            // Part 2: The slash
-            children.push(act!(text:
-                font("wendy_screenevaluation"): settext("/"):
-                align(1.0, 0.5): xy(cursor_x, item_y):
-                zoom(value_zoom): diffuse(gray[0], gray[1], gray[2], gray[3])
-            ));
+            children.push(act!(text: font("wendy_screenevaluation"): settext("/"): align(1.0, 0.5): xy(cursor_x, item_y): zoom(value_zoom): diffuse(gray[0], gray[1], gray[2], gray[3]) ));
             cursor_x -= digit_width;
 
-            // Part 1: The "achieved" count (always "000..." for now)
-            let achieved_count = 0u32; // This will be dynamic in the future.
-            let achieved_str = format!("{:0width$}", achieved_count, width = digits_to_fmt);
+            let achieved_str = format!("{:0width$}", 0u32, width = digits_to_fmt);
             for (char_idx, ch) in achieved_str.chars().rev().enumerate() {
-                // Since count is 0, only the last digit (char_idx == 0) is bright.
-                let is_dim = char_idx > 0;
-                let color = if is_dim { gray } else { white };
-
+                let color = if char_idx > 0 { gray } else { white };
                 children.push(act!(text:
                     font("wendy_screenevaluation"): settext(ch.to_string()):
                     align(1.0, 0.5): xy(cursor_x, item_y):
@@ -1248,103 +975,57 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
                 cursor_x -= digit_width;
             }
 
-            // Now render the label, positioned relative to the value block.
-            // In Lua, it's `x(-10 - offset)`.
             let label_x = -value_block_width - (10.0 * frame_zoom);
             children.push(act!(text:
-                font("miso"): settext(*label_text):
-                align(1.0, 0.5): xy(label_x, item_y):
+                font("miso"): settext(*label_text): align(1.0, 0.5): xy(label_x, item_y):
                 zoom(label_zoom): diffuse(white[0], white[1], white[2], white[3])
             ));
         }
     }));
 
-    // We don't have live judgment updates yet, so the "achieved" part is always 0.
-    // The structure is now in place for when that data becomes available.
-
     actors.push(Actor::Frame {
-        align: [0.5, 0.5],
-        offset: [frame_cx, frame_cy],
-        size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)], // Frame is just a grouping anchor
-        children,
-        background: None,
-        z: 120, // Same Z as the main stat pane
+        align: [0.5, 0.5], offset: [frame_cx, frame_cy], size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
+        children, background: None, z: 120,
     });
-
     actors
 }
 
-/// Builds the entire right-side statistics pane, including judgment counters.
-fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { // <-- CHANGED
-    // Only show this pane in single-player on a wide screen, mirroring the SL theme's behavior.
-    if !is_wide() {
-        return vec![];
-    }
-
+fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
+    if !is_wide() { return vec![]; }
     let mut actors = Vec::new();
 
-    // --- StepStatsPane container parity (SL defaults for single player) ---
     let sidepane_center_x = screen_width() * 0.75;
     let sidepane_center_y = screen_center_y() + 80.0;
-
-    // Determine if notefield is centered (approximation based on our notefield math).
     let logical_screen_width = screen_width();
     let clamped_width = logical_screen_width.clamp(640.0, 854.0);
     let nf_center_x = screen_center_x() - (clamped_width * 0.25);
     let note_field_is_centered = (nf_center_x - screen_center_x()).abs() < 1.0;
-
-    // Parent zoom for BannerAndData (SL only shrinks when Center1Player & wide)
     let is_ultrawide = screen_width() / screen_height() > (21.0 / 9.0);
-    // FIX: default 1.0; only shrink in Center1Player-like case (rough parity)
     let banner_data_zoom = if note_field_is_centered && is_wide() && !is_ultrawide {
         let ar = screen_width() / screen_height();
         let t = ((ar - (16.0/10.0)) / ((16.0/9.0) - (16.0/10.0))).clamp(0.0, 1.0);
         0.825 + (0.925 - 0.825) * t
-    } else {
-        1.0
-    };
+    } else { 1.0 };
 
-    // Local offset for TapNoteJudgments inside BannerAndData:
-    // P1 → negative (we only draw P1 here)
     let judgments_local_x = -widescale(152.0, 204.0);
-
-    // FIX: child frame has zoom(0.8) but its x is not scaled by its own zoom; only by parent.
     let final_judgments_center_x = sidepane_center_x + (judgments_local_x * banner_data_zoom);
     let final_judgments_center_y = sidepane_center_y;
-
-    // TapNoteJudgments zoom(0.8) like SL; children inherit this
     let parent_local_zoom = 0.8;
     let final_text_base_zoom = banner_data_zoom * parent_local_zoom;
 
-    // Digits (SL: max(4, floor(log10(total))+1))
     let total_tapnotes = state.chart.stats.total_steps as f32;
-    let digits = if total_tapnotes > 0.0 {
-        (total_tapnotes.log10().floor() as usize + 1).max(4)
-    } else {
-        4
-    };
-
-    // --- Calculate label horizontal position first to anchor the numbers ---
-    // SL positions the label's right edge at x = 80 + (digits-4)*16 relative to the frame center.
-    // Our left-aligned labels use this as a left-edge offset.
+    let digits = if total_tapnotes > 0.0 { (total_tapnotes.log10().floor() as usize + 1).max(4) } else { 4 };
     let label_local_x_offset = 80.0 + (digits.saturating_sub(4) as f32 * 16.0);
     let label_world_x = final_judgments_center_x + (label_local_x_offset * final_text_base_zoom);
-
-    // The right edge of the number block should be a small gap to the left of the label's left edge.
-    // This value is chosen to visually match the theme.
     const NUMBER_TO_LABEL_GAP: f32 = 8.0;
     let numbers_cx = label_world_x - NUMBER_TO_LABEL_GAP;
-
     let row_height = 35.0;
     let y_base = -280.0; 
 
-    // This block is wrapped in `with_font` to get access to the font metrics needed to
-    // simulate a monospace layout with a proportional font, preventing jitter.
     asset_manager.with_fonts(|all_fonts| asset_manager.with_font("wendy_screenevaluation", |f| {
         let numbers_zoom = final_text_base_zoom * 0.5;
-        // Determine the width of the widest digit ('0') to use as our fixed cell width.
         let max_digit_w = (font::measure_line_width_logical(f, "0", all_fonts) as f32) * numbers_zoom;
-        if max_digit_w <= 0.0 { return; } // Avoid division by zero if font fails
+        if max_digit_w <= 0.0 { return; }
 
         for (index, grade) in JUDGMENT_ORDER.iter().enumerate() {
             let info = JUDGMENT_INFO.get(grade).unwrap();
@@ -1353,57 +1034,36 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> { 
             let local_y = y_base + (index as f32 * row_height);
             let world_y = final_judgments_center_y + (local_y * final_text_base_zoom);
 
-            // Colors
             let bright = info.color;
             let dim = [bright[0]*0.35, bright[1]*0.35, bright[2]*0.35, bright[3]];
-
-            // Format number with leading zeros
             let full_number_str = format!("{:0width$}", count, width = digits);
 
-            // --- Render each digit individually in a fixed-width cell ---
             for (i, ch) in full_number_str.chars().enumerate() {
-                let is_dim = if count == 0 {
-                    // For a zero value, all digits are dim except the last one.
-                    i < digits - 1
-                } else {
-                    // For non-zero values, dim all digits before the first non-zero digit.
+                let is_dim = if count == 0 { i < digits - 1 } else {
                     let first_nonzero = full_number_str.find(|c: char| c != '0').unwrap_or(full_number_str.len());
                     i < first_nonzero
                 };
                 let color = if is_dim { dim } else { bright };
-
-                // Position each digit's "cell" from the right edge of the number block.
                 let index_from_right = digits - 1 - i;
                 let cell_right_x = numbers_cx - (index_from_right as f32 * max_digit_w);
 
-                // Render the digit, right-aligned within its cell.
                 actors.push(act!(text:
-                    font("wendy_screenevaluation"):
-                    settext(ch.to_string()):
-                    align(1.0, 0.5): // Right-align
-                    xy(cell_right_x, world_y):
-                    zoom(numbers_zoom):
+                    font("wendy_screenevaluation"): settext(ch.to_string()):
+                    align(1.0, 0.5): xy(cell_right_x, world_y): zoom(numbers_zoom):
                     diffuse(color[0], color[1], color[2], color[3])
                 ));
             }
 
-            // ---------- Label (left-aligned, position is now calculated above) ----------
             let label_world_y = world_y + (1.0 * final_text_base_zoom);
             let label_zoom = final_text_base_zoom * 0.833;
     
-            // SL keeps labels bright
             actors.push(act!(text:
-                font("miso"):
-                settext(info.label):
-                align(0.0, 0.5):
-                xy(label_world_x, label_world_y):
-                zoom(label_zoom):
-                maxwidth(72.0 * final_text_base_zoom):
-                horizalign(left):
+                font("miso"): settext(info.label): align(0.0, 0.5):
+                xy(label_world_x, label_world_y): zoom(label_zoom):
+                maxwidth(72.0 * final_text_base_zoom): horizalign(left):
                 diffuse(bright[0], bright[1], bright[2], bright[3])
             ));
         }
     }));
-
     actors
 }
