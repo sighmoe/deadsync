@@ -32,6 +32,7 @@ pub struct ScoreInfo {
     pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub score_percent: f64,
     pub grade: scores::Grade,
+    pub numerical_score: u64,
 }
 
 pub struct State {
@@ -44,18 +45,15 @@ pub struct State {
 
 pub fn init(gameplay_results: Option<gameplay::State>) -> State {
     let score_info = gameplay_results.map(|gs| {
-        let max_dp = (gs.notes.len() as f64) * 2.0;
-        let mut earned_dp = 0.0;
-        earned_dp += *gs.judgment_counts.get(&JudgeGrade::Fantastic).unwrap_or(&0) as f64 * 2.0;
-        earned_dp += *gs.judgment_counts.get(&JudgeGrade::Excellent).unwrap_or(&0) as f64 * 2.0;
-        earned_dp += *gs.judgment_counts.get(&JudgeGrade::Great).unwrap_or(&0) as f64 * 1.0;
-        earned_dp += *gs.judgment_counts.get(&JudgeGrade::WayOff).unwrap_or(&0) as f64 * -4.0;
-        earned_dp += *gs.judgment_counts.get(&JudgeGrade::Miss).unwrap_or(&0) as f64 * -8.0;
-
-        let score_percent = if max_dp > 0.0 { (earned_dp / max_dp).max(0.0) } else { 0.0 };
+        // --- NEW: Use pre-calculated values from gameplay::State ---
+        let score_percent = if gs.possible_grade_points > 0 {
+            (gs.earned_grade_points as f64 / gs.possible_grade_points as f64).max(0.0)
+        } else {
+            0.0
+        };
 
         // Use the public function from scores to determine the grade from the percentage.
-        // let grade = scores::score_to_grade(score_percent * 10000.0);
+        let _grade = scores::score_to_grade(score_percent * 10000.0);
         // TEMPORARY: Always show the Failed grade until pass/fail logic is implemented.
         let grade = scores::Grade::Failed;
 
@@ -65,6 +63,7 @@ pub fn init(gameplay_results: Option<gameplay::State>) -> State {
             judgment_counts: gs.judgment_counts.clone(),
             score_percent,
             grade,
+            numerical_score: gs.score,
         }
     });
 

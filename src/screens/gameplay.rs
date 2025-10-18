@@ -15,7 +15,6 @@ use crate::ui::components::screen_bar;
 use crate::screens::gameplay::screen_bar::ScreenBarParams;
 use log::{info, warn};
 use std::collections::HashMap;
-use std::iter;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -131,6 +130,15 @@ pub struct State {
     pub first_fc_attempt_broken: bool,
     pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub last_judgment: Option<JudgmentRenderInfo>,
+
+    // NEW: Scoring fields
+    pub score: u64,
+    max_possible_score: u64,
+    num_taps_and_holds: u64,
+    taps_hit: u64,
+    point_bonus: i64,
+    pub earned_grade_points: i32,
+    pub possible_grade_points: i32,
     
     // Visuals
     pub noteskin: Option<Noteskin>,
@@ -191,6 +199,11 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         })
     }).collect();
 
+    let num_taps_and_holds = notes.len() as u64;
+    // For now, possible grade points are based on taps/hold heads only, matching evaluation.rs.
+    // Each is worth 2 points for a W1/W2.
+    let possible_grade_points = (num_taps_and_holds * 2) as i32;
+
     info!("Parsed {} notes from chart data.", notes.len());
 
     // --- StepMania Timing Logic Implementation ---
@@ -238,6 +251,15 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         full_combo_grade: None,
         first_fc_attempt_broken: false,
         last_judgment: None,
+
+        score: 0,
+        max_possible_score: 10_000_000,
+        num_taps_and_holds,
+        taps_hit: 0,
+        point_bonus: 10_000_000,
+        earned_grade_points: 0,
+        possible_grade_points,
+
         noteskin,
         active_color_index,
         player_color: color::decorative_rgba(active_color_index),
@@ -375,6 +397,46 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
     if judgments_in_row.is_empty() { return; }
 
+    // --- NEW: Score each note in the row ---
+    for judgment in &judgments_in_row {
+        // 1. Update Grade Points (for percentage display)
+        let grade_points = match judgment.grade {
+            JudgeGrade::Fantastic => 2,
+            JudgeGrade::Excellent => 2,
+            JudgeGrade::Great     => 1,
+            JudgeGrade::Decent    => 0,
+            JudgeGrade::WayOff    => -4,
+            JudgeGrade::Miss      => -8,
+        };
+        state.earned_grade_points += grade_points;
+        
+        // 2. Update "Aaron-in-Japan" numerical score
+        if state.num_taps_and_holds > 0 {
+            state.taps_hit += 1;
+            let n = state.taps_hit;
+            let p = match judgment.grade {
+                JudgeGrade::Fantastic => 10,
+                JudgeGrade::Excellent => 9, // Assumes W1 is enabled, which is ITG/Deadsync style
+                JudgeGrade::Great     => 5,
+                _                     => 0, // Decent, WayOff, Miss are 0 points
+            };
+
+            let N = state.num_taps_and_holds;
+            let sum = (N * (N + 1)) / 2;
+            let Z = state.max_possible_score / 10;
+
+            if p > 0 {
+                // Formula from ScoreKeeperNormal.cpp: int(int64_t(p) * n * Z / S)
+                let note_score = (p as u64 * n * Z) / sum;
+                state.score += note_score;
+            }
+
+            // Subtract from bonus regardless of hit. The max score for any note is p=10.
+            let max_note_score = (10u64 * n * Z) / sum;
+            state.point_bonus -= max_note_score as i64;
+        }
+    }
+
     // --- Select the representative judgment for the row (ITG logic) ---
     // 1. Prioritize Misses.
     // 2. Otherwise, pick the judgment with the largest time offset (latest hit).
@@ -405,6 +467,19 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
     *state.judgment_counts.entry(final_grade).or_insert(0) += 1;
 
     state.miss_combo = 0;
+
+    // --- NEW: Check for end of song to apply bonus ---
+    // This logic runs after combo logic, so full_combo_grade is up to date.
+    if state.taps_hit == state.num_taps_and_holds {
+        // We just judged the last note(s). Check if it's a full combo.
+        if state.full_combo_grade.is_some() {
+            state.score += state.point_bonus.max(0) as u64;
+            // In case of rounding differences, cap at max.
+            if state.score > state.max_possible_score {
+                state.score = state.max_possible_score;
+            }
+        }
+    }
 
     if has_miss || matches!(final_grade, JudgeGrade::WayOff) {
         state.combo = 0;
@@ -907,9 +982,19 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let score_x = screen_center_x() - clamped_width / 4.3;
     let score_y = 56.0;
 
+    // --- NEW: Calculate percentage and numerical score strings ---
+    let score_percent = if state.possible_grade_points > 0 {
+        (state.earned_grade_points as f32 / state.possible_grade_points as f32).max(0.0) * 100.0
+    } else {
+        0.0
+    };
+    let percent_text = format!("{:.2}", score_percent);
+    let score_text = format!("{:08}", state.score);
+
+    // Percentage display
     actors.push(act!(text:
         font("wendy_monospace_numbers"):
-        settext("0.00"):
+        settext(percent_text):
         // valign(1)=bottom, horizalign(right)=right
         align(1.0, 1.0):
         xy(score_x, score_y):
@@ -1107,7 +1192,7 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
 
         // Width of a single digit in the monospace font, scaled.
         let digit_width = font::measure_line_width_logical(metrics_font, "0", all_fonts) as f32 * value_zoom;
-        if digit_width <= 0.0 { return; }
+        if digit_width <= 0.0 { return; } // Avoid division by zero if font fails
 
         // Calculate total width of the "000/000" string to position the label.
         // The width of '/' is approximated as one digit.
