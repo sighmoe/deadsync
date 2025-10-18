@@ -343,7 +343,7 @@ fn build_p2_timing_pane(_state: &State) -> Vec<Actor> {
     ));
 
     // Early/Late text
-    let early_late_y = topbar_height + 5.0;
+    let early_late_y = topbar_height + 11.0;
     children.push(act!(text: font("wendy"): settext("Early"):
         align(0.0, 0.0): xy(10.0, early_late_y):
         zoom(0.3):
