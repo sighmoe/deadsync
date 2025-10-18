@@ -15,6 +15,7 @@ use crate::ui::components::screen_bar;
 use crate::screens::gameplay::screen_bar::ScreenBarParams;
 use log::{info, warn};
 use std::collections::HashMap;
+use std::iter;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -70,12 +71,14 @@ pub enum JudgeGrade {
 #[derive(Clone, Debug)]
 pub struct Judgment {
     pub time_error_ms: f32,
-    pub grade: JudgeGrade,
+    pub grade: JudgeGrade, // The grade of this specific note
+    pub row: usize,        // The row this judgment belongs to
 }
 
 #[derive(Clone, Debug)]
 pub enum NoteType {
     Tap,
+    // Future: Holds and Rolls will be more complex
     Hold,
     Roll,
 }
@@ -85,14 +88,18 @@ pub struct Note {
     pub beat: f32,
     pub column: usize,
     pub note_type: NoteType,
+    // NEW: Add a row index for grouping and a place to store results
+    pub row_index: usize,
+    pub result: Option<Judgment>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Arrow {
     pub beat: f32,
     pub column: usize,
-    #[allow(dead_code)] // will be used for holds and rolls
     pub note_type: NoteType,
+    // NEW: Add an index back to the main `notes` Vec to link visual arrows to their data
+    pub note_index: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -113,11 +120,11 @@ pub struct State {
     pub song_start_instant: Instant, // The wall-clock moment music t=0 begins (after the initial delay).
     pub current_beat: f32,
     pub current_music_time: f32, // Time calculated at the start of each update frame.
-    pub note_cursor: usize,
+    pub note_spawn_cursor: usize,  // For spawning visual arrows
+    pub judged_row_cursor: usize,  // For finalizing row judgments
     pub arrows: [Vec<Arrow>; 4], // Active on-screen arrows per column
     
     // Scoring & Feedback
-    pub judgments: Vec<Judgment>,
     pub combo: u32,
     pub miss_combo: u32,
     pub full_combo_grade: Option<JudgeGrade>,
@@ -173,14 +180,14 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     ));
 
     let parsed_notes = note_parser::parse_chart_notes(&chart.notes); // CHANGED: Use the alias
-    let notes: Vec<Note> = parsed_notes.into_iter().filter_map(|(row_index, column, raw_note_type)| {
-        timing.get_beat_for_row(row_index).map(|beat| {
+    let notes: Vec<Note> = parsed_notes.iter().filter_map(|(row_index, column, raw_note_type)| {
+        timing.get_beat_for_row(*row_index).map(|beat| {
             let note_type = match raw_note_type {
                 ChartNoteType::Tap => NoteType::Tap, // CHANGED: Use the alias
                 ChartNoteType::Hold => NoteType::Hold, // CHANGED: Use the alias
                 ChartNoteType::Roll => NoteType::Roll, // CHANGED: Use the alias
             };
-            Note { beat, column, note_type }
+            Note { beat, column: *column, note_type, row_index: *row_index, result: None }
         })
     }).collect();
 
@@ -215,9 +222,10 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         song_start_instant,
         current_beat: 0.0,
         current_music_time: -start_delay, // At screen t=0, music time is negative
-        note_cursor: 0,
+        note_spawn_cursor: 0,
+        judged_row_cursor: 0,
         arrows: [vec![], vec![], vec![], vec![]],
-        judgment_counts: HashMap::from([
+        judgment_counts: HashMap::from_iter([
             (JudgeGrade::Fantastic, 0),
             (JudgeGrade::Excellent, 0),
             (JudgeGrade::Great, 0),
@@ -225,7 +233,6 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
             (JudgeGrade::WayOff, 0),
             (JudgeGrade::Miss, 0),
         ]),
-        judgments: Vec::new(),
         combo: 0,
         miss_combo: 0,
         full_combo_grade: None,
@@ -246,15 +253,22 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
 // --- INPUT HANDLING ---
 
-fn process_hit(state: &mut State, column: usize, current_time: f32) -> bool {
-    // Find the first (i.e., earliest) note in the target column
-    if let Some(arrow) = state.arrows[column].first() {
-        let note_time = state.timing.get_time_for_beat(arrow.beat);
+// Finds the note to be judged and stores the result, but does not finalize it.
+// Returns true if a note was judged and its visual arrow should be removed.
+fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
+    // Find the first (earliest) visual arrow in this column.
+    if let Some(arrow_to_judge) = state.arrows[column].first().cloned() {
+        let note_index = arrow_to_judge.note_index;
+        let (note_beat, note_row_index) = {
+            // Immutable borrow to get data
+            let note = &state.notes[note_index];
+            (note.beat, note.row_index)
+        };
+        let note_time = state.timing.get_time_for_beat(note_beat);
         let time_error = current_time - note_time;
         let abs_time_error = time_error.abs();
 
         // Calculate the final, effective timing windows for this hit.
-        // This structure makes it easy to add a TimingWindowScale multiplier later.
         let fantastic_window = BASE_FANTASTIC_WINDOW + TIMING_WINDOW_ADD;
         let excellent_window = BASE_EXCELLENT_WINDOW + TIMING_WINDOW_ADD;
         let great_window     = BASE_GREAT_WINDOW + TIMING_WINDOW_ADD;
@@ -275,37 +289,18 @@ fn process_hit(state: &mut State, column: usize, current_time: f32) -> bool {
                 JudgeGrade::WayOff
             };
 
-            // Process judgment
-            info!("HIT! Column {}, Error: {:.2}ms, Grade: {:?}", column, time_error * 1000.0, grade);
-            let judgment = Judgment { time_error_ms: time_error * 1000.0, grade: grade.clone() };
-            state.judgments.push(judgment.clone());
-            state.last_judgment = Some(JudgmentRenderInfo { judgment, judged_at: Instant::now() });
-            // Increment the counter for this grade
-            *state.judgment_counts.entry(grade.clone()).or_insert(0) += 1;
+            // Create the judgment but DO NOT finalize it yet.
+            let judgment = Judgment {
+                time_error_ms: time_error * 1000.0,
+                grade,
+                row: note_row_index,
+            };
 
-            state.miss_combo = 0; // Any hit breaks a miss combo
-            if matches!(grade, JudgeGrade::WayOff) {
-                state.combo = 0;
-                // If a colored combo was active, mark the first attempt as broken.
-                if state.full_combo_grade.is_some() {
-                    state.first_fc_attempt_broken = true;
-                }
-                state.full_combo_grade = None;
-            } else {
-                state.combo += 1;
-                
-                // Update full combo grade ONLY if the first attempt has not been broken yet.
-                if !state.first_fc_attempt_broken {
-                    // Update the grade. If it's the start of the combo, it becomes the new grade.
-                    // If continuing, it takes the worse of the current and new grades.
-                    let new_grade = if let Some(current_fc_grade) = &state.full_combo_grade {
-                        grade.clone().max(current_fc_grade.clone())
-                    } else {
-                        grade.clone()
-                    };
-                    state.full_combo_grade = Some(new_grade);
-                }
-            }
+            // Store the result on the main Note object.
+            state.notes[note_index].result = Some(judgment);
+
+            info!("JUDGED (pending): Row {}, Col {}, Error: {:.2}ms, Grade: {:?}",
+                  note_row_index, column, time_error * 1000.0, grade);
             
             // Remove the note that was hit
             state.arrows[column].remove(0);
@@ -357,7 +352,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                     } else {
                         now.saturating_duration_since(state.song_start_instant).as_secs_f32()
                     };
-                    let note_was_judged = process_hit(state, col_idx, hit_time);
+                    let note_was_judged = judge_a_tap(state, col_idx, hit_time);
                     if !note_was_judged {
                         state.receptor_bop_timers[col_idx] = 0.11;
                     }
@@ -373,6 +368,108 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
         }
     }
     ScreenAction::None
+}
+
+/// Called once a row is fully judged. Selects the representative judgment and
+/// updates global state like combo, score, and life.
+fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
+    if judgments_in_row.is_empty() { return; }
+
+    // --- Select the representative judgment for the row (ITG logic) ---
+    // 1. Prioritize Misses.
+    // 2. Otherwise, pick the judgment with the largest time offset (latest hit).
+    let mut representative_judgment = None;
+    let mut has_miss = false;
+    let mut latest_offset = f32::NEG_INFINITY;
+
+    for judgment in judgments_in_row {
+        if judgment.grade == JudgeGrade::Miss {
+            representative_judgment = Some(judgment.clone());
+            has_miss = true;
+            break; // A miss overrides everything else.
+        }
+        if judgment.time_error_ms > latest_offset {
+            latest_offset = judgment.time_error_ms;
+            representative_judgment = Some(judgment.clone());
+        }
+    }
+
+    let Some(final_judgment) = representative_judgment else { return; };
+    let final_grade = final_judgment.grade;
+
+    info!("FINALIZED: Row {}, Grade: {:?}, Offset: {:.2}ms",
+          final_judgment.row, final_grade, final_judgment.time_error_ms);
+
+    // --- Update global state based on this single representative judgment ---
+    state.last_judgment = Some(JudgmentRenderInfo { judgment: final_judgment, judged_at: Instant::now() });
+    *state.judgment_counts.entry(final_grade).or_insert(0) += 1;
+
+    state.miss_combo = 0;
+
+    if has_miss || matches!(final_grade, JudgeGrade::WayOff) {
+        state.combo = 0;
+        if state.full_combo_grade.is_some() {
+            state.first_fc_attempt_broken = true;
+        }
+        state.full_combo_grade = None;
+    } else {
+        state.combo += 1;
+
+        if !state.first_fc_attempt_broken {
+            let new_grade = if let Some(current_fc_grade) = &state.full_combo_grade {
+                final_grade.max(*current_fc_grade)
+            } else {
+                final_grade
+            };
+            state.full_combo_grade = Some(new_grade);
+        }
+    }
+}
+
+fn update_judged_rows(state: &mut State) {
+    loop {
+        // Find the maximum row index in the chart.
+        let max_row_index = state.notes.iter().map(|n| n.row_index).max().unwrap_or(0);
+        
+        // If we've processed all rows, stop.
+        if state.judged_row_cursor > max_row_index {
+            break;
+        }
+
+        // Check if all notes on the current row are judged using an immutable borrow.
+        let is_row_complete = {
+            let notes_on_row: Vec<&Note> = state.notes.iter()
+                .filter(|n| n.row_index == state.judged_row_cursor).collect();
+            notes_on_row.is_empty() || notes_on_row.iter().all(|n| n.result.is_some())
+        };
+
+        if is_row_complete {
+            // If complete, collect the results by cloning them (breaking the borrow).
+            let judgments_on_row: Vec<Judgment> = state.notes.iter()
+                .filter(|n| n.row_index == state.judged_row_cursor)
+                .filter_map(|n| n.result.clone())
+                .collect();
+            
+            // Now we can mutably borrow state to finalize the row.
+            finalize_row_judgment(state, judgments_on_row);
+            state.judged_row_cursor += 1;
+        } else {
+            // The row is not yet complete, so we stop checking for this frame.
+            break;
+        }
+    }
+}
+
+/// Calculates the time at which the gameplay should end and transition out.
+fn get_music_end_time(state: &State) -> f32 {
+    let last_note_beat = state.notes.last().map_or(0.0, |n| n.beat);
+    let last_step_seconds = state.timing.get_time_for_beat(last_note_beat);
+
+    // Add the widest possible window for a late hit.
+    let last_hittable_second = last_step_seconds + (BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD);
+    
+    // Add the outro transition time.
+    last_hittable_second + TRANSITION_OUT_DURATION
 }
 
 // --- UPDATE LOOP ---
@@ -404,6 +501,13 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     state.current_music_time = music_time_sec;
     state.current_beat = state.timing.get_beat_for_time(music_time_sec);
 
+    // --- Check for end of song ---
+    let music_end_time = get_music_end_time(state);
+    if state.current_music_time >= music_end_time {
+        info!("Music end time reached. Transitioning to evaluation.");
+        return ScreenAction::Navigate(Screen::Evaluation);
+    }
+
     // --- Edge-triggered hits from InputState (gamepad/dir mapping) ---
     // Map InputState to columns: [Left, Down, Up, Right] → [0,1,2,3]
     let current_inputs = [input.left, input.down, input.up, input.right];
@@ -411,7 +515,7 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
 
     for (col, (now_down, was_down)) in current_inputs.iter().copied().zip(prev_inputs).enumerate() {
         if now_down && !was_down {
-            let judged = process_hit(state, col, music_time_sec);
+            let judged = judge_a_tap(state, col, music_time_sec);
             if !judged {
                 state.receptor_bop_timers[col] = 0.11;
             }
@@ -430,37 +534,41 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     // Spawn arrows in lookahead window
     let lookahead_time = music_time_sec + SCROLL_SPEED_SECONDS;
     let lookahead_beat = state.timing.get_beat_for_time(lookahead_time);
-    while state.note_cursor < state.notes.len() && state.notes[state.note_cursor].beat < lookahead_beat {
-        let note = &state.notes[state.note_cursor];
+    while state.note_spawn_cursor < state.notes.len() && state.notes[state.note_spawn_cursor].beat < lookahead_beat {
+        let note = &state.notes[state.note_spawn_cursor];
         state.arrows[note.column].push(Arrow {
             beat: note.beat,
             column: note.column,
             note_type: note.note_type.clone(),
+            note_index: state.note_spawn_cursor,
         });
-        state.note_cursor += 1;
+        state.note_spawn_cursor += 1;
     }
 
     // Handle missed notes
     let way_off_window = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
     for col_arrows in &mut state.arrows {
         let mut missed = false;
-        if let Some(arrow) = col_arrows.first() {
-            let note_time = state.timing.get_time_for_beat(arrow.beat);
+        if let Some(arrow) = col_arrows.first().cloned() { // Clone to avoid borrow issues
+            let note_index = arrow.note_index;
+            let (note_row_index, note_result_is_none, note_beat) = { // Get all needed info
+                let note = &state.notes[note_index];
+                (note.row_index, note.result.is_none(), note.beat)
+            };
+
+            let note_time = state.timing.get_time_for_beat(note_beat);
             if music_time_sec - note_time > way_off_window {
-                log::info!("MISS! Column {}, Beat {:.2}", arrow.column, arrow.beat);
-                let judgment = Judgment {
-                    time_error_ms: ((music_time_sec - note_time) * 1000.0),
-                    grade: JudgeGrade::Miss,
-                };
-                state.judgments.push(judgment.clone());
-                *state.judgment_counts.entry(JudgeGrade::Miss).or_insert(0) += 1;
-                state.last_judgment = Some(JudgmentRenderInfo { judgment, judged_at: std::time::Instant::now() });
-                state.combo = 0;
-                state.miss_combo += 1;
-                if state.full_combo_grade.is_some() {
-                    state.first_fc_attempt_broken = true;
+                // Only mark as missed if it hasn't been judged yet (e.g., by an early hit).
+                if note_result_is_none {
+                    let judgment = Judgment {
+                        time_error_ms: ((music_time_sec - note_time) * 1000.0),
+                        grade: JudgeGrade::Miss,
+                        row: note_row_index,
+                    };
+                    state.notes[note_index].result = Some(judgment);
+                    info!("MISSED (pending): Row {}, Col {}, Beat {:.2}",
+                          note_row_index, arrow.column, arrow.beat);
                 }
-                state.full_combo_grade = None;
                 missed = true;
             }
         }
@@ -468,6 +576,9 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
             col_arrows.remove(0);
         }
     }
+
+    // Check for and finalize any completed rows.
+    update_judged_rows(state);
 
     // Debug
     state.log_timer += delta_time;
@@ -660,7 +771,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     _ => Quantization::Q192nd,
                 };
 
-                let note_idx = arrow.column * NUM_QUANTIZATIONS + quantization as usize;
+                // The noteskin frame index is based on column, not player.
+                let note_idx = (arrow.column % 4) * NUM_QUANTIZATIONS + quantization as usize;
                 if let Some(note_def) = ns.notes.get(note_idx) {
                     let uv = noteskin::get_uv_rect(note_def, ns.tex_notes_dims);
                     
