@@ -181,30 +181,38 @@ pub struct State {
 }
 
 impl State {
+    #[inline(always)]
+    fn is_dead(&self) -> bool {
+        self.is_failing || self.life <= 0.0
+    }
+
     fn change_life(&mut self, delta: f32) {
-        if self.is_failing {
-            self.life = 0.0; // Defensively ensure life stays at 0 once failed.
+        // If we've *ever* died, keep pinned.
+        if self.is_dead() {
+            self.life = 0.0;
+            self.is_failing = true;
             return;
         }
-        
+
         let mut final_delta = delta;
-        
-        if final_delta > 0.0 { // Gaining life
+
+        if final_delta > 0.0 {
+            // regen only when alive
             if self.combo_after_miss < REGEN_COMBO_AFTER_MISS {
                 self.combo_after_miss += 1;
             } else {
-                // In regen mode, add extra life
                 final_delta += LIFE_REGEN_AMOUNT;
                 self.combo_after_miss = (self.combo_after_miss + 1).min(MAX_REGEN_COMBO_AFTER_MISS);
             }
-        } else if final_delta < 0.0 { // Losing life
+        } else if final_delta < 0.0 {
             self.combo_after_miss = 0;
         }
-    
+
         self.life = (self.life + final_delta).clamp(0.0, 1.0);
-    
+
         if self.life <= 0.0 {
-            self.is_failing = true;
+            self.life = 0.0;
+            self.is_failing = true; // latch immediately in the same call
             info!("Player has failed!");
         }
     }
@@ -412,17 +420,20 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
     if judgments_in_row.is_empty() { return; }
 
-    for judgment in &judgments_in_row {
-        // Update Grade Points (for percentage display) using PercentScoreWeight values.
-        let grade_points = match judgment.grade {
-            JudgeGrade::Fantastic => 5,
-            JudgeGrade::Excellent => 4,
-            JudgeGrade::Great     => 2,
-            JudgeGrade::Decent    => 0,
-            JudgeGrade::WayOff    => -6,
-            JudgeGrade::Miss      => -12,
-        };
-        state.earned_grade_points += grade_points;
+    // If the player is not dead, update the score points.
+    if !state.is_dead() {
+        for judgment in &judgments_in_row {
+            // Update Grade Points (for percentage display) using PercentScoreWeight values.
+            let grade_points = match judgment.grade {
+                JudgeGrade::Fantastic => 5,
+                JudgeGrade::Excellent => 4,
+                JudgeGrade::Great     => 2,
+                JudgeGrade::Decent    => 0,
+                JudgeGrade::WayOff    => -6,
+                JudgeGrade::Miss      => -12,
+            };
+            state.earned_grade_points += grade_points;
+        }
     }
 
     // Select the representative judgment for the row (ITG logic)
@@ -472,7 +483,10 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
         }
         state.full_combo_grade = None;
     } else {
-        state.combo += 1;
+        // Don't increase combo if dead
+        if !state.is_dead() {
+            state.combo += 1;
+        }
 
         if !state.first_fc_attempt_broken {
             let new_grade = if let Some(current_fc_grade) = &state.full_combo_grade {
@@ -524,12 +538,6 @@ fn get_music_end_time(state: &State) -> f32 {
 
 #[inline(always)]
 pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenAction {
-    if state.is_failing {
-        info!("Player has failed. Transitioning to evaluation.");
-        // song_completed_naturally is false by default, which will result in a Failed grade.
-        return ScreenAction::Navigate(Screen::Evaluation);
-    }
-
     if let (Some(key), Some(start_time)) = (state.hold_to_exit_key, state.hold_to_exit_start) {
         if start_time.elapsed() >= std::time::Duration::from_secs(1) {
             state.hold_to_exit_key = None;
@@ -617,13 +625,6 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     }
 
     update_judged_rows(state);
-
-    // Check for failure after all judgments for the frame have been processed
-    if state.is_failing {
-        info!("Player has failed. Transitioning to evaluation.");
-        // song_completed_naturally is false by default, which will result in a Failed grade.
-        return ScreenAction::Navigate(Screen::Evaluation);
-    }
 
     state.log_timer += delta_time;
     if state.log_timer >= 1.0 {
@@ -817,7 +818,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     xy(playfield_center_x + col_x_offset as f32, receptor_y):
                     zoomto(glow_def.size[0] as f32, glow_def.size[1] as f32):
                     rotationz(-glow_def.rotation_deg as f32):
-                    customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], uv[3]):
+                    customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], glow_uv[3]):
                     diffuse(1.0, 1.0, 1.0, alpha):
                     blend(add)
                 ));
@@ -1001,48 +1002,46 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         });
     }
 
-    // Life Meter (P1)
+    // --- Life Meter (P1) ---  (drop-in replacement for the current block)
     {
         let w = 136.0; let h = 18.0;
         let meter_cx = screen_center_x() - widescale(238.0, 288.0);
         let meter_cy = 20.0;
 
+        // Frames/border
         actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w + 4.0, h + 4.0): diffuse(1.0, 1.0, 1.0, 1.0): z(150) ));
         actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w, h): diffuse(0.0, 0.0, 0.0, 1.0): z(151) ));
-        
-        let is_hot = state.life >= 1.0;
 
-        let life_color = if is_hot {
-            // Hot is solid white fill.
-            [1.0, 1.0, 1.0, 1.0]
-        } else {
-            // Not hot, use player color. No special "danger" color for the fill.
-            state.player_color
-        };
+        // Latch-to-zero for rendering the very frame we die.
+        let dead = state.is_failing || state.life <= 0.0;
+        let life_for_render = if dead { 0.0 } else { state.life.clamp(0.0, 1.0) };
 
-        let swoosh_alpha = if is_hot { 1.0 } else { 0.2 };
+        let is_hot = !dead && life_for_render >= 1.0;
+        let life_color = if is_hot { [1.0, 1.0, 1.0, 1.0] } else { state.player_color };
 
-        let bps = state.timing.get_bpm_for_beat(state.current_beat) / 60.0;
-        let filled_width = w * state.life;
+        let filled_width = w * life_for_render;
 
-        // Swoosh texture, sized to match the filled portion of the bar.
-        actors.push(act!(sprite("swoosh.png"):
-            align(0.0, 0.5): 
-            xy(meter_cx - w / 2.0, meter_cy): 
-            zoomto(filled_width, h): 
-            diffusealpha(swoosh_alpha): 
-            texcoordvelocity(-(bps * 0.5), 0.0): 
-            z(153)
-        ));
-        
-        // The life bar fill itself.
-        actors.push(act!(quad:
-            align(0.0, 0.5):
-            xy(meter_cx - w / 2.0, meter_cy):
-            zoomto(filled_width, h):
-            diffuse(life_color[0], life_color[1], life_color[2], 1.0):
-            z(152)
-        ));
+        // Never draw swoosh if dead OR nothing to fill.
+        if filled_width > 0.0 && !dead {
+            let bps = state.timing.get_bpm_for_beat(state.current_beat) / 60.0;
+            let swoosh_alpha = if is_hot { 1.0 } else { 0.2 };
+            actors.push(act!(sprite("swoosh.png"):
+                align(0.0, 0.5):
+                xy(meter_cx - w / 2.0, meter_cy):
+                zoomto(filled_width, h):
+                diffusealpha(swoosh_alpha):
+                texcoordvelocity(-(bps * 0.5), 0.0):
+                z(153)
+            ));
+
+            actors.push(act!(quad:
+                align(0.0, 0.5):
+                xy(meter_cx - w / 2.0, meter_cy):
+                zoomto(filled_width, h):
+                diffuse(life_color[0], life_color[1], life_color[2], 1.0):
+                z(152)
+            ));
+        }
     }
 
     actors.push(screen_bar::build(ScreenBarParams {
