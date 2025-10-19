@@ -32,7 +32,8 @@ const TRANSITION_OUT_DURATION: f32 = 0.4;
 // Gameplay Layout & Feel
 const SCROLL_SPEED_SECONDS: f32 = 0.60; // Time for a note to travel screen_height() pixels
 const RECEPTOR_Y_OFFSET_FROM_CENTER: f32 = -125.0; // From Simply Love metrics for standard up-scroll
-const DANGER_THRESHOLD: f32 = 0.2;
+
+//const DANGER_THRESHOLD: f32 = 0.2; // For implementation of red/green flashing light
 
 // Lead-in timing (from StepMania theme defaults)
 const MIN_SECONDS_TO_STEP: f32 = 6.0;
@@ -118,8 +119,10 @@ impl LifeChange {
     const DECENT: f32 = 0.0;
     const WAY_OFF: f32 = -0.050;
     const MISS: f32 = -0.100;
+    #[allow(dead_code)]
     const HIT_MINE: f32 = -0.050;
     const HELD: f32 = 0.008;
+    #[allow(dead_code)]
     const LET_GO: f32 = -0.080;
 }
 
