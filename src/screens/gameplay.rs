@@ -183,18 +183,12 @@ pub struct State {
 impl State {
     fn change_life(&mut self, delta: f32) {
         if self.is_failing {
+            self.life = 0.0; // Defensively ensure life stays at 0 once failed.
             return;
         }
         
         let mut final_delta = delta;
-    
-        // HarshHotLifePenalty
-        let is_hot = self.life >= 1.0;
-        if is_hot && delta <= 0.0 {
-            // SL metric `HarshHotLifePenalty` enables this. The penalty is `LifePercentChangeMiss`.
-            final_delta += LifeChange::MISS;
-        }
-    
+        
         if final_delta > 0.0 { // Gaining life
             if self.combo_after_miss < REGEN_COMBO_AFTER_MISS {
                 self.combo_after_miss += 1;
@@ -209,7 +203,7 @@ impl State {
     
         self.life = (self.life + final_delta).clamp(0.0, 1.0);
     
-        if self.life == 0.0 {
+        if self.life <= 0.0 {
             self.is_failing = true;
             info!("Player has failed!");
         }
@@ -1015,43 +1009,37 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
         actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w + 4.0, h + 4.0): diffuse(1.0, 1.0, 1.0, 1.0): z(150) ));
         actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w, h): diffuse(0.0, 0.0, 0.0, 1.0): z(151) ));
+        
+        let is_hot = state.life >= 1.0;
 
-        let life_color = if state.life >= 1.0 {
-            // Hot, pulsating color.
-            let anim_t = (state.total_elapsed_in_screen * 5.0).sin() * 0.5 + 0.5; // Fast pulse
-            let hot_color1 = color::rgba_hex("#FFFFFF");
-            let hot_color2 = color::rgba_hex("#FFFF8D");
-            [
-                hot_color1[0] * (1.0 - anim_t) + hot_color2[0] * anim_t,
-                hot_color1[1] * (1.0 - anim_t) + hot_color2[1] * anim_t,
-                hot_color1[2] * (1.0 - anim_t) + hot_color2[2] * anim_t,
-                1.0,
-            ]
-        } else if state.life < DANGER_THRESHOLD {
-            // Danger, pulsating red
-            let anim_t = (state.total_elapsed_in_screen * 2.0).sin() * 0.5 + 0.5; // Slower pulse
-            let danger_color1 = color::rgba_hex("#FF0000");
-            let danger_color2 = color::rgba_hex("#800000");
-             [
-                danger_color1[0] * (1.0 - anim_t) + danger_color2[0] * anim_t,
-                danger_color1[1] * (1.0 - anim_t) + danger_color2[1] * anim_t,
-                danger_color1[2] * (1.0 - anim_t) + danger_color2[2] * anim_t,
-                1.0,
-            ]
+        let life_color = if is_hot {
+            // Hot is solid white fill.
+            [1.0, 1.0, 1.0, 1.0]
         } else {
+            // Not hot, use player color. No special "danger" color for the fill.
             state.player_color
         };
 
+        let swoosh_alpha = if is_hot { 1.0 } else { 0.2 };
+
         let bps = state.timing.get_bpm_for_beat(state.current_beat) / 60.0;
+        let filled_width = w * state.life;
+
+        // Swoosh texture, sized to match the filled portion of the bar.
         actors.push(act!(sprite("swoosh.png"):
-            align(0.0, 0.5): xy(meter_cx - w / 2.0, meter_cy): zoomto(w, h): diffusealpha(0.2):
-            texcoordvelocity(-(bps * 0.5), 0.0): z(153)
+            align(0.0, 0.5): 
+            xy(meter_cx - w / 2.0, meter_cy): 
+            zoomto(filled_width, h): 
+            diffusealpha(swoosh_alpha): 
+            texcoordvelocity(-(bps * 0.5), 0.0): 
+            z(153)
         ));
         
+        // The life bar fill itself.
         actors.push(act!(quad:
             align(0.0, 0.5):
             xy(meter_cx - w / 2.0, meter_cy):
-            zoomto(w * state.life, h):
+            zoomto(filled_width, h):
             diffuse(life_color[0], life_color[1], life_color[2], 1.0):
             z(152)
         ));
