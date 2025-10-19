@@ -32,6 +32,7 @@ const TRANSITION_OUT_DURATION: f32 = 0.4;
 // Gameplay Layout & Feel
 const SCROLL_SPEED_SECONDS: f32 = 0.60; // Time for a note to travel screen_height() pixels
 const RECEPTOR_Y_OFFSET_FROM_CENTER: f32 = -125.0; // From Simply Love metrics for standard up-scroll
+const DANGER_THRESHOLD: f32 = 0.2;
 
 // Lead-in timing (from StepMania theme defaults)
 const MIN_SECONDS_TO_STEP: f32 = 6.0;
@@ -108,6 +109,24 @@ pub struct JudgmentRenderInfo {
 }
 
 
+// NEW: Life change constants
+struct LifeChange;
+impl LifeChange {
+    const FANTASTIC: f32 = 0.008;
+    const EXCELLENT: f32 = 0.008;
+    const GREAT: f32 = 0.004;
+    const DECENT: f32 = 0.0;
+    const WAY_OFF: f32 = -0.050;
+    const MISS: f32 = -0.100;
+    const HIT_MINE: f32 = -0.050;
+    const HELD: f32 = 0.008;
+    const LET_GO: f32 = -0.080;
+}
+
+const REGEN_COMBO_AFTER_MISS: u32 = 5;
+const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
+const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
+
 pub struct State {
     // Song & Chart data
     pub song: Arc<SongData>,
@@ -132,6 +151,11 @@ pub struct State {
     pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub last_judgment: Option<JudgmentRenderInfo>,
 
+    // Life Meter
+    pub life: f32, // 0.0 to 1.0
+    pub combo_after_miss: u32, // for regeneration logic
+    pub is_failing: bool,
+
     // Grade/Percent scoring
     pub earned_grade_points: i32,
     pub possible_grade_points: i32,
@@ -154,6 +178,42 @@ pub struct State {
 
     // Debugging
     log_timer: f32,
+}
+
+impl State {
+    fn change_life(&mut self, delta: f32) {
+        if self.is_failing {
+            return;
+        }
+        
+        let mut final_delta = delta;
+    
+        // HarshHotLifePenalty
+        let is_hot = self.life >= 1.0;
+        if is_hot && delta <= 0.0 {
+            // SL metric `HarshHotLifePenalty` enables this. The penalty is `LifePercentChangeMiss`.
+            final_delta += LifeChange::MISS;
+        }
+    
+        if final_delta > 0.0 { // Gaining life
+            if self.combo_after_miss < REGEN_COMBO_AFTER_MISS {
+                self.combo_after_miss += 1;
+            } else {
+                // In regen mode, add extra life
+                final_delta += LIFE_REGEN_AMOUNT;
+                self.combo_after_miss = (self.combo_after_miss + 1).min(MAX_REGEN_COMBO_AFTER_MISS);
+            }
+        } else if final_delta < 0.0 { // Losing life
+            self.combo_after_miss = 0;
+        }
+    
+        self.life = (self.life + final_delta).clamp(0.0, 1.0);
+    
+        if self.life == 0.0 {
+            self.is_failing = true;
+            info!("Player has failed!");
+        }
+    }
 }
 
 // --- INITIALIZATION ---
@@ -242,6 +302,9 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         full_combo_grade: None,
         first_fc_attempt_broken: false,
         last_judgment: None,
+        life: 0.5,
+        combo_after_miss: MAX_REGEN_COMBO_AFTER_MISS, // Start in a state where regen is active
+        is_failing: false,
         earned_grade_points: 0,
         possible_grade_points,
         song_completed_naturally: false,
@@ -391,6 +454,17 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
     info!("FINALIZED: Row {}, Grade: {:?}, Offset: {:.2}ms",
           final_judgment.row, final_grade, final_judgment.time_error_ms);
 
+    // Change life based on judgment
+    let life_delta = match final_grade {
+        JudgeGrade::Fantastic => LifeChange::FANTASTIC,
+        JudgeGrade::Excellent => LifeChange::EXCELLENT,
+        JudgeGrade::Great => LifeChange::GREAT,
+        JudgeGrade::Decent => LifeChange::DECENT,
+        JudgeGrade::WayOff => LifeChange::WAY_OFF,
+        JudgeGrade::Miss => LifeChange::MISS,
+    };
+    state.change_life(life_delta);
+
     // Update global state based on this single representative judgment
     state.last_judgment = Some(JudgmentRenderInfo { judgment: final_judgment, judged_at: Instant::now() });
     *state.judgment_counts.entry(final_grade).or_insert(0) += 1;
@@ -456,6 +530,12 @@ fn get_music_end_time(state: &State) -> f32 {
 
 #[inline(always)]
 pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenAction {
+    if state.is_failing {
+        info!("Player has failed. Transitioning to evaluation.");
+        // song_completed_naturally is false by default, which will result in a Failed grade.
+        return ScreenAction::Navigate(Screen::Evaluation);
+    }
+
     if let (Some(key), Some(start_time)) = (state.hold_to_exit_key, state.hold_to_exit_start) {
         if start_time.elapsed() >= std::time::Duration::from_secs(1) {
             state.hold_to_exit_key = None;
@@ -543,6 +623,13 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     }
 
     update_judged_rows(state);
+
+    // Check for failure after all judgments for the frame have been processed
+    if state.is_failing {
+        info!("Player has failed. Transitioning to evaluation.");
+        // song_completed_naturally is false by default, which will result in a Failed grade.
+        return ScreenAction::Navigate(Screen::Evaluation);
+    }
 
     state.log_timer += delta_time;
     if state.log_timer >= 1.0 {
@@ -928,12 +1015,45 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
         actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w + 4.0, h + 4.0): diffuse(1.0, 1.0, 1.0, 1.0): z(150) ));
         actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w, h): diffuse(0.0, 0.0, 0.0, 1.0): z(151) ));
-        actors.push(act!(quad: align(0.0, 0.5): xy(meter_cx - w / 2.0, meter_cy): zoomto(w, h): diffuse(state.player_color[0], state.player_color[1], state.player_color[2], state.player_color[3]): z(152) ));
+
+        let life_color = if state.life >= 1.0 {
+            // Hot, pulsating color.
+            let anim_t = (state.total_elapsed_in_screen * 5.0).sin() * 0.5 + 0.5; // Fast pulse
+            let hot_color1 = color::rgba_hex("#FFFFFF");
+            let hot_color2 = color::rgba_hex("#FFFF8D");
+            [
+                hot_color1[0] * (1.0 - anim_t) + hot_color2[0] * anim_t,
+                hot_color1[1] * (1.0 - anim_t) + hot_color2[1] * anim_t,
+                hot_color1[2] * (1.0 - anim_t) + hot_color2[2] * anim_t,
+                1.0,
+            ]
+        } else if state.life < DANGER_THRESHOLD {
+            // Danger, pulsating red
+            let anim_t = (state.total_elapsed_in_screen * 2.0).sin() * 0.5 + 0.5; // Slower pulse
+            let danger_color1 = color::rgba_hex("#FF0000");
+            let danger_color2 = color::rgba_hex("#800000");
+             [
+                danger_color1[0] * (1.0 - anim_t) + danger_color2[0] * anim_t,
+                danger_color1[1] * (1.0 - anim_t) + danger_color2[1] * anim_t,
+                danger_color1[2] * (1.0 - anim_t) + danger_color2[2] * anim_t,
+                1.0,
+            ]
+        } else {
+            state.player_color
+        };
 
         let bps = state.timing.get_bpm_for_beat(state.current_beat) / 60.0;
         actors.push(act!(sprite("swoosh.png"):
             align(0.0, 0.5): xy(meter_cx - w / 2.0, meter_cy): zoomto(w, h): diffusealpha(0.2):
             texcoordvelocity(-(bps * 0.5), 0.0): z(153)
+        ));
+        
+        actors.push(act!(quad:
+            align(0.0, 0.5):
+            xy(meter_cx - w / 2.0, meter_cy):
+            zoomto(w * state.life, h):
+            diffuse(life_color[0], life_color[1], life_color[2], 1.0):
+            z(152)
         ));
     }
 
