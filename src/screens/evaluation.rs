@@ -50,12 +50,10 @@ pub fn init(gameplay_results: Option<gameplay::State>) -> State {
             0.0
         };
 
-        // If the song was completed naturally, calculate the grade.
-        // Otherwise, it's an automatic fail.
-        let grade = if gs.song_completed_naturally {
-            scores::score_to_grade(score_percent * 10000.0)
-        } else {
+        let grade = if gs.is_failing || !gs.song_completed_naturally {
             scores::Grade::Failed
+        } else {
+            scores::score_to_grade(score_percent * 10000.0)
         };
 
         ScoreInfo {
