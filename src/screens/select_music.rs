@@ -930,6 +930,20 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             None
         };
 
+        let (crossovers_text, footswitches_text, sideswitches_text, jacks_text, brackets_text) =
+            if let Some(chart) = &selected_chart_data {
+                (
+                    chart.tech_counts.crossovers.to_string(),
+                    chart.tech_counts.footswitches.to_string(),
+                    chart.tech_counts.sideswitches.to_string(),
+                    chart.tech_counts.jacks.to_string(),
+                    chart.tech_counts.brackets.to_string(),
+                )
+            } else {
+                // When a pack is selected, or chart doesn't exist for difficulty, show "--"
+                ("--".to_string(), "--".to_string(), "--".to_string(), "--".to_string(), "--".to_string())
+            };
+
         let step_artist_text = selected_chart_data.as_ref().map_or("".to_string(), |c| c.step_artist.clone());
         let peak_nps_text = selected_chart_data.as_ref().map_or("Peak NPS: --".to_string(), |c| format!("Peak NPS: {:.1}", c.max_nps));
         let breakdown_text = if let Some(chart) = &selected_chart_data {
@@ -1306,15 +1320,15 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     };
 
     // Row 0: Crossovers | Footswitches
-    add_item(0, 0, "69",  "Crossovers",   None);
-    add_item(1, 0, "64",  "Footswitches", None);
+    add_item(0, 0, &crossovers_text,  "Crossovers",   None);
+    add_item(1, 0, &footswitches_text,  "Footswitches", None);
 
     // Row 1: Sideswitches | Jacks
-    add_item(0, 1, "123", "Sideswitches", None);
-    add_item(1, 1, "124", "Jacks",        None);
+    add_item(0, 1, &sideswitches_text, "Sideswitches", None);
+    add_item(1, 1, &jacks_text, "Jacks",        None);
 
     // Row 2: Brackets | Total Stream
-    add_item(0, 2, "90",  "Brackets",     None);
+    add_item(0, 2, &brackets_text,  "Brackets",     None);
 
     // Total Stream value text (only this one is clamped to 100 like SL)
     let total_stream_value = if let Some(chart) = &selected_chart_data {

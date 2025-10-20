@@ -1,4 +1,5 @@
 use rssp::stats::ArrowStats;
+use rssp::TechCounts;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChartData {
@@ -9,6 +10,7 @@ pub struct ChartData {
     pub notes: Vec<u8>, // This is the minimized raw data we will parse
     pub short_hash: String,
     pub stats: ArrowStats,
+    pub tech_counts: TechCounts,
     pub total_streams: u32,
     pub max_nps: f64,
     pub detailed_breakdown: String,

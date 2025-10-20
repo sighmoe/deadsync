@@ -120,6 +120,7 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
                 notes: c.minimized_note_data,
                 short_hash: c.short_hash,
                 stats: c.stats,
+                tech_counts: c.tech_counts,
                 total_streams: c.total_streams,
                 total_measures: c.total_measures,
                 max_nps: c.max_nps,
