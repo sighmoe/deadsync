@@ -1554,6 +1554,7 @@ impl Backend for State {
         let new_tex = create_texture(self, image)?;
         let out_key = self.next_new_texture_id;
         self.texture_map.insert(out_key, new_tex);
+        self.next_new_texture_id += 1;
         Ok(RendererTexture(out_key))
     }
 

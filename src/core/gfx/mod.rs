@@ -66,12 +66,10 @@ pub fn create_backend(
     window: Arc<Window>,
     vsync_enabled: bool,
 ) -> Result<Box<dyn Backend>, Box<dyn Error>> {
-    // match backend_type {
-    //     BackendType::Vulkan => Ok(Backend::Vulkan(vulkan::init(&window, vsync_enabled)?)),
-    //     BackendType::OpenGL => Ok(Backend::OpenGL(opengl::init(window, vsync_enabled)?)),
-    // }
-
-    todo!()
+    match backend_type {
+        BackendType::Vulkan => Ok(Box::new(vulkan::init(&window, vsync_enabled)?)),
+        BackendType::OpenGL => Ok(Box::new(vulkan::init(&window, vsync_enabled)?)) // todo!(), //Ok(Backend::OpenGL(opengl::init(window, vsync_enabled)?)),
+    }
 }
 
 /// Creates a new GPU texture from raw image data.
