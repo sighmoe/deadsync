@@ -21,7 +21,7 @@ pub enum BackgroundFilter {
 }
 
 impl Default for BackgroundFilter {
-    fn default() -> Self { BackgroundFilter::Dark }
+    fn default() -> Self { BackgroundFilter::Darkest }
 }
 
 impl FromStr for BackgroundFilter {
