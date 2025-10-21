@@ -1,15 +1,14 @@
 use std::{collections::HashMap, error::Error};
 
 use image::RgbaImage;
-use winit::window::Window;
 
 use crate::core::gfx::RenderList;
 
 
-// #[cfg(not(target_os = "macos"))]
-// pub mod opengl;
+#[cfg(not(target_os = "macos"))]
+pub mod opengl;
 
-// #[cfg(not(target_os = "macos"))]
+#[cfg(not(target_os = "macos"))]
 pub mod vulkan;
 
 /// An opaque identifier for textures.
@@ -32,8 +31,5 @@ pub trait Backend {
     fn cleanup(&mut self);
 
     fn wait_for_idle(&mut self);
-    // if let Backend::Vulkan(vk_state) = backend {
-    //     if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
-    // }
 }
 

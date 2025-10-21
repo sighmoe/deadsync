@@ -1,4 +1,4 @@
-use crate::core::gfx::{BlendMode, ObjectType, RenderList, Texture as RendererTexture};
+use crate::core::gfx::{Backend, BlendMode, ObjectType, RenderList, Texture as RendererTexture};
 use crate::core::space::ortho_for_window;
 use cgmath::Matrix4;
 use glow::{HasContext, PixelUnpackData, UniformLocation};
@@ -15,9 +15,6 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::{collections::HashMap, error::Error, ffi::CStr, mem, num::NonZeroU32, sync::Arc};
 use winit::window::Window;
 
-// A handle to an OpenGL texture on the GPU.
-#[derive(Debug, Clone, Copy)]
-pub struct Texture(pub glow::Texture);
 
 pub struct State {
     pub gl: glow::Context,
@@ -38,6 +35,9 @@ pub struct State {
     uv_offset_location: UniformLocation,
     edge_fade_location: UniformLocation,
     instanced_location: UniformLocation,
+
+    texture_map: HashMap<u64, glow::Texture>,
+    next_new_texture_id: u64,
 }
 
 pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn Error>> {
@@ -134,13 +134,15 @@ pub fn init(window: Arc<Window>, vsync_enabled: bool) -> Result<State, Box<dyn E
         uv_offset_location,
         edge_fade_location,
         instanced_location,
+        texture_map: HashMap::new(),
+        next_new_texture_id: 0,
     };
 
     info!("OpenGL backend initialized successfully.");
     Ok(state)
 }
 
-pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, String> {
+pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<glow::Texture, String> {
     unsafe {
         let t = gl.create_texture()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(t));
@@ -175,7 +177,7 @@ pub fn create_texture(gl: &glow::Context, image: &RgbaImage) -> Result<Texture, 
         );
 
         gl.bind_texture(glow::TEXTURE_2D, None);
-        Ok(Texture(t))
+        Ok(t)
     }
 }
 
@@ -253,10 +255,10 @@ pub fn draw(
             // All renderable objects are now sprites
             match &obj.object_type {
                 ObjectType::Sprite { texture_id, tint, uv_scale, uv_offset, edge_fade } => {
-                    if let Some(RendererTexture::OpenGL(gl_tex)) = textures.get(texture_id) {
-                        if last_bound_tex != Some(gl_tex.0) {
-                            gl.bind_texture(glow::TEXTURE_2D, Some(gl_tex.0));
-                            last_bound_tex = Some(gl_tex.0);
+                    if let Some(gl_tex) = textures.get(texture_id).and_then(|t| state.texture_map.get(&t.0)) {
+                        if last_bound_tex != Some(*gl_tex) {
+                            gl.bind_texture(glow::TEXTURE_2D, Some(*gl_tex));
+                            last_bound_tex = Some(*gl_tex);
                         }
                         if last_uv_scale != Some(*uv_scale) {
                             gl.uniform_2_f32(Some(&state.uv_scale_location), uv_scale[0], uv_scale[1]);
@@ -488,5 +490,41 @@ mod bytemuck {
             "cast_slice: misaligned cast"
         );
         mid
+    }
+}
+
+impl Backend for State {
+    fn create_texture(&mut self, image: &RgbaImage) -> Result<RendererTexture, Box<dyn Error>> {
+        let new_tex = create_texture(&self.gl, image)?;
+        let out_key = self.next_new_texture_id;
+        self.texture_map.insert(out_key, new_tex);
+        self.next_new_texture_id += 1;
+        Ok(RendererTexture(out_key))
+    }
+
+    fn drop_textures(&mut self, textures: &mut dyn Iterator<Item = (String, RendererTexture)>) -> Result<(), Box<dyn Error>> {
+        // ash resolves this on drop
+        for (_, tex_id) in textures {
+            if let Some(x) = self.texture_map.remove(&tex_id.0) {
+                unsafe { self.gl.delete_texture(x); } 
+            }
+        }
+        Ok(())
+    }
+
+    fn draw(&mut self, render_list: &RenderList, textures: &HashMap<String, RendererTexture>) -> Result<u32, Box<dyn Error>> {
+        draw(self, render_list, textures)
+    }
+
+    fn resize(&mut self, width: u32, height: u32) {
+        resize(self, width, height);
+    }
+
+    fn cleanup(&mut self) {
+        cleanup(self)
+    }
+
+    fn wait_for_idle(&mut self) {
+        // no-op
     }
 }

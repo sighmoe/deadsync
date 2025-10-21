@@ -1,8 +1,6 @@
 mod backends;
 
-use crate::core::gfx::backends::{vulkan};
 use cgmath::Matrix4;
-use glow::HasContext;
 use image::RgbaImage;
 use std::{collections::HashMap, error::Error, str::FromStr, sync::Arc};
 use winit::window::Window;
@@ -67,8 +65,13 @@ pub fn create_backend(
     vsync_enabled: bool,
 ) -> Result<Box<dyn Backend>, Box<dyn Error>> {
     match backend_type {
-        BackendType::Vulkan => Ok(Box::new(vulkan::init(&window, vsync_enabled)?)),
-        BackendType::OpenGL => Ok(Box::new(vulkan::init(&window, vsync_enabled)?)) // todo!(), //Ok(Backend::OpenGL(opengl::init(window, vsync_enabled)?)),
+        #[cfg(not(target_os = "macos"))]
+        BackendType::Vulkan => Ok(Box::new(crate::core::gfx::backends::vulkan::init(&window, vsync_enabled)?)),
+
+        #[cfg(not(target_os = "macos"))]
+        BackendType::OpenGL => Ok(Box::new(crate::core::gfx::backends::opengl::init(window, vsync_enabled)?)),
+
+        _ => Err(format!("The rendering backend '{:?}' is not supported on this platform", backend_type).into())
     }
 }
 
@@ -86,24 +89,6 @@ pub fn dispose_textures(backend: &mut dyn Backend, textures: &mut HashMap<String
     let mut old = std::mem::take(textures).into_iter();
 
     backend.drop_textures(&mut old).unwrap()
-
-    // match backend {
-    //     Backend::Vulkan(_state) => {
-    //         // Vulkan: no device-wide stall here. Dropping the textures will run their Drop impls
-    //         // (free descriptor sets, views, images, memory). Global idle is done at cleanup().
-    //         drop(old);
-    //     }
-    //     Backend::OpenGL(state) => {
-    //         unsafe {
-    //             for tex in old.values() {
-    //                 if let Texture::OpenGL(opengl::Texture(handle)) = tex {
-    //                     state.gl.delete_texture(*handle);
-    //                 }
-    //             }
-    //         }
-    //         // HashMap contents dropped here; no GPU stall required.
-    //     }
-    // }
 }
 
 /// Draws a single frame to the screen using the provided `RenderList`.
