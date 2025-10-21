@@ -1,4 +1,4 @@
-use crate::core::gfx::{self as renderer, create_backend, Backend, BackendType, RenderList};
+use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList};
 use crate::core::input;
 use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
@@ -40,7 +40,7 @@ enum TransitionState {
 
 pub struct App {
     window: Option<Arc<Window>>,
-    backend: Option<Box<dyn Backend>>,
+    backend: Option<renderer::Backend>,
     backend_type: BackendType,
     asset_manager: AssetManager,
     current_screen: CurrentScreen,
@@ -322,7 +322,7 @@ impl App {
         crate::core::space::set_current_metrics(self.metrics);
         let mut backend = create_backend(self.backend_type, window.clone(), self.vsync_enabled)?;
         
-        self.asset_manager.load_initial_assets(backend.as_mut())?;
+        self.asset_manager.load_initial_assets(&mut backend)?;
 
         self.window = Some(window);
         self.backend = Some(backend);
@@ -683,7 +683,7 @@ impl ApplicationHandler for App {
                     self.metrics = space::metrics_for_window(new_size.width, new_size.height);
                     space::set_current_metrics(self.metrics);
                     if let Some(backend) = &mut self.backend {
-                        renderer::resize(backend.as_mut(), new_size.width, new_size.height);
+                        backend.resize(new_size.width, new_size.height);
                     }
                 }
             }
@@ -794,10 +794,10 @@ impl ApplicationHandler for App {
                                     match action {
                                         ScreenAction::RequestBanner(path_opt) => {
                                             if let Some(path) = path_opt {
-                                                let key = self.asset_manager.set_dynamic_banner(backend.as_mut(), Some(path));
+                                                let key = self.asset_manager.set_dynamic_banner(backend, Some(path));
                                                 self.select_music_state.current_banner_key = key;
                                             } else {
-                                                self.asset_manager.destroy_dynamic_assets(backend.as_mut());
+                                                self.asset_manager.destroy_dynamic_assets(backend);
                                                 let color_index = self.select_music_state.active_color_index;
                                                 let banner_num = color_index.rem_euclid(12) + 1;
                                                 let key = format!("banner{}.png", banner_num);
@@ -826,7 +826,7 @@ impl ApplicationHandler for App {
                                                 None
                                             };
 
-                                            let key = self.asset_manager.set_density_graph(backend.as_mut(), graph_request);
+                                            let key = self.asset_manager.set_density_graph(backend, graph_request);
                                             self.select_music_state.current_graph_key = key;
                                         }
                                         _ => { let _ = self.handle_action(action, event_loop); },
@@ -846,7 +846,7 @@ impl ApplicationHandler for App {
                     if prev == CurrentScreen::Gameplay { 
                         crate::core::audio::stop_music();
                         if let Some(backend) = self.backend.as_mut() {
-                            self.asset_manager.set_dynamic_background(backend.as_mut(), None);
+                            self.asset_manager.set_dynamic_background(backend, None);
                         }
                     }
 
@@ -893,7 +893,7 @@ impl ApplicationHandler for App {
                         let mut gs = gameplay::init(song_arc, chart, color_index);
                         // Load dynamic background
                         if let Some(backend) = self.backend.as_mut() {
-                            gs.background_texture_key = self.asset_manager.set_dynamic_background(backend.as_mut(), gs.song.background_path.clone());
+                            gs.background_texture_key = self.asset_manager.set_dynamic_background(backend, gs.song.background_path.clone());
                         }
                         self.gameplay_state = Some(gs);
                     }
@@ -931,9 +931,9 @@ impl ApplicationHandler for App {
                             };
                             
                             let key = if let Some((key, data)) = graph_request {
-                                self.asset_manager.set_density_graph(backend.as_mut(), Some((key, data)))
+                                self.asset_manager.set_density_graph(backend, Some((key, data)))
                             } else {
-                                self.asset_manager.set_density_graph(backend.as_mut(), None)
+                                self.asset_manager.set_density_graph(backend, None)
                             };
                             self.evaluation_state.density_graph_texture_key = key;
                         }
@@ -968,7 +968,7 @@ impl ApplicationHandler for App {
                 self.update_fps_title(&window, now);
 
                 if let Some(backend) = &mut self.backend {
-                    match renderer::draw(backend.as_mut(), &screen, &self.asset_manager.textures) {
+                    match backend.draw(&screen, &self.asset_manager.textures) {
                         Ok(vpf) => self.current_frame_vpf = vpf,
                         Err(e) => {
                             error!("Failed to draw frame: {}", e);
@@ -992,9 +992,9 @@ impl ApplicationHandler for App {
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(backend) = &mut self.backend {
-            self.asset_manager.destroy_dynamic_assets(backend.as_mut());
-            renderer::dispose_textures(backend.as_mut(), &mut self.asset_manager.textures);
-            renderer::cleanup(backend.as_mut());
+            self.asset_manager.destroy_dynamic_assets(backend);
+            backend.dispose_textures(&mut self.asset_manager.textures);
+            backend.cleanup();
         }
     }
 }
