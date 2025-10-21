@@ -1,6 +1,6 @@
 [package]
 name = "deadsync"
-version = "0.1.46"
+version = "0.1.48"
 authors = ["Patrik Nilsson <perfecttaste@pm.me>"]
 edition = "2024"
 description = "Rust-based ITG engine with switchable Vulkan/OpenGL backends, designed for accurate sync and competitive performance."
@@ -38,6 +38,10 @@ regex = "1.12.2"
 
 # Networking
 ureq = { version = "3.1.2", features = ["json", "rustls"] }
+
+# Song cache
+bincode = "2.0.1"
+twox-hash = "2.1.2"
 
 # rssp submodule
 rssp = { path = "src/extern/rssp" }
