@@ -1,4 +1,4 @@
-use crate::core::gfx::{BlendMode, ObjectType, RenderList, Texture as RendererTexture};
+use crate::core::gfx::{Backend, BlendMode, ObjectType, RenderList, Texture as RendererTexture};
 use crate::core::space::ortho_for_window;
 use ash::{
     khr::{surface, swapchain},
@@ -43,7 +43,7 @@ struct PipelinePair {
 }
 
 // A handle to a Vulkan texture on the GPU.
-pub struct Texture {
+pub struct VulkanTexture {
     device: Arc<Device>,
     image: vk::Image,
     memory: vk::DeviceMemory,
@@ -52,7 +52,7 @@ pub struct Texture {
     pool: vk::DescriptorPool,
 }
 
-impl Drop for Texture {
+impl Drop for VulkanTexture {
     fn drop(&mut self) {
         unsafe {
             let _ = self.device.free_descriptor_sets(self.pool, &[self.descriptor_set]);
@@ -112,6 +112,9 @@ pub struct State {
     instance_ring_ptr: *mut InstanceData,        // persistently mapped pointer
     instance_capacity_instances: usize,          // total instances across ring
     per_frame_stride_instances: usize,           // instances reserved per frame
+
+    texture_map: HashMap<u64, VulkanTexture>,
+    next_new_texture_id: u64,
 }
 
 // --- Main Procedural Functions ---
@@ -196,6 +199,8 @@ pub fn init(window: &Window, vsync_enabled: bool) -> Result<State, Box<dyn Error
         instance_ring_ptr: std::ptr::null_mut(),
         instance_capacity_instances: 0,
         per_frame_stride_instances: 0,
+        texture_map: HashMap::new(),
+        next_new_texture_id: 0,
     };
 
     // Static unit quad buffers
@@ -469,7 +474,7 @@ fn transition_image_layout_cmd(
     }
 }
 
-pub fn create_texture(state: &mut State, image: &RgbaImage) -> Result<Texture, Box<dyn Error>> {
+pub fn create_texture(state: &mut State, image: &RgbaImage) -> Result<VulkanTexture, Box<dyn Error>> {
     let device_arc = state.device.as_ref().unwrap().clone();
     let device = device_arc.as_ref();
 
@@ -515,7 +520,7 @@ pub fn create_texture(state: &mut State, image: &RgbaImage) -> Result<Texture, B
     let view = create_image_view(device, tex_image, fmt)?;
     let set  = create_texture_descriptor_set(state, view, state.sampler)?;
 
-    Ok(Texture {
+    Ok(VulkanTexture {
         device: device_arc.clone(),
         image: tex_image,
         memory: tex_mem,
@@ -561,8 +566,7 @@ pub fn draw(
     let needed_instances = render_list.objects.iter().filter(|o| {
         matches!(
             &o.object_type,
-            ObjectType::Sprite { texture_id, .. }
-                if matches!(textures.get(texture_id), Some(RendererTexture::Vulkan(_)))
+            ObjectType::Sprite { .. }
         )
     }).count();
 
@@ -654,10 +658,9 @@ pub fn draw(
             };
 
             // Only draw sprites that have a Vulkan texture bound.
-            let set_opt = textures.get(texture_id).and_then(|t| match t {
-                RendererTexture::Vulkan(tex) => Some(tex.descriptor_set),
-                _ => None,
-            });
+            let set_opt = textures.get(texture_id).and_then(|t| {
+                state.texture_map.get(&t.0)
+            }).map(|t| &t.descriptor_set).copied();
             let set = match set_opt { Some(s) => s, None => continue };
 
             // Decompose transform and write instance directly.
@@ -1544,4 +1547,37 @@ fn recreate_swapchain_and_dependents(state: &mut State) -> Result<(), Box<dyn Er
     state.images_in_flight = vec![vk::Fence::null(); state.swapchain_resources._images.len()];
     debug!("Swapchain recreated.");
     Ok(())
+}
+
+impl Backend for State {
+    fn create_texture(&mut self, image: &RgbaImage) -> Result<RendererTexture, Box<dyn Error>> {
+        let new_tex = create_texture(self, image)?;
+        let out_key = self.next_new_texture_id;
+        self.texture_map.insert(out_key, new_tex);
+        Ok(RendererTexture(out_key))
+    }
+
+    fn drop_textures(&mut self, textures: &mut dyn Iterator<Item = (String, RendererTexture)>) -> Result<(), Box<dyn Error>> {
+        // ash resolves this on drop
+        for (_, tex_id) in textures {
+            let _ = self.texture_map.remove(&tex_id.0);
+        }
+        Ok(())
+    }
+
+    fn draw(&mut self, render_list: &RenderList, textures: &HashMap<String, RendererTexture>) -> Result<u32, Box<dyn Error>> {
+        draw(self, render_list, textures)
+    }
+
+    fn resize(&mut self, width: u32, height: u32) {
+        resize(self, width, height);
+    }
+
+    fn cleanup(&mut self) {
+        cleanup(self)
+    }
+
+    fn wait_for_idle(&mut self) {
+        if let Some(device) = &self.device { unsafe { let _ = device.device_wait_idle(); } }
+    }
 }

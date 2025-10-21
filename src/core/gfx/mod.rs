@@ -1,6 +1,6 @@
 mod backends;
 
-use crate::core::gfx::backends::{opengl, vulkan};
+use crate::core::gfx::backends::{vulkan};
 use cgmath::Matrix4;
 use glow::HasContext;
 use image::RgbaImage;
@@ -58,97 +58,73 @@ pub enum BackendType {
     OpenGL,
 }
 
-/// An opaque handle to a texture managed by the active backend.
-pub enum Texture {
-    Vulkan(vulkan::Texture),
-    OpenGL(opengl::Texture),
-}
-
-/// An opaque handle to the active graphics backend state.
-pub enum Backend {
-    Vulkan(vulkan::State),
-    OpenGL(opengl::State),
-}
+pub use backends::{Backend, Texture};
 
 /// Creates and initializes a new graphics backend.
 pub fn create_backend(
     backend_type: BackendType,
     window: Arc<Window>,
     vsync_enabled: bool,
-) -> Result<Backend, Box<dyn Error>> {
-    match backend_type {
-        BackendType::Vulkan => Ok(Backend::Vulkan(vulkan::init(&window, vsync_enabled)?)),
-        BackendType::OpenGL => Ok(Backend::OpenGL(opengl::init(window, vsync_enabled)?)),
-    }
+) -> Result<Box<dyn Backend>, Box<dyn Error>> {
+    // match backend_type {
+    //     BackendType::Vulkan => Ok(Backend::Vulkan(vulkan::init(&window, vsync_enabled)?)),
+    //     BackendType::OpenGL => Ok(Backend::OpenGL(opengl::init(window, vsync_enabled)?)),
+    // }
+
+    todo!()
 }
 
 /// Creates a new GPU texture from raw image data.
 pub fn create_texture(
-    backend: &mut Backend,
+    backend: &mut dyn Backend,
     image: &RgbaImage,
 ) -> Result<Texture, Box<dyn Error>> {
-    match backend {
-        Backend::Vulkan(state) => {
-            let tex = vulkan::create_texture(state, image)?;
-            Ok(Texture::Vulkan(tex))
-        }
-        Backend::OpenGL(state) => {
-            let tex = opengl::create_texture(&state.gl, image)?;
-            Ok(Texture::OpenGL(tex))
-        }
-    }
+    backend.create_texture(image)
 }
 
 /// Disposes of all textures currently in the texture manager.
-pub fn dispose_textures(backend: &mut Backend, textures: &mut HashMap<String, Texture>) {
+pub fn dispose_textures(backend: &mut dyn Backend, textures: &mut HashMap<String, Texture>) {
     // Take ownership so we drop after explicit GL deletes without borrowing issues.
-    let old = std::mem::take(textures);
+    let mut old = std::mem::take(textures).into_iter();
 
-    match backend {
-        Backend::Vulkan(_state) => {
-            // Vulkan: no device-wide stall here. Dropping the textures will run their Drop impls
-            // (free descriptor sets, views, images, memory). Global idle is done at cleanup().
-            drop(old);
-        }
-        Backend::OpenGL(state) => {
-            unsafe {
-                for tex in old.values() {
-                    if let Texture::OpenGL(opengl::Texture(handle)) = tex {
-                        state.gl.delete_texture(*handle);
-                    }
-                }
-            }
-            // HashMap contents dropped here; no GPU stall required.
-        }
-    }
+    backend.drop_textures(&mut old).unwrap()
+
+    // match backend {
+    //     Backend::Vulkan(_state) => {
+    //         // Vulkan: no device-wide stall here. Dropping the textures will run their Drop impls
+    //         // (free descriptor sets, views, images, memory). Global idle is done at cleanup().
+    //         drop(old);
+    //     }
+    //     Backend::OpenGL(state) => {
+    //         unsafe {
+    //             for tex in old.values() {
+    //                 if let Texture::OpenGL(opengl::Texture(handle)) = tex {
+    //                     state.gl.delete_texture(*handle);
+    //                 }
+    //             }
+    //         }
+    //         // HashMap contents dropped here; no GPU stall required.
+    //     }
+    // }
 }
 
 /// Draws a single frame to the screen using the provided `RenderList`.
 pub fn draw(
-    backend: &mut Backend,
+    backend: &mut dyn Backend,
     render_list: &RenderList,
     textures: &HashMap<String, Texture>,
 ) -> Result<u32, Box<dyn Error>> {
-    match backend {
-        Backend::Vulkan(state) => vulkan::draw(state, render_list, textures),
-        Backend::OpenGL(state) => opengl::draw(state, render_list, textures),
-    }
+    backend.draw(render_list, textures)
 }
 
 /// Notifies the backend that the window has been resized.
-pub fn resize(backend: &mut Backend, width: u32, height: u32) {
-    match backend {
-        Backend::Vulkan(state) => vulkan::resize(state, width, height),
-        Backend::OpenGL(state) => opengl::resize(state, width, height),
-    }
+pub fn resize(backend: &mut dyn Backend, width: u32, height: u32) {
+    backend.resize(width, height);
 }
 
 /// Cleans up all resources associated with the graphics backend.
-pub fn cleanup(backend: &mut Backend) {
-    match backend {
-        Backend::Vulkan(state) => vulkan::cleanup(state),
-        Backend::OpenGL(state) => opengl::cleanup(state),
-    }
+pub fn cleanup(backend: &mut dyn Backend) {
+    backend.cleanup();
 }
 
 impl core::fmt::Display for BackendType {

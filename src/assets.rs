@@ -144,13 +144,13 @@ impl AssetManager {
 
     // --- Loading Logic (moved from app.rs) ---
 
-    pub fn load_initial_assets(&mut self, backend: &mut Backend) -> Result<(), Box<dyn Error>> {
+    pub fn load_initial_assets(&mut self, backend: &mut dyn Backend) -> Result<(), Box<dyn Error>> {
         self.load_initial_textures(backend)?;
         self.load_initial_fonts(backend)?;
         Ok(())
     }
 
-    fn load_initial_textures(&mut self, backend: &mut Backend) -> Result<(), Box<dyn Error>> {
+    fn load_initial_textures(&mut self, backend: &mut dyn Backend) -> Result<(), Box<dyn Error>> {
         info!("Loading initial textures...");
 
         #[inline(always)]
@@ -221,7 +221,7 @@ impl AssetManager {
         Ok(())
     }
 
-    fn load_initial_fonts(&mut self, backend: &mut Backend) -> Result<(), Box<dyn Error>> {
+    fn load_initial_fonts(&mut self, backend: &mut dyn Backend) -> Result<(), Box<dyn Error>> {
         for &name in &["wendy", "miso", "cjk", "emoji", "game", "wendy_monospace_numbers", "wendy_screenevaluation", "wendy_combo", "wendy_white" ] {
             let ini_path_str = match name {
                 "wendy" => "assets/fonts/wendy/_wendy small.ini",
@@ -266,28 +266,22 @@ impl AssetManager {
 
     // --- Dynamic Asset Management (moved from app.rs) ---
 
-    pub fn destroy_dynamic_assets(&mut self, backend: &mut Backend) {
+    pub fn destroy_dynamic_assets(&mut self, backend: &mut dyn Backend) {
         if let Some((key, _)) = self.current_dynamic_banner.take() {
-            if let Backend::Vulkan(vk_state) = backend {
-                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
-            }
+            backend.wait_for_idle();
             self.textures.remove(&key);
         }
         if let Some((key, _)) = self.current_density_graph.take() {
-            if let Backend::Vulkan(vk_state) = backend {
-                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
-            }
+            backend.wait_for_idle();
             self.textures.remove(&key);
         }
         if let Some((key, _)) = self.current_dynamic_background.take() {
-            if let Backend::Vulkan(vk_state) = backend {
-                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
-            }
+            backend.wait_for_idle();
             self.textures.remove(&key);
         }
     }
 
-    pub fn set_dynamic_banner(&mut self, backend: &mut Backend, path_opt: Option<PathBuf>) -> String {
+    pub fn set_dynamic_banner(&mut self, backend: &mut dyn Backend, path_opt: Option<PathBuf>) -> String {
         if let Some(path) = path_opt {
             if self.current_dynamic_banner.as_ref().map_or(false, |(_, p)| p == &path) {
                 return self.current_dynamic_banner.as_ref().unwrap().0.clone();
@@ -325,7 +319,7 @@ impl AssetManager {
 
     pub fn set_density_graph(
         &mut self,
-        backend: &mut Backend,
+        backend: &mut dyn Backend,
         data: Option<(String, rssp::graph::GraphImageData)>,
     ) -> String {
         const FALLBACK_KEY: &str = "__white";
@@ -365,7 +359,7 @@ impl AssetManager {
         }
     }
 
-    pub fn set_dynamic_background(&mut self, backend: &mut Backend, path_opt: Option<PathBuf>) -> String {
+    pub fn set_dynamic_background(&mut self, backend: &mut dyn Backend, path_opt: Option<PathBuf>) -> String {
         const FALLBACK_KEY: &str = "__white";
 
         if let Some(path) = path_opt {
@@ -403,29 +397,23 @@ impl AssetManager {
         }
     }
 
-    fn destroy_current_dynamic_banner(&mut self, backend: &mut Backend) {
+    fn destroy_current_dynamic_banner(&mut self, backend: &mut dyn Backend) {
         if let Some((key, _)) = self.current_dynamic_banner.take() {
-            if let Backend::Vulkan(vk_state) = backend {
-                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
-            }
+            backend.wait_for_idle();
             self.textures.remove(&key);
         }
     }
 
-    fn destroy_current_density_graph(&mut self, backend: &mut Backend) {
+    fn destroy_current_density_graph(&mut self, backend: &mut dyn Backend) {
         if let Some((key, _)) = self.current_density_graph.take() {
-            if let Backend::Vulkan(vk_state) = backend {
-                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
-            }
+            backend.wait_for_idle();
             self.textures.remove(&key);
         }
     }
 
-    fn destroy_current_dynamic_background(&mut self, backend: &mut Backend) {
+    fn destroy_current_dynamic_background(&mut self, backend: &mut dyn Backend) {
         if let Some((key, _)) = self.current_dynamic_background.take() {
-            if let Backend::Vulkan(vk_state) = backend {
-                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
-            }
+            backend.wait_for_idle();
             self.textures.remove(&key);
         }
     }
