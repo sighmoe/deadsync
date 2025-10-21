@@ -503,7 +503,6 @@ impl Backend for State {
     }
 
     fn drop_textures(&mut self, textures: &mut dyn Iterator<Item = (String, RendererTexture)>) -> Result<(), Box<dyn Error>> {
-        // ash resolves this on drop
         for (_, tex_id) in textures {
             if let Some(x) = self.texture_map.remove(&tex_id.0) {
                 unsafe { self.gl.delete_texture(x); } 

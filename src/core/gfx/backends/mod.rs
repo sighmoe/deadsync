@@ -18,8 +18,6 @@ pub struct Texture(pub(crate) u64);
 
 /// The rendering backend, and any associated state for performing rendering operations with that backend.
 pub trait Backend {
-    // fn init(window: &Window, vsynd_enabled: bool) -> Result<Self, Box<dyn Error>>;
-
     fn create_texture(&mut self, image: &RgbaImage) -> Result<Texture, Box<dyn Error>>;
 
     fn drop_textures(&mut self, textures: &mut dyn Iterator<Item = (String, Texture)>) -> Result<(), Box<dyn Error>>;

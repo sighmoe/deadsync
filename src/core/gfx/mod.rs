@@ -71,7 +71,10 @@ pub fn create_backend(
         #[cfg(not(target_os = "macos"))]
         BackendType::OpenGL => Ok(Box::new(crate::core::gfx::backends::opengl::init(window, vsync_enabled)?)),
 
-        _ => Err(format!("The rendering backend '{:?}' is not supported on this platform", backend_type).into())
+        _ => {
+            let _ = (window, vsync_enabled);
+            Err(format!("The rendering backend '{:?}' is not supported on this platform", backend_type).into())
+        }
     }
 }
 
