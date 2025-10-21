@@ -19,6 +19,7 @@ use crate::ui::font;
 use crate::gameplay::profile;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use chrono::Local;
 
 /* ---------------------------- transitions ---------------------------- */
 const TRANSITION_IN_DURATION: f32 = 0.4;
@@ -713,6 +714,21 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         fg_color: [1.0; 4],
         left_text: Some(&profile.display_name), center_text: None, right_text: None,
     }));
+
+     // --- Date/Time in footer (like ScreenEvaluation decorations) ---
+    let now = Local::now();
+    // The format matches YYYY/MM/DD HH:MM from the Lua script.
+    let timestamp_text = now.format("%Y/%m/%d %H:%M").to_string();
+
+    actors.push(act!(text:
+        font("wendy_monospace_numbers"):
+        settext(timestamp_text):
+        align(0.5, 1.0): // align bottom-center of text block
+        xy(screen_center_x(), screen_height() - 14.0):
+        zoom(0.18):
+        horizalign(center):
+        z(121) // a bit above the screen bar (z=120)
+    ));
 
     actors
 }
