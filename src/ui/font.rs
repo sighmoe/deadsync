@@ -50,10 +50,10 @@ struct FontPageSettings {
     pub(crate) draw_extra_pixels_right: i32,
     pub(crate) add_to_all_widths: i32,
     pub(crate) scale_all_widths_by: f32,
-    pub(crate) line_spacing: i32, // -1 = “use frame height”
-    pub(crate) top: i32,          // -1 = “center – line_spacing/2”
-    pub(crate) baseline: i32,     // -1 = “center + line_spacing/2”
-    pub(crate) default_width: i32, // -1 = “use frame width”
+    pub(crate) line_spacing: i32,         // -1 = “use frame height”
+    pub(crate) top: i32,                  // -1 = “center – line_spacing/2”
+    pub(crate) baseline: i32,             // -1 = “center + line_spacing/2”
+    pub(crate) default_width: i32,        // -1 = “use frame width”
     pub(crate) advance_extra_pixels: i32, // SM default is 0
     pub(crate) glyph_widths: HashMap<usize, i32>,
 }
@@ -419,38 +419,38 @@ fn round_half_to_even_i32(v: f32) -> i32 {
 #[inline(always)]
 fn cp1252_to_unicode(byte: u8) -> u32 {
     match byte {
-        0x80 => 0x20AC, // €
-        0x81 => 0x0081, // undefined (C1)
-        0x82 => 0x201A, // ‚
-        0x83 => 0x0192, // ƒ
-        0x84 => 0x201E, // „
-        0x85 => 0x2026, // …
-        0x86 => 0x2020, // †
-        0x87 => 0x2021, // ‡
-        0x88 => 0x02C6, // ˆ
-        0x89 => 0x2030, // ‰
-        0x8A => 0x0160, // Š
-        0x8B => 0x2039, // ‹
-        0x8C => 0x0152, // Œ
-        0x8D => 0x008D, // undefined (C1)
-        0x8E => 0x017D, // Ž
-        0x8F => 0x008F, // undefined (C1)
-        0x90 => 0x0090, // undefined (C1)
-        0x91 => 0x2018, // ‘
-        0x92 => 0x2019, // ’
-        0x93 => 0x201C, // “
-        0x94 => 0x201D, // ”
-        0x95 => 0x2022, // •
-        0x96 => 0x2013, // –
-        0x97 => 0x2014, // —
-        0x98 => 0x02DC, // ˜
-        0x99 => 0x2122, // ™
-        0x9A => 0x0161, // š
-        0x9B => 0x203A, // ›
-        0x9C => 0x0153, // œ
-        0x9D => 0x009D, // undefined (C1)
-        0x9E => 0x017E, // ž
-        0x9F => 0x0178, // Ÿ
+        0x80 => 0x20AC,   // €
+        0x81 => 0x0081,   // undefined (C1)
+        0x82 => 0x201A,   // ‚
+        0x83 => 0x0192,   // ƒ
+        0x84 => 0x201E,   // „
+        0x85 => 0x2026,   // …
+        0x86 => 0x2020,   // †
+        0x87 => 0x2021,   // ‡
+        0x88 => 0x02C6,   // ˆ
+        0x89 => 0x2030,   // ‰
+        0x8A => 0x0160,   // Š
+        0x8B => 0x2039,   // ‹
+        0x8C => 0x0152,   // Œ
+        0x8D => 0x008D,   // undefined (C1)
+        0x8E => 0x017D,   // Ž
+        0x8F => 0x008F,   // undefined (C1)
+        0x90 => 0x0090,   // undefined (C1)
+        0x91 => 0x2018,   // ‘
+        0x92 => 0x2019,   // ’
+        0x93 => 0x201C,   // “
+        0x94 => 0x201D,   // ”
+        0x95 => 0x2022,   // •
+        0x96 => 0x2013,   // –
+        0x97 => 0x2014,   // —
+        0x98 => 0x02DC,   // ˜
+        0x99 => 0x2122,   // ™
+        0x9A => 0x0161,   // š
+        0x9B => 0x203A,   // ›
+        0x9C => 0x0153,   // œ
+        0x9D => 0x009D,   // undefined (C1)
+        0x9E => 0x017E,   // ž
+        0x9F => 0x0178,   // Ÿ
         _ => byte as u32, // 0x00..0x7F and 0xA0..0xFF map 1:1 to Unicode
     }
 }
@@ -516,8 +516,8 @@ fn apply_range_mapping(
             // Include both 'x' and 'X'; many SM fonts expect upper-case as well.
             // Also include the multiplication sign × for completeness.
             let numbers_map: &[char] = &[
-                '0','1','2','3','4','5','6','7','8','9',
-                '.',':','-','+','/','x','X','×','%',' ',
+                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', ':', '-', '+', '/', 'x',
+                'X', '×', '%', ' ',
             ];
             let (start, end) = hex_range.unwrap_or((0, (numbers_map.len() as u32) - 1));
             let mut ff = first_frame;
@@ -558,7 +558,9 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
         None
     }
 
-    fn gather_import_specs(ini_map_lower: &HashMap<String, HashMap<String, String>>) -> Vec<String> {
+    fn gather_import_specs(
+        ini_map_lower: &HashMap<String, HashMap<String, String>>,
+    ) -> Vec<String> {
         let mut specs: Vec<String> = Vec::new();
         // SM implicitly seeds "Common default". We'll add it first; failure is non-fatal.
         specs.push("Common default".to_string());
@@ -797,7 +799,9 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                     } else if key_lc.starts_with("map ") {
                         if let Ok(frame_index) = val_str.parse::<usize>() {
                             let spec = raw_key_lc[4..].trim();
-                            if let Some(hex) = spec.strip_prefix("U+").or_else(|| spec.strip_prefix("u+")) {
+                            if let Some(hex) =
+                                spec.strip_prefix("U+").or_else(|| spec.strip_prefix("u+"))
+                            {
                                 if let Ok(cp) = u32::from_str_radix(hex, 16) {
                                     if let Some(ch) = char::from_u32(cp) {
                                         if frame_index < total_frames {
@@ -805,7 +809,10 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                                         }
                                     }
                                 }
-                            } else if spec.starts_with('"') && spec.ends_with('"') && spec.len() >= 2 {
+                            } else if spec.starts_with('"')
+                                && spec.ends_with('"')
+                                && spec.len() >= 2
+                            {
                                 for ch in spec[1..spec.len() - 1].chars() {
                                     if frame_index < total_frames {
                                         char_to_frame.insert(ch, frame_index);
@@ -871,45 +878,47 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                 chop_i -= 1;
                 width_i += 1; // odd-chop quirk
             }
-            let pad_i = (chop_i / 2).max(0);
 
-            let mut extra_left_i = draw_left.min(pad_i);
-            let mut extra_right_i = draw_right.min(pad_i);
+            let width_f = width_i as f32;
+            let chop_f = chop_i as f32;
+            let pad_f = (chop_f * 0.5).max(0.0);
+
+            let mut extra_left = (draw_left as f32).min(pad_f);
+            let mut extra_right = (draw_right as f32).min(pad_f);
             if width_i <= 0 {
-                extra_left_i = 0;
-                extra_right_i = 0;
+                extra_left = 0.0;
+                extra_right = 0.0;
             }
 
-            let glyph_size = [(width_i + extra_left_i + extra_right_i) as f32, frame_h_i as f32];
-            let glyph_offset = [-(extra_left_i as f32), vshift_authored];
+            let glyph_size = [width_f + extra_left + extra_right, frame_h_i as f32];
+            let glyph_offset = [-extra_left, vshift_authored];
             let advance = hadvance as f32;
 
-            // texture rect in actual pixels
-            let actual_frame_w_i = (tex_dims.0 / num_frames_wide) as i32;
-            let actual_frame_h_i = (tex_dims.1 / num_frames_high) as i32;
-            let col_i = (i as u32 % num_frames_wide) as i32;
-            let row_i = (i as u32 / num_frames_wide) as i32;
+            // texture rect in actual pixels (retain SM float precision)
+            let actual_frame_w = (tex_dims.0 as f32) / (num_frames_wide as f32);
+            let actual_frame_h = (tex_dims.1 as f32) / (num_frames_high as f32);
+            let col = (i as u32 % num_frames_wide) as f32;
+            let row = (i as u32 / num_frames_wide) as f32;
 
             let authored_to_actual_ratio = if frame_w_i > 0 {
-                actual_frame_w_i as f32 / frame_w_i as f32
+                actual_frame_w / frame_w_i as f32
             } else {
                 1.0
             };
-            let tex_chop_off_i = (chop_i as f32 * authored_to_actual_ratio).round() as i32;
-            let tex_extra_left_i = (extra_left_i as f32 * authored_to_actual_ratio).round() as i32;
-            let tex_extra_right_i = (extra_right_i as f32 * authored_to_actual_ratio).round() as i32;
+            let tex_chop_off = chop_f * authored_to_actual_ratio;
+            let tex_extra_left = extra_left * authored_to_actual_ratio;
+            let tex_extra_right = extra_right * authored_to_actual_ratio;
 
-            let left_padding = tex_chop_off_i / 2;
-            let right_padding = tex_chop_off_i - left_padding;
-
-            let frame_left_px = col_i * actual_frame_w_i;
-            let tex_rect_left = frame_left_px + left_padding - tex_extra_left_i;
-            let tex_rect_right = (col_i + 1) * actual_frame_w_i - right_padding + tex_extra_right_i;
+            let frame_left_px = col * actual_frame_w;
+            let frame_top_px = row * actual_frame_h;
+            let tex_rect_left = frame_left_px + 0.5 * tex_chop_off - tex_extra_left;
+            let tex_rect_right =
+                frame_left_px + actual_frame_w - 0.5 * tex_chop_off + tex_extra_right;
             let tex_rect = [
-                tex_rect_left as f32,
-                (row_i * actual_frame_h_i) as f32,
-                tex_rect_right as f32,
-                ((row_i + 1) * actual_frame_h_i) as f32,
+                tex_rect_left,
+                frame_top_px,
+                tex_rect_right,
+                frame_top_px + actual_frame_h,
             ];
 
             let glyph = Glyph {
@@ -932,8 +941,8 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
                         width_i,
                         hadvance,
                         chop_i,
-                        extra_left_i,
-                        extra_right_i,
+                        extra_left,
+                        extra_right,
                         glyph.size[0],
                         glyph.size[1],
                         glyph.offset[0],
@@ -970,7 +979,11 @@ pub fn parse(ini_path_str: &str) -> Result<FontLoadData, Box<dyn std::error::Err
     };
 
     if !font.glyph_map.contains_key(&' ') {
-        let adv = font.default_glyph.as_ref().map(|g| g.advance).unwrap_or(0.0);
+        let adv = font
+            .default_glyph
+            .as_ref()
+            .map(|g| g.advance)
+            .unwrap_or(0.0);
         warn!(
             "Font '{}' is missing SPACE (U+0020). Falling back to default glyph (advance {:.1}).",
             ini_path_str, adv
