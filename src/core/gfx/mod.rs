@@ -49,53 +49,55 @@ pub enum BackendType {
     OpenGL,
 }
 
-// Texture goes back to being an enum holding the concrete backend texture type.
+// A handle to a backend-specific texture resource.
 pub enum Texture {
     Vulkan(vulkan::Texture),
     OpenGL(opengl::Texture),
 }
 
-// Backend is an enum, not a trait object.
-pub enum Backend {
+// An internal enum to hold the state for the active rendering backend.
+enum BackendImpl {
     Vulkan(vulkan::State),
     OpenGL(opengl::State),
 }
 
-// This is the core of the enum dispatch pattern. All backend-related logic is
-// centralized here, dispatched via a single `match`.
+/// A public, opaque wrapper around the active rendering backend.
+/// This hides platform-specific variants from the rest of the application.
+pub struct Backend(BackendImpl);
+
 impl Backend {
     pub fn draw(
         &mut self,
         render_list: &RenderList,
         textures: &HashMap<String, Texture>,
     ) -> Result<u32, Box<dyn Error>> {
-        match self {
-            Backend::Vulkan(state) => vulkan::draw(state, render_list, textures),
-            Backend::OpenGL(state) => opengl::draw(state, render_list, textures),
+        match &mut self.0 {
+            BackendImpl::Vulkan(state) => vulkan::draw(state, render_list, textures),
+            BackendImpl::OpenGL(state) => opengl::draw(state, render_list, textures),
         }
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
-        match self {
-            Backend::Vulkan(state) => vulkan::resize(state, width, height),
-            Backend::OpenGL(state) => opengl::resize(state, width, height),
+        match &mut self.0 {
+            BackendImpl::Vulkan(state) => vulkan::resize(state, width, height),
+            BackendImpl::OpenGL(state) => opengl::resize(state, width, height),
         }
     }
 
     pub fn cleanup(&mut self) {
-        match self {
-            Backend::Vulkan(state) => vulkan::cleanup(state),
-            Backend::OpenGL(state) => opengl::cleanup(state),
+        match &mut self.0 {
+            BackendImpl::Vulkan(state) => vulkan::cleanup(state),
+            BackendImpl::OpenGL(state) => opengl::cleanup(state),
         }
     }
 
     pub fn create_texture(&mut self, image: &RgbaImage) -> Result<Texture, Box<dyn Error>> {
-        match self {
-            Backend::Vulkan(state) => {
+        match &mut self.0 {
+            BackendImpl::Vulkan(state) => {
                 let tex = vulkan::create_texture(state, image)?;
                 Ok(Texture::Vulkan(tex))
             }
-            Backend::OpenGL(state) => {
+            BackendImpl::OpenGL(state) => {
                 let tex = opengl::create_texture(&state.gl, image)?;
                 Ok(Texture::OpenGL(tex))
             }
@@ -104,12 +106,12 @@ impl Backend {
 
     pub fn dispose_textures(&mut self, textures: &mut HashMap<String, Texture>) {
         let old_textures = std::mem::take(textures);
-        match self {
-            Backend::Vulkan(_) => {
-                // For Vulkan, the texture's Drop implementation handles cleanup.
+        match &mut self.0 {
+            BackendImpl::Vulkan(_) => {
+                // Vulkan textures are cleaned up by their Drop implementation.
                 drop(old_textures);
             }
-            Backend::OpenGL(state) => unsafe {
+            BackendImpl::OpenGL(state) => unsafe {
                 for tex in old_textures.values() {
                     if let Texture::OpenGL(opengl::Texture(handle)) = tex {
                         state.gl.delete_texture(*handle);
@@ -120,16 +122,16 @@ impl Backend {
     }
 
     pub fn wait_for_idle(&mut self) {
-        match self {
-            Backend::Vulkan(state) => {
+        match &mut self.0 {
+            BackendImpl::Vulkan(state) => {
                 if let Some(device) = &state.device {
                     unsafe {
                         let _ = device.device_wait_idle();
                     }
                 }
             }
-            Backend::OpenGL(_) => {
-                // OpenGL does not have a direct equivalent, so this is a no-op.
+            BackendImpl::OpenGL(_) => {
+                // This is a no-op for OpenGL.
             }
         }
     }
@@ -141,10 +143,11 @@ pub fn create_backend(
     window: Arc<Window>,
     vsync_enabled: bool,
 ) -> Result<Backend, Box<dyn Error>> {
-    match backend_type {
-        BackendType::Vulkan => Ok(Backend::Vulkan(vulkan::init(&window, vsync_enabled)?)),
-        BackendType::OpenGL => Ok(Backend::OpenGL(opengl::init(window, vsync_enabled)?)),
-    }
+    let backend_impl = match backend_type {
+        BackendType::Vulkan => BackendImpl::Vulkan(vulkan::init(&window, vsync_enabled)?),
+        BackendType::OpenGL => BackendImpl::OpenGL(opengl::init(window, vsync_enabled)?),
+    };
+    Ok(Backend(backend_impl))
 }
 
 // -- Boilerplate impls --
