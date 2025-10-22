@@ -1,4 +1,3 @@
-// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/deadsync/src/ui/compose.rs =====
 use crate::core::gfx as renderer;
 use crate::core::gfx::{BlendMode, RenderList, RenderObject};
 use crate::core::space::Metrics;

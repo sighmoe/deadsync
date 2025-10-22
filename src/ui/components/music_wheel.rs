@@ -80,6 +80,8 @@ pub fn build(p: MusicWheelParams) -> Vec<Actor> {
             let y_center_item      = center_y + (offset_from_center as f32) * slot_spacing;
             let is_selected_slot   = i_slot == CENTER_WHEEL_SLOT_INDEX;
 
+            // The selected_index from the state now freely increments/decrements. We use it as a base
+            // and apply the modulo here for safe list access.
             let list_index = ((p.selected_index as isize + offset_from_center + num_entries as isize)
                 as usize) % num_entries;
 
@@ -219,6 +221,63 @@ pub fn build(p: MusicWheelParams) -> Vec<Actor> {
             }
 
             // Container: left-anchored at SL highlight-left
+            actors.push(Actor::Frame {
+                align: [0.0, 0.5], // left-center
+                offset: [highlight_left_world, y_center_item],
+                size: [SizeSpec::Px(highlight_w), SizeSpec::Px(item_h_full)],
+                background: None,
+                z: 51,
+                children: slot_children,
+            });
+        }
+    } else {
+        // Handle the case where there are no songs or packs loaded.
+        let empty_text = "- EMPTY -";
+        let text_color = color::decorative_rgba(0); // Red
+        
+        for i_slot in 0..NUM_WHEEL_ITEMS {
+            let offset_from_center = i_slot as isize - CENTER_WHEEL_SLOT_INDEX as isize;
+            let y_center_item      = center_y + (offset_from_center as f32) * slot_spacing;
+            let is_selected_slot   = i_slot == CENTER_WHEEL_SLOT_INDEX;
+            
+            // Use pack header colors for the empty state
+            let base = col_pack_header_box();
+            let sel  = col_selected_pack_header_box();
+            let bg_col   = if is_selected_slot { lerp_color(base, sel, anim_t) } else { base };
+
+            let mut slot_children: Vec<Actor> = Vec::new();
+
+            // Add black background for 1px gap effect, just like real pack headers
+            slot_children.push(act!(quad:
+                align(0.0, 0.5):
+                xy(0.0, half_item_h):
+                zoomto(highlight_w, item_h_full):
+                diffuse(0.0, 0.0, 0.0, 1.0):
+                z(0)
+            ));
+
+            // Colored (gray) quad background for the slot
+            slot_children.push(act!(quad:
+                align(0.0, 0.5):
+                xy(0.0, half_item_h):
+                zoomto(highlight_w, item_h_colored):
+                diffuse(bg_col[0], bg_col[1], bg_col[2], bg_col[3]):
+                z(1)
+            ));
+
+            // "- EMPTY -" text, centered like a pack header
+            slot_children.push(act!(text:
+                font("miso"):
+                settext(empty_text):
+                align(0.5, 0.5):
+                xy(pack_center_x_local, half_item_h):
+                maxwidth(pack_name_max_w):
+                zoom(1.0):
+                diffuse(text_color[0], text_color[1], text_color[2], text_color[3]):
+                z(2)
+            ));
+
+            // Container frame for the slot
             actors.push(Actor::Frame {
                 align: [0.0, 0.5], // left-center
                 offset: [highlight_left_world, y_center_item],
