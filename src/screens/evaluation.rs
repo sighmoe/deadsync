@@ -598,29 +598,33 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     // --- Breakdown Text (under grade) ---
     let breakdown_text = {
         let chart = &score_info.chart;
-        // This logic mimics the Lua script's loop to find the best-fitting text.
-        asset_manager.with_fonts(|all_fonts| asset_manager.with_font("miso", |miso_font| -> String {
-            let width_constraint = 155.0;
-            let text_zoom = 0.7;
-            // The max width is applied to the final zoomed width, so we check if the logical width
-            // will fit once scaled down.
-            let max_allowed_logical_width = width_constraint / text_zoom;
+        // Match the Lua script by progressively minimizing the breakdown text until it fits.
+        asset_manager
+            .with_fonts(|all_fonts| {
+                asset_manager.with_font("miso", |miso_font| -> Option<String> {
+                    let width_constraint = 155.0;
+                    let text_zoom = 0.7;
+                    // Measure at logical width (zoom 1.0) and ensure it fits once scaled down.
+                    let max_allowed_logical_width = width_constraint / text_zoom;
 
-            let check_width = |text: &str| {
-                let logical_width = font::measure_line_width_logical(miso_font, text, all_fonts) as f32;
-                logical_width <= max_allowed_logical_width
-            };
+                    let fits = |text: &str| {
+                        let logical_width = font::measure_line_width_logical(miso_font, text, all_fonts) as f32;
+                        logical_width <= max_allowed_logical_width
+                    };
 
-            if check_width(&chart.detailed_breakdown) {
-                chart.detailed_breakdown.clone()
-            } else if check_width(&chart.partial_breakdown) {
-                chart.partial_breakdown.clone()
-            } else {
-                // If even the simplest doesn't fit, we still use it and let `maxwidth` clamp it.
-                // This matches the Lua script which doesn't have a final fallback beyond level 3.
-                chart.simple_breakdown.clone()
-            }
-        })).unwrap_or_else(|| score_info.chart.simple_breakdown.clone()) // Fallback if font is not loaded
+                    if fits(&chart.detailed_breakdown) {
+                        Some(chart.detailed_breakdown.clone())
+                    } else if fits(&chart.partial_breakdown) {
+                        Some(chart.partial_breakdown.clone())
+                    } else if fits(&chart.simple_breakdown) {
+                        Some(chart.simple_breakdown.clone())
+                    } else {
+                        Some(format!("{} Total", chart.total_streams))
+                    }
+                })
+            })
+            .flatten()
+            .unwrap_or_else(|| chart.simple_breakdown.clone()) // Fallback if font isn't found
     };
 
     // Position based on P1, left-aligned. The y-value is from the original theme.
