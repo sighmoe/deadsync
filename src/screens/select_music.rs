@@ -1204,7 +1204,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
             // Stat value (right-aligned)
             actors.push(act!(text: font("miso"): settext(*value):
-                align(1.0, 0.5): xy(pane_cx + col_x, pane_top + row_y):
+                align(1.0, 0.5): horizalign(right): xy(pane_cx + col_x, pane_top + row_y):
                 zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
             ));
             // Stat label (left-aligned, +3px offset)
@@ -1265,7 +1265,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         };
         
         let mut meter_actor = act!(text: font("wendy"): settext(meter_text):
-            align(1.0, 0.5):
+            align(1.0, 0.5): horizalign(right):
             xy(pane_cx + cols_x[3], pane_top + rows_y[1]):
             z(121): diffuse(0.0, 0.0, 0.0, 1.0)
         );
