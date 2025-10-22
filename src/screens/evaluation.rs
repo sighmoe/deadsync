@@ -180,7 +180,9 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
         let numbers_frame_zoom = 0.8;
         let final_numbers_zoom = numbers_frame_zoom * 0.5;
         let digit_width = font::measure_line_width_logical(metrics_font, "0", all_fonts) as f32 * final_numbers_zoom;
+        let slash_width = font::measure_line_width_logical(metrics_font, "/", all_fonts) as f32 * final_numbers_zoom;
         if digit_width <= 0.0 { return; }
+        let slash_width = if slash_width > 0.0 { slash_width } else { digit_width };
 
         // --- Judgment Labels & Numbers ---
         let labels_frame_origin_x = p1_side_offset + 50.0;
@@ -278,14 +280,14 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
                 align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
                 diffuse(gray_color_possible[0], gray_color_possible[1], gray_color_possible[2], gray_color_possible[3]): z(101)
             ));
-            cursor_x -= digit_width;
+            cursor_x -= slash_width;
 
             // 3. Draw "achieved" number (left-most part)
             let achieved_str = format!("{:03}", achieved);
             let first_nonzero_achieved = achieved_str.find(|c: char| c != '0').unwrap_or(achieved_str.len());
 
             // The 'achieved' block must have its own right-anchor for alignment within the group.
-            let achieved_block_right_x = cursor_x; 
+            let achieved_block_right_x = cursor_x;
 
             for (char_idx_from_right, ch) in achieved_str.chars().rev().enumerate() {
                  let is_dim = if achieved == 0 { 
