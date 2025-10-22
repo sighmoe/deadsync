@@ -1314,6 +1314,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         match max_value_w {
             Some(maxw) => actors.push(act!(text: font("miso"): settext(value_text):
                 align(1.0, 0.5):
+                horizalign(right):
                 xy(x_val, y):
                 maxwidth(maxw):
                 zoom(text_zoom):
@@ -1322,6 +1323,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             )),
             None => actors.push(act!(text: font("miso"): settext(value_text):
                 align(1.0, 0.5):
+                horizalign(right):
                 xy(x_val, y):
                 zoom(text_zoom):
                 z(121):
@@ -1332,6 +1334,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         // label (left-aligned) — no clamp for SL parity
         actors.push(act!(text: font("miso"): settext(label_text):
             align(0.0, 0.5):
+            horizalign(left):
             xy(x_label, y):
             zoom(text_zoom):
             z(121):
