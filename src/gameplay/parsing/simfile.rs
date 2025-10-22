@@ -287,6 +287,8 @@ fn get_cache_path(simfile_path: &Path) -> Result<PathBuf, std::io::Error> {
 pub fn scan_and_load_songs(root_path_str: &'static str) {
     info!("Starting simfile scan in '{}'...", root_path_str);
 
+    let config = crate::config::get();
+
     // Ensure the cache directory exists before we start scanning.
     let cache_dir = Path::new("cache/songs");
     if let Err(e) = fs::create_dir_all(cache_dir) {
@@ -325,7 +327,7 @@ pub fn scan_and_load_songs(root_path_str: &'static str) {
                     let file_path = file.path();
                     if let Some(ext) = file_path.extension().and_then(|s| s.to_str()) {
                         if ext.eq_ignore_ascii_case("sm") || ext.eq_ignore_ascii_case("ssc") {
-                            match load_song_from_file(&file_path) {
+                            match load_song_from_file(&file_path, config.fastload, config.cachesongs) {
                                 Ok(song_data) => {
                                     current_pack.songs.push(Arc::new(song_data));
                                 }
@@ -376,7 +378,7 @@ pub fn scan_and_load_songs(root_path_str: &'static str) {
 }
 
 /// Helper function to parse a single simfile, using a cache if available and valid.
-fn load_song_from_file(path: &Path) -> Result<SongData, String> {
+fn load_song_from_file(path: &Path, fastload: bool, cachesongs: bool) -> Result<SongData, String> {
     let cache_path = match get_cache_path(path) {
         Ok(p) => Some(p),
         Err(e) => {
@@ -394,17 +396,19 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
     };
 
     // --- CACHE CHECK ---
-    if let (Some(cp), Some(ch)) = (cache_path.as_ref(), content_hash) {
-        if cp.exists() {
-            if let Ok(mut file) = fs::File::open(cp) {
-                let mut buffer = Vec::new();
-                if file.read_to_end(&mut buffer).is_ok() {
-                    if let Ok((cached_song, _)) = bincode::decode_from_slice::<CachedSong, _>(&buffer, bincode::config::standard()) {
-                        if cached_song.source_hash == ch {
-                            info!("Cache hit for: {:?}", path.file_name().unwrap_or_default());
-                            return Ok(cached_song.data.into());
-                        } else {
-                            info!("Cache stale for: {:?}", path.file_name().unwrap_or_default());
+    if fastload {
+        if let (Some(cp), Some(ch)) = (cache_path.as_ref(), content_hash) {
+            if cp.exists() {
+                if let Ok(mut file) = fs::File::open(cp) {
+                    let mut buffer = Vec::new();
+                    if file.read_to_end(&mut buffer).is_ok() {
+                        if let Ok((cached_song, _)) = bincode::decode_from_slice::<CachedSong, _>(&buffer, bincode::config::standard()) {
+                            if cached_song.source_hash == ch {
+                                info!("Cache hit for: {:?}", path.file_name().unwrap_or_default());
+                                return Ok(cached_song.data.into());
+                            } else {
+                                info!("Cache stale for: {:?}", path.file_name().unwrap_or_default());
+                            }
                         }
                     }
                 }
@@ -413,23 +417,29 @@ fn load_song_from_file(path: &Path) -> Result<SongData, String> {
     }
 
     // --- CACHE MISS: PARSE AND WRITE ---
-    info!("Cache miss for: {:?}", path.file_name().unwrap_or_default());
+    if fastload {
+        info!("Cache miss for: {:?}", path.file_name().unwrap_or_default());
+    } else {
+        info!("Parsing (fastload disabled): {:?}", path.file_name().unwrap_or_default());
+    }
     let song_data = parse_and_process_song_file(path)?;
 
-    if let (Some(cp), Some(ch)) = (cache_path, content_hash) {
-        let serializable_data: SerializableSongData = (&song_data).into();
-        let cached_song = CachedSong {
-            source_hash: ch,
-            data: serializable_data,
-        };
-        
-        if let Ok(encoded) = bincode::encode_to_vec(&cached_song, bincode::config::standard()) {
-            if let Ok(mut file) = fs::File::create(&cp) {
-                if file.write_all(&encoded).is_err() {
-                    warn!("Failed to write cache file for {:?}", cp);
+    if cachesongs {
+        if let (Some(cp), Some(ch)) = (cache_path, content_hash) {
+            let serializable_data: SerializableSongData = (&song_data).into();
+            let cached_song = CachedSong {
+                source_hash: ch,
+                data: serializable_data,
+            };
+            
+            if let Ok(encoded) = bincode::encode_to_vec(&cached_song, bincode::config::standard()) {
+                if let Ok(mut file) = fs::File::create(&cp) {
+                    if file.write_all(&encoded).is_err() {
+                        warn!("Failed to write cache file for {:?}", cp);
+                    }
+                } else {
+                     warn!("Failed to create cache file for {:?}", cp);
                 }
-            } else {
-                 warn!("Failed to create cache file for {:?}", cp);
             }
         }
     }
