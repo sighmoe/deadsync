@@ -678,15 +678,14 @@ fn lrint_ties_even(v: f32) -> f32 {
 
 #[inline(always)]
 #[must_use]
-fn quantize_up_even_px(v: f32) -> f32 {
-    if !v.is_finite() || v <= 0.0 {
-        return 0.0;
+fn quantize_up_even_i32(v: i32) -> i32 {
+    if v <= 0 {
+        0
+    } else if (v & 1) != 0 {
+        v + 1
+    } else {
+        v
     }
-    let mut n = v.ceil() as i32;
-    if (n & 1) != 0 {
-        n += 1;
-    }
-    n as f32
 }
 
 fn layout_text(
@@ -717,27 +716,46 @@ fn layout_text(
     }
 
     // 1) Logical (integer) widths like SM: sum integer advances (default glyph if unmapped).
-    let logical_line_widths: Vec<i32> = lines.iter().map(|l| font::measure_line_width_logical(font, l, fonts)).collect();
-    let max_logical_width = logical_line_widths.iter().copied().max().unwrap_or(0) as f32;
+    let logical_line_widths: Vec<i32> =
+        lines.iter().map(|l| font::measure_line_width_logical(font, l, fonts)).collect();
+    let max_logical_width_i = logical_line_widths.iter().copied().max().unwrap_or(0);
+    let block_w_logical_even = quantize_up_even_i32(max_logical_width_i) as f32;
 
     // 2) Unscaled block cap height + line spacing in logical units
     let cap_height = if font.height > 0 { font.height as f32 } else { font.line_spacing as f32 };
     let num_lines = lines.len();
-    let unscaled_block_height = if num_lines > 1 {
-        cap_height + ((num_lines - 1) as f32 * font.line_spacing as f32)
+    let block_h_logical_i = if num_lines > 1 {
+        font.height + ((num_lines - 1) as i32 * font.line_spacing)
+    } else {
+        font.height
+    };
+    let block_h_logical = if block_h_logical_i > 0 {
+        block_h_logical_i as f32
     } else {
         cap_height
     };
 
     // 3) Fit scaling (zoomto...) preserves aspect ratio
     use std::f32::INFINITY;
-    let s_w_fit = fit_width.map_or(INFINITY, |w| if max_logical_width > 0.0 { w / max_logical_width } else { 1.0 });
-    let s_h_fit = fit_height.map_or(INFINITY, |h| if unscaled_block_height > 0.0 { h / unscaled_block_height } else { 1.0 });
+    let s_w_fit = fit_width.map_or(INFINITY, |w| {
+        if block_w_logical_even > 0.0 {
+            w / block_w_logical_even
+        } else {
+            1.0
+        }
+    });
+    let s_h_fit = fit_height.map_or(INFINITY, |h| {
+        if block_h_logical > 0.0 {
+            h / block_h_logical
+        } else {
+            1.0
+        }
+    });
     let fit_s = if s_w_fit.is_infinite() && s_h_fit.is_infinite() { 1.0 } else { s_w_fit.min(s_h_fit).max(0.0) };
 
     // 4) Reference sizes before/after zoom (but before max clamp)
-    let width_before_zoom  = max_logical_width     * fit_s;
-    let height_before_zoom = unscaled_block_height * fit_s;
+    let width_before_zoom  = block_w_logical_even * fit_s;
+    let height_before_zoom = block_h_logical * fit_s;
 
     let width_after_zoom   = width_before_zoom  * scale[0];
     let height_after_zoom  = height_before_zoom * scale[1];
@@ -763,28 +781,42 @@ fn layout_text(
         return vec![];
     }
 
-    // 8) Pixel rounding/snapping (unchanged)
-    let line_widths_px: Vec<f32> = logical_line_widths.iter().map(|w| lrint_ties_even((*w as f32) * sx)).collect();
-    let max_line_width_px = line_widths_px.iter().fold(0.0_f32, |a, &b| a.max(b));
-    let block_w_px = quantize_up_even_px(max_line_width_px);
-    let block_h_px = unscaled_block_height * sy;
+    // 8) Pixel rounding/snapping
+    let block_w_px = block_w_logical_even * sx;
+    let block_h_px = block_h_logical * sy;
 
     // 9) Place the block, compute baseline (unchanged)
     let block_left_sm = parent.x + offset[0] - align[0] * block_w_px;
     let block_top_sm  = parent.y + offset[1] - align[1] * block_h_px;
+    let block_center_x = block_left_sm + 0.5 * block_w_px;
     let block_center_y = block_top_sm  + 0.5 * block_h_px;
 
-    let i_y0 = lrint_ties_even(-block_h_px * 0.5);
-    let baseline_local = i_y0 + (font.height as f32) * sy;
-    let mut baseline_sm = lrint_ties_even(block_center_y + baseline_local);
+    let mut pen_y_logical = lrint_ties_even(-(block_h_logical_i as f32) * 0.5) as i32;
+    let line_padding = font.line_spacing - font.height;
 
     #[inline(always)]
-    fn start_x_px(align: actors::TextAlign, block_left_px: f32, block_w_px: f32, line_w_px: f32) -> f32 {
-        match align {
-            actors::TextAlign::Left   => block_left_px,
-            actors::TextAlign::Center => lrint_ties_even(block_left_px + 0.5 * (block_w_px - line_w_px)),
-            actors::TextAlign::Right  => lrint_ties_even(block_left_px + (block_w_px - line_w_px)),
-        }
+    fn start_x_logical(
+        align: actors::TextAlign,
+        block_w_logical: f32,
+        line_w_logical: f32,
+    ) -> i32 {
+        let align_value = match align {
+            actors::TextAlign::Left => 0.0,
+            actors::TextAlign::Center => 0.5,
+            actors::TextAlign::Right => 1.0,
+        };
+        let start = -0.5 * block_w_logical + align_value * (block_w_logical - line_w_logical);
+        lrint_ties_even(start) as i32
+    }
+
+    #[inline(always)]
+    fn advance_logical(glyph: &font::Glyph) -> i32 {
+        lrint_ties_even(glyph.advance) as i32
+    }
+
+    #[inline(always)]
+    fn logical_to_world(center: f32, logical: f32, scale: f32) -> f32 {
+        center + logical * scale
     }
 
     use std::collections::HashMap;
@@ -804,14 +836,15 @@ fn layout_text(
     let mut objects = Vec::new();
 
     for (i, line) in lines.iter().enumerate() {
-        let line_w_px = line_widths_px[i];
-        let pen_start_x = start_x_px(text_align, block_left_sm, block_w_px, line_w_px);
+        pen_y_logical += font.height;
+        let baseline_local_logical = pen_y_logical as f32;
 
-        let mut pen_ux: i32 = 0;
+        let line_w_logical = logical_line_widths[i] as f32;
+        let mut pen_x_logical = start_x_logical(text_align, block_w_logical_even, line_w_logical);
 
         for ch in line.chars() {
             let glyph = font::find_glyph(font, ch, fonts);
-            
+
             let glyph = match glyph {
                 Some(g) => g,
                 None => continue, // no glyph and no default; skip entirely
@@ -822,11 +855,12 @@ fn layout_text(
 
             let draw_quad = !(ch == ' ' && font.glyph_map.get(&ch).is_none());
 
-            let pen_x_draw = pen_start_x + (pen_ux as f32) * sx;
+            let quad_x_logical = pen_x_logical as f32 + glyph.offset[0];
+            let quad_y_logical = baseline_local_logical + glyph.offset[1];
 
             if draw_quad && quad_w.abs() >= 1e-6 && quad_h.abs() >= 1e-6 {
-                let quad_x_sm = pen_x_draw + glyph.offset[0] * sx;
-                let quad_y_sm = lrint_ties_even(baseline_sm + glyph.offset[1] * sy);
+                let quad_x_sm = logical_to_world(block_center_x, quad_x_logical, sx);
+                let quad_y_sm = logical_to_world(block_center_y, quad_y_logical, sy);
 
                 let center_x = m.left + quad_x_sm + quad_w * 0.5;
                 let center_y = m.top  - (quad_y_sm + quad_h * 0.5);
@@ -856,10 +890,9 @@ fn layout_text(
                 });
             }
 
-            pen_ux += glyph.advance as i32;
+            pen_x_logical += advance_logical(glyph);
         }
-
-        baseline_sm = lrint_ties_even(baseline_sm + (font.line_spacing as f32) * sy);
+        pen_y_logical += line_padding;
     }
 
     objects
