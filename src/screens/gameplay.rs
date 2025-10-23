@@ -1104,9 +1104,9 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
     let frame_zoom = banner_data_zoom;
 
     let categories = [
-        ("Holds", state.chart.stats.holds),
-        ("Mines", state.chart.stats.mines),
-        ("Rolls", state.chart.stats.rolls),
+        ("holds", state.chart.stats.holds),
+        ("mines", state.chart.stats.mines),
+        ("rolls", state.chart.stats.rolls),
     ];
 
     let largest_count = categories.iter().map(|(_, count)| *count).max().unwrap_or(0);
@@ -1120,45 +1120,63 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
         let label_zoom = 0.833 * frame_zoom;
         let gray = color::rgba_hex("#5A6166");
         let white = [1.0, 1.0, 1.0, 1.0];
+        
+        // --- HYBRID LAYOUT LOGIC ---
+        // 1. Measure real character widths for number layout.
         let digit_width = font::measure_line_width_logical(metrics_font, "0", all_fonts) as f32 * value_zoom;
         if digit_width <= 0.0 { return; }
-        let value_block_width = ((digits_to_fmt * 2) + 1) as f32 * digit_width;
+        let slash_width = font::measure_line_width_logical(metrics_font, "/", all_fonts) as f32 * value_zoom;
+
+        // 2. Use a hardcoded width for calculating the label's position (for theme parity).
+        const LOGICAL_CHAR_WIDTH_FOR_LABEL: f32 = 36.0;
+        let fixed_char_width_scaled_for_label = LOGICAL_CHAR_WIDTH_FOR_LABEL * value_zoom;
 
         for (i, (label_text, count)) in categories.iter().enumerate() {
             let item_y = (i as f32 - 1.0) * row_height;
-            let mut cursor_x = 0.0;
+            let right_anchor_x = 0.0;
+            let mut cursor_x = right_anchor_x;
 
             let possible_str = format!("{:0width$}", count, width = digits_to_fmt);
+            let achieved_str = format!("{:0width$}", 0u32, width = digits_to_fmt);
+
+            // --- Layout Numbers using MEASURED widths ---
+            // 1. Draw "possible" number (right-most part)
+            let first_nonzero_possible = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
             for (char_idx, ch) in possible_str.chars().rev().enumerate() {
                 let is_dim = if *count == 0 { char_idx > 0 } else {
                     let original_index = digits_to_fmt - 1 - char_idx;
-                    let first_nonzero = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
-                    original_index < first_nonzero
+                    original_index < first_nonzero_possible
                 };
                 let color = if is_dim { gray } else { white };
+                let x_pos = cursor_x - (char_idx as f32 * digit_width);
                 children.push(act!(text:
                     font("wendy_screenevaluation"): settext(ch.to_string()):
-                    align(1.0, 0.5): xy(cursor_x, item_y):
+                    align(1.0, 0.5): xy(x_pos, item_y):
                     zoom(value_zoom): diffuse(color[0], color[1], color[2], color[3])
                 ));
-                cursor_x -= digit_width;
             }
+            cursor_x -= possible_str.len() as f32 * digit_width;
+            
+            // 2. Draw slash
+            children.push(act!(text: font("wendy_screenevaluation"): settext("/"): align(1.0, 0.5): xy(cursor_x, item_y): zoom(value_zoom): diffuse(gray[0], gray[1], gray[2], gray[3])));
+            cursor_x -= slash_width;
 
-            children.push(act!(text: font("wendy_screenevaluation"): settext("/"): align(1.0, 0.5): xy(cursor_x, item_y): zoom(value_zoom): diffuse(gray[0], gray[1], gray[2], gray[3]) ));
-            cursor_x -= digit_width;
-
-            let achieved_str = format!("{:0width$}", 0u32, width = digits_to_fmt);
+            // 3. Draw "achieved" number
+            let achieved_block_right_x = cursor_x;
             for (char_idx, ch) in achieved_str.chars().rev().enumerate() {
                 let color = if char_idx > 0 { gray } else { white };
+                let x_pos = achieved_block_right_x - (char_idx as f32 * digit_width);
                 children.push(act!(text:
                     font("wendy_screenevaluation"): settext(ch.to_string()):
-                    align(1.0, 0.5): xy(cursor_x, item_y):
+                    align(1.0, 0.5): xy(x_pos, item_y):
                     zoom(value_zoom): diffuse(color[0], color[1], color[2], color[3])
                 ));
-                cursor_x -= digit_width;
             }
 
-            let label_x = -value_block_width - (10.0 * frame_zoom);
+            // --- Position Label using HARDCODED width assumption ---
+            let total_value_width_for_label = (achieved_str.len() + 1 + possible_str.len()) as f32 * fixed_char_width_scaled_for_label;
+            let label_x = right_anchor_x - total_value_width_for_label - (10.0 * frame_zoom);
+            
             children.push(act!(text:
                 font("miso"): settext(*label_text): align(1.0, 0.5): xy(label_x, item_y):
                 zoom(label_zoom): diffuse(white[0], white[1], white[2], white[3])
