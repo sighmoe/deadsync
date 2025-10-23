@@ -1198,22 +1198,29 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
     let total_tapnotes = state.chart.stats.total_steps as f32;
     let digits = if total_tapnotes > 0.0 { (total_tapnotes.log10().floor() as usize + 1).max(4) } else { 4 };
-    let label_local_x_offset = 80.0 + (digits.saturating_sub(4) as f32 * 16.0);
-    let label_world_x = final_judgments_center_x + (label_local_x_offset * final_text_base_zoom);
+    let extra_digits = digits.saturating_sub(4) as f32;
+    let base_label_local_x_offset = 80.0;
+    const LABEL_DIGIT_STEP: f32 = 16.0;
     const NUMBER_TO_LABEL_GAP: f32 = 8.0;
-    let numbers_cx = label_world_x - NUMBER_TO_LABEL_GAP;
+    let base_numbers_local_x_offset = base_label_local_x_offset - NUMBER_TO_LABEL_GAP;
     let row_height = 35.0;
-    let y_base = -280.0; 
+    let y_base = -280.0;
 
     asset_manager.with_fonts(|all_fonts| asset_manager.with_font("wendy_screenevaluation", |f| {
         let numbers_zoom = final_text_base_zoom * 0.5;
         let max_digit_w = (font::measure_line_width_logical(f, "0", all_fonts) as f32) * numbers_zoom;
         if max_digit_w <= 0.0 { return; }
 
+        let digit_local_width = max_digit_w / final_text_base_zoom;
+        let label_local_x_offset = base_label_local_x_offset + (extra_digits * LABEL_DIGIT_STEP);
+        let label_world_x = final_judgments_center_x + (label_local_x_offset * final_text_base_zoom);
+        let numbers_local_x_offset = base_numbers_local_x_offset + (extra_digits * digit_local_width);
+        let numbers_cx = final_judgments_center_x + (numbers_local_x_offset * final_text_base_zoom);
+
         for (index, grade) in JUDGMENT_ORDER.iter().enumerate() {
             let info = JUDGMENT_INFO.get(grade).unwrap();
             let count = *state.judgment_counts.get(grade).unwrap_or(&0);
-            
+
             let local_y = y_base + (index as f32 * row_height);
             let world_y = final_judgments_center_y + (local_y * final_text_base_zoom);
 
