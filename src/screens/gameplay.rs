@@ -158,6 +158,7 @@ pub struct State {
     pub life: f32, // 0.0 to 1.0
     pub combo_after_miss: u32, // for regeneration logic
     pub is_failing: bool,
+    pub fail_time: Option<f32>,
 
     // Grade/Percent scoring
     pub earned_grade_points: i32,
@@ -214,6 +215,9 @@ impl State {
         self.life = (self.life + final_delta).clamp(0.0, 1.0);
 
         if self.life <= 0.0 {
+            if !self.is_failing { // first frame of failure
+                self.fail_time = Some(self.current_music_time);
+            }
             self.life = 0.0;
             self.is_failing = true; // latch immediately in the same call
             info!("Player has failed!");
@@ -310,6 +314,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         life: 0.5,
         combo_after_miss: MAX_REGEN_COMBO_AFTER_MISS, // Start in a state where regen is active
         is_failing: false,
+        fail_time: None,
         earned_grade_points: 0,
         possible_grade_points,
         song_completed_naturally: false,
@@ -728,6 +733,24 @@ static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyL
         (JudgeGrade::Miss,      JudgmentDisplayInfo { label: "MISS",      color: color::rgba_hex(color::JUDGMENT_HEX[5]) }),
     ])
 });
+
+fn format_game_time(s: f32, total_seconds: f32) -> String {
+    if s < 0.0 { return format_game_time(0.0, total_seconds); }
+    let s_u64 = s as u64;
+
+    let minutes = s_u64 / 60;
+    let seconds = s_u64 % 60;
+
+    if total_seconds >= 3600.0 { // Over an hour total? use H:MM:SS
+         let hours = s_u64 / 3600;
+         let minutes = (s_u64 % 3600) / 60;
+         format!("{}:{:02}:{:02}", hours, minutes, seconds)
+    } else if total_seconds >= 600.0 { // Over 10 mins total? use MM:SS
+        format!("{:02}:{:02}", minutes, seconds)
+    } else { // Under 10 mins total? use M:SS
+        format!("{}:{:02}", minutes, seconds)
+    }
+}
 
 pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let mut actors = Vec::new();
@@ -1224,6 +1247,65 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 diffuse(bright[0], bright[1], bright[2], bright[3])
             ));
         }
+
+        // --- Time Display (Remaining / Total) ---
+        {
+            let local_y = -40.0 * banner_data_zoom;
+            
+            let total_seconds = state.song.total_length_seconds.max(0) as f32;
+            let total_time_str = format_game_time(total_seconds, total_seconds);
+
+            let remaining_seconds = if let Some(fail_time) = state.fail_time {
+                (total_seconds - fail_time.max(0.0)).max(0.0)
+            } else {
+                (total_seconds - state.current_music_time.max(0.0)).max(0.0)
+            };
+            let remaining_time_str = format_game_time(remaining_seconds, total_seconds);
+
+            let font_name = "miso";
+            let text_zoom = banner_data_zoom * 0.833;
+
+            let numbers_block_width = (digits as f32) * max_digit_w;
+            let numbers_left_x = numbers_cx - numbers_block_width;
+
+            let red_color = color::rgba_hex("#ff3030");
+            let white_color = [1.0, 1.0, 1.0, 1.0];
+            let remaining_color = if state.is_failing { red_color } else { white_color };
+            
+            // --- Total Time Row ---
+            let y_pos_total = sidepane_center_y + local_y + 20.0;
+            let label_offset = 32.0;
+            
+            actors.push(act!(text: font(font_name): settext(total_time_str):
+                align(0.0, 0.5): horizalign(left):
+                xy(numbers_left_x, y_pos_total):
+                z(120):
+                diffuse(white_color[0], white_color[1], white_color[2], white_color[3])
+            ));
+            actors.push(act!(text: font(font_name): settext(" song"):
+                align(0.0, 0.5): horizalign(left):
+                xy(numbers_left_x + label_offset, y_pos_total - 1.0):
+                zoom(text_zoom): z(120):
+                diffuse(white_color[0], white_color[1], white_color[2], white_color[3])
+            ));
+            
+            // --- Remaining Time Row ---
+            let y_pos_remaining = sidepane_center_y + local_y;
+
+            actors.push(act!(text: font(font_name): settext(remaining_time_str):
+                align(0.0, 0.5): horizalign(left):
+                xy(numbers_left_x, y_pos_remaining):
+                z(120):
+                diffuse(remaining_color[0], remaining_color[1], remaining_color[2], remaining_color[3])
+            ));
+            actors.push(act!(text: font(font_name): settext(" remaining"):
+                align(0.0, 0.5): horizalign(left):
+                xy(numbers_left_x + label_offset, y_pos_remaining - 1.0):
+                zoom(text_zoom): z(120):
+                diffuse(remaining_color[0], remaining_color[1], remaining_color[2], remaining_color[3])
+            ));
+        }
     }));
+
     actors
 }
