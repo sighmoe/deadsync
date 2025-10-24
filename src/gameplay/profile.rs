@@ -2,7 +2,7 @@ use configparser::ini::Ini;
 use log::{info, warn};
 use once_cell::sync::Lazy;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Mutex;
 
@@ -10,6 +10,7 @@ use std::sync::Mutex;
 const PROFILE_DIR: &str = "save/profiles/00000000";
 const PROFILE_INI_PATH: &str = "save/profiles/00000000/profile.ini";
 const GROOVESTATS_INI_PATH: &str = "save/profiles/00000000/groovestats.ini";
+const PROFILE_AVATAR_PATH: &str = "save/profiles/00000000/profile.png";
 
 // This enum is now part of the profile system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +58,8 @@ pub struct Profile {
     pub groovestats_is_pad_player: bool,
     pub groovestats_username: String,
     pub background_filter: BackgroundFilter,
+    pub avatar_path: Option<PathBuf>,
+    pub avatar_texture_key: Option<String>,
 }
 
 impl Default for Profile {
@@ -68,6 +71,8 @@ impl Default for Profile {
             groovestats_is_pad_player: false,
             groovestats_username: "".to_string(),
             background_filter: BackgroundFilter::default(),
+            avatar_path: None,
+            avatar_texture_key: None,
         }
     }
 }
@@ -142,9 +147,22 @@ pub fn load() {
     } else {
         warn!("Failed to load '{}', using default GrooveStats info.", GROOVESTATS_INI_PATH);
     }
+
+    let avatar_path = Path::new(PROFILE_AVATAR_PATH);
+    profile.avatar_path = if avatar_path.exists() {
+        Some(avatar_path.to_path_buf())
+    } else {
+        None
+    };
+    profile.avatar_texture_key = None;
 }
 
 /// Returns a copy of the currently loaded profile data.
 pub fn get() -> Profile {
     PROFILE.lock().unwrap().clone()
+}
+
+pub fn set_avatar_texture_key(key: Option<String>) {
+    let mut profile = PROFILE.lock().unwrap();
+    profile.avatar_texture_key = key;
 }

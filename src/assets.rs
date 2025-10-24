@@ -1,4 +1,5 @@
 use crate::core::gfx::{self as renderer, Backend, Texture as GfxTexture};
+use crate::gameplay::profile;
 use crate::ui::font::{self, Font, FontLoadData};
 use image::RgbaImage;
 use log::{info, warn};
@@ -109,6 +110,7 @@ pub struct AssetManager {
     current_dynamic_banner: Option<(String, PathBuf)>,
     current_density_graph: Option<(String, String)>,
     current_dynamic_background: Option<(String, PathBuf)>,
+    current_profile_avatar: Option<(String, PathBuf)>,
 }
 
 impl AssetManager {
@@ -119,6 +121,7 @@ impl AssetManager {
             current_dynamic_banner: None,
             current_density_graph: None,
             current_dynamic_background: None,
+            current_profile_avatar: None,
         }
     }
 
@@ -218,6 +221,10 @@ impl AssetManager {
                 }
             }
         }
+
+        let profile = profile::get();
+        self.set_profile_avatar(backend, profile.avatar_path);
+
         Ok(())
     }
 
@@ -285,6 +292,7 @@ impl AssetManager {
             }
             self.textures.remove(&key);
         }
+        self.destroy_current_profile_avatar(backend);
     }
 
     pub fn set_dynamic_banner(&mut self, backend: &mut Backend, path_opt: Option<PathBuf>) -> String {
@@ -403,6 +411,44 @@ impl AssetManager {
         }
     }
 
+    pub fn set_profile_avatar(&mut self, backend: &mut Backend, path_opt: Option<PathBuf>) {
+        if let Some(path) = path_opt {
+            if self.current_profile_avatar.as_ref().map_or(false, |(_, p)| p == &path) {
+                if let Some((key, _)) = &self.current_profile_avatar {
+                    profile::set_avatar_texture_key(Some(key.clone()));
+                }
+                return;
+            }
+
+            self.destroy_current_profile_avatar(backend);
+
+            match image::open(&path) {
+                Ok(img) => {
+                    let rgba = img.to_rgba8();
+                    match renderer::create_texture(backend, &rgba) {
+                        Ok(texture) => {
+                            let key = path.to_string_lossy().into_owned();
+                            self.textures.insert(key.clone(), texture);
+                            register_texture_dims(&key, rgba.width(), rgba.height());
+                            self.current_profile_avatar = Some((key.clone(), path));
+                            profile::set_avatar_texture_key(Some(key));
+                        }
+                        Err(e) => {
+                            warn!("Failed to create GPU texture for profile avatar {:?}: {}.", path, e);
+                            profile::set_avatar_texture_key(None);
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to open profile avatar image {:?}: {}.", path, e);
+                    profile::set_avatar_texture_key(None);
+                }
+            }
+        } else {
+            self.destroy_current_profile_avatar(backend);
+        }
+    }
+
     fn destroy_current_dynamic_banner(&mut self, backend: &mut Backend) {
         if let Some((key, _)) = self.current_dynamic_banner.take() {
             if let Backend::Vulkan(vk_state) = backend {
@@ -428,5 +474,15 @@ impl AssetManager {
             }
             self.textures.remove(&key);
         }
+    }
+
+    fn destroy_current_profile_avatar(&mut self, backend: &mut Backend) {
+        if let Some((key, _)) = self.current_profile_avatar.take() {
+            if let Backend::Vulkan(vk_state) = backend {
+                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
+            }
+            self.textures.remove(&key);
+        }
+        profile::set_avatar_texture_key(None);
     }
 }

@@ -5,7 +5,9 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::{heart_bg, pad_display, music_wheel};
-use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
+use crate::ui::components::screen_bar::{
+    self, AvatarParams, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement,
+};
 use crate::ui::actors::SizeSpec;
 use crate::core::space::is_wide;
 use crate::core::gamepad::{PadDir, PadButton};
@@ -741,7 +743,12 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         transparent: false,
         fg_color: [1.0; 4],
         left_text: None, center_text: None, right_text: None,
+        left_avatar: None,
     }));
+    let footer_avatar = profile
+        .avatar_texture_key
+        .as_deref()
+        .map(|texture_key| AvatarParams { texture_key });
     actors.push(screen_bar::build(ScreenBarParams {
         title: "EVENT MODE",
         title_placement: ScreenBarTitlePlacement::Center,
@@ -749,6 +756,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         transparent: false,
         fg_color: [1.0; 4],
         left_text: Some(&profile.display_name), center_text: None, right_text: Some("PRESS START"),
+        left_avatar: footer_avatar,
     }));
  
     // Calculate the color for the currently selected difficulty based on the active theme color

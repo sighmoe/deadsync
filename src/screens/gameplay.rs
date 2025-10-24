@@ -1072,7 +1072,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
     actors.push(screen_bar::build(ScreenBarParams {
         title: "", title_placement: screen_bar::ScreenBarTitlePlacement::Center, position: screen_bar::ScreenBarPosition::Bottom,
-        transparent: true, fg_color: [1.0; 4], left_text: Some(&profile.display_name), center_text: None, right_text: None,
+        transparent: true, fg_color: [1.0; 4], left_text: Some(&profile.display_name), center_text: None, right_text: None, left_avatar: None,
     }));
     
     actors.extend(build_side_pane(state, asset_manager));

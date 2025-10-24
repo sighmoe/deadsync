@@ -4,7 +4,7 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;
 use crate::ui::components::{heart_bg, pad_display, screen_bar};
-use crate::ui::components::screen_bar::{ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
+use crate::ui::components::screen_bar::{AvatarParams, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::core::space::widescale;
 
 use crate::screens::gameplay::{self, JudgeGrade};
@@ -469,6 +469,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         transparent: false,
         fg_color: [1.0; 4],
         left_text: None, center_text: None, right_text: None,
+        left_avatar: None,
     }));
 
     // Session Timer
@@ -712,6 +713,10 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     }
 
     // 3. Bottom Bar
+    let footer_avatar = profile
+        .avatar_texture_key
+        .as_deref()
+        .map(|texture_key| AvatarParams { texture_key });
     actors.push(screen_bar::build(ScreenBarParams {
         title: "",
         title_placement: screen_bar::ScreenBarTitlePlacement::Center,
@@ -719,6 +724,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         transparent: true,
         fg_color: [1.0; 4],
         left_text: Some(&profile.display_name), center_text: None, right_text: None,
+        left_avatar: footer_avatar,
     }));
 
      // --- Date/Time in footer (like ScreenEvaluation decorations) ---
