@@ -1,3 +1,4 @@
+// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/deadsync/src/app.rs =====
 use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList};
 use crate::core::input;
 use crate::core::input::InputState;
@@ -5,7 +6,7 @@ use crate::core::space::{self as space, Metrics};
 use crate::gameplay::{profile, scores};
 use crate::assets::AssetManager;
 use crate::ui::color;
-use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, Screen as CurrentScreen, ScreenAction, Screen};
+use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, player_options, Screen as CurrentScreen, ScreenAction, Screen};
 use crate::gameplay::parsing::simfile as song_loading;
 use winit::{
     application::ApplicationHandler,
@@ -47,6 +48,7 @@ pub struct App {
     menu_state: menu::State,
     gameplay_state: Option<gameplay::State>,
     options_state: options::State,
+    player_options_state: Option<player_options::State>,
     input_state: InputState,
     frame_count: u32,
     last_title_update: Instant,
@@ -113,6 +115,7 @@ impl App {
         Self {
             window: None, backend: None, backend_type, asset_manager: AssetManager::new(),
             current_screen: CurrentScreen::Init, init_state, menu_state, gameplay_state: None, options_state,
+            player_options_state: None,
             select_color_state, select_music_state, sandbox_state: sandbox::init(), evaluation_state,
             input_state: input::init_state(), frame_count: 0, last_title_update: Instant::now(), last_frame_time: Instant::now(),
             start_time: Instant::now(), metrics: space::metrics_for_window(display_width, display_height), preferred_difficulty_index: 2, // Default to Medium
@@ -215,6 +218,11 @@ impl App {
                 } else { vec![] }
             },
             CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
+            CurrentScreen::PlayerOptions => {
+                if let Some(pos) = &self.player_options_state {
+                    player_options::get_actors(pos)
+                } else { vec![] }
+            },
             CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, screen_alpha_multiplier),
             CurrentScreen::SelectMusic => select_music::get_actors(&self.select_music_state, &self.asset_manager),
             CurrentScreen::Sandbox  => sandbox::get_actors(&self.sandbox_state),
@@ -251,6 +259,7 @@ impl App {
             CurrentScreen::Menu => menu::out_transition(),
             CurrentScreen::Gameplay => gameplay::out_transition(),
             CurrentScreen::Options => options::out_transition(),
+            CurrentScreen::PlayerOptions => player_options::out_transition(),
             CurrentScreen::SelectColor => select_color::out_transition(),
             CurrentScreen::SelectMusic => select_music::out_transition(),
             CurrentScreen::Sandbox => sandbox::out_transition(),
@@ -264,6 +273,7 @@ impl App {
             CurrentScreen::Menu => menu::in_transition(),
             CurrentScreen::Gameplay => gameplay::in_transition(),
             CurrentScreen::Options => options::in_transition(),
+            CurrentScreen::PlayerOptions => player_options::in_transition(),
             CurrentScreen::SelectColor => select_color::in_transition(),
             CurrentScreen::SelectMusic => select_music::in_transition(),
             CurrentScreen::Sandbox => sandbox::in_transition(),
@@ -403,6 +413,13 @@ impl App {
                 }
             }
             CurrentScreen::Options => options::handle_key_press(&mut self.options_state, &key_event),
+            CurrentScreen::PlayerOptions => {
+                if let Some(pos) = &mut self.player_options_state {
+                    player_options::handle_key_press(pos, &key_event)
+                } else {
+                    ScreenAction::None
+                }
+            }
             CurrentScreen::SelectColor => select_color::handle_key_press(&mut self.select_color_state, &key_event),
             CurrentScreen::Sandbox => sandbox::handle_key_press(&mut self.sandbox_state, &key_event),
             CurrentScreen::SelectMusic => select_music::handle_key_press(&mut self.select_music_state, &key_event),
@@ -525,6 +542,19 @@ impl App {
                             play_sound = false; // select_music handles its own sounds
                             select_music::handle_pad_button(&mut self.select_music_state, PadButton::Confirm, true)
                         },
+                        CurrentScreen::PlayerOptions => {
+                            if let Some(pos) = &self.player_options_state {
+                                if pos.rows[pos.selected_row].name == "Exit" {
+                                    if pos.rows[pos.selected_row].selected_choice_index == 0 {
+                                        ScreenAction::Navigate(Screen::Gameplay)
+                                    } else {
+                                        ScreenAction::Navigate(Screen::SelectMusic)
+                                    }
+                                } else {
+                                    ScreenAction::None
+                                }
+                            } else { ScreenAction::None }
+                        }
                         CurrentScreen::Evaluation => {
                             play_sound = false; // No sound when leaving eval
                             ScreenAction::Navigate(Screen::SelectMusic)
@@ -559,6 +589,23 @@ impl App {
                             CurrentScreen::SelectMusic => {
                                 play_sound = false; // select_music handles its own sounds
                                 select_music::handle_pad_button(&mut self.select_music_state, PadButton::Confirm, true)
+                            },
+                            CurrentScreen::PlayerOptions => {
+                                if let Some(pos) = &self.player_options_state {
+                                    if pos.rows[pos.selected_row].name == "Exit" {
+                                        if pos.rows[pos.selected_row].selected_choice_index == 0 {
+                                            ScreenAction::Navigate(Screen::Gameplay)
+                                        } else {
+                                            ScreenAction::Navigate(Screen::SelectMusic)
+                                        }
+                                    } else {
+                                        play_sound = false;
+                                        ScreenAction::None
+                                    }
+                                } else {
+                                    play_sound = false;
+                                    ScreenAction::None
+                                }
                             },
                             CurrentScreen::Gameplay => {
                                 if let Some(gs) = &mut self.gameplay_state {
@@ -597,6 +644,7 @@ impl App {
                             CurrentScreen::Menu => ScreenAction::Exit,
                             CurrentScreen::Evaluation => ScreenAction::Navigate(Screen::SelectMusic),
                             CurrentScreen::Gameplay => ScreenAction::Navigate(Screen::SelectMusic),
+                            CurrentScreen::PlayerOptions => ScreenAction::Navigate(Screen::SelectMusic),
                             // Default for Options, SelectColor, SelectMusic, Sandbox is to go back to Menu
                             _ => ScreenAction::Navigate(CurrentScreen::Menu),
                         };
@@ -777,6 +825,11 @@ impl ApplicationHandler for App {
                             CurrentScreen::Options => {
                                 options::update(&mut self.options_state, delta_time);
                             }
+                            CurrentScreen::PlayerOptions => {
+                                if let Some(pos) = &mut self.player_options_state {
+                                    player_options::update(pos, delta_time);
+                                }
+                            }
                             CurrentScreen::Sandbox => sandbox::update(&mut self.sandbox_state, delta_time),
                             CurrentScreen::SelectColor => select_color::update(&mut self.select_color_state, delta_time),
                             CurrentScreen::Evaluation => {
@@ -850,8 +903,11 @@ impl ApplicationHandler for App {
                         }
                     }
 
-                    if prev == CurrentScreen::SelectMusic {
+                    if prev == CurrentScreen::SelectMusic || prev == CurrentScreen::PlayerOptions {
                         crate::core::audio::stop_music();
+                    }
+
+                    if prev == CurrentScreen::SelectMusic {
                         self.preferred_difficulty_index = self.select_music_state.preferred_difficulty_index;
                     }
 
@@ -874,28 +930,39 @@ impl ApplicationHandler for App {
                         let current_color_index = self.options_state.active_color_index;
                         self.options_state = options::init();
                         self.options_state.active_color_index = current_color_index;
-                    }
-
-                    if target == CurrentScreen::Gameplay {
-                        let (song_arc, chart) = {
+                    } else if target == CurrentScreen::PlayerOptions {
+                        let (song_arc, chart_difficulty_index) = {
                             let sm_state = &self.select_music_state;
                             let entry = sm_state.entries.get(sm_state.selected_index).unwrap();
                             let song = match entry {
                                 select_music::MusicWheelEntry::Song(s) => s,
-                                _ => panic!("Cannot start gameplay on a pack header"),
+                                _ => panic!("Cannot open player options on a pack header"),
                             };
-                            let difficulty_name = color::FILE_DIFFICULTY_NAMES[sm_state.selected_difficulty_index];
-                            let chart_ref = song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).unwrap();
-                            (song.clone(), Arc::new(chart_ref.clone()))
+                            (song.clone(), sm_state.selected_difficulty_index)
                         };
                         
-                        let color_index = self.menu_state.active_color_index;
-                        let mut gs = gameplay::init(song_arc, chart, color_index);
-                        // Load dynamic background
-                        if let Some(backend) = self.backend.as_mut() {
-                            gs.background_texture_key = self.asset_manager.set_dynamic_background(backend, gs.song.background_path.clone());
+                        let color_index = self.select_music_state.active_color_index;
+                        self.player_options_state = Some(player_options::init(song_arc, chart_difficulty_index, color_index));
+                    }
+
+                    if target == CurrentScreen::Gameplay {
+                        if let Some(po_state) = self.player_options_state.take() {
+                            let song_arc = po_state.song;
+                            let chart_difficulty_index = po_state.chart_difficulty_index;
+                            let difficulty_name = color::FILE_DIFFICULTY_NAMES[chart_difficulty_index];
+                            let chart_ref = song_arc.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).unwrap();
+                            let chart = Arc::new(chart_ref.clone());
+
+                            let color_index = po_state.active_color_index;
+                            let mut gs = gameplay::init(song_arc, chart, color_index);
+                            
+                            if let Some(backend) = self.backend.as_mut() {
+                                gs.background_texture_key = self.asset_manager.set_dynamic_background(backend, gs.song.background_path.clone());
+                            }
+                            self.gameplay_state = Some(gs);
+                        } else {
+                            panic!("Navigating to Gameplay without PlayerOptions state!");
                         }
-                        self.gameplay_state = Some(gs);
                     }
 
                     if target == CurrentScreen::Evaluation {

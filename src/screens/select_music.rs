@@ -364,7 +364,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                         match entry {
                             MusicWheelEntry::Song(song) => {
                                 info!("Selected song: '{}'. It has {} charts.", song.title, song.charts.len());
-                                return ScreenAction::Navigate(Screen::Gameplay);
+                                return ScreenAction::Navigate(Screen::PlayerOptions);
                             }
                             MusicWheelEntry::PackHeader { name, .. } => {
                                 audio::play_sfx("assets/sounds/expand.ogg");
@@ -529,7 +529,7 @@ pub fn handle_pad_button(state: &mut State, btn: PadButton, pressed: bool) -> Sc
                 match entry {
                     MusicWheelEntry::Song(_song) => {
                         // same as Enter on a song
-                        return ScreenAction::Navigate(Screen::Gameplay);
+                        return ScreenAction::Navigate(Screen::PlayerOptions);
                     }
                     MusicWheelEntry::PackHeader { name, .. } => {
                         // toggle expand/collapse (same as Enter on pack)
