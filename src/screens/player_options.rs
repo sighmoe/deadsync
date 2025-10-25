@@ -260,6 +260,7 @@ pub fn update(state: &mut State, _dt: f32) {
     }
 }
 
+
 pub fn get_actors(state: &State) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(64);
 
@@ -270,7 +271,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     }));
 
     actors.push(screen_bar::build(ScreenBarParams {
-        title: "PLAYER OPTIONS",
+        title: "SELECT MODIFIERS",
         title_placement: ScreenBarTitlePlacement::Left,
         position: ScreenBarPosition::Top,
         transparent: false,
@@ -289,16 +290,28 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     };
     actors.push(act!(text: font("wendy"): settext(speed_text):
         align(0.0, 0.5): xy(speed_mod_x, speed_mod_y): zoom(0.5):
-        diffuse(speed_color[0], speed_color[1], speed_color[2], 1.0)
+        diffuse(speed_color[0], speed_color[1], speed_color[2], 1.0):
+        z(121) // Draw above the screen bar and option rows
     ));
 
-    // Option Rows (from metrics.ini)
+    // --- LAYOUT FIXES APPLIED HERE ---
+
+    // 1. Corrected width for all option rows.
+    let options_width = widescale(614.0, 792.0);
+
+    // 2. Corrected row height. The 0.065 in metrics.ini is likely a truncated 32/480.
+    //    Using a 32px base height at 480p logical resolution is consistent with other screens.
+    let row_spacing = screen_height() * (32.0 / 480.0);
+    let frame_h = row_spacing - 1.0; // The visible quad is 1px shorter to create a gap.
+
     for i in 0..state.rows.len() {
-        let row_y = (screen_center_y() - 170.0) + (screen_height() * 0.065 * i as f32);
+        // 3. Corrected vertical starting position to prevent overlap with the speed mod display.
+        //    The -170 in metrics.ini is too high; -160 provides the necessary clearance.
+        let start_y_offset = -160.0;
+        let row_y = screen_center_y() + start_y_offset + (row_spacing * i as f32);
+
         let is_active = i == state.selected_row;
         let row = &state.rows[i];
-
-        let frame_h = screen_height() * 0.065 - 1.0; // Add 1px gap like SL
 
         let active_bg = color::rgba_hex("#333333");
         let inactive_bg_base = color::rgba_hex("#071016");
@@ -309,11 +322,13 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             [inactive_bg_base[0], inactive_bg_base[1], inactive_bg_base[2], 0.8]
         };
         actors.push(act!(quad:
-            align(0.5, 0.5): xy(screen_center_x(), row_y): zoomto(screen_width(), frame_h):
-            diffuse(bg_color[0], bg_color[1], bg_color[2], bg_color[3])
+            align(0.5, 0.5): xy(screen_center_x(), row_y):
+            zoomto(options_width, frame_h):
+            diffuse(bg_color[0], bg_color[1], bg_color[2], bg_color[3]):
+            z(100)
         ));
 
-        let title_x = widescale(26.0, 40.0);
+        let title_x = (screen_center_x() - options_width / 2.0) + widescale(26.0, 40.0);
         let title_color = if is_active && row.name != "Exit" {
             color::simply_love_rgba(state.active_color_index)
         } else {
@@ -323,7 +338,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         actors.push(act!(text: font("miso"): settext(row.name.clone()):
             align(0.0, 0.5): xy(title_x, row_y): zoom(0.8):
             diffuse(title_color[0], title_color[1], title_color[2], title_color[3]):
-            horizalign(left): maxwidth(widescale(128.0, 120.0))
+            horizalign(left): maxwidth(widescale(128.0, 120.0)):
+            z(101)
         ));
 
         let choice_x = widescale(screen_center_x() - 100.0, screen_center_x() - 130.0);
@@ -332,7 +348,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
         actors.push(act!(text: font("miso"): settext(choice_text.clone()):
             align(0.0, 0.5): xy(choice_x, row_y): zoom(0.75):
-            diffuse(choice_color[0], choice_color[1], choice_color[2], choice_color[3])
+            diffuse(choice_color[0], choice_color[1], choice_color[2], choice_color[3]):
+            z(101)
         ));
     }
 
