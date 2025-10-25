@@ -1,3 +1,4 @@
+// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/deadsync/src/screens/player_options.rs =====
 use crate::act;
 use crate::core::audio;
 use crate::core::space::*;
@@ -20,18 +21,6 @@ const TRANSITION_OUT_DURATION: f32 = 0.4;
 const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(300);
 const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/* --------------------------------- Layout --------------------------------- */
-const BAR_H: f32 = 32.0;
-const LEFT_MARGIN_PX: f32 = 13.0;
-const RIGHT_MARGIN_PX: f32 = 30.0;
-const FIRST_ROW_TOP_MARGIN_PX: f32 = 10.0;
-const VISIBLE_ROWS: usize = 12;
-const ROW_H: f32 = 32.0;
-const ROW_GAP: f32 = 1.0;
-const LABEL_COL_W: f32 = 240.0;
-const HELP_BOX_H: f32 = 40.0;
-const HELP_BOX_Y_FROM_BOTTOM: f32 = 36.0;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NavDirection {
     Up,
@@ -45,6 +34,11 @@ pub struct Row {
     pub help: Vec<String>,
 }
 
+pub struct SpeedMod {
+    pub mod_type: String, // "X", "C", "M"
+    pub value: f32,
+}
+
 pub struct State {
     pub song: Arc<SongData>,
     pub chart_difficulty_index: usize,
@@ -52,19 +46,33 @@ pub struct State {
     pub selected_row: usize,
     pub prev_selected_row: usize,
     pub active_color_index: i32,
+    pub speed_mod: SpeedMod,
     bg: heart_bg::State,
     nav_key_held_direction: Option<NavDirection>,
     nav_key_held_since: Option<Instant>,
     nav_key_last_scrolled_at: Option<Instant>,
 }
 
-fn build_rows() -> Vec<Row> {
+fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
+    let speed_mod_value_str = match speed_mod.mod_type.as_str() {
+        "X" => format!("{:.2}x", speed_mod.value),
+        "C" => format!("C{}", speed_mod.value as i32),
+        "M" => format!("M{}", speed_mod.value as i32),
+        _ => "".to_string(),
+    };
+
     vec![
         Row {
-            name: "Speed Mod".to_string(),
-            choices: vec!["x1.00".to_string(), "x1.25".to_string(), "x1.50".to_string(), "x1.75".to_string(), "x2.00".to_string(), "C300".to_string(), "M500".to_string()],
-            selected_choice_index: 0,
+            name: "Speed Mod Type".to_string(),
+            choices: vec!["X (multiplier)".to_string(), "C (constant)".to_string(), "M (maximum)".to_string()],
+            selected_choice_index: match speed_mod.mod_type.as_str() { "X" => 0, "C" => 1, "M" => 2, _ => 0 },
             help: vec!["Adjust the scroll speed of the arrows.".to_string(), "x: Multiplier | C: Constant BPM | M: Max BPM".to_string()],
+        },
+        Row {
+            name: "Speed Mod".to_string(),
+            choices: vec![speed_mod_value_str], // Display only the current value
+            selected_choice_index: 0,
+            help: vec!["Use Left/Right to adjust the speed value.".to_string()],
         },
         Row {
             name: "Perspective".to_string(),
@@ -73,8 +81,6 @@ fn build_rows() -> Vec<Row> {
             help: vec!["Changes the camera perspective.".to_string()],
         },
         Row { name: "Note Skin".to_string(), choices: vec!["cel".to_string(), "metal".to_string(), "note".to_string()], selected_choice_index: 0, help: vec!["Change the appearance of the arrows.".to_string()] },
-        Row { name: "Judgment Graphic".to_string(), choices: vec!["ITG".to_string(), "Simply Love".to_string()], selected_choice_index: 1, help: vec!["Change the appearance of judgment text.".to_string()] },
-        Row { name: "Combo Font".to_string(), choices: vec!["ITG".to_string(), "Simply Love".to_string()], selected_choice_index: 1, help: vec!["Change the appearance of the combo text.".to_string()] },
         Row {
             name: "Background Filter".to_string(),
             choices: vec!["Off".to_string(), "Dark".to_string(), "Darker".to_string(), "Darkest".to_string()],
@@ -94,13 +100,16 @@ fn build_rows() -> Vec<Row> {
 }
 
 pub fn init(song: Arc<SongData>, chart_difficulty_index: usize, active_color_index: i32) -> State {
+    let speed_mod = SpeedMod { mod_type: "X".to_string(), value: 1.0 };
+
     State {
         song,
         chart_difficulty_index,
-        rows: build_rows(),
+        rows: build_rows(&speed_mod),
         selected_row: 0,
         prev_selected_row: 0,
         active_color_index,
+        speed_mod,
         bg: heart_bg::State::new(),
         nav_key_held_direction: None,
         nav_key_held_since: None,
@@ -152,22 +161,50 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
                 state.nav_key_held_since = Some(Instant::now());
                 state.nav_key_last_scrolled_at = Some(Instant::now());
             }
-            KeyCode::ArrowLeft | KeyCode::KeyA => {
-                if num_rows > 0 {
-                    let row = &mut state.rows[state.selected_row];
+            KeyCode::ArrowLeft | KeyCode::KeyA | KeyCode::ArrowRight | KeyCode::KeyD => {
+                let row = &mut state.rows[state.selected_row];
+                if row.name == "Speed Mod" {
+                    let delta_dir = if key_code == KeyCode::ArrowLeft || key_code == KeyCode::KeyA { -1.0 } else { 1.0 };
+                    let speed_mod = &mut state.speed_mod;
+                    let (upper, increment) = match speed_mod.mod_type.as_str() {
+                        "X" => (20.0, 0.05),
+                        "C" | "M" => (2000.0, 5.0),
+                        _ => (1.0, 0.1),
+                    };
+                    speed_mod.value += delta_dir * increment;
+                    speed_mod.value = (speed_mod.value / increment).round() * increment;
+                    speed_mod.value = speed_mod.value.clamp(increment, upper);
+
+                    let speed_mod_value_str = match speed_mod.mod_type.as_str() {
+                        "X" => format!("{:.2}x", speed_mod.value),
+                        "C" => format!("C{}", speed_mod.value as i32),
+                        "M" => format!("M{}", speed_mod.value as i32),
+                        _ => "".to_string(),
+                    };
+                    row.choices[0] = speed_mod_value_str;
+                    audio::play_sfx("assets/sounds/change.ogg");
+                } else {
                     let num_choices = row.choices.len();
                     if num_choices > 0 {
-                        row.selected_choice_index = (row.selected_choice_index + num_choices - 1) % num_choices;
-                        audio::play_sfx("assets/sounds/change.ogg");
-                    }
-                }
-            }
-            KeyCode::ArrowRight | KeyCode::KeyD => {
-                if num_rows > 0 {
-                    let row = &mut state.rows[state.selected_row];
-                    let num_choices = row.choices.len();
-                    if num_choices > 0 {
-                        row.selected_choice_index = (row.selected_choice_index + 1) % num_choices;
+                        row.selected_choice_index = if key_code == KeyCode::ArrowLeft || key_code == KeyCode::KeyA {
+                            (row.selected_choice_index + num_choices - 1) % num_choices
+                        } else {
+                            (row.selected_choice_index + 1) % num_choices
+                        };
+
+                        if row.name == "Speed Mod Type" {
+                            state.speed_mod.mod_type = match row.selected_choice_index {
+                                0 => "X".to_string(), 1 => "C".to_string(), 2 => "M".to_string(), _ => "X".to_string()
+                            };
+                            state.speed_mod.value = if state.speed_mod.mod_type == "X" { 1.0 } else { 300.0 };
+                            let speed_mod_value_str = match state.speed_mod.mod_type.as_str() {
+                                "X" => format!("{:.2}x", state.speed_mod.value),
+                                "C" => format!("C{}", state.speed_mod.value as i32),
+                                "M" => format!("M{}", state.speed_mod.value as i32),
+                                _ => "".to_string(),
+                            };
+                            state.rows[1].choices[0] = speed_mod_value_str;
+                        }
                         audio::play_sfx("assets/sounds/change.ogg");
                     }
                 }
@@ -233,7 +270,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     }));
 
     actors.push(screen_bar::build(ScreenBarParams {
-        title: "SELECT MODIFIERS",
+        title: "PLAYER OPTIONS",
         title_placement: ScreenBarTitlePlacement::Left,
         position: ScreenBarPosition::Top,
         transparent: false,
@@ -241,55 +278,89 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         left_text: None, center_text: None, right_text: None, left_avatar: None,
     }));
 
-    let content_w = screen_width() - LEFT_MARGIN_PX - RIGHT_MARGIN_PX;
-    let value_col_w = content_w - LABEL_COL_W;
-    let list_x = LEFT_MARGIN_PX;
-    let list_y = BAR_H + FIRST_ROW_TOP_MARGIN_PX;
+    // Speed Mod Helper Display (from overlay.lua)
+    let speed_mod_y = 48.0;
+    let speed_mod_x = screen_center_x() + widescale(-77.0, -100.0);
+    let speed_color = color::simply_love_rgba(state.active_color_index);
+    let speed_text = if state.speed_mod.mod_type == "X" {
+        format!("{:.2}x", state.speed_mod.value)
+    } else {
+        format!("{}{}", state.speed_mod.mod_type, state.speed_mod.value as i32)
+    };
+    actors.push(act!(text: font("wendy"): settext(speed_text):
+        align(0.0, 0.5): xy(speed_mod_x, speed_mod_y): zoom(0.5):
+        diffuse(speed_color[0], speed_color[1], speed_color[2], 1.0)
+    ));
 
-    let total_items = state.rows.len();
-    let anchor_row: usize = 5;
-    let max_offset = total_items.saturating_sub(VISIBLE_ROWS);
-    let offset_rows = if total_items <= VISIBLE_ROWS { 0 } else { state.selected_row.saturating_sub(anchor_row).min(max_offset) };
+    // Option Rows (from metrics.ini)
+    for i in 0..state.rows.len() {
+        let row_y = (screen_center_y() - 170.0) + (screen_height() * 0.065 * i as f32);
+        let is_active = i == state.selected_row;
+        let row = &state.rows[i];
 
-    for i_vis in 0..VISIBLE_ROWS {
-        let item_idx = offset_rows + i_vis;
-        if item_idx >= total_items { break; }
-
-        let row_y = list_y + (i_vis as f32) * (ROW_H + ROW_GAP);
-        let is_active = item_idx == state.selected_row;
-        let row = &state.rows[item_idx];
+        let frame_h = screen_height() * 0.065 - 1.0; // Add 1px gap like SL
 
         let active_bg = color::rgba_hex("#333333");
         let inactive_bg_base = color::rgba_hex("#071016");
-        let label_bg_base = color::rgba_hex("#000000");
-        let active_text_color = color::simply_love_rgba(state.active_color_index);
         let exit_bg = color::simply_love_rgba(state.active_color_index);
-
-        let (val_bg_col, text_col, val_bg_alpha) = if is_active {
-            (if row.name == "Exit" { exit_bg } else { active_bg }, if row.name == "Exit" { [0.0, 0.0, 0.0, 1.0] } else { active_text_color }, 1.0)
+        let bg_color = if is_active {
+            if row.name == "Exit" { exit_bg } else { active_bg }
         } else {
-            (inactive_bg_base, [1.0, 1.0, 1.0, 1.0], 0.8)
+            [inactive_bg_base[0], inactive_bg_base[1], inactive_bg_base[2], 0.8]
+        };
+        actors.push(act!(quad:
+            align(0.5, 0.5): xy(screen_center_x(), row_y): zoomto(screen_width(), frame_h):
+            diffuse(bg_color[0], bg_color[1], bg_color[2], bg_color[3])
+        ));
+
+        let title_x = widescale(26.0, 40.0);
+        let title_color = if is_active && row.name != "Exit" {
+            color::simply_love_rgba(state.active_color_index)
+        } else {
+            [1.0, 1.0, 1.0, 1.0]
         };
 
-        actors.push(act!(quad: align(0.0, 0.0): xy(list_x, row_y): zoomto(LABEL_COL_W, ROW_H): diffuse(label_bg_base[0], label_bg_base[1], label_bg_base[2], 0.4) ));
-        actors.push(act!(quad: align(0.0, 0.0): xy(list_x + LABEL_COL_W, row_y): zoomto(value_col_w, ROW_H): diffuse(val_bg_col[0], val_bg_col[1], val_bg_col[2], val_bg_alpha) ));
+        actors.push(act!(text: font("miso"): settext(row.name.clone()):
+            align(0.0, 0.5): xy(title_x, row_y): zoom(0.8):
+            diffuse(title_color[0], title_color[1], title_color[2], title_color[3]):
+            horizalign(left): maxwidth(widescale(128.0, 120.0))
+        ));
 
-        let text_h = 20.0;
-        let row_mid_y = row_y + 0.5 * ROW_H;
+        let choice_x = widescale(screen_center_x() - 100.0, screen_center_x() - 130.0);
+        let choice_text = &row.choices[row.selected_choice_index];
+        let choice_color = if is_active && row.name == "Exit" { [0.0, 0.0, 0.0, 1.0] } else { [1.0, 1.0, 1.0, 1.0] };
 
-        actors.push(act!(text: font("miso"): settext(row.name.clone()): align(0.0, 0.5): xy(list_x + 15.0, row_mid_y): zoomtoheight(text_h): diffuse(1.0, 1.0, 1.0, 1.0) ));
-        if let Some(choice_text) = row.choices.get(row.selected_choice_index) {
-             actors.push(act!(text: font("miso"): settext(choice_text.clone()): align(0.5, 0.5): xy(list_x + LABEL_COL_W + 0.5 * value_col_w, row_mid_y): zoomtoheight(text_h): maxwidth(value_col_w - 20.0): horizalign(center): diffuse(text_col[0], text_col[1], text_col[2], text_col[3]) ));
-        }
+        actors.push(act!(text: font("miso"): settext(choice_text.clone()):
+            align(0.0, 0.5): xy(choice_x, row_y): zoom(0.75):
+            diffuse(choice_color[0], choice_color[1], choice_color[2], choice_color[3])
+        ));
     }
 
-    let help_text_y = screen_height() - HELP_BOX_Y_FROM_BOTTOM - HELP_BOX_H;
-    let help_bg_base_color = color::rgba_hex("#000000");
-    actors.push(act!(quad: align(0.0, 0.0): xy(LEFT_MARGIN_PX, help_text_y): zoomto(content_w, HELP_BOX_H): diffuse(help_bg_base_color[0], help_bg_base_color[1], help_bg_base_color[2], 0.8) ));
+    // Help Text Box (from underlay.lua)
+    let help_box_h = 40.0;
+    let help_box_w = widescale(614.0, 792.0);
+    let help_box_x = widescale(13.0, 30.666);
+    let help_box_bottom_y = screen_height() - 36.0;
+
+    actors.push(act!(quad:
+        align(0.0, 1.0): xy(help_box_x, help_box_bottom_y):
+        zoomto(help_box_w, help_box_h):
+        diffuse(0.0, 0.0, 0.0, 0.8)
+    ));
 
     if let Some(row) = state.rows.get(state.selected_row) {
         let help_text = row.help.join(" | ");
-        actors.push(act!(text: font("miso"): settext(help_text): align(0.0, 0.5): xy(LEFT_MARGIN_PX + 15.0, help_text_y + 0.5 * HELP_BOX_H): zoom(0.75): diffuse(1.0, 1.0, 1.0, 1.0): maxwidth(content_w - 30.0)));
+        let help_text_color = color::simply_love_rgba(state.active_color_index);
+        let wrap_width = help_box_w - 30.0; // padding
+
+        actors.push(act!(text:
+            font("miso"): settext(help_text):
+            align(0.0, 0.5): // vertically center in the box
+            xy(help_box_x + 15.0, help_box_bottom_y - (help_box_h / 2.0)):
+            zoom(widescale(0.7, 0.75)):
+            diffuse(help_text_color[0], help_text_color[1], help_text_color[2], 1.0):
+            maxwidth(wrap_width): horizalign(left)
+        ));
     }
 
     actors
