@@ -6,13 +6,7 @@ use crate::ui::color;
 
 // --- Constants ---
 const BAR_H: f32 = 32.0;
-const AVATAR_SIZE: f32 = 28.0;
-const AVATAR_MARGIN_X_NORMAL: f32 = 12.0;
-const AVATAR_MARGIN_X_WIDE: f32 = 16.0;
-const AVATAR_MARGIN_BOTTOM: f32 = 2.0;
-const AVATAR_TEXT_GAP_NORMAL: f32 = 10.0;
-const AVATAR_TEXT_GAP_WIDE: f32 = 12.0;
-const AVATAR_BORDER: f32 = 2.0;
+const AVATAR_SIZE: f32 = 32.0;
 
 // --- Positioning for the main title on the top bar when left-aligned ---
 const TOP_TITLE_OFFSET_X: f32 = 10.0;
@@ -124,31 +118,16 @@ pub fn build(params: ScreenBarParams) -> Actor {
             let text_zoom = wide_scale(0.8, 0.9);
 
             if let Some(avatar) = params.left_avatar {
-                let avatar_margin_x = wide_scale(AVATAR_MARGIN_X_NORMAL, AVATAR_MARGIN_X_WIDE);
-                let avatar_bottom_y = BAR_H - AVATAR_MARGIN_BOTTOM;
-                children.push(act!(quad:
-                    align(0.0, 1.0):
-                    xy(avatar_margin_x - AVATAR_BORDER, avatar_bottom_y + AVATAR_BORDER):
-                    setsize(AVATAR_SIZE + AVATAR_BORDER * 2.0, AVATAR_SIZE + AVATAR_BORDER * 2.0):
-                    diffuse(0.0, 0.0, 0.0, 0.8):
-                    z(1)
-                ));
                 children.push(act!(sprite(avatar.texture_key):
                     align(0.0, 1.0):
-                    xy(avatar_margin_x, avatar_bottom_y):
+                    xy(0.0, BAR_H):
                     setsize(AVATAR_SIZE, AVATAR_SIZE):
                     z(2)
                 ));
             }
 
             if let Some(text) = params.left_text {
-                let margin_x = if params.left_avatar.is_some() {
-                    let avatar_margin_x = wide_scale(AVATAR_MARGIN_X_NORMAL, AVATAR_MARGIN_X_WIDE);
-                    let gap = wide_scale(AVATAR_TEXT_GAP_NORMAL, AVATAR_TEXT_GAP_WIDE);
-                    avatar_margin_x + AVATAR_SIZE + gap
-                } else {
-                    wide_scale(38.0, 45.0)
-                };
+                let margin_x = wide_scale(38.0, 45.0);
                 children.push(act!(text:
                     align(0.0, 1.0): // horizalign,left; vertalign,bottom
                     xy(margin_x, BAR_H - 9.0):
