@@ -1023,6 +1023,40 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         zoom(0.5): horizalign(right): z(100)
     ));
 
+    // Current BPM Display (1:1 with Simply Love)
+    {
+        let bpm_value = state.timing.get_bpm_for_beat(state.current_beat);
+        let bpm_display = if bpm_value.is_finite() {
+            bpm_value.round() as i32
+        } else {
+            0
+        };
+
+        let bpm_text = bpm_display.to_string();
+        let base_zoom = 1.33;
+        let bpm_y = 52.0;
+        let bpm_x = screen_center_x();
+
+        actors.push(act!(text:
+            font("miso"): settext(bpm_text):
+            align(0.5, 1.0): xy(bpm_x, bpm_y):
+            zoom(base_zoom): horizalign(center): z(150)
+        ));
+
+        let music_rate = 1.0_f32; // Placeholder until dynamic music rate support exists
+        let rate_text = if (music_rate - 1.0).abs() > 0.001 {
+            format!("{music_rate:.2}x rate")
+        } else {
+            String::new()
+        };
+
+        actors.push(act!(text:
+            font("miso"): settext(rate_text):
+            align(0.5, 0.0): xy(bpm_x, bpm_y + 12.0 * base_zoom):
+            zoom(base_zoom * 0.5): horizalign(center): z(150)
+        ));
+    }
+
     // Song Title Box (SongMeter)
     {
         let w = widescale(310.0, 417.0);
