@@ -13,6 +13,7 @@ use crate::gameplay::chart::ChartData;
 use crate::gameplay::scores;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
+use crate::gameplay::profile::ScrollSpeedSetting;
 use crate::assets::AssetManager;
 use crate::ui::font;
 
@@ -33,6 +34,7 @@ pub struct ScoreInfo {
     pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub score_percent: f64,
     pub grade: scores::Grade,
+    pub speed_mod: ScrollSpeedSetting,
 }
 
 pub struct State {
@@ -63,6 +65,7 @@ pub fn init(gameplay_results: Option<gameplay::State>) -> State {
             judgment_counts: gs.judgment_counts.clone(),
             score_percent,
             grade,
+            speed_mod: gs.scroll_speed,
         }
     });
 
@@ -422,7 +425,7 @@ fn build_p2_timing_pane(_state: &State) -> Vec<Actor> {
 
 
 /// Builds the modifiers display pane for P1.
-fn build_modifiers_pane(_state: &State) -> Vec<Actor> {
+fn build_modifiers_pane(state: &State) -> Vec<Actor> {
     // These positions are derived from the original ActorFrame layout to place
     // the text in the exact same world-space position without the frame.
     let p1_side_offset = screen_center_x() - 155.0;
@@ -437,9 +440,13 @@ fn build_modifiers_pane(_state: &State) -> Vec<Actor> {
     // The original large background pane is at z=100. This text needs to be on top.
     let text_z = 101;
 
+    // Get the speed mod from state.score_info
+    let speed_mod_text = state.score_info.as_ref().unwrap().speed_mod.to_string();
+    let final_text = format!("{}, Overhead", speed_mod_text);
+
     let modifier_text = act!(text:
         font("miso"):
-        settext("Overhead"): // Static text as requested
+        settext(final_text):
         align(0.0, 0.0):
         xy(text_x, text_y):
         zoom(font_zoom):
