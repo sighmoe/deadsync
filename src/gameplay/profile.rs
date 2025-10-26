@@ -191,6 +191,22 @@ fn create_default_files() -> Result<(), std::io::Error> {
     Ok(())
 }
 
+fn save_profile_ini() {
+    let profile = PROFILE.lock().unwrap();
+    let mut conf = Ini::new();
+
+    // Set all known values from the struct back into the ini object
+    // to ensure the file is complete, even if it didn't exist.
+    conf.set("userprofile", "DisplayName", Some(profile.display_name.clone()));
+    conf.set("userprofile", "PlayerInitials", Some(profile.player_initials.clone()));
+    conf.set("PlayerOptions", "BackgroundFilter", Some(profile.background_filter.to_string()));
+    conf.set("PlayerOptions", "ScrollSpeed", Some(profile.scroll_speed.to_string()));
+
+    if let Err(e) = conf.write(PROFILE_INI_PATH) {
+        warn!("Failed to save {}: {}", PROFILE_INI_PATH, e);
+    }
+}
+
 pub fn load() {
     if !Path::new(PROFILE_INI_PATH).exists() || !Path::new(GROOVESTATS_INI_PATH).exists() {
         if let Err(e) = create_default_files() {
@@ -252,4 +268,15 @@ pub fn get() -> Profile {
 pub fn set_avatar_texture_key(key: Option<String>) {
     let mut profile = PROFILE.lock().unwrap();
     profile.avatar_texture_key = key;
+}
+
+pub fn update_scroll_speed(setting: ScrollSpeedSetting) {
+    {
+        let mut profile = PROFILE.lock().unwrap();
+        if profile.scroll_speed == setting {
+            return;
+        }
+        profile.scroll_speed = setting;
+    }
+    save_profile_ini();
 }

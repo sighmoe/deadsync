@@ -1,4 +1,3 @@
-// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/deadsync/src/screens/player_options.rs =====
 use crate::act;
 use crate::core::audio;
 use crate::core::space::*;
@@ -65,7 +64,7 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
 
     vec![
         Row {
-            name: "Type of Speed Mod".to_string(),
+            name: "Speed Mod Type".to_string(),
             choices: vec![
                 "X (multiplier)".to_string(),
                 "C (constant)".to_string(),
@@ -75,7 +74,7 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
                 "X" => 0,
                 "C" => 1,
                 "M" => 2,
-                _ => 0,
+                _ => 1, // Default to C
             },
             help: vec![
                 "Adjust the scroll speed of the arrows.".to_string(),
@@ -153,9 +152,12 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
 }
 
 pub fn init(song: Arc<SongData>, chart_difficulty_index: usize, active_color_index: i32) -> State {
-    let speed_mod = SpeedMod {
-        mod_type: "X".to_string(),
-        value: 1.0,
+    let profile = crate::gameplay::profile::get();
+    let speed_mod = match profile.scroll_speed {
+        crate::gameplay::profile::ScrollSpeedSetting::CMod(bpm) => SpeedMod {
+            mod_type: "C".to_string(),
+            value: bpm,
+        },
     };
 
     State {
@@ -264,24 +266,37 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
                             };
 
                         if row.name == "Speed Mod Type" {
-                            state.speed_mod.mod_type = match row.selected_choice_index {
-                                0 => "X".to_string(),
-                                1 => "C".to_string(),
-                                2 => "M".to_string(),
-                                _ => "X".to_string(),
+                            let new_type = match row.selected_choice_index {
+                                0 => "X",
+                                1 => "C",
+                                2 => "M",
+                                _ => "C",
                             };
-                            state.speed_mod.value = if state.speed_mod.mod_type == "X" {
-                                1.0
-                            } else {
-                                300.0
+                            state.speed_mod.mod_type = new_type.to_string();
+
+                            // Reset value to a default for the new type
+                            let new_value = match new_type {
+                                "X" => 1.0,
+                                "C" => 600.0,
+                                "M" => 600.0,
+                                _ => 600.0,
                             };
-                            let speed_mod_value_str = match state.speed_mod.mod_type.as_str() {
-                                "X" => format!("{:.2}x", state.speed_mod.value),
-                                "C" => format!("C{}", state.speed_mod.value as i32),
-                                "M" => format!("M{}", state.speed_mod.value as i32),
+                            state.speed_mod.value = new_value;
+
+                            // Format the new value string
+                            let speed_mod_value_str = match new_type {
+                                "X" => format!("{:.2}x", new_value),
+                                "C" => format!("C{}", new_value as i32),
+                                "M" => format!("M{}", new_value as i32),
                                 _ => "".to_string(),
                             };
-                            state.rows[1].choices[0] = speed_mod_value_str;
+
+                            // Update the choices vec for the "Speed Mod" row.
+                            if let Some(speed_mod_row) = state.rows.get_mut(1) {
+                                if speed_mod_row.name == "Speed Mod" {
+                                    speed_mod_row.choices[0] = speed_mod_value_str;
+                                }
+                            }
                         }
                         audio::play_sfx("assets/sounds/change.ogg");
                     }

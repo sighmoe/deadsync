@@ -904,6 +904,16 @@ impl ApplicationHandler for App {
                     }
 
                     if prev == CurrentScreen::SelectMusic || prev == CurrentScreen::PlayerOptions {
+                        // When leaving PlayerOptions, save the selected speed mod if it's a C-Mod.
+                        if prev == CurrentScreen::PlayerOptions {
+                            if let Some(po_state) = &self.player_options_state {
+                                if po_state.speed_mod.mod_type == "C" {
+                                    let setting = profile::ScrollSpeedSetting::CMod(po_state.speed_mod.value);
+                                    profile::update_scroll_speed(setting);
+                                    info!("Saved C-Mod speed: {}", setting);
+                                }
+                            }
+                        }
                         crate::core::audio::stop_music();
                     }
 
