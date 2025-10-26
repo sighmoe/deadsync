@@ -1,6 +1,7 @@
 use configparser::ini::Ini;
 use log::{info, warn};
 use once_cell::sync::Lazy;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -50,6 +51,86 @@ impl core::fmt::Display for BackgroundFilter {
 }
 
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ScrollSpeedSetting {
+    CMod(f32),
+}
+
+impl ScrollSpeedSetting {
+    pub const ARROW_SPACING: f32 = 64.0;
+
+    pub fn cmod_bpm(self) -> f32 {
+        match self {
+            ScrollSpeedSetting::CMod(bpm) => bpm,
+        }
+    }
+
+    pub fn pixels_per_second(self) -> f32 {
+        let bpm = self.cmod_bpm();
+        (bpm / 60.0) * Self::ARROW_SPACING
+    }
+
+    pub fn travel_time_seconds(self, draw_distance: f32) -> f32 {
+        let speed = self.pixels_per_second();
+        if speed <= 0.0 {
+            0.0
+        } else {
+            draw_distance / speed
+        }
+    }
+}
+
+impl Default for ScrollSpeedSetting {
+    fn default() -> Self { ScrollSpeedSetting::CMod(600.0) }
+}
+
+impl fmt::Display for ScrollSpeedSetting {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ScrollSpeedSetting::CMod(bpm) => {
+                if (*bpm - bpm.round()).abs() < f32::EPSILON {
+                    write!(f, "C{}", bpm.round() as i32)
+                } else {
+                    write!(f, "C{}", bpm)
+                }
+            }
+        }
+    }
+}
+
+impl FromStr for ScrollSpeedSetting {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Err("ScrollSpeed value is empty".to_string());
+        }
+
+        let rest = if let Some(rest) = trimmed.strip_prefix('C') {
+            rest
+        } else if let Some(rest) = trimmed.strip_prefix('c') {
+            rest
+        } else {
+            return Err(format!("ScrollSpeed '{}' must start with 'C'", trimmed));
+        };
+
+        let bpm: f32 = rest
+            .trim()
+            .parse()
+            .map_err(|_| format!("ScrollSpeed '{}' is not a valid number", trimmed))?;
+
+        if bpm <= 0.0 {
+            return Err(format!(
+                "ScrollSpeed '{}' must be greater than zero",
+                trimmed
+            ));
+        }
+
+        Ok(ScrollSpeedSetting::CMod(bpm))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Profile {
     pub display_name: String,
@@ -60,6 +141,7 @@ pub struct Profile {
     pub background_filter: BackgroundFilter,
     pub avatar_path: Option<PathBuf>,
     pub avatar_texture_key: Option<String>,
+    pub scroll_speed: ScrollSpeedSetting,
 }
 
 impl Default for Profile {
@@ -73,6 +155,7 @@ impl Default for Profile {
             background_filter: BackgroundFilter::default(),
             avatar_path: None,
             avatar_texture_key: None,
+            scroll_speed: ScrollSpeedSetting::default(),
         }
     }
 }
@@ -92,6 +175,7 @@ fn create_default_files() -> Result<(), std::io::Error> {
         profile_conf.set("userprofile", "DisplayName", Some(default_profile.display_name));
         profile_conf.set("userprofile", "PlayerInitials", Some(default_profile.player_initials));
         profile_conf.set("PlayerOptions", "BackgroundFilter", Some(default_profile.background_filter.to_string()));
+        profile_conf.set("PlayerOptions", "ScrollSpeed", Some(default_profile.scroll_speed.to_string()));
         profile_conf.write(PROFILE_INI_PATH)?;
     }
 
@@ -129,6 +213,9 @@ pub fn load() {
         profile.background_filter = profile_conf.get("PlayerOptions", "BackgroundFilter")
             .and_then(|s| BackgroundFilter::from_str(&s).ok())
             .unwrap_or(default_profile.background_filter);
+        profile.scroll_speed = profile_conf.get("PlayerOptions", "ScrollSpeed")
+            .and_then(|s| ScrollSpeedSetting::from_str(&s).ok())
+            .unwrap_or(default_profile.scroll_speed);
     } else {
         warn!("Failed to load '{}', using default display name.", PROFILE_INI_PATH);
     }

@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::gameplay::profile;
+use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::ui::font;
 use crate::assets::AssetManager;
 
@@ -30,7 +30,6 @@ const TRANSITION_IN_DURATION: f32 = 0.4;
 const TRANSITION_OUT_DURATION: f32 = 0.4;
 
 // Gameplay Layout & Feel
-const SCROLL_SPEED_SECONDS: f32 = 0.60; // Time for a note to travel screen_height() pixels
 const RECEPTOR_Y_OFFSET_FROM_CENTER: f32 = -125.0; // From Simply Love metrics for standard up-scroll
 
 //const DANGER_THRESHOLD: f32 = 0.2; // For implementation of red/green flashing light
@@ -169,6 +168,9 @@ pub struct State {
     pub noteskin: Option<Noteskin>,
     pub active_color_index: i32,
     pub player_color: [f32; 4],
+    pub scroll_speed: ScrollSpeedSetting,
+    pub scroll_pixels_per_second: f32,
+    pub scroll_travel_time: f32,
     pub receptor_glow_timers: [f32; 4], // Timers for glow effect on each receptor
     pub receptor_bop_timers: [f32; 4],  // Timers for the "bop" animation on empty press
 
@@ -286,6 +288,27 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         warn!("No music path found for song '{}'", song.title);
     }
 
+    let profile = profile::get();
+    let scroll_speed = profile.scroll_speed;
+    let mut pixels_per_second = scroll_speed.pixels_per_second();
+    if pixels_per_second <= 0.0 {
+        warn!(
+            "Scroll speed {} produced non-positive velocity; falling back to default.",
+            scroll_speed
+        );
+        pixels_per_second = ScrollSpeedSetting::default().pixels_per_second();
+    }
+    let mut travel_time = scroll_speed.travel_time_seconds(screen_height());
+    if travel_time <= 0.0 {
+        travel_time = screen_height() / pixels_per_second;
+    }
+    info!(
+        "Scroll speed set to {} ({} BPM), {:.2} px/s",
+        scroll_speed,
+        scroll_speed.cmod_bpm(),
+        pixels_per_second
+    );
+
     State {
         song,
         chart,
@@ -321,6 +344,9 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         noteskin,
         active_color_index,
         player_color: color::decorative_rgba(active_color_index),
+        scroll_speed,
+        scroll_pixels_per_second: pixels_per_second,
+        scroll_travel_time: travel_time,
         receptor_glow_timers: [0.0; 4],
         receptor_bop_timers: [0.0; 4],
         total_elapsed_in_screen: 0.0,
@@ -591,7 +617,7 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     for timer in &mut state.receptor_glow_timers { *timer = (*timer - delta_time).max(0.0); }
     for timer in &mut state.receptor_bop_timers { *timer = (*timer - delta_time).max(0.0); }
 
-    let lookahead_time = music_time_sec + SCROLL_SPEED_SECONDS;
+    let lookahead_time = music_time_sec + state.scroll_travel_time;
     let lookahead_beat = state.timing.get_beat_for_time(lookahead_time);
     while state.note_spawn_cursor < state.notes.len() && state.notes[state.note_spawn_cursor].beat < lookahead_beat {
         let note = &state.notes[state.note_spawn_cursor];
@@ -781,7 +807,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let playfield_center_x = screen_center_x() - (clamped_width * 0.25);
 
     let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
-    let pixels_per_second = screen_height() / SCROLL_SPEED_SECONDS;
+    let pixels_per_second = state.scroll_pixels_per_second;
 
     // --- Banner (1:1 with Simply Love, including parent frame logic) ---
     if let Some(banner_path) = &state.song.banner_path {
