@@ -26,6 +26,8 @@ const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(50);
 enum NavDirection {
     Up,
     Down,
+    Left,
+    Right,
 }
 
 pub struct Row {
@@ -206,6 +208,72 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
     (vec![actor], TRANSITION_OUT_DURATION)
 }
 
+fn change_choice(state: &mut State, delta: isize) {
+    let row = &mut state.rows[state.selected_row];
+    if row.name == "Speed Mod" {
+        let speed_mod = &mut state.speed_mod;
+        let (upper, increment) = match speed_mod.mod_type.as_str() {
+            "X" => (20.0, 0.05),
+            "C" | "M" => (2000.0, 5.0),
+            _ => (1.0, 0.1),
+        };
+        speed_mod.value += delta as f32 * increment;
+        speed_mod.value = (speed_mod.value / increment).round() * increment;
+        speed_mod.value = speed_mod.value.clamp(increment, upper);
+
+        let speed_mod_value_str = match speed_mod.mod_type.as_str() {
+            "X" => format!("{:.2}x", speed_mod.value),
+            "C" => format!("C{}", speed_mod.value as i32),
+            "M" => format!("M{}", speed_mod.value as i32),
+            _ => "".to_string(),
+        };
+        row.choices[0] = speed_mod_value_str;
+        audio::play_sfx("assets/sounds/change.ogg");
+    } else {
+        let num_choices = row.choices.len();
+        if num_choices > 0 {
+            let current_idx = row.selected_choice_index as isize;
+            row.selected_choice_index =
+                ((current_idx + delta + num_choices as isize) % num_choices as isize) as usize;
+
+            if row.name == "Speed Mod Type" {
+                let new_type = match row.selected_choice_index {
+                    0 => "X",
+                    1 => "C",
+                    2 => "M",
+                    _ => "C",
+                };
+                state.speed_mod.mod_type = new_type.to_string();
+
+                // Reset value to a default for the new type
+                let new_value = match new_type {
+                    "X" => 1.0,
+                    "C" => 600.0,
+                    "M" => 600.0,
+                    _ => 600.0,
+                };
+                state.speed_mod.value = new_value;
+
+                // Format the new value string
+                let speed_mod_value_str = match new_type {
+                    "X" => format!("{:.2}x", new_value),
+                    "C" => format!("C{}", new_value as i32),
+                    "M" => format!("M{}", new_value as i32),
+                    _ => "".to_string(),
+                };
+
+                // Update the choices vec for the "Speed Mod" row.
+                if let Some(speed_mod_row) = state.rows.get_mut(1) {
+                    if speed_mod_row.name == "Speed Mod" {
+                        speed_mod_row.choices[0] = speed_mod_value_str;
+                    }
+                }
+            }
+            audio::play_sfx("assets/sounds/change.ogg");
+        }
+    }
+}
+
 pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
     let num_rows = state.rows.len();
     let key_code = if let PhysicalKey::Code(code) = e.physical_key {
@@ -237,78 +305,17 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
                 state.nav_key_held_since = Some(Instant::now());
                 state.nav_key_last_scrolled_at = Some(Instant::now());
             }
-            KeyCode::ArrowLeft | KeyCode::KeyA | KeyCode::ArrowRight | KeyCode::KeyD => {
-                let row = &mut state.rows[state.selected_row];
-                if row.name == "Speed Mod" {
-                    let delta_dir = if key_code == KeyCode::ArrowLeft || key_code == KeyCode::KeyA {
-                        -1.0
-                    } else {
-                        1.0
-                    };
-                    let speed_mod = &mut state.speed_mod;
-                    let (upper, increment) = match speed_mod.mod_type.as_str() {
-                        "X" => (20.0, 0.05),
-                        "C" | "M" => (2000.0, 5.0),
-                        _ => (1.0, 0.1),
-                    };
-                    speed_mod.value += delta_dir * increment;
-                    speed_mod.value = (speed_mod.value / increment).round() * increment;
-                    speed_mod.value = speed_mod.value.clamp(increment, upper);
-
-                    let speed_mod_value_str = match speed_mod.mod_type.as_str() {
-                        "X" => format!("{:.2}x", speed_mod.value),
-                        "C" => format!("C{}", speed_mod.value as i32),
-                        "M" => format!("M{}", speed_mod.value as i32),
-                        _ => "".to_string(),
-                    };
-                    row.choices[0] = speed_mod_value_str;
-                    audio::play_sfx("assets/sounds/change.ogg");
-                } else {
-                    let num_choices = row.choices.len();
-                    if num_choices > 0 {
-                        row.selected_choice_index =
-                            if key_code == KeyCode::ArrowLeft || key_code == KeyCode::KeyA {
-                                (row.selected_choice_index + num_choices - 1) % num_choices
-                            } else {
-                                (row.selected_choice_index + 1) % num_choices
-                            };
-
-                        if row.name == "Speed Mod Type" {
-                            let new_type = match row.selected_choice_index {
-                                0 => "X",
-                                1 => "C",
-                                2 => "M",
-                                _ => "C",
-                            };
-                            state.speed_mod.mod_type = new_type.to_string();
-
-                            // Reset value to a default for the new type
-                            let new_value = match new_type {
-                                "X" => 1.0,
-                                "C" => 600.0,
-                                "M" => 600.0,
-                                _ => 600.0,
-                            };
-                            state.speed_mod.value = new_value;
-
-                            // Format the new value string
-                            let speed_mod_value_str = match new_type {
-                                "X" => format!("{:.2}x", new_value),
-                                "C" => format!("C{}", new_value as i32),
-                                "M" => format!("M{}", new_value as i32),
-                                _ => "".to_string(),
-                            };
-
-                            // Update the choices vec for the "Speed Mod" row.
-                            if let Some(speed_mod_row) = state.rows.get_mut(1) {
-                                if speed_mod_row.name == "Speed Mod" {
-                                    speed_mod_row.choices[0] = speed_mod_value_str;
-                                }
-                            }
-                        }
-                        audio::play_sfx("assets/sounds/change.ogg");
-                    }
-                }
+            KeyCode::ArrowLeft | KeyCode::KeyA => {
+                change_choice(state, -1);
+                state.nav_key_held_direction = Some(NavDirection::Left);
+                state.nav_key_held_since = Some(Instant::now());
+                state.nav_key_last_scrolled_at = Some(Instant::now());
+            }
+            KeyCode::ArrowRight | KeyCode::KeyD => {
+                change_choice(state, 1);
+                state.nav_key_held_direction = Some(NavDirection::Right);
+                state.nav_key_held_since = Some(Instant::now());
+                state.nav_key_last_scrolled_at = Some(Instant::now());
             }
             KeyCode::Enter => {
                 if num_rows > 0 && state.rows[state.selected_row].name == "Exit" {
@@ -322,16 +329,17 @@ pub fn handle_key_press(state: &mut State, e: &KeyEvent) -> ScreenAction {
             _ => {}
         }
     } else if e.state == ElementState::Released {
-        if let Some(dir) = state.nav_key_held_direction {
-            match (dir, key_code) {
-                (NavDirection::Up, KeyCode::ArrowUp | KeyCode::KeyW)
-                | (NavDirection::Down, KeyCode::ArrowDown | KeyCode::KeyS) => {
-                    state.nav_key_held_direction = None;
-                    state.nav_key_held_since = None;
-                    state.nav_key_last_scrolled_at = None;
-                }
-                _ => {}
-            }
+        let direction_to_clear = match key_code {
+            KeyCode::ArrowUp | KeyCode::KeyW => Some(NavDirection::Up),
+            KeyCode::ArrowDown | KeyCode::KeyS => Some(NavDirection::Down),
+            KeyCode::ArrowLeft | KeyCode::KeyA => Some(NavDirection::Left),
+            KeyCode::ArrowRight | KeyCode::KeyD => Some(NavDirection::Right),
+            _ => None,
+        };
+        if state.nav_key_held_direction == direction_to_clear {
+            state.nav_key_held_direction = None;
+            state.nav_key_held_since = None;
+            state.nav_key_last_scrolled_at = None;
         }
     }
     ScreenAction::None
@@ -346,13 +354,19 @@ pub fn update(state: &mut State, _dt: f32) {
         let now = Instant::now();
         if now.duration_since(held_since) > NAV_INITIAL_HOLD_DELAY {
             if now.duration_since(last_scrolled_at) >= NAV_REPEAT_SCROLL_INTERVAL {
-                let total = state.rows.len();
-                if total > 0 {
+                let total_rows = state.rows.len();
+                if total_rows > 0 {
                     match direction {
                         NavDirection::Up => {
-                            state.selected_row = (state.selected_row + total - 1) % total
+                            state.selected_row = (state.selected_row + total_rows - 1) % total_rows
                         }
-                        NavDirection::Down => state.selected_row = (state.selected_row + 1) % total,
+                        NavDirection::Down => state.selected_row = (state.selected_row + 1) % total_rows,
+                        NavDirection::Left => {
+                            change_choice(state, -1);
+                        }
+                        NavDirection::Right => {
+                            change_choice(state, 1);
+                        }
                     }
                     state.nav_key_last_scrolled_at = Some(now);
                 }
