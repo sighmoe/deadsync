@@ -54,24 +54,30 @@ impl core::fmt::Display for BackgroundFilter {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ScrollSpeedSetting {
     CMod(f32),
+    XMod(f32),
 }
 
 impl ScrollSpeedSetting {
     pub const ARROW_SPACING: f32 = 64.0;
 
-    pub fn cmod_bpm(self) -> f32 {
+    pub fn effective_bpm(self, current_chart_bpm: f32) -> f32 {
         match self {
             ScrollSpeedSetting::CMod(bpm) => bpm,
+            ScrollSpeedSetting::XMod(multiplier) => current_chart_bpm * multiplier,
         }
     }
 
-    pub fn pixels_per_second(self) -> f32 {
-        let bpm = self.cmod_bpm();
-        (bpm / 60.0) * Self::ARROW_SPACING
+    pub fn pixels_per_second(self, current_chart_bpm: f32) -> f32 {
+        let bpm = self.effective_bpm(current_chart_bpm);
+        if !bpm.is_finite() || bpm <= 0.0 {
+            0.0
+        } else {
+            (bpm / 60.0) * Self::ARROW_SPACING
+        }
     }
 
-    pub fn travel_time_seconds(self, draw_distance: f32) -> f32 {
-        let speed = self.pixels_per_second();
+    pub fn travel_time_seconds(self, draw_distance: f32, current_chart_bpm: f32) -> f32 {
+        let speed = self.pixels_per_second(current_chart_bpm);
         if speed <= 0.0 {
             0.0
         } else {
@@ -94,6 +100,13 @@ impl fmt::Display for ScrollSpeedSetting {
                     write!(f, "C{}", bpm)
                 }
             }
+            ScrollSpeedSetting::XMod(multiplier) => {
+                if (*multiplier - multiplier.round()).abs() < f32::EPSILON {
+                    write!(f, "X{}", multiplier.round() as i32)
+                } else {
+                    write!(f, "X{:.2}", multiplier)
+                }
+            }
         }
     }
 }
@@ -107,27 +120,35 @@ impl FromStr for ScrollSpeedSetting {
             return Err("ScrollSpeed value is empty".to_string());
         }
 
-        let rest = if let Some(rest) = trimmed.strip_prefix('C') {
-            rest
+        let (variant, value_str) = if let Some(rest) = trimmed.strip_prefix('C') {
+            ("C", rest)
         } else if let Some(rest) = trimmed.strip_prefix('c') {
-            rest
+            ("C", rest)
+        } else if let Some(rest) = trimmed.strip_prefix('X') {
+            ("X", rest)
+        } else if let Some(rest) = trimmed.strip_prefix('x') {
+            ("X", rest)
         } else {
-            return Err(format!("ScrollSpeed '{}' must start with 'C'", trimmed));
+            return Err(format!("ScrollSpeed '{}' must start with 'C' or 'X'", trimmed));
         };
 
-        let bpm: f32 = rest
+        let value: f32 = value_str
             .trim()
             .parse()
             .map_err(|_| format!("ScrollSpeed '{}' is not a valid number", trimmed))?;
 
-        if bpm <= 0.0 {
+        if value <= 0.0 {
             return Err(format!(
                 "ScrollSpeed '{}' must be greater than zero",
                 trimmed
             ));
         }
 
-        Ok(ScrollSpeedSetting::CMod(bpm))
+        match variant {
+            "C" => Ok(ScrollSpeedSetting::CMod(value)),
+            "X" => Ok(ScrollSpeedSetting::XMod(value)),
+            _ => Err(format!("ScrollSpeed '{}' has an unsupported modifier", trimmed)),
+        }
     }
 }
 

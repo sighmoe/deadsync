@@ -907,10 +907,20 @@ impl ApplicationHandler for App {
                         // When leaving PlayerOptions, save the selected speed mod if it's a C-Mod.
                         if prev == CurrentScreen::PlayerOptions {
                             if let Some(po_state) = &self.player_options_state {
-                                if po_state.speed_mod.mod_type == "C" {
-                                    let setting = profile::ScrollSpeedSetting::CMod(po_state.speed_mod.value);
+                                let setting = match po_state.speed_mod.mod_type.as_str() {
+                                    "C" => Some(profile::ScrollSpeedSetting::CMod(po_state.speed_mod.value)),
+                                    "X" => Some(profile::ScrollSpeedSetting::XMod(po_state.speed_mod.value)),
+                                    _ => None,
+                                };
+
+                                if let Some(setting) = setting {
                                     profile::update_scroll_speed(setting);
-                                    info!("Saved C-Mod speed: {}", setting);
+                                    info!("Saved scroll speed: {}", setting);
+                                } else {
+                                    warn!(
+                                        "Unsupported speed mod '{}' not saved to profile.",
+                                        po_state.speed_mod.mod_type
+                                    );
                                 }
                             }
                         }
