@@ -1033,14 +1033,27 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         };
 
         let bpm_text = bpm_display.to_string();
-        let base_zoom = 1.33;
-        let bpm_y = 52.0;
+        
+        // Final world-space positions derived from analyzing the SM Lua transforms.
+        // The parent frame is bottom-aligned to y=52, and its children are positioned
+        // relative to that y-coordinate, with a zoom of 1.33 applied to the whole group.
+        let frame_origin_y = 51.0;
+        let frame_zoom = 1.33;
+
+        // The BPM text is at y=0 relative to the frame's origin. Its final position is just the origin.
+        let bpm_center_y = frame_origin_y;
+        // The Rate text is at y=12 relative to the frame's origin. Its offset is scaled by the frame's zoom.
+        let rate_center_y = frame_origin_y + (12.0 * frame_zoom); 
+        
+        let bpm_final_zoom = 1.0 * frame_zoom;
+        let rate_final_zoom = 0.5 * frame_zoom;
+
         let bpm_x = screen_center_x();
 
         actors.push(act!(text:
             font("miso"): settext(bpm_text):
-            align(0.5, 1.0): xy(bpm_x, bpm_y):
-            zoom(base_zoom): horizalign(center): z(150)
+            align(0.5, 0.5): xy(bpm_x, bpm_center_y):
+            zoom(bpm_final_zoom): horizalign(center): z(150)
         ));
 
         let music_rate = 1.0_f32; // Placeholder until dynamic music rate support exists
@@ -1052,8 +1065,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
         actors.push(act!(text:
             font("miso"): settext(rate_text):
-            align(0.5, 0.0): xy(bpm_x, bpm_y + 12.0 * base_zoom):
-            zoom(base_zoom * 0.5): horizalign(center): z(150)
+            align(0.5, 0.5): xy(bpm_x, rate_center_y):
+            zoom(rate_final_zoom): horizalign(center): z(150)
         ));
     }
 
