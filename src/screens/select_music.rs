@@ -44,6 +44,7 @@ const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
 const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(200);
 const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(40);
 const PREVIEW_DELAY_SECONDS: f32 = 0.25;
+const PREVIEW_FADE_OUT_SECONDS: f64 = 1.5;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum NavDirection { Left, Right }
@@ -648,7 +649,12 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
                 if let (Some(path), Some(start), Some(length)) = (&song.music_path, song.sample_start, song.sample_length) {
                     if length > 0.0 {
                         info!("Playing preview for '{}' at {:.2}s for {:.2}s", song.title, start, length);
-                        let cut = audio::Cut { start_sec: start as f64, length_sec: length as f64 };
+                        let cut = audio::Cut {
+                            start_sec: start as f64,
+                            length_sec: length as f64,
+                            fade_out_sec: PREVIEW_FADE_OUT_SECONDS,
+                            ..Default::default()
+                        };
                         audio::play_music(path.clone(), cut, true);
                         played = true;
                     }

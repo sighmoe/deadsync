@@ -339,7 +339,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
     if let Some(music_path) = &song.music_path {
         info!("Starting music with a preroll delay of {:.2}s", start_delay);
-        let cut = audio::Cut { start_sec: (-start_delay) as f64, length_sec: f64::INFINITY };
+        let cut = audio::Cut { start_sec: (-start_delay) as f64, length_sec: f64::INFINITY, ..Default::default() };
         audio::play_music(music_path.clone(), cut, false);
     } else {
         warn!("No music path found for song '{}'", song.title);
