@@ -6,6 +6,7 @@ use log::{info, warn};
 use std::{
     collections::HashMap,
     error::Error,
+    fs,
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
@@ -171,34 +172,59 @@ impl AssetManager {
         register_texture_dims("__white", 1, 1);
         info!("Loaded built-in texture: __white");
 
-        let textures_to_load: Vec<(&'static str, &'static str)> = vec![
-            ("logo.png", "logo.png"), ("init_arrow.png", "init_arrow.png"),
-            ("dance.png", "dance.png"), ("meter_arrow.png", "meter_arrow.png"), ("rounded-square.png", "rounded-square.png"),
-            ("swoosh.png", "swoosh.png"),
-            ("heart.png", "heart.png"), ("banner1.png", "_fallback/banner1.png"),
-            ("banner2.png", "_fallback/banner2.png"), ("banner3.png", "_fallback/banner3.png"),
-            ("banner4.png", "_fallback/banner4.png"), ("banner5.png", "_fallback/banner5.png"),
-            ("banner6.png", "_fallback/banner6.png"), ("banner7.png", "_fallback/banner7.png"),
-            ("banner8.png", "_fallback/banner8.png"), ("banner9.png", "_fallback/banner9.png"),
-            ("banner10.png", "_fallback/banner10.png"), ("banner11.png", "_fallback/banner11.png"),
-            ("banner12.png", "_fallback/banner12.png"),
-            ("noteskins/metal/tex notes.png", "noteskins/metal/tex notes.png"),
-            ("noteskins/metal/tex receptors.png", "noteskins/metal/tex receptors.png"),
-            ("noteskins/metal/tex glow.png", "noteskins/metal/tex glow.png"),
-            ("judgements/Love 2x7 (doubleres).png", "judgements/Love 2x7 (doubleres).png"),
-            ("grades/grades 1x19.png", "grades/grades 1x19.png"),
+        let mut textures_to_load: Vec<(String, String)> = vec![
+            ("logo.png".to_string(), "logo.png".to_string()),
+            ("init_arrow.png".to_string(), "init_arrow.png".to_string()),
+            ("dance.png".to_string(), "dance.png".to_string()),
+            ("meter_arrow.png".to_string(), "meter_arrow.png".to_string()),
+            ("rounded-square.png".to_string(), "rounded-square.png".to_string()),
+            ("swoosh.png".to_string(), "swoosh.png".to_string()),
+            ("heart.png".to_string(), "heart.png".to_string()),
+            ("banner1.png".to_string(), "_fallback/banner1.png".to_string()),
+            ("banner2.png".to_string(), "_fallback/banner2.png".to_string()),
+            ("banner3.png".to_string(), "_fallback/banner3.png".to_string()),
+            ("banner4.png".to_string(), "_fallback/banner4.png".to_string()),
+            ("banner5.png".to_string(), "_fallback/banner5.png".to_string()),
+            ("banner6.png".to_string(), "_fallback/banner6.png".to_string()),
+            ("banner7.png".to_string(), "_fallback/banner7.png".to_string()),
+            ("banner8.png".to_string(), "_fallback/banner8.png".to_string()),
+            ("banner9.png".to_string(), "_fallback/banner9.png".to_string()),
+            ("banner10.png".to_string(), "_fallback/banner10.png".to_string()),
+            ("banner11.png".to_string(), "_fallback/banner11.png".to_string()),
+            ("banner12.png".to_string(), "_fallback/banner12.png".to_string()),
+            ("noteskins/bar/tex notes.png".to_string(), "noteskins/bar/tex notes.png".to_string()),
+            ("noteskins/bar/tex receptors.png".to_string(), "noteskins/bar/tex receptors.png".to_string()),
+            ("noteskins/bar/tex glow.png".to_string(), "noteskins/bar/tex glow.png".to_string()),
+            (
+                "judgements/Love 2x7 (doubleres).png".to_string(),
+                "judgements/Love 2x7 (doubleres).png".to_string(),
+            ),
+            ("grades/grades 1x19.png".to_string(), "grades/grades 1x19.png".to_string()),
         ];
 
+        if let Ok(entries) = fs::read_dir("assets/noteskins/cel") {
+            for entry in entries.flatten() {
+                if let Some(ext) = entry.path().extension().and_then(|e| e.to_str()) {
+                    if ext.eq_ignore_ascii_case("png") {
+                        if let Ok(name) = entry.file_name().into_string() {
+                            let key = format!("noteskins/cel/{}", name);
+                            textures_to_load.push((key.clone(), key));
+                        }
+                    }
+                }
+            }
+        }
+
         let mut handles = Vec::with_capacity(textures_to_load.len());
-        for &(key, relative_path) in &textures_to_load {
-            let path = if relative_path.starts_with("noteskins/") {
-                Path::new("assets").join(relative_path)
-            } else {
-                Path::new("assets/graphics").join(relative_path)
-            };
+        for (key, relative_path) in textures_to_load {
             handles.push(std::thread::spawn(move || {
+                let path = if relative_path.starts_with("noteskins/") {
+                    Path::new("assets").join(&relative_path)
+                } else {
+                    Path::new("assets/graphics").join(&relative_path)
+                };
                 match image::open(&path) {
-                    Ok(img) => Ok::<(&'static str, RgbaImage), (&'static str, String)>((key, img.to_rgba8())),
+                    Ok(img) => Ok::<(String, RgbaImage), (String, String)>((key, img.to_rgba8())),
                     Err(e) => Err((key, e.to_string())),
                 }
             }));
@@ -209,15 +235,15 @@ impl AssetManager {
             match h.join().expect("texture decode thread panicked") {
                 Ok((key, rgba)) => {
                     let texture = renderer::create_texture(backend, &rgba)?;
-                    self.textures.insert(key.to_string(), texture);
-                    register_texture_dims(key, rgba.width(), rgba.height());
+                    register_texture_dims(&key, rgba.width(), rgba.height());
                     info!("Loaded texture: {}", key);
+                    self.textures.insert(key, texture);
                 }
                 Err((key, msg)) => {
                     warn!("Failed to load texture for key '{}': {}. Using fallback.", key, msg);
                     let texture = renderer::create_texture(backend, &fallback_image)?;
-                    self.textures.insert(key.to_string(), texture);
-                    register_texture_dims(key, fallback_image.width(), fallback_image.height());
+                    register_texture_dims(&key, fallback_image.width(), fallback_image.height());
+                    self.textures.insert(key, texture);
                 }
             }
         }

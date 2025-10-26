@@ -86,6 +86,9 @@ const TRANSITION_OUT_DURATION: f32 = 0.4;
 
 // Gameplay Layout & Feel
 const RECEPTOR_Y_OFFSET_FROM_CENTER: f32 = -125.0; // From Simply Love metrics for standard up-scroll
+const TARGET_ARROW_PIXEL_SIZE: f32 = 64.0; // Match Simply Love's on-screen arrow height
+const TARGET_EXPLOSION_PIXEL_SIZE: f32 = 125.0; // Simply Love tap explosions top out around 125px tall
+const TAP_EXPLOSION_LIFETIME: f32 = 0.3; // seconds
 
 //const DANGER_THRESHOLD: f32 = 0.2; // For implementation of red/green flashing light
 
@@ -164,6 +167,12 @@ pub struct JudgmentRenderInfo {
     pub judged_at: Instant,
 }
 
+#[derive(Clone, Debug)]
+struct ActiveTapExplosion {
+    window: String,
+    elapsed: f32,
+    start_beat: f32,
+}
 
 // NEW: Life change constants
 struct LifeChange;
@@ -179,6 +188,39 @@ impl LifeChange {
     const HELD: f32 = 0.008;
     #[allow(dead_code)]
     const LET_GO: f32 = -0.080;
+}
+
+fn grade_to_window(grade: JudgeGrade) -> Option<&'static str> {
+    match grade {
+        JudgeGrade::Fantastic => Some("W1"),
+        JudgeGrade::Excellent => Some("W2"),
+        JudgeGrade::Great => Some("W3"),
+        JudgeGrade::Decent => Some("W4"),
+        JudgeGrade::WayOff => Some("W5"),
+        JudgeGrade::Miss => None,
+    }
+}
+
+fn trigger_tap_explosion(state: &mut State, column: usize, grade: JudgeGrade) {
+    let Some(window_key) = grade_to_window(grade) else {
+        return;
+    };
+
+    let spawn_window = state.noteskin.as_ref().and_then(|ns| {
+        if ns.tap_explosions.contains_key(window_key) {
+            Some(window_key.to_string())
+        } else {
+            None
+        }
+    });
+
+    if let Some(window) = spawn_window {
+        state.tap_explosions[column] = Some(ActiveTapExplosion {
+            window,
+            elapsed: 0.0,
+            start_beat: state.current_beat,
+        });
+    }
 }
 
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
@@ -230,6 +272,7 @@ pub struct State {
     pub scroll_travel_time: f32,
     pub receptor_glow_timers: [f32; 4], // Timers for glow effect on each receptor
     pub receptor_bop_timers: [f32; 4],  // Timers for the "bop" animation on empty press
+    pub tap_explosions: [Option<ActiveTapExplosion>; 4],
 
     // Animation timing for this screen
     pub total_elapsed_in_screen: f32,
@@ -291,15 +334,9 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     info!("Loaded song '{}' and chart '{}'", song.title, chart.difficulty);
 
     let style = Style { num_cols: 4, num_players: 1 };
-    let mut noteskin = noteskin::load(Path::new("assets/noteskins/metal/dance-single.txt"), &style).ok()
-        .or_else(|| noteskin::load(Path::new("assets/noteskins/metal/all-styles.txt"), &style).ok());
-
-    if let Some(ns) = &mut noteskin {
-        let base_path = Path::new("assets");
-        ns.tex_notes_dims = image::image_dimensions(base_path.join(&ns.tex_notes_path)).unwrap_or((256, 256));
-        ns.tex_receptors_dims = image::image_dimensions(base_path.join(&ns.tex_receptors_path)).unwrap_or((128, 64));
-        ns.tex_glow_dims = image::image_dimensions(base_path.join(&ns.tex_glow_path)).unwrap_or((96, 96));
-    }
+    let noteskin = noteskin::load(Path::new("assets/noteskins/cel/dance-single.txt"), &style)
+        .ok()
+        .or_else(|| noteskin::load(Path::new("assets/noteskins/fallback.txt"), &style).ok());
 
     let config = crate::config::get();
     let timing = Arc::new(TimingData::from_chart_data(
@@ -415,6 +452,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         scroll_travel_time: travel_time,
         receptor_glow_timers: [0.0; 4],
         receptor_bop_timers: [0.0; 4],
+        tap_explosions: Default::default(),
         total_elapsed_in_screen: 0.0,
         hold_to_exit_key: None,
         hold_to_exit_start: None,
@@ -462,11 +500,17 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
             };
 
             state.notes[note_index].result = Some(judgment);
-            info!("JUDGED (pending): Row {}, Col {}, Error: {:.2}ms, Grade: {:?}",
-                  note_row_index, column, time_error * 1000.0, grade);
-            
+            info!(
+                "JUDGED (pending): Row {}, Col {}, Error: {:.2}ms, Grade: {:?}",
+                note_row_index,
+                column,
+                time_error * 1000.0,
+                grade
+            );
+
             state.arrows[column].remove(0);
             state.receptor_glow_timers[column] = RECEPTOR_GLOW_DURATION;
+            trigger_tap_explosion(state, column, grade);
 
             return true;
         }
@@ -698,12 +742,26 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     }
     state.prev_inputs = current_inputs;
 
-    for timer in &mut state.receptor_glow_timers { *timer = (*timer - delta_time).max(0.0); }
-    for timer in &mut state.receptor_bop_timers { *timer = (*timer - delta_time).max(0.0); }
+    for timer in &mut state.receptor_glow_timers {
+        *timer = (*timer - delta_time).max(0.0);
+    }
+    for timer in &mut state.receptor_bop_timers {
+        *timer = (*timer - delta_time).max(0.0);
+    }
+    for explosion in &mut state.tap_explosions {
+        if let Some(active) = explosion {
+            active.elapsed += delta_time;
+            if active.elapsed >= TAP_EXPLOSION_LIFETIME {
+                *explosion = None;
+            }
+        }
+    }
 
     let lookahead_time = music_time_sec + state.scroll_travel_time;
     let lookahead_beat = state.timing.get_beat_for_time(lookahead_time);
-    while state.note_spawn_cursor < state.notes.len() && state.notes[state.note_spawn_cursor].beat < lookahead_beat {
+    while state.note_spawn_cursor < state.notes.len()
+        && state.notes[state.note_spawn_cursor].beat < lookahead_beat
+    {
         let note = &state.notes[state.note_spawn_cursor];
         state.arrows[note.column].push(Arrow {
             beat: note.beat,
@@ -923,43 +981,118 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     }
 
     if let Some(ns) = &state.noteskin {
+        let scale_sprite = |size: [i32; 2]| -> [f32; 2] {
+            let width = size[0].max(0) as f32;
+            let height = size[1].max(0) as f32;
+            if height <= 0.0 || TARGET_ARROW_PIXEL_SIZE <= 0.0 {
+                [width, height]
+            } else {
+                let scale = TARGET_ARROW_PIXEL_SIZE / height;
+                [width * scale, TARGET_ARROW_PIXEL_SIZE]
+            }
+        };
+        let scale_explosion = |size: [i32; 2]| -> [f32; 2] {
+            let width = size[0].max(0) as f32;
+            let height = size[1].max(0) as f32;
+            if height <= 0.0 || TARGET_EXPLOSION_PIXEL_SIZE <= 0.0 {
+                [width, height]
+            } else {
+                let scale = TARGET_EXPLOSION_PIXEL_SIZE / height;
+                [width * scale, TARGET_EXPLOSION_PIXEL_SIZE]
+            }
+        };
+
         // Receptors + glow
         for i in 0..4 {
             let col_x_offset = ns.column_xs[i];
-            
+
             let bop_timer = state.receptor_bop_timers[i];
             let bop_zoom = if bop_timer > 0.0 {
                 let t = (0.11 - bop_timer) / 0.11;
                 0.75 + (1.0 - 0.75) * t
             } else { 1.0 };
 
-            let receptor_def = &ns.receptor_off[i];
-            let uv = noteskin::get_uv_rect(receptor_def, ns.tex_receptors_dims);
-            actors.push(act!(sprite(ns.tex_receptors_path.clone()):
+            let receptor_slot = &ns.receptor_off[i];
+            let receptor_frame =
+                receptor_slot.frame_index(state.total_elapsed_in_screen, state.current_beat);
+            let receptor_uv = receptor_slot.uv_for_frame(receptor_frame);
+            let receptor_size = scale_sprite(receptor_slot.size());
+            let receptor_color = ns.receptor_pulse.color_for_beat(state.current_beat);
+            actors.push(act!(sprite(receptor_slot.texture_key().to_string()):
                 align(0.5, 0.5):
                 xy(playfield_center_x + col_x_offset as f32, receptor_y):
-                zoomto(receptor_def.size[0] as f32, receptor_def.size[1] as f32):
+                zoomto(receptor_size[0] as f32, receptor_size[1] as f32):
                 zoom(bop_zoom):
-                rotationz(-receptor_def.rotation_deg as f32):
-                customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                diffuse(
+                    receptor_color[0],
+                    receptor_color[1],
+                    receptor_color[2],
+                    receptor_color[3]
+                ):
+                rotationz(-receptor_slot.def.rotation_deg as f32):
+                customtexturerect(
+                    receptor_uv[0],
+                    receptor_uv[1],
+                    receptor_uv[2],
+                    receptor_uv[3]
+                ):
                 z(100)
             ));
 
             let glow_timer = state.receptor_glow_timers[i];
             if glow_timer > 0.0 {
-                let glow_def = &ns.receptor_glow[i];
-                let glow_uv = noteskin::get_uv_rect(glow_def, ns.tex_glow_dims);
-                let alpha = (glow_timer / RECEPTOR_GLOW_DURATION).powf(0.75);
-                actors.push(act!(sprite(ns.tex_glow_path.clone()):
-                    align(0.5, 0.5):
-                    xy(playfield_center_x + col_x_offset as f32, receptor_y):
-                    zoomto(glow_def.size[0] as f32, glow_def.size[1] as f32):
-                    rotationz(-glow_def.rotation_deg as f32):
-                    customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], glow_uv[3]):
-                    diffuse(1.0, 1.0, 1.0, alpha):
-                    blend(add):
-                    z(102)
-                ));
+                if let Some(glow_slot) = ns.receptor_glow.get(i).and_then(|slot| slot.as_ref()) {
+                    let glow_frame =
+                        glow_slot.frame_index(state.total_elapsed_in_screen, state.current_beat);
+                    let glow_uv = glow_slot.uv_for_frame(glow_frame);
+                    let glow_size = glow_slot.size();
+                    let alpha = (glow_timer / RECEPTOR_GLOW_DURATION).powf(0.75);
+                    actors.push(act!(sprite(glow_slot.texture_key().to_string()):
+                        align(0.5, 0.5):
+                        xy(playfield_center_x + col_x_offset as f32, receptor_y):
+                        zoomto(glow_size[0] as f32, glow_size[1] as f32):
+                        rotationz(-glow_slot.def.rotation_deg as f32):
+                        customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], glow_uv[3]):
+                        diffuse(1.0, 1.0, 1.0, alpha):
+                        blend(add):
+                        z(102)
+                    ));
+                }
+            }
+        }
+
+        // Tap explosions
+        for i in 0..4 {
+            if let Some(active) = state.tap_explosions[i].as_ref() {
+                if let Some(slot) = ns.tap_explosions.get(&active.window) {
+                    let col_x_offset = ns.column_xs[i];
+                    let anim_time = active.elapsed;
+                    let beat_for_anim = if slot.source.is_beat_based() {
+                        (state.current_beat - active.start_beat).max(0.0)
+                    } else {
+                        state.current_beat
+                    };
+                    let frame = slot.frame_index(anim_time, beat_for_anim);
+                    let uv = slot.uv_for_frame(frame);
+                    let size = scale_explosion(slot.size());
+                    let alpha = (1.0 - (active.elapsed / TAP_EXPLOSION_LIFETIME)).clamp(0.0, 1.0);
+                    let rotation_deg = ns
+                        .receptor_off
+                        .get(i)
+                        .map(|slot| slot.def.rotation_deg)
+                        .unwrap_or(0);
+
+                    actors.push(act!(sprite(slot.texture_key().to_string()):
+                        align(0.5, 0.5):
+                        xy(playfield_center_x + col_x_offset as f32, receptor_y):
+                        zoomto(size[0], size[1]):
+                        customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                        diffuse(1.0, 1.0, 1.0, alpha):
+                        rotationz(-(rotation_deg as f32)):
+                        blend(add):
+                        z(101)
+                    ));
+                }
             }
         }
 
@@ -993,15 +1126,18 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 };
 
                 let note_idx = (arrow.column % 4) * NUM_QUANTIZATIONS + quantization as usize;
-                if let Some(note_def) = ns.notes.get(note_idx) {
-                    let uv = noteskin::get_uv_rect(note_def, ns.tex_notes_dims);
-                    
-                    actors.push(act!(sprite(ns.tex_notes_path.clone()):
+                if let Some(note_slot) = ns.notes.get(note_idx) {
+                    let note_frame =
+                        note_slot.frame_index(state.total_elapsed_in_screen, state.current_beat);
+                    let note_uv = note_slot.uv_for_frame(note_frame);
+                    let note_size = scale_sprite(note_slot.size());
+
+                    actors.push(act!(sprite(note_slot.texture_key().to_string()):
                         align(0.5, 0.5):
                         xy(playfield_center_x + col_x_offset as f32, y_pos):
-                        zoomto(note_def.size[0] as f32, note_def.size[1] as f32):
-                        rotationz(-note_def.rotation_deg as f32):
-                        customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                        zoomto(note_size[0] as f32, note_size[1] as f32):
+                        rotationz(-note_slot.def.rotation_deg as f32):
+                        customtexturerect(note_uv[0], note_uv[1], note_uv[2], note_uv[3]):
                         z(101)
                     ));
                 }
