@@ -910,6 +910,7 @@ impl ApplicationHandler for App {
                                 let setting = match po_state.speed_mod.mod_type.as_str() {
                                     "C" => Some(profile::ScrollSpeedSetting::CMod(po_state.speed_mod.value)),
                                     "X" => Some(profile::ScrollSpeedSetting::XMod(po_state.speed_mod.value)),
+                                    "M" => Some(profile::ScrollSpeedSetting::MMod(po_state.speed_mod.value)),
                                     _ => None,
                                 };
 

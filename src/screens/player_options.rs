@@ -162,6 +162,10 @@ pub fn init(song: Arc<SongData>, chart_difficulty_index: usize, active_color_ind
             mod_type: "X".to_string(),
             value: mult,
         },
+        crate::gameplay::profile::ScrollSpeedSetting::MMod(bpm) => SpeedMod {
+            mod_type: "M".to_string(),
+            value: bpm,
+        },
     };
 
     State {

@@ -23,7 +23,9 @@ pub enum BackgroundFilter {
 }
 
 impl Default for BackgroundFilter {
-    fn default() -> Self { BackgroundFilter::Darkest }
+    fn default() -> Self {
+        BackgroundFilter::Darkest
+    }
 }
 
 impl FromStr for BackgroundFilter {
@@ -50,44 +52,17 @@ impl core::fmt::Display for BackgroundFilter {
     }
 }
 
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ScrollSpeedSetting {
     CMod(f32),
     XMod(f32),
-}
-
-impl ScrollSpeedSetting {
-    pub const ARROW_SPACING: f32 = 64.0;
-
-    pub fn effective_bpm(self, current_chart_bpm: f32) -> f32 {
-        match self {
-            ScrollSpeedSetting::CMod(bpm) => bpm,
-            ScrollSpeedSetting::XMod(multiplier) => current_chart_bpm * multiplier,
-        }
-    }
-
-    pub fn pixels_per_second(self, current_chart_bpm: f32) -> f32 {
-        let bpm = self.effective_bpm(current_chart_bpm);
-        if !bpm.is_finite() || bpm <= 0.0 {
-            0.0
-        } else {
-            (bpm / 60.0) * Self::ARROW_SPACING
-        }
-    }
-
-    pub fn travel_time_seconds(self, draw_distance: f32, current_chart_bpm: f32) -> f32 {
-        let speed = self.pixels_per_second(current_chart_bpm);
-        if speed <= 0.0 {
-            0.0
-        } else {
-            draw_distance / speed
-        }
-    }
+    MMod(f32),
 }
 
 impl Default for ScrollSpeedSetting {
-    fn default() -> Self { ScrollSpeedSetting::CMod(600.0) }
+    fn default() -> Self {
+        ScrollSpeedSetting::CMod(600.0)
+    }
 }
 
 impl fmt::Display for ScrollSpeedSetting {
@@ -105,6 +80,13 @@ impl fmt::Display for ScrollSpeedSetting {
                     write!(f, "X{}", multiplier.round() as i32)
                 } else {
                     write!(f, "X{:.2}", multiplier)
+                }
+            }
+            ScrollSpeedSetting::MMod(bpm) => {
+                if (*bpm - bpm.round()).abs() < f32::EPSILON {
+                    write!(f, "M{}", bpm.round() as i32)
+                } else {
+                    write!(f, "M{}", bpm)
                 }
             }
         }
@@ -128,8 +110,15 @@ impl FromStr for ScrollSpeedSetting {
             ("X", rest)
         } else if let Some(rest) = trimmed.strip_prefix('x') {
             ("X", rest)
+        } else if let Some(rest) = trimmed.strip_prefix('M') {
+            ("M", rest)
+        } else if let Some(rest) = trimmed.strip_prefix('m') {
+            ("M", rest)
         } else {
-            return Err(format!("ScrollSpeed '{}' must start with 'C' or 'X'", trimmed));
+            return Err(format!(
+                "ScrollSpeed '{}' must start with 'C', 'X', or 'M'",
+                trimmed
+            ));
         };
 
         let value: f32 = value_str
@@ -147,7 +136,11 @@ impl FromStr for ScrollSpeedSetting {
         match variant {
             "C" => Ok(ScrollSpeedSetting::CMod(value)),
             "X" => Ok(ScrollSpeedSetting::XMod(value)),
-            _ => Err(format!("ScrollSpeed '{}' has an unsupported modifier", trimmed)),
+            "M" => Ok(ScrollSpeedSetting::MMod(value)),
+            _ => Err(format!(
+                "ScrollSpeed '{}' has an unsupported modifier",
+                trimmed
+            )),
         }
     }
 }
@@ -186,17 +179,36 @@ static PROFILE: Lazy<Mutex<Profile>> = Lazy::new(|| Mutex::new(Profile::default(
 
 /// Creates the default profile directory and .ini files if they don't exist.
 fn create_default_files() -> Result<(), std::io::Error> {
-    info!("Profile files not found, creating defaults in '{}'.", PROFILE_DIR);
+    info!(
+        "Profile files not found, creating defaults in '{}'.",
+        PROFILE_DIR
+    );
     fs::create_dir_all(PROFILE_DIR)?;
 
     // Create profile.ini
     if !Path::new(PROFILE_INI_PATH).exists() {
         let mut profile_conf = Ini::new();
         let default_profile = Profile::default();
-        profile_conf.set("userprofile", "DisplayName", Some(default_profile.display_name));
-        profile_conf.set("userprofile", "PlayerInitials", Some(default_profile.player_initials));
-        profile_conf.set("PlayerOptions", "BackgroundFilter", Some(default_profile.background_filter.to_string()));
-        profile_conf.set("PlayerOptions", "ScrollSpeed", Some(default_profile.scroll_speed.to_string()));
+        profile_conf.set(
+            "userprofile",
+            "DisplayName",
+            Some(default_profile.display_name),
+        );
+        profile_conf.set(
+            "userprofile",
+            "PlayerInitials",
+            Some(default_profile.player_initials),
+        );
+        profile_conf.set(
+            "PlayerOptions",
+            "BackgroundFilter",
+            Some(default_profile.background_filter.to_string()),
+        );
+        profile_conf.set(
+            "PlayerOptions",
+            "ScrollSpeed",
+            Some(default_profile.scroll_speed.to_string()),
+        );
         profile_conf.write(PROFILE_INI_PATH)?;
     }
 
@@ -218,10 +230,26 @@ fn save_profile_ini() {
 
     // Set all known values from the struct back into the ini object
     // to ensure the file is complete, even if it didn't exist.
-    conf.set("userprofile", "DisplayName", Some(profile.display_name.clone()));
-    conf.set("userprofile", "PlayerInitials", Some(profile.player_initials.clone()));
-    conf.set("PlayerOptions", "BackgroundFilter", Some(profile.background_filter.to_string()));
-    conf.set("PlayerOptions", "ScrollSpeed", Some(profile.scroll_speed.to_string()));
+    conf.set(
+        "userprofile",
+        "DisplayName",
+        Some(profile.display_name.clone()),
+    );
+    conf.set(
+        "userprofile",
+        "PlayerInitials",
+        Some(profile.player_initials.clone()),
+    );
+    conf.set(
+        "PlayerOptions",
+        "BackgroundFilter",
+        Some(profile.background_filter.to_string()),
+    );
+    conf.set(
+        "PlayerOptions",
+        "ScrollSpeed",
+        Some(profile.scroll_speed.to_string()),
+    );
 
     if let Err(e) = conf.write(PROFILE_INI_PATH) {
         warn!("Failed to save {}: {}", PROFILE_INI_PATH, e);
@@ -232,9 +260,28 @@ fn save_groovestats_ini() {
     let profile = PROFILE.lock().unwrap();
     let mut conf = Ini::new();
 
-    conf.set("GrooveStats", "ApiKey", Some(profile.groovestats_api_key.clone()));
-    conf.set("GrooveStats", "IsPadPlayer", Some((if profile.groovestats_is_pad_player { "1" } else { "0" }).to_string()));
-    conf.set("GrooveStats", "Username", Some(profile.groovestats_username.clone()));
+    conf.set(
+        "GrooveStats",
+        "ApiKey",
+        Some(profile.groovestats_api_key.clone()),
+    );
+    conf.set(
+        "GrooveStats",
+        "IsPadPlayer",
+        Some(
+            (if profile.groovestats_is_pad_player {
+                "1"
+            } else {
+                "0"
+            })
+            .to_string(),
+        ),
+    );
+    conf.set(
+        "GrooveStats",
+        "Username",
+        Some(profile.groovestats_username.clone()),
+    );
 
     if let Err(e) = conf.write(GROOVESTATS_INI_PATH) {
         warn!("Failed to save {}: {}", GROOVESTATS_INI_PATH, e);
@@ -256,33 +303,45 @@ pub fn load() {
         // Load profile.ini
         let mut profile_conf = Ini::new();
         if profile_conf.load(PROFILE_INI_PATH).is_ok() {
-            profile.display_name =
-                profile_conf.get("userprofile", "DisplayName").unwrap_or(default_profile.display_name.clone());
-            profile.player_initials =
-                profile_conf.get("userprofile", "PlayerInitials").unwrap_or(default_profile.player_initials.clone());
-            profile.background_filter = profile_conf.get("PlayerOptions", "BackgroundFilter")
+            profile.display_name = profile_conf
+                .get("userprofile", "DisplayName")
+                .unwrap_or(default_profile.display_name.clone());
+            profile.player_initials = profile_conf
+                .get("userprofile", "PlayerInitials")
+                .unwrap_or(default_profile.player_initials.clone());
+            profile.background_filter = profile_conf
+                .get("PlayerOptions", "BackgroundFilter")
                 .and_then(|s| BackgroundFilter::from_str(&s).ok())
                 .unwrap_or(default_profile.background_filter);
-            profile.scroll_speed = profile_conf.get("PlayerOptions", "ScrollSpeed")
+            profile.scroll_speed = profile_conf
+                .get("PlayerOptions", "ScrollSpeed")
                 .and_then(|s| ScrollSpeedSetting::from_str(&s).ok())
                 .unwrap_or(default_profile.scroll_speed);
         } else {
-            warn!("Failed to load '{}', using default profile settings.", PROFILE_INI_PATH);
+            warn!(
+                "Failed to load '{}', using default profile settings.",
+                PROFILE_INI_PATH
+            );
         }
 
         // Load groovestats.ini
         let mut gs_conf = Ini::new();
         if gs_conf.load(GROOVESTATS_INI_PATH).is_ok() {
-            profile.groovestats_api_key =
-                gs_conf.get("GrooveStats", "ApiKey").unwrap_or(default_profile.groovestats_api_key.clone());
+            profile.groovestats_api_key = gs_conf
+                .get("GrooveStats", "ApiKey")
+                .unwrap_or(default_profile.groovestats_api_key.clone());
             profile.groovestats_is_pad_player = gs_conf
                 .get("GrooveStats", "IsPadPlayer")
                 .and_then(|v| v.parse::<u8>().ok())
                 .map_or(default_profile.groovestats_is_pad_player, |v| v != 0);
-            profile.groovestats_username =
-                gs_conf.get("GrooveStats", "Username").unwrap_or(default_profile.groovestats_username.clone());
+            profile.groovestats_username = gs_conf
+                .get("GrooveStats", "Username")
+                .unwrap_or(default_profile.groovestats_username.clone());
         } else {
-            warn!("Failed to load '{}', using default GrooveStats info.", GROOVESTATS_INI_PATH);
+            warn!(
+                "Failed to load '{}', using default GrooveStats info.",
+                GROOVESTATS_INI_PATH
+            );
         }
 
         let avatar_path = Path::new(PROFILE_AVATAR_PATH);

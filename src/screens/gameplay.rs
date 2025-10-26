@@ -23,6 +23,61 @@ use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::ui::font;
 use crate::assets::AssetManager;
 
+impl ScrollSpeedSetting {
+    pub const ARROW_SPACING: f32 = 64.0;
+
+    pub fn effective_bpm(self, current_chart_bpm: f32, reference_bpm: f32) -> f32 {
+        match self {
+            ScrollSpeedSetting::CMod(bpm) => bpm,
+            ScrollSpeedSetting::XMod(multiplier) => current_chart_bpm * multiplier,
+            ScrollSpeedSetting::MMod(target_bpm) => {
+                if reference_bpm > 0.0 {
+                    current_chart_bpm * (target_bpm / reference_bpm)
+                } else {
+                    current_chart_bpm
+                }
+            }
+        }
+    }
+
+    pub fn beat_multiplier(self, reference_bpm: f32) -> f32 {
+        match self {
+            ScrollSpeedSetting::XMod(multiplier) => multiplier,
+            ScrollSpeedSetting::MMod(target_bpm) => {
+                if reference_bpm > 0.0 {
+                    target_bpm / reference_bpm
+                } else {
+                    1.0
+                }
+            }
+            _ => 1.0,
+        }
+    }
+
+    pub fn pixels_per_second(self, current_chart_bpm: f32, reference_bpm: f32) -> f32 {
+        let bpm = self.effective_bpm(current_chart_bpm, reference_bpm);
+        if !bpm.is_finite() || bpm <= 0.0 {
+            0.0
+        } else {
+            (bpm / 60.0) * Self::ARROW_SPACING
+        }
+    }
+
+    pub fn travel_time_seconds(
+        self,
+        draw_distance: f32,
+        current_chart_bpm: f32,
+        reference_bpm: f32,
+    ) -> f32 {
+        let speed = self.pixels_per_second(current_chart_bpm, reference_bpm);
+        if speed <= 0.0 {
+            0.0
+        } else {
+            draw_distance / speed
+        }
+    }
+}
+
 // --- CONSTANTS ---
 
 // Transitions
@@ -37,6 +92,7 @@ const RECEPTOR_Y_OFFSET_FROM_CENTER: f32 = -125.0; // From Simply Love metrics f
 // Lead-in timing (from StepMania theme defaults)
 const MIN_SECONDS_TO_STEP: f32 = 6.0;
 const MIN_SECONDS_TO_MUSIC: f32 = 2.0;
+const M_MOD_HIGH_CAP: f32 = 600.0;
 
 // Visual Feedback
 const RECEPTOR_GLOW_DURATION: f32 = 0.2; // How long the glow sprite is visible
@@ -169,6 +225,7 @@ pub struct State {
     pub active_color_index: i32,
     pub player_color: [f32; 4],
     pub scroll_speed: ScrollSpeedSetting,
+    pub scroll_reference_bpm: f32,
     pub scroll_pixels_per_second: f32,
     pub scroll_travel_time: f32,
     pub receptor_glow_timers: [f32; 4], // Timers for glow effect on each receptor
@@ -291,22 +348,29 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     let profile = profile::get();
     let scroll_speed = profile.scroll_speed;
     let initial_bpm = timing.get_bpm_for_beat(first_note_beat);
-    let mut pixels_per_second = scroll_speed.pixels_per_second(initial_bpm);
+    let mut reference_bpm = timing.get_capped_max_bpm(Some(M_MOD_HIGH_CAP));
+    if !reference_bpm.is_finite() || reference_bpm <= 0.0 {
+        reference_bpm = initial_bpm.max(120.0);
+    }
+
+    let mut pixels_per_second = scroll_speed.pixels_per_second(initial_bpm, reference_bpm);
     if !pixels_per_second.is_finite() || pixels_per_second <= 0.0 {
         warn!(
             "Scroll speed {} produced non-positive velocity; falling back to default.",
             scroll_speed
         );
-        pixels_per_second = ScrollSpeedSetting::default().pixels_per_second(initial_bpm);
+        pixels_per_second = ScrollSpeedSetting::default()
+            .pixels_per_second(initial_bpm, reference_bpm);
     }
-    let mut travel_time = scroll_speed.travel_time_seconds(screen_height(), initial_bpm);
+    let mut travel_time =
+        scroll_speed.travel_time_seconds(screen_height(), initial_bpm, reference_bpm);
     if !travel_time.is_finite() || travel_time <= 0.0 {
         travel_time = screen_height() / pixels_per_second;
     }
     info!(
         "Scroll speed set to {} ({:.2} BPM at start), {:.2} px/s",
         scroll_speed,
-        scroll_speed.effective_bpm(initial_bpm),
+        scroll_speed.effective_bpm(initial_bpm, reference_bpm),
         pixels_per_second
     );
 
@@ -346,6 +410,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         active_color_index,
         player_color: color::decorative_rgba(active_color_index),
         scroll_speed,
+        scroll_reference_bpm: reference_bpm,
         scroll_pixels_per_second: pixels_per_second,
         scroll_travel_time: travel_time,
         receptor_glow_timers: [0.0; 4],
@@ -598,15 +663,18 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     state.current_beat = state.timing.get_beat_for_time(music_time_sec);
 
     let current_bpm = state.timing.get_bpm_for_beat(state.current_beat);
-    let mut dynamic_speed = state.scroll_speed.pixels_per_second(current_bpm);
+    let mut dynamic_speed = state
+        .scroll_speed
+        .pixels_per_second(current_bpm, state.scroll_reference_bpm);
     if !dynamic_speed.is_finite() || dynamic_speed <= 0.0 {
-        dynamic_speed = ScrollSpeedSetting::default().pixels_per_second(current_bpm);
+        dynamic_speed = ScrollSpeedSetting::default()
+            .pixels_per_second(current_bpm, state.scroll_reference_bpm);
     }
     state.scroll_pixels_per_second = dynamic_speed;
 
     let mut travel_time = state
         .scroll_speed
-        .travel_time_seconds(screen_height(), current_bpm);
+        .travel_time_seconds(screen_height(), current_bpm, state.scroll_reference_bpm);
     if !travel_time.is_finite() || travel_time <= 0.0 {
         travel_time = screen_height() / dynamic_speed;
     }
@@ -902,9 +970,12 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 let arrow_time = state.timing.get_time_for_beat(arrow.beat);
                 let time_diff = arrow_time - current_time;
                 let y_pos = match state.scroll_speed {
-                    ScrollSpeedSetting::XMod(mult) => {
+                    ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
                         let beat_diff = arrow.beat - state.current_beat;
-                        receptor_y + (beat_diff * ScrollSpeedSetting::ARROW_SPACING * mult)
+                        let multiplier =
+                            state.scroll_speed.beat_multiplier(state.scroll_reference_bpm);
+                        receptor_y
+                            + (beat_diff * ScrollSpeedSetting::ARROW_SPACING * multiplier)
                     }
                     _ => receptor_y + (time_diff * pixels_per_second),
                 };
