@@ -207,57 +207,75 @@ fn save_profile_ini() {
     }
 }
 
+fn save_groovestats_ini() {
+    let profile = PROFILE.lock().unwrap();
+    let mut conf = Ini::new();
+
+    conf.set("GrooveStats", "ApiKey", Some(profile.groovestats_api_key.clone()));
+    conf.set("GrooveStats", "IsPadPlayer", Some((if profile.groovestats_is_pad_player { "1" } else { "0" }).to_string()));
+    conf.set("GrooveStats", "Username", Some(profile.groovestats_username.clone()));
+
+    if let Err(e) = conf.write(GROOVESTATS_INI_PATH) {
+        warn!("Failed to save {}: {}", GROOVESTATS_INI_PATH, e);
+    }
+}
+
 pub fn load() {
     if !Path::new(PROFILE_INI_PATH).exists() || !Path::new(GROOVESTATS_INI_PATH).exists() {
         if let Err(e) = create_default_files() {
             warn!("Failed to create default profile files: {}", e);
-            // Proceed with default struct values.
-            return;
+            // Proceed with default struct values and attempt to save them.
         }
     }
 
-    let mut profile = PROFILE.lock().unwrap();
-    let default_profile = Profile::default();
+    {
+        let mut profile = PROFILE.lock().unwrap();
+        let default_profile = Profile::default();
 
-    // Load profile.ini
-    let mut profile_conf = Ini::new();
-    if profile_conf.load(PROFILE_INI_PATH).is_ok() {
-        profile.display_name =
-            profile_conf.get("userprofile", "DisplayName").unwrap_or(default_profile.display_name.clone());
-        profile.player_initials =
-            profile_conf.get("userprofile", "PlayerInitials").unwrap_or(default_profile.player_initials.clone());
-        profile.background_filter = profile_conf.get("PlayerOptions", "BackgroundFilter")
-            .and_then(|s| BackgroundFilter::from_str(&s).ok())
-            .unwrap_or(default_profile.background_filter);
-        profile.scroll_speed = profile_conf.get("PlayerOptions", "ScrollSpeed")
-            .and_then(|s| ScrollSpeedSetting::from_str(&s).ok())
-            .unwrap_or(default_profile.scroll_speed);
-    } else {
-        warn!("Failed to load '{}', using default display name.", PROFILE_INI_PATH);
-    }
+        // Load profile.ini
+        let mut profile_conf = Ini::new();
+        if profile_conf.load(PROFILE_INI_PATH).is_ok() {
+            profile.display_name =
+                profile_conf.get("userprofile", "DisplayName").unwrap_or(default_profile.display_name.clone());
+            profile.player_initials =
+                profile_conf.get("userprofile", "PlayerInitials").unwrap_or(default_profile.player_initials.clone());
+            profile.background_filter = profile_conf.get("PlayerOptions", "BackgroundFilter")
+                .and_then(|s| BackgroundFilter::from_str(&s).ok())
+                .unwrap_or(default_profile.background_filter);
+            profile.scroll_speed = profile_conf.get("PlayerOptions", "ScrollSpeed")
+                .and_then(|s| ScrollSpeedSetting::from_str(&s).ok())
+                .unwrap_or(default_profile.scroll_speed);
+        } else {
+            warn!("Failed to load '{}', using default profile settings.", PROFILE_INI_PATH);
+        }
 
-    // Load groovestats.ini
-    let mut gs_conf = Ini::new();
-    if gs_conf.load(GROOVESTATS_INI_PATH).is_ok() {
-        profile.groovestats_api_key =
-            gs_conf.get("GrooveStats", "ApiKey").unwrap_or(default_profile.groovestats_api_key.clone());
-        profile.groovestats_is_pad_player = gs_conf
-            .get("GrooveStats", "IsPadPlayer")
-            .and_then(|v| v.parse::<u8>().ok())
-            .map_or(default_profile.groovestats_is_pad_player, |v| v != 0);
-        profile.groovestats_username =
-            gs_conf.get("GrooveStats", "Username").unwrap_or(default_profile.groovestats_username.clone());
-    } else {
-        warn!("Failed to load '{}', using default GrooveStats info.", GROOVESTATS_INI_PATH);
-    }
+        // Load groovestats.ini
+        let mut gs_conf = Ini::new();
+        if gs_conf.load(GROOVESTATS_INI_PATH).is_ok() {
+            profile.groovestats_api_key =
+                gs_conf.get("GrooveStats", "ApiKey").unwrap_or(default_profile.groovestats_api_key.clone());
+            profile.groovestats_is_pad_player = gs_conf
+                .get("GrooveStats", "IsPadPlayer")
+                .and_then(|v| v.parse::<u8>().ok())
+                .map_or(default_profile.groovestats_is_pad_player, |v| v != 0);
+            profile.groovestats_username =
+                gs_conf.get("GrooveStats", "Username").unwrap_or(default_profile.groovestats_username.clone());
+        } else {
+            warn!("Failed to load '{}', using default GrooveStats info.", GROOVESTATS_INI_PATH);
+        }
 
-    let avatar_path = Path::new(PROFILE_AVATAR_PATH);
-    profile.avatar_path = if avatar_path.exists() {
-        Some(avatar_path.to_path_buf())
-    } else {
-        None
-    };
-    profile.avatar_texture_key = None;
+        let avatar_path = Path::new(PROFILE_AVATAR_PATH);
+        profile.avatar_path = if avatar_path.exists() {
+            Some(avatar_path.to_path_buf())
+        } else {
+            None
+        };
+        profile.avatar_texture_key = None;
+    } // Lock is released here.
+
+    save_profile_ini();
+    save_groovestats_ini();
+    info!("Profile configuration files updated with default values for any missing fields.");
 }
 
 /// Returns a copy of the currently loaded profile data.
