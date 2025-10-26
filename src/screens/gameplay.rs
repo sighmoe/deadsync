@@ -857,7 +857,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 zoomto(receptor_def.size[0] as f32, receptor_def.size[1] as f32):
                 zoom(bop_zoom):
                 rotationz(-receptor_def.rotation_deg as f32):
-                customtexturerect(uv[0], uv[1], uv[2], uv[3])
+                customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                z(100)
             ));
 
             let glow_timer = state.receptor_glow_timers[i];
@@ -872,7 +873,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     rotationz(-glow_def.rotation_deg as f32):
                     customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], glow_uv[3]):
                     diffuse(1.0, 1.0, 1.0, alpha):
-                    blend(add)
+                    blend(add):
+                    z(102)
                 ));
             }
         }
@@ -906,7 +908,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         xy(playfield_center_x + col_x_offset as f32, y_pos):
                         zoomto(note_def.size[0] as f32, note_def.size[1] as f32):
                         rotationz(-note_def.rotation_deg as f32):
-                        customtexturerect(uv[0], uv[1], uv[2], uv[3])
+                        customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                        z(101)
                     ));
                 }
             }
@@ -920,7 +923,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             align(0.5, 0.5): xy(playfield_center_x, screen_center_y() + 30.0):
             zoom(0.75): horizalign(center):
             diffuse(1.0, 0.0, 0.0, 1.0):
-            z(200)
+            z(90)
         ));
     } else if state.combo >= SHOW_COMBO_AT {
         let (color1, color2) = if let Some(fc_grade) = &state.full_combo_grade {
@@ -948,7 +951,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             align(0.5, 0.5): xy(playfield_center_x, screen_center_y() + 30.0):
             zoom(0.75): horizalign(center):
             diffuse(final_color[0], final_color[1], final_color[2], final_color[3]):
-            z(200)
+            z(90)
         ));
     }
     
@@ -1004,7 +1007,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 zoom(0.4): diffuse(0.0, 0.0, 0.0, 1.0)
             )
         ],
-        background: None, z: 100,
+        background: None, z: 90,
     });
 
     // Score Display (P1)
@@ -1020,7 +1023,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     actors.push(act!(text:
         font("wendy_monospace_numbers"): settext(percent_text):
         align(1.0, 1.0): xy(score_x, score_y):
-        zoom(0.5): horizalign(right): z(100)
+        zoom(0.5): horizalign(right): z(90)
     ));
 
     // Current BPM Display (1:1 with Simply Love)
@@ -1053,7 +1056,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         actors.push(act!(text:
             font("miso"): settext(bpm_text):
             align(0.5, 0.5): xy(bpm_x, bpm_center_y):
-            zoom(bpm_final_zoom): horizalign(center): z(150)
+            zoom(bpm_final_zoom): horizalign(center): z(90)
         ));
 
         let music_rate = 1.0_f32; // Placeholder until dynamic music rate support exists
@@ -1066,7 +1069,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         actors.push(act!(text:
             font("miso"): settext(rate_text):
             align(0.5, 0.5): xy(bpm_x, rate_center_y):
-            zoom(rate_final_zoom): horizalign(center): z(150)
+            zoom(rate_final_zoom): horizalign(center): z(90)
         ));
     }
 
@@ -1097,7 +1100,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
         actors.push(Actor::Frame {
             align: [0.5, 0.5], offset: [box_cx, box_cy], size: [SizeSpec::Px(w), SizeSpec::Px(h)],
-            background: None, z: 150, children: frame_children,
+            background: None, z: 90, children: frame_children,
         });
     }
 
@@ -1108,8 +1111,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         let meter_cy = 20.0;
 
         // Frames/border
-        actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w + 4.0, h + 4.0): diffuse(1.0, 1.0, 1.0, 1.0): z(150) ));
-        actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w, h): diffuse(0.0, 0.0, 0.0, 1.0): z(151) ));
+        actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w + 4.0, h + 4.0): diffuse(1.0, 1.0, 1.0, 1.0): z(90) ));
+        actors.push(act!(quad: align(0.5, 0.5): xy(meter_cx, meter_cy): zoomto(w, h): diffuse(0.0, 0.0, 0.0, 1.0): z(91) ));
 
         // Latch-to-zero for rendering the very frame we die.
         let dead = state.is_failing || state.life <= 0.0;
@@ -1130,7 +1133,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 zoomto(filled_width, h):
                 diffusealpha(swoosh_alpha):
                 texcoordvelocity(-(bps * 0.5), 0.0):
-                z(153)
+                z(93)
             ));
 
             actors.push(act!(quad:
@@ -1138,7 +1141,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 xy(meter_cx - w / 2.0, meter_cy):
                 zoomto(filled_width, h):
                 diffuse(life_color[0], life_color[1], life_color[2], 1.0):
-                z(152)
+                z(92)
             ));
         }
     }
@@ -1259,7 +1262,7 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
 
     actors.push(Actor::Frame {
         align: [0.5, 0.5], offset: [frame_cx, frame_cy], size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
-        children, background: None, z: 120,
+        children, background: None, z: 70,
     });
     actors
 }
@@ -1331,7 +1334,7 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 actors.push(act!(text:
                     font("wendy_screenevaluation"): settext(ch.to_string()):
                     align(1.0, 0.5): xy(cell_right_x, world_y): zoom(numbers_zoom):
-                    diffuse(color[0], color[1], color[2], color[3])
+                    diffuse(color[0], color[1], color[2], color[3]): z(71)
                 ));
             }
 
@@ -1342,7 +1345,8 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 font("miso"): settext(info.label): align(0.0, 0.5):
                 xy(label_world_x, label_world_y): zoom(label_zoom):
                 maxwidth(72.0 * final_text_base_zoom): horizalign(left):
-                diffuse(bright[0], bright[1], bright[2], bright[3])
+                diffuse(bright[0], bright[1], bright[2], bright[3]):
+                z(71)
             ));
         }
 
@@ -1377,13 +1381,13 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             actors.push(act!(text: font(font_name): settext(total_time_str):
                 align(0.0, 0.5): horizalign(left):
                 xy(numbers_left_x, y_pos_total):
-                z(120):
+                z(71):
                 diffuse(white_color[0], white_color[1], white_color[2], white_color[3])
             ));
             actors.push(act!(text: font(font_name): settext(" song"):
                 align(0.0, 0.5): horizalign(left):
                 xy(numbers_left_x + label_offset, y_pos_total - 1.0):
-                zoom(text_zoom): z(120):
+                zoom(text_zoom): z(71):
                 diffuse(white_color[0], white_color[1], white_color[2], white_color[3])
             ));
             
@@ -1393,14 +1397,14 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             actors.push(act!(text: font(font_name): settext(remaining_time_str):
                 align(0.0, 0.5): horizalign(left):
                 xy(numbers_left_x, y_pos_remaining):
-                z(120):
+                z(71):
                 diffuse(remaining_color[0], remaining_color[1], remaining_color[2], remaining_color[3])
             ));
             actors.push(act!(text: font(font_name): settext(" remaining"):
                 align(0.0, 0.5): horizalign(left):
                 xy(numbers_left_x + label_offset, y_pos_remaining - 1.0):
-                zoom(text_zoom): z(120):
-                diffuse(remaining_color[0], remaining_color[1], remaining_color[2], remaining_color[3])
+                zoom(text_zoom): z(71):
+                diffuse(white_color[0], white_color[1], white_color[2], white_color[3])
             ));
         }
     }));
