@@ -206,47 +206,80 @@ pub struct Noteskin {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ReceptorPulse {
-    pub base_color: [f32; 4],
-    pub beat_color: [f32; 4],
-    pub hold_beats: f32,
-    pub fade_beats: f32,
+    pub effect_color1: [f32; 4],
+    pub effect_color2: [f32; 4],
+    pub ramp_to_half: f32,
+    pub hold_at_half: f32,
+    pub ramp_to_full: f32,
+    pub hold_at_full: f32,
+    pub hold_at_zero: f32,
+    pub effect_offset: f32,
 }
 
 impl ReceptorPulse {
+    fn total_period(&self) -> f32 {
+        let mut total = 0.0;
+        total += self.ramp_to_half.max(0.0);
+        total += self.hold_at_half.max(0.0);
+        total += self.ramp_to_full.max(0.0);
+        total += self.hold_at_full.max(0.0);
+        total += self.hold_at_zero.max(0.0);
+        total
+    }
+
     pub fn color_for_beat(&self, beat: f32) -> [f32; 4] {
-        let hold = self.hold_beats.max(0.0);
-        let fade = self.fade_beats.max(0.0);
-
-        let phase = beat.rem_euclid(1.0);
-        if phase < f32::EPSILON {
-            return self.beat_color;
-        }
-        if phase < hold {
-            return self.beat_color;
-        }
-        if fade > 0.0 && phase < hold + fade {
-            let t = ((phase - hold) / fade).clamp(0.0, 1.0);
-            let mut color = [0.0; 4];
-            for i in 0..4 {
-                color[i] = self.beat_color[i] + (self.base_color[i] - self.beat_color[i]) * t;
-            }
-            return color;
+        let period = self.total_period();
+        if period <= f32::EPSILON {
+            return self.effect_color2;
         }
 
-        self.base_color
+        let phase = (beat + self.effect_offset).rem_euclid(period);
+
+        let ramp_to_half = self.ramp_to_half.max(0.0);
+        let hold_at_half = self.hold_at_half.max(0.0);
+        let ramp_to_full = self.ramp_to_full.max(0.0);
+        let hold_at_full = self.hold_at_full.max(0.0);
+
+        let ramp_and_hold_half = ramp_to_half + hold_at_half;
+        let through_ramp_full = ramp_and_hold_half + ramp_to_full;
+        let through_hold_full = through_ramp_full + hold_at_full;
+
+        let percent = if ramp_to_half > 0.0 && phase < ramp_to_half {
+            (phase / ramp_to_half) * 0.5
+        } else if phase < ramp_and_hold_half {
+            0.5
+        } else if ramp_to_full > 0.0 && phase < through_ramp_full {
+            0.5 + ((phase - ramp_and_hold_half) / ramp_to_full) * 0.5
+        } else if phase < through_hold_full {
+            1.0
+        } else {
+            0.0
+        };
+
+        let mut color = [0.0; 4];
+        for i in 0..4 {
+            color[i] =
+                self.effect_color1[i] * percent + self.effect_color2[i] * (1.0 - percent);
+        }
+        color
     }
 }
 
 impl Default for ReceptorPulse {
     fn default() -> Self {
         Self {
-            base_color: [1.0, 1.0, 1.0, 1.0],
-            beat_color: [1.0, 1.0, 1.0, 1.0],
-            hold_beats: 0.0,
-            fade_beats: 0.0,
+            effect_color1: [1.0, 1.0, 1.0, 1.0],
+            effect_color2: [1.0, 1.0, 1.0, 1.0],
+            ramp_to_half: 0.25,
+            hold_at_half: 0.5,
+            ramp_to_full: 0.0,
+            hold_at_full: 0.0,
+            hold_at_zero: 0.25,
+            effect_offset: -0.25,
         }
     }
 }
+
 
 #[derive(Clone, Default)]
 struct SlotBuilder {
@@ -906,40 +939,84 @@ fn parse_color_rgba(input: &str) -> Option<[f32; 4]> {
 }
 
 fn parse_receptor_pulse(builder: &mut NoteskinBuilder, props: &HashMap<&str, &str>) {
+    fn parse_non_negative(value: Option<&&str>) -> Option<f32> {
+        value.and_then(|v| v.parse::<f32>().ok()).map(|v| v.max(0.0))
+    }
+
     let mut pulse = builder.receptor_pulse;
 
-    if let Some(base) = props
-        .get("base_color")
+    if let Some(color) = props
+        .get("effect_color1")
+        .or_else(|| props.get("base_color"))
         .or_else(|| props.get("base"))
         .and_then(|v| parse_color_rgba(v))
     {
-        pulse.base_color = base;
+        pulse.effect_color1 = color;
     }
 
-    if let Some(beat) = props
-        .get("beat_color")
+    if let Some(color) = props
+        .get("effect_color2")
+        .or_else(|| props.get("beat_color"))
         .or_else(|| props.get("bright_color"))
         .and_then(|v| parse_color_rgba(v))
     {
-        pulse.beat_color = beat;
+        pulse.effect_color2 = color;
     }
 
-    if let Some(hold) = props
-        .get("hold_beats")
-        .or_else(|| props.get("hold"))
-        .or_else(|| props.get("duration"))
+    if let Some(offset) = props
+        .get("effect_offset")
+        .or_else(|| props.get("offset"))
         .and_then(|v| v.parse::<f32>().ok())
     {
-        pulse.hold_beats = hold.max(0.0);
+        pulse.effect_offset = offset;
     }
 
-    if let Some(fade) = props
-        .get("fade_beats")
-        .or_else(|| props.get("fade"))
-        .or_else(|| props.get("fade_duration"))
-        .and_then(|v| v.parse::<f32>().ok())
+    if let Some(timing) = props
+        .get("effect_timing")
+        .or_else(|| props.get("timing"))
+        .and_then(|v| {
+            let values: Vec<_> = v
+                .split(',')
+                .filter_map(|s| s.trim().parse::<f32>().ok())
+                .collect();
+            if values.is_empty() {
+                None
+            } else {
+                Some(values)
+            }
+        })
     {
-        pulse.fade_beats = fade.max(0.0);
+        if let Some(value) = timing.get(0) {
+            pulse.ramp_to_half = value.max(0.0);
+        }
+        if let Some(value) = timing.get(1) {
+            pulse.hold_at_half = value.max(0.0);
+        }
+        if let Some(value) = timing.get(2) {
+            pulse.ramp_to_full = value.max(0.0);
+        }
+        if let Some(value) = timing.get(3) {
+            pulse.hold_at_full = value.max(0.0);
+        }
+        if let Some(value) = timing.get(4) {
+            pulse.hold_at_zero = value.max(0.0);
+        }
+    }
+
+    if let Some(value) = parse_non_negative(props.get("ramp_to_half")) {
+        pulse.ramp_to_half = value;
+    }
+    if let Some(value) = parse_non_negative(props.get("hold_at_half")) {
+        pulse.hold_at_half = value;
+    }
+    if let Some(value) = parse_non_negative(props.get("ramp_to_full")) {
+        pulse.ramp_to_full = value;
+    }
+    if let Some(value) = parse_non_negative(props.get("hold_at_full")) {
+        pulse.hold_at_full = value;
+    }
+    if let Some(value) = parse_non_negative(props.get("hold_at_zero")) {
+        pulse.hold_at_zero = value;
     }
 
     builder.receptor_pulse = pulse;

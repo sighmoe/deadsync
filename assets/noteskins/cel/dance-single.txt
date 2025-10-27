@@ -8,7 +8,7 @@ NoteSheet { texture="32nd.png"; quants=32; grid=8,8; frames=64; frame_size=256,2
 NoteSheet { texture="64th.png"; quants=64,192; grid=8,8; frames=64; frame_size=256,256; AnimationIsBeatBased=1; loop_beats=2 }
 
 ReceptorSheet { texture="_Down Receptor tex 4x1 (res 1024x256).png"; grid=4,1; frames=4; frame_size=256,256; fps=1; AnimationIsBeatBased=1; state=off }
-ReceptorPulse { base_color=0.37,0.37,0.37,1; beat_color=1,1,1,1; hold_beats=0.25; fade_beats=0.25 }
+ReceptorPulse { base_color=0.1,0.1,0.1,1; beat_color=1,1,1,1; effect_timing=0.25,0.50,0,0,0.25; effect_offset=-0.25 }
 
 ExplosionSheet { texture="Down Tap Explosion Dim W1 (res 256x256).png"; window=W1; grid=1,1; frames=1, frame_size=256,256 }
 ExplosionSheet { texture="Down Tap Explosion Dim W2 (res 256x256).png"; window=W2; grid=1,1; frames=1, frame_size=256,256 }
