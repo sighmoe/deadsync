@@ -661,11 +661,7 @@ pub fn load(path: &Path, style: &Style) -> Result<Noteskin, String> {
         if let Some((tag, rest)) = line.split_once('{') {
             if let Some(content) = rest.strip_suffix('}') {
                 let tag = tag.trim();
-                let props: HashMap<&str, &str> = content
-                    .split(';')
-                    .filter_map(|p| p.trim().split_once('='))
-                    .map(|(k, v)| (k.trim(), v.trim()))
-                    .collect();
+                let props = parse_properties(content);
 
                 match tag {
                     "NoteSheet" => parse_note_sheet(&noteskin_dir, &mut builder, style, &props),
@@ -712,6 +708,44 @@ pub fn load(path: &Path, style: &Style) -> Result<Noteskin, String> {
     let noteskin = builder.finalize()?;
     info!("Loaded noteskin from: {:?}", path);
     Ok(noteskin)
+}
+
+fn parse_properties<'a>(content: &'a str) -> HashMap<&'a str, &'a str> {
+    let mut props = HashMap::new();
+    let mut start = 0;
+    let mut in_quotes = false;
+    let mut escape_next = false;
+
+    for (idx, ch) in content.char_indices() {
+        if escape_next {
+            escape_next = false;
+            continue;
+        }
+
+        match ch {
+            '\\' => {
+                escape_next = true;
+            }
+            '"' => {
+                in_quotes = !in_quotes;
+            }
+            ';' if !in_quotes => {
+                if let Some((key, value)) = content[start..idx].split_once('=') {
+                    props.insert(key.trim(), value.trim());
+                }
+                start = idx + 1;
+            }
+            _ => {}
+        }
+    }
+
+    if start < content.len() {
+        if let Some((key, value)) = content[start..].split_once('=') {
+            props.insert(key.trim(), value.trim());
+        }
+    }
+
+    props
 }
 
 fn parse_note_sheet(
