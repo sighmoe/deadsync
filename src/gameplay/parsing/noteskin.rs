@@ -48,6 +48,12 @@ pub struct SpriteDefinition {
     pub mirror_v: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum AnimationRate {
+    FramesPerSecond(f32),
+    FramesPerBeat(f32),
+}
+
 #[derive(Debug)]
 pub enum SpriteSource {
     Atlas {
@@ -60,8 +66,7 @@ pub enum SpriteSource {
         frame_size: [i32; 2],
         grid: (usize, usize),
         frame_count: usize,
-        fps: f32,
-        beat_based: bool,
+        rate: AnimationRate,
     },
 }
 
@@ -87,17 +92,6 @@ impl SpriteSource {
         }
     }
 
-    pub fn fps(&self) -> f32 {
-        match self {
-            SpriteSource::Atlas { .. } => 0.0,
-            SpriteSource::Animated { fps, .. } => (*fps).max(0.0),
-        }
-    }
-
-    pub fn is_beat_based(&self) -> bool {
-        matches!(self, SpriteSource::Animated { beat_based, .. } if *beat_based)
-    }
-
     fn frame_size(&self) -> Option<[i32; 2]> {
         match self {
             SpriteSource::Atlas { .. } => None,
@@ -105,6 +99,15 @@ impl SpriteSource {
         }
     }
 
+    pub fn is_beat_based(&self) -> bool {
+        matches!(
+            self,
+            SpriteSource::Animated {
+                rate: AnimationRate::FramesPerBeat(_),
+                ..
+            }
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -127,16 +130,21 @@ impl SpriteSlot {
         if frames <= 1 {
             return 0;
         }
-        let fps = self.source.fps();
-        if fps <= 0.0 {
-            return 0;
+        match self.source.as_ref() {
+            SpriteSource::Atlas { .. } => 0,
+            SpriteSource::Animated { rate, .. } => {
+                let frame = match rate {
+                    AnimationRate::FramesPerSecond(fps) if *fps > 0.0 => {
+                        (time * fps).floor() as isize
+                    }
+                    AnimationRate::FramesPerBeat(frames_per_beat) if *frames_per_beat > 0.0 => {
+                        (beat * frames_per_beat).floor() as isize
+                    }
+                    _ => return 0,
+                };
+                ((frame % frames as isize) + frames as isize) as usize % frames
+            }
         }
-        let frame = if self.source.is_beat_based() {
-            (beat * fps).floor() as isize
-        } else {
-            (time * fps).floor() as isize
-        };
-        ((frame % frames as isize) + frames as isize) as usize % frames
     }
 
     pub fn uv_for_frame(&self, frame_index: usize) -> [f32; 4] {
@@ -300,7 +308,10 @@ impl NoteskinBuilder {
                         }
                     },
                 };
-                result.push(SpriteSlot { def: slot.def, source });
+                result.push(SpriteSlot {
+                    def: slot.def,
+                    source,
+                });
             }
             Ok(result)
         }
@@ -314,7 +325,10 @@ impl NoteskinBuilder {
                 .map(|slot| {
                     slot.source
                         .or_else(|| default_source.cloned())
-                        .map(|source| SpriteSlot { def: slot.def, source })
+                        .map(|source| SpriteSlot {
+                            def: slot.def,
+                            source,
+                        })
                 })
                 .collect()
         }
@@ -347,18 +361,12 @@ impl NoteskinBuilder {
             .collect();
 
         let column_xs = self.column_xs;
-        let field_left_x = column_xs
-            .first()
-            .cloned()
-            .unwrap_or(0)
+        let field_left_x = column_xs.first().cloned().unwrap_or(0)
             - receptor_off
                 .first()
                 .map(|slot| slot.def.size[0] / 2)
                 .unwrap_or(0);
-        let field_right_x = column_xs
-            .last()
-            .cloned()
-            .unwrap_or(0)
+        let field_right_x = column_xs.last().cloned().unwrap_or(0)
             + receptor_off
                 .last()
                 .map(|slot| slot.def.size[0] / 2)
@@ -408,7 +416,9 @@ pub fn load(path: &Path, style: &Style) -> Result<Noteskin, String> {
 
                 match tag {
                     "NoteSheet" => parse_note_sheet(&noteskin_dir, &mut builder, style, &props),
-                    "ReceptorSheet" => parse_receptor_sheet(&noteskin_dir, &mut builder, style, &props),
+                    "ReceptorSheet" => {
+                        parse_receptor_sheet(&noteskin_dir, &mut builder, style, &props)
+                    }
                     "GlowSheet" => parse_glow_sheet(&noteskin_dir, &mut builder, style, &props),
                     "ExplosionSheet" => parse_explosion_sheet(&noteskin_dir, &mut builder, &props),
                     "ReceptorPulse" => parse_receptor_pulse(&mut builder, &props),
@@ -466,9 +476,7 @@ fn parse_note_sheet(
         None => return,
     };
 
-    let quants = parse_quant_list(props)
-        .into_iter()
-        .collect::<Vec<_>>();
+    let quants = parse_quant_list(props).into_iter().collect::<Vec<_>>();
     if quants.is_empty() {
         warn!("NoteSheet declared without quantization list");
         return;
@@ -477,9 +485,13 @@ fn parse_note_sheet(
     let players = parse_index(props.get("player"), style.num_players as u32);
     let cols = parse_index(props.get("col"), style.num_cols as u32);
 
-    let frame_size = source
-        .frame_size()
-        .unwrap_or_else(|| builder.defaults.get("Note").map(|d| d.size).unwrap_or([0, 0]));
+    let frame_size = source.frame_size().unwrap_or_else(|| {
+        builder
+            .defaults
+            .get("Note")
+            .map(|d| d.size)
+            .unwrap_or([0, 0])
+    });
 
     for p in &players {
         if (*p as usize) >= style.num_players {
@@ -490,7 +502,8 @@ fn parse_note_sheet(
                 continue;
             }
             for q in &quants {
-                let idx = ((*p as usize * style.num_cols) + *c as usize) * NUM_QUANTIZATIONS + *q as usize;
+                let idx = ((*p as usize * style.num_cols) + *c as usize) * NUM_QUANTIZATIONS
+                    + *q as usize;
                 if let Some(slot) = builder.notes.get_mut(idx) {
                     slot.def.size = frame_size;
                     slot.def.src = parse_src_offset(props).unwrap_or([0, 0]);
@@ -512,14 +525,21 @@ fn parse_receptor_sheet(
         return;
     };
 
-    let default_state = props.get("state").map(|s| s.to_ascii_lowercase()).unwrap_or_else(|| "off".to_string());
+    let default_state = props
+        .get("state")
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_else(|| "off".to_string());
     let source = match build_sheet_source(noteskin_dir, texture, props, 20.0) {
         Some(src) => src,
         None => return,
     };
-    let frame_size = source
-        .frame_size()
-        .unwrap_or_else(|| builder.defaults.get("Receptor-off").map(|d| d.size).unwrap_or([0, 0]));
+    let frame_size = source.frame_size().unwrap_or_else(|| {
+        builder
+            .defaults
+            .get("Receptor-off")
+            .map(|d| d.size)
+            .unwrap_or([0, 0])
+    });
 
     let cols = parse_index(props.get("col"), style.num_cols as u32);
     let target = match default_state.as_str() {
@@ -560,9 +580,13 @@ fn parse_glow_sheet(
         Some(src) => src,
         None => return,
     };
-    let frame_size = source
-        .frame_size()
-        .unwrap_or_else(|| builder.defaults.get("Receptor-glow").map(|d| d.size).unwrap_or([0, 0]));
+    let frame_size = source.frame_size().unwrap_or_else(|| {
+        builder
+            .defaults
+            .get("Receptor-glow")
+            .map(|d| d.size)
+            .unwrap_or([0, 0])
+    });
 
     let cols = parse_index(props.get("col"), style.num_cols as u32);
     for c in cols {
@@ -586,10 +610,7 @@ fn parse_explosion_sheet(
         warn!("ExplosionSheet missing texture attribute");
         return;
     };
-    let Some(window) = props
-        .get("window")
-        .map(|s| s.trim().to_ascii_uppercase())
-    else {
+    let Some(window) = props.get("window").map(|s| s.trim().to_ascii_uppercase()) else {
         warn!("ExplosionSheet missing window attribute");
         return;
     };
@@ -632,7 +653,8 @@ fn parse_sprite_rule(
         }
     };
 
-    let has_range_spec = props.contains_key("row") || props.contains_key("col") || props.contains_key("player");
+    let has_range_spec =
+        props.contains_key("row") || props.contains_key("col") || props.contains_key("player");
     if !has_range_spec {
         let mut def = builder.defaults.get(tag).cloned().unwrap_or_default();
         if let Some(src_str) = props.get("src") {
@@ -672,7 +694,9 @@ fn parse_sprite_rule(
                 "Note" => {
                     for r in &rows {
                         if let Some(q) = Quantization::from_row(*r) {
-                            let idx = ((*p as usize * style.num_cols) + *c as usize) * NUM_QUANTIZATIONS + q as usize;
+                            let idx = ((*p as usize * style.num_cols) + *c as usize)
+                                * NUM_QUANTIZATIONS
+                                + q as usize;
                             if let Some(slot) = builder.notes.get_mut(idx) {
                                 apply_properties(slot);
                             }
@@ -725,9 +749,8 @@ fn parse_index(spec: Option<&&str>, max: u32) -> Vec<u32> {
 
 fn parse_src_offset(props: &HashMap<&str, &str>) -> Option<[i32; 2]> {
     props.get("offset").and_then(|s| {
-        s.split_once(',').map(|(x, y)| {
-            [x.trim().parse().unwrap_or(0), y.trim().parse().unwrap_or(0)]
-        })
+        s.split_once(',')
+            .map(|(x, y)| [x.trim().parse().unwrap_or(0), y.trim().parse().unwrap_or(0)])
     })
 }
 
@@ -764,21 +787,44 @@ fn build_sheet_source(
         .get("frames")
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or_else(|| grid.0 * grid.1);
-    let beat_based = props
+    let beats_per_loop = props
+        .get("beats_per_loop")
+        .or_else(|| props.get("loop_beats"))
+        .or_else(|| props.get("beat_length"))
+        .or_else(|| props.get("animation_length"))
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| *v > 0.0);
+    let beat_based_flag = props
         .get("AnimationIsBeatBased")
         .or_else(|| props.get("animationisbeatbased"))
         .or_else(|| props.get("animation_is_beat_based"))
         .map(|v| matches!(v.trim(), "1" | "true" | "True" | "TRUE" | "yes" | "Yes"))
         .unwrap_or(false);
+    let beat_based = beat_based_flag || beats_per_loop.is_some();
+    let frame_count = frames.max(1);
+    let rate = if beat_based {
+        let frames_per_beat = beats_per_loop
+            .map(|beats| {
+                if beats != 0.0 {
+                    frame_count as f32 / beats
+                } else {
+                    0.0
+                }
+            })
+            .unwrap_or(fps)
+            .max(0.0);
+        AnimationRate::FramesPerBeat(frames_per_beat)
+    } else {
+        AnimationRate::FramesPerSecond(fps.max(0.0))
+    };
 
     Some(Arc::new(SpriteSource::Animated {
         texture_key: key,
         tex_dims: dims,
         frame_size,
         grid,
-        frame_count: frames.max(1),
-        fps,
-        beat_based,
+        frame_count,
+        rate,
     }))
 }
 
@@ -803,9 +849,9 @@ fn texture_dimensions(key: &str) -> Option<(u32, u32)> {
 }
 
 fn parse_pair_usize(input: &str) -> Option<(usize, usize)> {
-    input.split_once(',').and_then(|(a, b)| {
-        Some((a.trim().parse().ok()?, b.trim().parse().ok()?))
-    })
+    input
+        .split_once(',')
+        .and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)))
 }
 
 fn parse_pair_i32(input: &str) -> Option<[i32; 2]> {
