@@ -187,6 +187,191 @@ impl SpriteSlot {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub enum TweenType {
+    Linear,
+    Accelerate,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExplosionState {
+    pub zoom: f32,
+    pub color: [f32; 4],
+}
+
+impl Default for ExplosionState {
+    fn default() -> Self {
+        Self {
+            zoom: 1.0,
+            color: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExplosionSegment {
+    pub duration: f32,
+    pub tween: TweenType,
+    pub start: ExplosionState,
+    pub end_zoom: Option<f32>,
+    pub end_color: Option<[f32; 4]>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GlowEffect {
+    pub period: f32,
+    pub color1: [f32; 4],
+    pub color2: [f32; 4],
+}
+
+impl GlowEffect {
+    fn color_at(&self, time: f32, base_alpha: f32) -> [f32; 4] {
+        if self.period <= f32::EPSILON || base_alpha <= f32::EPSILON {
+            return [0.0, 0.0, 0.0, 0.0];
+        }
+
+        let phase = (time / self.period).rem_euclid(1.0);
+        if !phase.is_finite() {
+            return [0.0, 0.0, 0.0, 0.0];
+        }
+
+        let percent_between = ((phase + 0.25) * std::f32::consts::TAU).sin() * 0.5 + 0.5;
+
+        let mut color = [0.0; 4];
+        for i in 0..4 {
+            color[i] = self.color1[i] * percent_between + self.color2[i] * (1.0 - percent_between);
+        }
+        color[3] *= base_alpha;
+        color
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ExplosionVisualState {
+    pub zoom: f32,
+    pub diffuse: [f32; 4],
+    pub glow: [f32; 4],
+}
+
+#[derive(Debug, Clone)]
+pub struct ExplosionAnimation {
+    pub initial: ExplosionState,
+    pub segments: Vec<ExplosionSegment>,
+    pub glow: Option<GlowEffect>,
+}
+
+impl Default for ExplosionAnimation {
+    fn default() -> Self {
+        Self {
+            initial: ExplosionState {
+                zoom: 1.0,
+                color: [1.0, 1.0, 1.0, 1.0],
+            },
+            segments: vec![ExplosionSegment {
+                duration: 0.3,
+                tween: TweenType::Linear,
+                start: ExplosionState {
+                    zoom: 1.0,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                },
+                end_zoom: Some(1.0),
+                end_color: Some([1.0, 1.0, 1.0, 0.0]),
+            }],
+            glow: None,
+        }
+    }
+}
+
+impl ExplosionAnimation {
+    pub fn duration(&self) -> f32 {
+        self.segments
+            .iter()
+            .map(|segment| segment.duration.max(0.0))
+            .sum::<f32>()
+            .max(0.0)
+    }
+
+    pub fn state_at(&self, time: f32) -> ExplosionVisualState {
+        let mut elapsed = time;
+        let mut current = self.initial;
+
+        for segment in &self.segments {
+            let duration = segment.duration.max(0.0);
+            if duration <= 0.0 {
+                if let Some(zoom) = segment.end_zoom {
+                    current.zoom = zoom;
+                }
+                if let Some(color) = segment.end_color {
+                    current.color = color;
+                }
+                continue;
+            }
+
+            if elapsed > duration {
+                if let Some(zoom) = segment.end_zoom {
+                    current.zoom = zoom;
+                }
+                if let Some(color) = segment.end_color {
+                    current.color = color;
+                }
+                elapsed -= duration;
+                continue;
+            }
+
+            let progress = (elapsed / duration).clamp(0.0, 1.0);
+            let eased = match segment.tween {
+                TweenType::Linear => progress,
+                TweenType::Accelerate => progress * progress,
+            };
+
+            let mut zoom = current.zoom;
+            if let Some(target_zoom) = segment.end_zoom {
+                zoom = segment.start.zoom + (target_zoom - segment.start.zoom) * eased;
+            }
+
+            let mut color = current.color;
+            if let Some(target_color) = segment.end_color {
+                let mut interpolated = current.color;
+                for i in 0..4 {
+                    interpolated[i] =
+                        segment.start.color[i] + (target_color[i] - segment.start.color[i]) * eased;
+                }
+                color = interpolated;
+            }
+
+            let diffuse = color;
+            let glow = self
+                .glow
+                .map(|g| g.color_at(time, diffuse[3]))
+                .unwrap_or([0.0, 0.0, 0.0, 0.0]);
+
+            return ExplosionVisualState {
+                zoom,
+                diffuse,
+                glow,
+            };
+        }
+
+        let diffuse = current.color;
+        let glow = self
+            .glow
+            .map(|g| g.color_at(time, diffuse[3]))
+            .unwrap_or([0.0, 0.0, 0.0, 0.0]);
+
+        ExplosionVisualState {
+            zoom: current.zoom,
+            diffuse,
+            glow,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TapExplosion {
+    pub slot: SpriteSlot,
+    pub animation: ExplosionAnimation,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Style {
     pub num_cols: usize,
     pub num_players: usize,
@@ -200,7 +385,7 @@ pub struct Noteskin {
     pub column_xs: Vec<i32>,
     pub field_left_x: i32,
     pub field_right_x: i32,
-    pub tap_explosions: HashMap<String, SpriteSlot>,
+    pub tap_explosions: HashMap<String, TapExplosion>,
     pub receptor_pulse: ReceptorPulse,
 }
 
@@ -258,8 +443,7 @@ impl ReceptorPulse {
 
         let mut color = [0.0; 4];
         for i in 0..4 {
-            color[i] =
-                self.effect_color1[i] * percent + self.effect_color2[i] * (1.0 - percent);
+            color[i] = self.effect_color1[i] * percent + self.effect_color2[i] * (1.0 - percent);
         }
         color
     }
@@ -280,7 +464,6 @@ impl Default for ReceptorPulse {
     }
 }
 
-
 #[derive(Clone, Default)]
 struct SlotBuilder {
     def: SpriteDefinition,
@@ -293,6 +476,12 @@ impl SlotBuilder {
     }
 }
 
+#[derive(Clone, Default)]
+struct ExplosionBuilder {
+    slot: Option<SlotBuilder>,
+    animation: Option<ExplosionAnimation>,
+}
+
 struct NoteskinBuilder {
     notes: Vec<SlotBuilder>,
     receptor_off: Vec<SlotBuilder>,
@@ -300,7 +489,7 @@ struct NoteskinBuilder {
     column_xs: Vec<i32>,
     defaults: HashMap<String, SpriteDefinition>,
     default_sources: HashMap<String, Arc<SpriteSource>>,
-    tap_explosions: HashMap<String, SlotBuilder>,
+    tap_explosions: HashMap<String, ExplosionBuilder>,
     receptor_pulse: ReceptorPulse,
 }
 
@@ -337,7 +526,7 @@ impl NoteskinBuilder {
                             return Err(format!(
                                 "Noteskin missing texture assignment for category '{}'.",
                                 tag
-                            ))
+                            ));
                         }
                     },
                 };
@@ -380,16 +569,47 @@ impl NoteskinBuilder {
         let tap_explosions = self
             .tap_explosions
             .into_iter()
-            .filter_map(|(window, slot)| {
-                slot.source.map(|source| {
-                    (
-                        window,
-                        SpriteSlot {
-                            def: slot.def,
+            .filter_map(|(window, builder)| {
+                let slot_builder = match builder.slot {
+                    Some(slot) => slot,
+                    None => {
+                        warn!(
+                            "Noteskin missing ExplosionSheet definition for tap window '{}'",
+                            window
+                        );
+                        return None;
+                    }
+                };
+
+                let source = match slot_builder.source {
+                    Some(src) => src,
+                    None => {
+                        warn!(
+                            "Noteskin tap explosion '{}' missing texture assignment",
+                            window
+                        );
+                        return None;
+                    }
+                };
+
+                let animation = builder.animation.unwrap_or_else(|| {
+                    warn!(
+                        "Noteskin tap explosion '{}' missing command script; using default fade",
+                        window
+                    );
+                    ExplosionAnimation::default()
+                });
+
+                Some((
+                    window,
+                    TapExplosion {
+                        slot: SpriteSlot {
+                            def: slot_builder.def,
                             source,
                         },
-                    )
-                })
+                        animation,
+                    },
+                ))
             })
             .collect();
 
@@ -454,6 +674,7 @@ pub fn load(path: &Path, style: &Style) -> Result<Noteskin, String> {
                     }
                     "GlowSheet" => parse_glow_sheet(&noteskin_dir, &mut builder, style, &props),
                     "ExplosionSheet" => parse_explosion_sheet(&noteskin_dir, &mut builder, &props),
+                    "ExplosionCommand" => parse_explosion_command(&mut builder, &props),
                     "ReceptorPulse" => parse_receptor_pulse(&mut builder, &props),
                     _ => parse_sprite_rule(tag, &props, style, &mut builder),
                 }
@@ -657,7 +878,282 @@ fn parse_explosion_sheet(
     slot.def.size = source.frame_size().unwrap_or([0, 0]);
     slot.def.src = parse_src_offset(props).unwrap_or([0, 0]);
     slot.set_source(source);
-    builder.tap_explosions.insert(window, slot);
+
+    builder.tap_explosions.entry(window).or_default().slot = Some(slot);
+}
+
+fn parse_explosion_command(builder: &mut NoteskinBuilder, props: &HashMap<&str, &str>) {
+    let Some(window) = props.get("window").map(|s| s.trim().to_ascii_uppercase()) else {
+        warn!("ExplosionCommand missing window attribute");
+        return;
+    };
+
+    let Some(commands) = props.get("commands").map(|s| s.trim().trim_matches('"')) else {
+        warn!(
+            "ExplosionCommand missing commands attribute for window '{}'",
+            window
+        );
+        return;
+    };
+
+    let animation = parse_explosion_animation(commands);
+    builder.tap_explosions.entry(window).or_default().animation = Some(animation);
+}
+
+struct PendingSegment {
+    tween: TweenType,
+    duration: f32,
+    start: ExplosionState,
+    target_zoom: Option<f32>,
+    target_color: Option<[f32; 4]>,
+}
+
+fn parse_explosion_animation(script: &str) -> ExplosionAnimation {
+    let mut animation = ExplosionAnimation {
+        initial: ExplosionState::default(),
+        segments: Vec::new(),
+        glow: None,
+    };
+
+    let mut current_state = ExplosionState::default();
+    let mut initial_locked = false;
+    let mut pending: Option<PendingSegment> = None;
+
+    let finish_pending = |pending: &mut Option<PendingSegment>,
+                          animation: &mut ExplosionAnimation,
+                          current_state: &mut ExplosionState| {
+        if let Some(segment) = pending.take() {
+            let mut end_state = segment.start;
+            if let Some(z) = segment.target_zoom {
+                end_state.zoom = z;
+            }
+            if let Some(color) = segment.target_color {
+                end_state.color = color;
+            }
+
+            animation.segments.push(ExplosionSegment {
+                duration: segment.duration.max(0.0),
+                tween: segment.tween,
+                start: segment.start,
+                end_zoom: segment.target_zoom,
+                end_color: segment.target_color,
+            });
+
+            *current_state = end_state;
+        }
+    };
+
+    for raw_token in script.split(';') {
+        let token = raw_token.trim();
+        if token.is_empty() {
+            continue;
+        }
+
+        let mut parts = token.split(',').map(|p| p.trim());
+        let command = parts
+            .next()
+            .map(|c| c.to_ascii_lowercase())
+            .unwrap_or_default();
+        let args: Vec<&str> = parts.collect();
+
+        match command.as_str() {
+            "linear" | "accelerate" => {
+                finish_pending(&mut pending, &mut animation, &mut current_state);
+                if let Some(arg) = args.first() {
+                    if let Ok(duration) = arg.parse::<f32>() {
+                        pending = Some(PendingSegment {
+                            tween: if command == "linear" {
+                                TweenType::Linear
+                            } else {
+                                TweenType::Accelerate
+                            },
+                            duration: duration.max(0.0),
+                            start: current_state,
+                            target_zoom: None,
+                            target_color: None,
+                        });
+                        if !initial_locked {
+                            animation.initial = current_state;
+                            initial_locked = true;
+                        }
+                    } else {
+                        warn!(
+                            "Failed to parse duration '{}' for explosion command '{}'",
+                            arg, command
+                        );
+                    }
+                } else {
+                    warn!("Explosion command '{}' missing duration argument", command);
+                }
+            }
+            "diffusealpha" => {
+                if let Some(arg) = args.first() {
+                    if let Ok(value) = arg.parse::<f32>() {
+                        if let Some(segment) = pending.as_mut() {
+                            let mut target_color =
+                                segment.target_color.unwrap_or(segment.start.color);
+                            target_color[3] = value;
+                            segment.target_color = Some(target_color);
+                        } else {
+                            current_state.color[3] = value;
+                            if !initial_locked {
+                                animation.initial = current_state;
+                            }
+                        }
+                    } else {
+                        warn!(
+                            "Failed to parse diffusealpha value '{}' in explosion commands",
+                            arg
+                        );
+                    }
+                }
+            }
+            "zoom" => {
+                if let Some(arg) = args.first() {
+                    if let Ok(value) = arg.parse::<f32>() {
+                        if let Some(segment) = pending.as_mut() {
+                            segment.target_zoom = Some(value);
+                        } else {
+                            current_state.zoom = value;
+                            if !initial_locked {
+                                animation.initial = current_state;
+                            }
+                        }
+                    } else {
+                        warn!("Failed to parse zoom value '{}' in explosion commands", arg);
+                    }
+                }
+            }
+            "diffuse" => {
+                if args.len() >= 3 {
+                    let mut parsed = [0.0f32; 4];
+                    let mut ok = true;
+                    for i in 0..3 {
+                        match args[i].parse::<f32>() {
+                            Ok(v) => parsed[i] = v,
+                            Err(_) => {
+                                warn!(
+                                    "Failed to parse diffuse component '{}' in explosion commands",
+                                    args[i]
+                                );
+                                ok = false;
+                                break;
+                            }
+                        }
+                    }
+                    if ok {
+                        parsed[3] = if args.len() >= 4 {
+                            args[3].parse::<f32>().unwrap_or(current_state.color[3])
+                        } else {
+                            current_state.color[3]
+                        };
+
+                        if let Some(segment) = pending.as_mut() {
+                            segment.target_color = Some(parsed);
+                        } else {
+                            current_state.color = parsed;
+                            if !initial_locked {
+                                animation.initial = current_state;
+                            }
+                        }
+                    }
+                }
+            }
+            "glowshift" => {
+                animation.glow.get_or_insert(GlowEffect {
+                    period: 0.0,
+                    color1: [1.0, 1.0, 1.0, 0.0],
+                    color2: [1.0, 1.0, 1.0, 0.0],
+                });
+            }
+            "effectperiod" => {
+                if let Some(arg) = args.first() {
+                    if let Ok(period) = arg.parse::<f32>() {
+                        if let Some(glow) = animation.glow.as_mut() {
+                            glow.period = period.max(0.0);
+                        } else {
+                            animation.glow = Some(GlowEffect {
+                                period: period.max(0.0),
+                                color1: [1.0, 1.0, 1.0, 0.0],
+                                color2: [1.0, 1.0, 1.0, 0.0],
+                            });
+                        }
+                    }
+                }
+            }
+            "effectcolor1" => {
+                if let Some(color) = parse_color4(&args) {
+                    if let Some(glow) = animation.glow.as_mut() {
+                        glow.color1 = color;
+                    } else {
+                        animation.glow = Some(GlowEffect {
+                            period: 0.0,
+                            color1: color,
+                            color2: color,
+                        });
+                    }
+                }
+            }
+            "effectcolor2" => {
+                if let Some(color) = parse_color4(&args) {
+                    if let Some(glow) = animation.glow.as_mut() {
+                        glow.color2 = color;
+                    } else {
+                        animation.glow = Some(GlowEffect {
+                            period: 0.0,
+                            color1: color,
+                            color2: color,
+                        });
+                    }
+                }
+            }
+            other => {
+                if !other.is_empty() {
+                    warn!("Unhandled explosion command '{}'.", other);
+                }
+            }
+        }
+    }
+
+    finish_pending(&mut pending, &mut animation, &mut current_state);
+
+    if !initial_locked {
+        animation.initial = current_state;
+    }
+
+    if animation.segments.is_empty() {
+        animation.segments.push(ExplosionSegment {
+            duration: 0.3,
+            tween: TweenType::Linear,
+            start: animation.initial,
+            end_zoom: Some(animation.initial.zoom),
+            end_color: Some([
+                animation.initial.color[0],
+                animation.initial.color[1],
+                animation.initial.color[2],
+                0.0,
+            ]),
+        });
+    }
+
+    animation
+}
+
+fn parse_color4(args: &[&str]) -> Option<[f32; 4]> {
+    if args.is_empty() {
+        return None;
+    }
+
+    let mut values = [0.0; 4];
+    for (i, arg) in args.iter().enumerate().take(4) {
+        values[i] = arg.parse().ok()?;
+    }
+
+    if args.len() < 4 {
+        None
+    } else {
+        Some(values)
+    }
 }
 
 fn parse_sprite_rule(
@@ -940,7 +1436,9 @@ fn parse_color_rgba(input: &str) -> Option<[f32; 4]> {
 
 fn parse_receptor_pulse(builder: &mut NoteskinBuilder, props: &HashMap<&str, &str>) {
     fn parse_non_negative(value: Option<&&str>) -> Option<f32> {
-        value.and_then(|v| v.parse::<f32>().ok()).map(|v| v.max(0.0))
+        value
+            .and_then(|v| v.parse::<f32>().ok())
+            .map(|v| v.max(0.0))
     }
 
     let mut pulse = builder.receptor_pulse;

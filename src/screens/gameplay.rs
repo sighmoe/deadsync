@@ -88,7 +88,6 @@ const TRANSITION_OUT_DURATION: f32 = 0.4;
 const RECEPTOR_Y_OFFSET_FROM_CENTER: f32 = -125.0; // From Simply Love metrics for standard up-scroll
 const TARGET_ARROW_PIXEL_SIZE: f32 = 64.0; // Match Simply Love's on-screen arrow height
 const TARGET_EXPLOSION_PIXEL_SIZE: f32 = 125.0; // Simply Love tap explosions top out around 125px tall
-const TAP_EXPLOSION_LIFETIME: f32 = 0.3; // seconds
 
 //const DANGER_THRESHOLD: f32 = 0.2; // For implementation of red/green flashing light
 
@@ -751,7 +750,14 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     for explosion in &mut state.tap_explosions {
         if let Some(active) = explosion {
             active.elapsed += delta_time;
-            if active.elapsed >= TAP_EXPLOSION_LIFETIME {
+            let lifetime = state
+                .noteskin
+                .as_ref()
+                .and_then(|ns| ns.tap_explosions.get(&active.window))
+                .map(|explosion| explosion.animation.duration())
+                .unwrap_or(0.0);
+
+            if lifetime <= 0.0 || active.elapsed >= lifetime {
                 *explosion = None;
             }
         }
@@ -1064,9 +1070,10 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         // Tap explosions
         for i in 0..4 {
             if let Some(active) = state.tap_explosions[i].as_ref() {
-                if let Some(slot) = ns.tap_explosions.get(&active.window) {
+                if let Some(explosion) = ns.tap_explosions.get(&active.window) {
                     let col_x_offset = ns.column_xs[i];
                     let anim_time = active.elapsed;
+                    let slot = &explosion.slot;
                     let beat_for_anim = if slot.source.is_beat_based() {
                         (state.current_beat - active.start_beat).max(0.0)
                     } else {
@@ -1075,7 +1082,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     let frame = slot.frame_index(anim_time, beat_for_anim);
                     let uv = slot.uv_for_frame(frame);
                     let size = scale_explosion(slot.size());
-                    let alpha = (1.0 - (active.elapsed / TAP_EXPLOSION_LIFETIME)).clamp(0.0, 1.0);
+                    let visual = explosion.animation.state_at(active.elapsed);
                     let rotation_deg = ns
                         .receptor_off
                         .get(i)
@@ -1086,12 +1093,37 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         align(0.5, 0.5):
                         xy(playfield_center_x + col_x_offset as f32, receptor_y):
                         zoomto(size[0], size[1]):
+                        zoom(visual.zoom):
                         customtexturerect(uv[0], uv[1], uv[2], uv[3]):
-                        diffuse(1.0, 1.0, 1.0, alpha):
+                        diffuse(
+                            visual.diffuse[0],
+                            visual.diffuse[1],
+                            visual.diffuse[2],
+                            visual.diffuse[3]
+                        ):
                         rotationz(-(rotation_deg as f32)):
-                        blend(add):
+                        blend(normal):
                         z(101)
                     ));
+
+                    let glow = visual.glow;
+                    let glow_strength = glow[0].abs()
+                        + glow[1].abs()
+                        + glow[2].abs()
+                        + glow[3].abs();
+                    if glow_strength > f32::EPSILON {
+                        actors.push(act!(sprite(slot.texture_key().to_string()):
+                            align(0.5, 0.5):
+                            xy(playfield_center_x + col_x_offset as f32, receptor_y):
+                            zoomto(size[0], size[1]):
+                            zoom(visual.zoom):
+                            customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                            diffuse(glow[0], glow[1], glow[2], glow[3]):
+                            rotationz(-(rotation_deg as f32)):
+                            blend(add):
+                            z(101)
+                        ));
+                    }
                 }
             }
         }

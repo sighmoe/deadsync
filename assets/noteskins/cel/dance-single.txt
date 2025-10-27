@@ -15,6 +15,11 @@ ExplosionSheet { texture="Down Tap Explosion Dim W2 (res 256x256).png"; window=W
 ExplosionSheet { texture="Down Tap Explosion Dim W3 (res 256x256).png"; window=W3; grid=1,1; frames=1, frame_size=256,256 }
 ExplosionSheet { texture="Down Tap Explosion Dim W4 (res 256x256).png"; window=W4; grid=1,1; frames=1, frame_size=256,256 }
 ExplosionSheet { texture="Down Tap Explosion Dim W5 (res 256x256).png"; window=W5; grid=1,1; frames=1, frame_size=256,256 }
+ExplosionCommand { window=W1; commands="diffusealpha,1.2;zoom,1.1;accelerate,0.15;zoom,1.0;diffusealpha,0;glowshift;effectperiod,0.05;effectcolor1,1,1,1,0;effectcolor2,1,1,1,0.5" }
+ExplosionCommand { window=W2; commands="diffusealpha,1.2;zoom,1.1;accelerate,0.15;zoom,1.0;diffusealpha,0" }
+ExplosionCommand { window=W3; commands="diffusealpha,1.2;zoom,1.1;accelerate,0.15;zoom,1.0;diffusealpha,0" }
+ExplosionCommand { window=W4; commands="diffusealpha,1.2;zoom,1.1;accelerate,0.15;zoom,1.0;diffusealpha,0" }
+ExplosionCommand { window=W5; commands="diffusealpha,1.2;zoom,1.1;accelerate,0.15;zoom,1.0;diffusealpha,0" }
 
 Receptor { col=0; x=-102 }
 Receptor { col=1; x=-34 }
