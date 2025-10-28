@@ -371,6 +371,15 @@ pub struct TapExplosion {
     pub animation: ExplosionAnimation,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct HoldVisuals {
+    pub body_inactive: Option<SpriteSlot>,
+    pub body_active: Option<SpriteSlot>,
+    pub bottomcap_inactive: Option<SpriteSlot>,
+    pub bottomcap_active: Option<SpriteSlot>,
+    pub explosion: Option<SpriteSlot>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Style {
     pub num_cols: usize,
@@ -387,6 +396,8 @@ pub struct Noteskin {
     pub field_right_x: i32,
     pub tap_explosions: HashMap<String, TapExplosion>,
     pub receptor_pulse: ReceptorPulse,
+    pub hold: HoldVisuals,
+    pub roll: HoldVisuals,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -476,6 +487,13 @@ impl SlotBuilder {
     }
 }
 
+#[derive(Clone, Copy)]
+enum HoldSpritePart {
+    Body,
+    Bottom,
+    Explosion,
+}
+
 #[derive(Clone, Default)]
 struct ExplosionBuilder {
     slot: Option<SlotBuilder>,
@@ -491,6 +509,16 @@ struct NoteskinBuilder {
     default_sources: HashMap<String, Arc<SpriteSource>>,
     tap_explosions: HashMap<String, ExplosionBuilder>,
     receptor_pulse: ReceptorPulse,
+    hold_body_inactive: Option<SlotBuilder>,
+    hold_body_active: Option<SlotBuilder>,
+    hold_bottomcap_inactive: Option<SlotBuilder>,
+    hold_bottomcap_active: Option<SlotBuilder>,
+    hold_explosion: Option<SlotBuilder>,
+    roll_body_inactive: Option<SlotBuilder>,
+    roll_body_active: Option<SlotBuilder>,
+    roll_bottomcap_inactive: Option<SlotBuilder>,
+    roll_bottomcap_active: Option<SlotBuilder>,
+    roll_explosion: Option<SlotBuilder>,
 }
 
 impl NoteskinBuilder {
@@ -507,6 +535,16 @@ impl NoteskinBuilder {
             default_sources: HashMap::new(),
             tap_explosions: HashMap::new(),
             receptor_pulse: ReceptorPulse::default(),
+            hold_body_inactive: None,
+            hold_body_active: None,
+            hold_bottomcap_inactive: None,
+            hold_bottomcap_active: None,
+            hold_explosion: None,
+            roll_body_inactive: None,
+            roll_body_active: None,
+            roll_bottomcap_inactive: None,
+            roll_bottomcap_active: None,
+            roll_explosion: None,
         }
     }
 
@@ -555,6 +593,32 @@ impl NoteskinBuilder {
                 .collect()
         }
 
+        fn finalize_single_slot(
+            slot: Option<SlotBuilder>,
+            default_source: Option<&Arc<SpriteSource>>,
+            tag: &str,
+        ) -> Option<SpriteSlot> {
+            slot.and_then(|slot_builder| {
+                let source = match slot_builder.source {
+                    Some(src) => src,
+                    None => match default_source {
+                        Some(src) => src.clone(),
+                        None => {
+                            warn!(
+                                "Noteskin missing texture assignment for component '{}'",
+                                tag
+                            );
+                            return None;
+                        }
+                    },
+                };
+                Some(SpriteSlot {
+                    def: slot_builder.def,
+                    source,
+                })
+            })
+        }
+
         let notes = finalize_slots(self.notes, self.default_sources.get("Note"), "Note")?;
         let receptor_off = finalize_slots(
             self.receptor_off,
@@ -565,6 +629,105 @@ impl NoteskinBuilder {
             self.receptor_glow,
             self.default_sources.get("Receptor-glow"),
         );
+
+        let hold_body_inactive = finalize_single_slot(
+            self.hold_body_inactive,
+            self.default_sources.get("Hold-body"),
+            "Hold-body",
+        );
+        let mut hold_body_active = finalize_single_slot(
+            self.hold_body_active,
+            self.default_sources
+                .get("Hold-body-active")
+                .or_else(|| self.default_sources.get("Hold-body")),
+            "Hold-body-active",
+        );
+        if hold_body_active.is_none() {
+            hold_body_active = hold_body_inactive.clone();
+        }
+
+        let hold_bottomcap_inactive = finalize_single_slot(
+            self.hold_bottomcap_inactive,
+            self.default_sources.get("Hold-tail"),
+            "Hold-tail",
+        );
+        let mut hold_bottomcap_active = finalize_single_slot(
+            self.hold_bottomcap_active,
+            self.default_sources
+                .get("Hold-bottomcap-active")
+                .or_else(|| self.default_sources.get("Hold-tail")),
+            "Hold-bottomcap-active",
+        );
+        if hold_bottomcap_active.is_none() {
+            hold_bottomcap_active = hold_bottomcap_inactive.clone();
+        }
+
+        let hold_explosion = finalize_single_slot(
+            self.hold_explosion,
+            self.default_sources
+                .get("Hold-explosion")
+                .or_else(|| self.default_sources.get("Hold-body")),
+            "Hold-explosion",
+        );
+
+        let roll_body_inactive = finalize_single_slot(
+            self.roll_body_inactive,
+            self.default_sources.get("Roll-body"),
+            "Roll-body",
+        )
+        .or_else(|| hold_body_inactive.clone());
+        let mut roll_body_active = finalize_single_slot(
+            self.roll_body_active,
+            self.default_sources
+                .get("Roll-body-active")
+                .or_else(|| self.default_sources.get("Roll-body")),
+            "Roll-body-active",
+        );
+        if roll_body_active.is_none() {
+            roll_body_active = roll_body_inactive.clone();
+        }
+
+        let roll_bottomcap_inactive = finalize_single_slot(
+            self.roll_bottomcap_inactive,
+            self.default_sources.get("Roll-tail"),
+            "Roll-tail",
+        )
+        .or_else(|| hold_bottomcap_inactive.clone());
+        let mut roll_bottomcap_active = finalize_single_slot(
+            self.roll_bottomcap_active,
+            self.default_sources
+                .get("Roll-bottomcap-active")
+                .or_else(|| self.default_sources.get("Roll-tail")),
+            "Roll-bottomcap-active",
+        );
+        if roll_bottomcap_active.is_none() {
+            roll_bottomcap_active = roll_bottomcap_inactive.clone();
+        }
+
+        let roll_explosion = finalize_single_slot(
+            self.roll_explosion,
+            self.default_sources
+                .get("Roll-explosion")
+                .or_else(|| self.default_sources.get("Hold-explosion")),
+            "Roll-explosion",
+        )
+        .or_else(|| hold_explosion.clone());
+
+        let hold_visuals = HoldVisuals {
+            body_inactive: hold_body_inactive.clone(),
+            body_active: hold_body_active.clone(),
+            bottomcap_inactive: hold_bottomcap_inactive.clone(),
+            bottomcap_active: hold_bottomcap_active.clone(),
+            explosion: hold_explosion.clone(),
+        };
+
+        let roll_visuals = HoldVisuals {
+            body_inactive: roll_body_inactive.clone(),
+            body_active: roll_body_active.clone(),
+            bottomcap_inactive: roll_bottomcap_inactive.clone(),
+            bottomcap_active: roll_bottomcap_active.clone(),
+            explosion: roll_explosion.clone(),
+        };
 
         let tap_explosions = self
             .tap_explosions
@@ -634,6 +797,8 @@ impl NoteskinBuilder {
             field_right_x,
             tap_explosions,
             receptor_pulse: self.receptor_pulse,
+            hold: hold_visuals,
+            roll: roll_visuals,
         })
     }
 }
@@ -672,6 +837,71 @@ pub fn load(path: &Path, style: &Style) -> Result<Noteskin, String> {
                     "ExplosionSheet" => parse_explosion_sheet(&noteskin_dir, &mut builder, &props),
                     "ExplosionCommand" => parse_explosion_command(&mut builder, &props),
                     "ReceptorPulse" => parse_receptor_pulse(&mut builder, &props),
+                    "HoldBody" | "Hold-body" | "HoldHead" | "HoldBodyActive"
+                    | "HoldBodyInactive" => parse_hold_component(
+                        &noteskin_dir,
+                        &mut builder,
+                        &props,
+                        false,
+                        HoldSpritePart::Body,
+                        props
+                            .get("state")
+                            .map(|s| s.trim_matches('"').to_ascii_lowercase()),
+                    ),
+                    "HoldBottomCap"
+                    | "Hold-tail"
+                    | "HoldBottomCapActive"
+                    | "HoldBottomCapInactive" => parse_hold_component(
+                        &noteskin_dir,
+                        &mut builder,
+                        &props,
+                        false,
+                        HoldSpritePart::Bottom,
+                        props
+                            .get("state")
+                            .map(|s| s.trim_matches('"').to_ascii_lowercase()),
+                    ),
+                    "HoldExplosion" => parse_hold_component(
+                        &noteskin_dir,
+                        &mut builder,
+                        &props,
+                        false,
+                        HoldSpritePart::Explosion,
+                        None,
+                    ),
+                    "RollBody" | "Roll-body" | "RollBodyActive" | "RollBodyInactive" => {
+                        parse_hold_component(
+                            &noteskin_dir,
+                            &mut builder,
+                            &props,
+                            true,
+                            HoldSpritePart::Body,
+                            props
+                                .get("state")
+                                .map(|s| s.trim_matches('"').to_ascii_lowercase()),
+                        )
+                    }
+                    "RollBottomCap"
+                    | "Roll-tail"
+                    | "RollBottomCapActive"
+                    | "RollBottomCapInactive" => parse_hold_component(
+                        &noteskin_dir,
+                        &mut builder,
+                        &props,
+                        true,
+                        HoldSpritePart::Bottom,
+                        props
+                            .get("state")
+                            .map(|s| s.trim_matches('"').to_ascii_lowercase()),
+                    ),
+                    "RollExplosion" => parse_hold_component(
+                        &noteskin_dir,
+                        &mut builder,
+                        &props,
+                        true,
+                        HoldSpritePart::Explosion,
+                        None,
+                    ),
                     _ => parse_sprite_rule(tag, &props, style, &mut builder),
                 }
             }
@@ -680,7 +910,19 @@ pub fn load(path: &Path, style: &Style) -> Result<Noteskin, String> {
             match tag.trim() {
                 "Texture-notes" => {
                     if let Some(src) = build_atlas_source(&noteskin_dir, value) {
-                        builder.default_sources.insert("Note".to_string(), src);
+                        builder
+                            .default_sources
+                            .insert("Note".to_string(), src.clone());
+                        builder
+                            .default_sources
+                            .insert("Hold-body".to_string(), src.clone());
+                        builder
+                            .default_sources
+                            .insert("Hold-tail".to_string(), src.clone());
+                        builder
+                            .default_sources
+                            .insert("Roll-body".to_string(), src.clone());
+                        builder.default_sources.insert("Roll-tail".to_string(), src);
                     }
                 }
                 "Texture-receptors" => {
@@ -848,6 +1090,99 @@ fn parse_receptor_sheet(
                 slot.def.size = frame_size;
                 slot.def.src = parse_src_offset(props).unwrap_or([0, 0]);
                 slot.set_source(source.clone());
+            }
+        }
+    }
+}
+
+fn parse_hold_component(
+    noteskin_dir: &str,
+    builder: &mut NoteskinBuilder,
+    props: &HashMap<&str, &str>,
+    is_roll: bool,
+    part: HoldSpritePart,
+    state: Option<String>,
+) {
+    let state_ref = state.as_deref();
+    let slot_option = match (is_roll, part) {
+        (false, HoldSpritePart::Body) => {
+            if matches!(state_ref, Some("active")) {
+                &mut builder.hold_body_active
+            } else {
+                &mut builder.hold_body_inactive
+            }
+        }
+        (false, HoldSpritePart::Bottom) => {
+            if matches!(state_ref, Some("active")) {
+                &mut builder.hold_bottomcap_active
+            } else {
+                &mut builder.hold_bottomcap_inactive
+            }
+        }
+        (false, HoldSpritePart::Explosion) => &mut builder.hold_explosion,
+        (true, HoldSpritePart::Body) => {
+            if matches!(state_ref, Some("active")) {
+                &mut builder.roll_body_active
+            } else {
+                &mut builder.roll_body_inactive
+            }
+        }
+        (true, HoldSpritePart::Bottom) => {
+            if matches!(state_ref, Some("active")) {
+                &mut builder.roll_bottomcap_active
+            } else {
+                &mut builder.roll_bottomcap_inactive
+            }
+        }
+        (true, HoldSpritePart::Explosion) => &mut builder.roll_explosion,
+    };
+
+    let slot = slot_option.get_or_insert_with(SlotBuilder::default);
+
+    let base = if is_roll { "Roll" } else { "Hold" };
+    let part_key = match part {
+        HoldSpritePart::Body => "body",
+        HoldSpritePart::Bottom => "tail",
+        HoldSpritePart::Explosion => "explosion",
+    };
+    let mut default_key = format!("{}-{}", base, part_key);
+    if matches!(part, HoldSpritePart::Body | HoldSpritePart::Bottom)
+        && matches!(state_ref, Some("active"))
+    {
+        default_key.push_str("-active");
+    }
+
+    if let Some(default_def) = builder.defaults.get(&default_key).cloned() {
+        slot.def = default_def;
+    }
+
+    apply_basic_sprite_properties(slot, props);
+    builder
+        .defaults
+        .insert(default_key.clone(), slot.def.clone());
+
+    if let Some(texture) = props.get("texture").map(|s| s.trim().trim_matches('"')) {
+        if let Some(source) = build_sheet_source(noteskin_dir, texture, props, 30.0) {
+            slot.set_source(source);
+        } else {
+            warn!(
+                "Failed to load texture '{}' for {} component",
+                texture, default_key
+            );
+        }
+    } else if slot.source.is_none() {
+        if let Some(source) = builder.default_sources.get(&default_key) {
+            slot.set_source(source.clone());
+        }
+    }
+
+    if slot.def.size == [0, 0] {
+        if let Some(source) = slot.source.as_ref() {
+            if let Some(size) = source.frame_size() {
+                slot.def.size = size;
+            } else {
+                let dims = source.tex_dims();
+                slot.def.size = [dims.0 as i32, dims.1 as i32];
             }
         }
     }
@@ -1183,10 +1518,26 @@ fn parse_color4(args: &[&str]) -> Option<[f32; 4]> {
         values[i] = arg.parse().ok()?;
     }
 
-    if args.len() < 4 {
-        None
-    } else {
-        Some(values)
+    if args.len() < 4 { None } else { Some(values) }
+}
+
+fn apply_basic_sprite_properties(slot: &mut SlotBuilder, props: &HashMap<&str, &str>) {
+    if let Some(src_str) = props.get("src") {
+        if let Some((x_str, y_str)) = src_str.split_once(',') {
+            slot.def.src = [x_str.parse().unwrap_or(0), y_str.parse().unwrap_or(0)];
+        }
+    }
+    if let Some(size_str) = props.get("size") {
+        if let Some((w_str, h_str)) = size_str.split_once(',') {
+            slot.def.size = [w_str.parse().unwrap_or(0), h_str.parse().unwrap_or(0)];
+        }
+    }
+    if let Some(rot_str) = props.get("rot") {
+        slot.def.rotation_deg = rot_str.parse().unwrap_or(0);
+    }
+    if let Some(mirror_str) = props.get("mirror") {
+        slot.def.mirror_h = mirror_str.contains('h');
+        slot.def.mirror_v = mirror_str.contains('v');
     }
 }
 
@@ -1196,25 +1547,7 @@ fn parse_sprite_rule(
     style: &Style,
     builder: &mut NoteskinBuilder,
 ) {
-    let apply_properties = |slot: &mut SlotBuilder| {
-        if let Some(src_str) = props.get("src") {
-            if let Some((x_str, y_str)) = src_str.split_once(',') {
-                slot.def.src = [x_str.parse().unwrap_or(0), y_str.parse().unwrap_or(0)];
-            }
-        }
-        if let Some(size_str) = props.get("size") {
-            if let Some((w_str, h_str)) = size_str.split_once(',') {
-                slot.def.size = [w_str.parse().unwrap_or(0), h_str.parse().unwrap_or(0)];
-            }
-        }
-        if let Some(rot_str) = props.get("rot") {
-            slot.def.rotation_deg = rot_str.parse().unwrap_or(0);
-        }
-        if let Some(mirror_str) = props.get("mirror") {
-            slot.def.mirror_h = mirror_str.contains('h');
-            slot.def.mirror_v = mirror_str.contains('v');
-        }
-    };
+    let apply_properties = |slot: &mut SlotBuilder| apply_basic_sprite_properties(slot, props);
 
     let has_range_spec =
         props.contains_key("row") || props.contains_key("col") || props.contains_key("player");

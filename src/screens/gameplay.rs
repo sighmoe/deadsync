@@ -1,17 +1,20 @@
-use crate::core::input::InputState;
-use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
-use crate::gameplay::parsing::notes as note_parser;
-use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
-use crate::gameplay::song::SongData;
-use crate::core::space::*;
-use crate::gameplay::timing::TimingData;
-use crate::core::audio;
-use crate::screens::{Screen, ScreenAction};
-use crate::core::space::{is_wide, widescale};
-use crate::ui::actors::{Actor, SizeSpec};
 use crate::act;
+use crate::assets::AssetManager;
+use crate::core::audio;
+use crate::core::input::InputState;
+use crate::core::space::*;
+use crate::core::space::{is_wide, widescale};
+use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
+use crate::gameplay::parsing::notes as note_parser;
+use crate::gameplay::parsing::noteskin::{self, NUM_QUANTIZATIONS, Noteskin, Quantization, Style};
+use crate::gameplay::profile::{self, ScrollSpeedSetting};
+use crate::gameplay::song::SongData;
+use crate::gameplay::timing::TimingData;
+use crate::screens::{Screen, ScreenAction};
+use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;
 use crate::ui::components::screen_bar::{self, ScreenBarParams};
+use crate::ui::font;
 use log::{info, warn};
 use std::collections::HashMap;
 use std::path::Path;
@@ -19,9 +22,6 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use crate::gameplay::profile::{self, ScrollSpeedSetting};
-use crate::ui::font;
-use crate::assets::AssetManager;
 
 impl ScrollSpeedSetting {
     pub const ARROW_SPACING: f32 = 64.0;
@@ -108,9 +108,9 @@ const TIMING_WINDOW_ADD: f32 = 0.0015;
 
 pub const BASE_FANTASTIC_WINDOW: f32 = 0.0215; // W1 (0.0230 final)
 const BASE_EXCELLENT_WINDOW: f32 = 0.0430; // W2 (0.0445 final)
-const BASE_GREAT_WINDOW:     f32 = 0.1020; // W3 (0.1035 final)
-const BASE_DECENT_WINDOW:    f32 = 0.1350; // W4 (0.1365 final)
-const BASE_WAY_OFF_WINDOW:   f32 = 0.1800; // W5 (0.1815 final)
+const BASE_GREAT_WINDOW: f32 = 0.1020; // W3 (0.1035 final)
+const BASE_DECENT_WINDOW: f32 = 0.1350; // W4 (0.1365 final)
+const BASE_WAY_OFF_WINDOW: f32 = 0.1800; // W5 (0.1815 final)
 // Notes outside the final WayOff window are considered a Miss.
 
 // --- DATA STRUCTURES ---
@@ -135,9 +135,21 @@ pub struct Judgment {
 #[derive(Clone, Debug)]
 pub enum NoteType {
     Tap,
-    // Future: Holds and Rolls will be more complex
     Hold,
     Roll,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HoldResult {
+    Held,
+    LetGo,
+}
+
+#[derive(Clone, Debug)]
+pub struct HoldData {
+    pub end_row_index: usize,
+    pub end_beat: f32,
+    pub result: Option<HoldResult>,
 }
 
 #[derive(Clone, Debug)]
@@ -148,6 +160,7 @@ pub struct Note {
     // NEW: Add a row index for grouping and a place to store results
     pub row_index: usize,
     pub result: Option<Judgment>,
+    pub hold: Option<HoldData>,
 }
 
 #[derive(Clone, Debug)]
@@ -171,6 +184,26 @@ struct ActiveTapExplosion {
     window: String,
     elapsed: f32,
     start_beat: f32,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveHold {
+    note_index: usize,
+    end_time: f32,
+    note_type: NoteType,
+    let_go: bool,
+    last_input_time: f32,
+    is_pressed: bool,
+}
+
+impl ActiveHold {
+    fn is_engaged(&self, now: f32) -> bool {
+        if self.let_go {
+            return false;
+        }
+
+        self.is_pressed || (now - self.last_input_time) <= HOLD_DROP_TOLERANCE
+    }
 }
 
 // NEW: Life change constants
@@ -222,9 +255,92 @@ fn trigger_tap_explosion(state: &mut State, column: usize, grade: JudgeGrade) {
     }
 }
 
+fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
+    if let Some(hold) = state.notes[note_index].hold.as_mut() {
+        if hold.result == Some(HoldResult::LetGo) {
+            return;
+        }
+        hold.result = Some(HoldResult::LetGo);
+    }
+
+    state.change_life(LifeChange::LET_GO);
+    state.combo = 0;
+    state.miss_combo = state.miss_combo.saturating_add(1);
+    state.combo_after_miss = 0;
+    if state.full_combo_grade.is_some() {
+        state.first_fc_attempt_broken = true;
+    }
+    state.full_combo_grade = None;
+    state.receptor_glow_timers[column] = 0.0;
+}
+
+fn handle_hold_success(state: &mut State, note_index: usize) {
+    if let Some(hold) = state.notes[note_index].hold.as_mut() {
+        if hold.result == Some(HoldResult::Held) {
+            return;
+        }
+        hold.result = Some(HoldResult::Held);
+    }
+
+    if matches!(state.notes[note_index].note_type, NoteType::Hold) {
+        state.holds_held = state.holds_held.saturating_add(1);
+    }
+    state.change_life(LifeChange::HELD);
+    state.miss_combo = 0;
+}
+
+fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32) {
+    for column in 0..state.active_holds.len() {
+        let mut handle_let_go = None;
+        let mut handle_success = None;
+
+        {
+            let active_opt = &mut state.active_holds[column];
+            if let Some(active) = active_opt {
+                if inputs[column] {
+                    active.last_input_time = current_time;
+                    active.is_pressed = true;
+                } else {
+                    active.is_pressed = false;
+                    if !active.let_go
+                        && current_time < active.end_time
+                        && (current_time - active.last_input_time) > HOLD_DROP_TOLERANCE
+                    {
+                        active.let_go = true;
+                        handle_let_go = Some((column, active.note_index));
+                    }
+                }
+
+                if current_time >= active.end_time {
+                    let note_index = active.note_index;
+                    let still_engaged = active.is_engaged(current_time);
+                    if still_engaged {
+                        handle_success = Some(note_index);
+                    } else if !active.let_go {
+                        active.let_go = true;
+                        handle_let_go = Some((column, note_index));
+                    }
+                    *active_opt = None;
+                }
+            }
+        }
+
+        if let Some((column, note_index)) = handle_let_go {
+            handle_hold_let_go(state, column, note_index);
+        }
+
+        if let Some(note_index) = handle_success {
+            handle_hold_success(state, note_index);
+        }
+    }
+}
+
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
 const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
 const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
+// Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
+// Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
+const HOLD_DROP_TOLERANCE: f32 = 0.32;
 
 pub struct State {
     // Song & Chart data
@@ -233,15 +349,15 @@ pub struct State {
     pub chart: Arc<ChartData>,
     pub timing: Arc<TimingData>,
     pub notes: Vec<Note>,
-    
+
     // Gameplay state
     pub song_start_instant: Instant, // The wall-clock moment music t=0 begins (after the initial delay).
     pub current_beat: f32,
     pub current_music_time: f32, // Time calculated at the start of each update frame.
-    pub note_spawn_cursor: usize,  // For spawning visual arrows
-    pub judged_row_cursor: usize,  // For finalizing row judgments
+    pub note_spawn_cursor: usize, // For spawning visual arrows
+    pub judged_row_cursor: usize, // For finalizing row judgments
     pub arrows: [Vec<Arrow>; 4], // Active on-screen arrows per column
-    
+
     // Scoring & Feedback
     pub combo: u32,
     pub miss_combo: u32,
@@ -251,7 +367,7 @@ pub struct State {
     pub last_judgment: Option<JudgmentRenderInfo>,
 
     // Life Meter
-    pub life: f32, // 0.0 to 1.0
+    pub life: f32,             // 0.0 to 1.0
     pub combo_after_miss: u32, // for regeneration logic
     pub is_failing: bool,
     pub fail_time: Option<f32>,
@@ -260,7 +376,7 @@ pub struct State {
     pub earned_grade_points: i32,
     pub possible_grade_points: i32,
     pub song_completed_naturally: bool,
-    
+
     // Visuals
     pub noteskin: Option<Noteskin>,
     pub active_color_index: i32,
@@ -272,6 +388,9 @@ pub struct State {
     pub receptor_glow_timers: [f32; 4], // Timers for glow effect on each receptor
     pub receptor_bop_timers: [f32; 4],  // Timers for the "bop" animation on empty press
     pub tap_explosions: [Option<ActiveTapExplosion>; 4],
+    pub active_holds: [Option<ActiveHold>; 4],
+    pub holds_total: u32,
+    pub holds_held: u32,
 
     // Animation timing for this screen
     pub total_elapsed_in_screen: f32,
@@ -280,6 +399,7 @@ pub struct State {
     pub hold_to_exit_key: Option<KeyCode>,
     pub hold_to_exit_start: Option<Instant>,
     prev_inputs: [bool; 4],
+    keyboard_inputs: [bool; 4],
 
     // Debugging
     log_timer: f32,
@@ -316,7 +436,8 @@ impl State {
         self.life = (self.life + final_delta).clamp(0.0, 1.0);
 
         if self.life <= 0.0 {
-            if !self.is_failing { // first frame of failure
+            if !self.is_failing {
+                // first frame of failure
                 self.fail_time = Some(self.current_music_time);
             }
             self.life = 0.0;
@@ -330,9 +451,15 @@ impl State {
 
 pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32) -> State {
     info!("Initializing Gameplay Screen...");
-    info!("Loaded song '{}' and chart '{}'", song.title, chart.difficulty);
+    info!(
+        "Loaded song '{}' and chart '{}'",
+        song.title, chart.difficulty
+    );
 
-    let style = Style { num_cols: 4, num_players: 1 };
+    let style = Style {
+        num_cols: 4,
+        num_players: 1,
+    };
     let noteskin = noteskin::load(Path::new("assets/noteskins/cel/dance-single.txt"), &style)
         .ok()
         .or_else(|| noteskin::load(Path::new("assets/noteskins/fallback.txt"), &style).ok());
@@ -349,16 +476,40 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     ));
 
     let parsed_notes = note_parser::parse_chart_notes(&chart.notes);
-    let notes: Vec<Note> = parsed_notes.iter().filter_map(|(row_index, column, raw_note_type)| {
-        timing.get_beat_for_row(*row_index).map(|beat| {
-            let note_type = match raw_note_type {
-                ChartNoteType::Tap => NoteType::Tap,
-                ChartNoteType::Hold => NoteType::Hold,
-                ChartNoteType::Roll => NoteType::Roll,
-            };
-            Note { beat, column: *column, note_type, row_index: *row_index, result: None }
-        })
-    }).collect();
+    let mut notes: Vec<Note> = Vec::with_capacity(parsed_notes.len());
+    for parsed in parsed_notes {
+        let Some(beat) = timing.get_beat_for_row(parsed.row_index) else {
+            continue;
+        };
+
+        let note_type = match parsed.note_type {
+            ChartNoteType::Tap => NoteType::Tap,
+            ChartNoteType::Hold => NoteType::Hold,
+            ChartNoteType::Roll => NoteType::Roll,
+        };
+
+        let hold = match (&note_type, parsed.tail_row_index) {
+            (NoteType::Hold | NoteType::Roll, Some(tail_row)) => {
+                timing.get_beat_for_row(tail_row).map(|end_beat| HoldData {
+                    end_row_index: tail_row,
+                    end_beat,
+                    result: None,
+                })
+            }
+            _ => None,
+        };
+
+        notes.push(Note {
+            beat,
+            column: parsed.column,
+            note_type,
+            row_index: parsed.row_index,
+            result: None,
+            hold,
+        });
+    }
+
+    let holds_total = chart.stats.holds as u32;
 
     let num_taps_and_holds = notes.len() as u64;
     // Possible grade points are based on taps/hold heads only.
@@ -375,7 +526,11 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
     if let Some(music_path) = &song.music_path {
         info!("Starting music with a preroll delay of {:.2}s", start_delay);
-        let cut = audio::Cut { start_sec: (-start_delay) as f64, length_sec: f64::INFINITY, ..Default::default() };
+        let cut = audio::Cut {
+            start_sec: (-start_delay) as f64,
+            length_sec: f64::INFINITY,
+            ..Default::default()
+        };
         audio::play_music(music_path.clone(), cut, false);
     } else {
         warn!("No music path found for song '{}'", song.title);
@@ -395,8 +550,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
             "Scroll speed {} produced non-positive velocity; falling back to default.",
             scroll_speed
         );
-        pixels_per_second = ScrollSpeedSetting::default()
-            .pixels_per_second(initial_bpm, reference_bpm);
+        pixels_per_second =
+            ScrollSpeedSetting::default().pixels_per_second(initial_bpm, reference_bpm);
     }
     let mut travel_time =
         scroll_speed.travel_time_seconds(screen_height(), initial_bpm, reference_bpm);
@@ -452,10 +607,14 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         receptor_glow_timers: [0.0; 4],
         receptor_bop_timers: [0.0; 4],
         tap_explosions: Default::default(),
+        active_holds: Default::default(),
+        holds_total,
+        holds_held: 0,
         total_elapsed_in_screen: 0.0,
         hold_to_exit_key: None,
         hold_to_exit_start: None,
         prev_inputs: [false; 4],
+        keyboard_inputs: [false; 4],
         log_timer: 0.0,
     }
 }
@@ -475,9 +634,9 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
 
         let fantastic_window = BASE_FANTASTIC_WINDOW + TIMING_WINDOW_ADD;
         let excellent_window = BASE_EXCELLENT_WINDOW + TIMING_WINDOW_ADD;
-        let great_window     = BASE_GREAT_WINDOW + TIMING_WINDOW_ADD;
-        let decent_window    = BASE_DECENT_WINDOW + TIMING_WINDOW_ADD;
-        let way_off_window   = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
+        let great_window = BASE_GREAT_WINDOW + TIMING_WINDOW_ADD;
+        let decent_window = BASE_DECENT_WINDOW + TIMING_WINDOW_ADD;
+        let way_off_window = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
 
         if abs_time_error <= way_off_window {
             let grade = if abs_time_error <= fantastic_window {
@@ -499,6 +658,11 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
             };
 
             state.notes[note_index].result = Some(judgment);
+            let note_type = state.notes[note_index].note_type.clone();
+            let hold_end_time = state.notes[note_index]
+                .hold
+                .as_ref()
+                .map(|hold| state.timing.get_time_for_beat(hold.end_beat));
             info!(
                 "JUDGED (pending): Row {}, Col {}, Error: {:.2}ms, Grade: {:?}",
                 note_row_index,
@@ -511,6 +675,19 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
             state.receptor_glow_timers[column] = RECEPTOR_GLOW_DURATION;
             trigger_tap_explosion(state, column, grade);
 
+            if matches!(note_type, NoteType::Hold | NoteType::Roll) {
+                if let Some(end_time) = hold_end_time {
+                    state.active_holds[column] = Some(ActiveHold {
+                        note_index,
+                        end_time,
+                        note_type,
+                        let_go: false,
+                        last_input_time: current_time,
+                        is_pressed: true,
+                    });
+                }
+            }
+
             return true;
         }
     }
@@ -519,34 +696,28 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
 
 pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     if let PhysicalKey::Code(key_code) = event.physical_key {
+        if event.state == ElementState::Pressed && event.repeat {
+            return ScreenAction::None;
+        }
+
+        let column = match key_code {
+            KeyCode::ArrowLeft | KeyCode::KeyD => Some(0),
+            KeyCode::ArrowDown | KeyCode::KeyF => Some(1),
+            KeyCode::ArrowUp | KeyCode::KeyJ => Some(2),
+            KeyCode::ArrowRight | KeyCode::KeyK => Some(3),
+            _ => None,
+        };
+
+        if let Some(col_idx) = column {
+            state.keyboard_inputs[col_idx] = event.state == ElementState::Pressed;
+        }
+
         match event.state {
             ElementState::Pressed => {
-                if event.repeat { return ScreenAction::None; }
-
                 if key_code == KeyCode::Escape || key_code == KeyCode::Enter {
                     state.hold_to_exit_key = Some(key_code);
                     state.hold_to_exit_start = Some(Instant::now());
                     return ScreenAction::None;
-                }
-
-                let column = match key_code {
-                    KeyCode::ArrowLeft  | KeyCode::KeyD => Some(0),
-                    KeyCode::ArrowDown  | KeyCode::KeyF => Some(1),
-                    KeyCode::ArrowUp    | KeyCode::KeyJ => Some(2),
-                    KeyCode::ArrowRight | KeyCode::KeyK => Some(3),
-                    _ => None,
-                };
-
-                if let Some(col_idx) = column {
-                    let now = Instant::now();
-                    let hit_time = if now < state.song_start_instant {
-                        -(state.song_start_instant.saturating_duration_since(now).as_secs_f32())
-                    } else {
-                        now.saturating_duration_since(state.song_start_instant).as_secs_f32()
-                    };
-                    if !judge_a_tap(state, col_idx, hit_time) {
-                        state.receptor_bop_timers[col_idx] = 0.11;
-                    }
                 }
             }
             ElementState::Released => {
@@ -561,7 +732,9 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 }
 
 fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
-    if judgments_in_row.is_empty() { return; }
+    if judgments_in_row.is_empty() {
+        return;
+    }
 
     // If the player is not dead, update the score points.
     if !state.is_dead() {
@@ -570,10 +743,10 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
             let grade_points = match judgment.grade {
                 JudgeGrade::Fantastic => 5,
                 JudgeGrade::Excellent => 4,
-                JudgeGrade::Great     => 2,
-                JudgeGrade::Decent    => 0,
-                JudgeGrade::WayOff    => -6,
-                JudgeGrade::Miss      => -12,
+                JudgeGrade::Great => 2,
+                JudgeGrade::Decent => 0,
+                JudgeGrade::WayOff => -6,
+                JudgeGrade::Miss => -12,
             };
             state.earned_grade_points += grade_points;
         }
@@ -596,11 +769,15 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
         }
     }
 
-    let Some(final_judgment) = representative_judgment else { return; };
+    let Some(final_judgment) = representative_judgment else {
+        return;
+    };
     let final_grade = final_judgment.grade;
 
-    info!("FINALIZED: Row {}, Grade: {:?}, Offset: {:.2}ms",
-          final_judgment.row, final_grade, final_judgment.time_error_ms);
+    info!(
+        "FINALIZED: Row {}, Grade: {:?}, Offset: {:.2}ms",
+        final_judgment.row, final_grade, final_judgment.time_error_ms
+    );
 
     // Change life based on judgment
     let life_delta = match final_grade {
@@ -614,7 +791,10 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
     state.change_life(life_delta);
 
     // Update global state based on this single representative judgment
-    state.last_judgment = Some(JudgmentRenderInfo { judgment: final_judgment, judged_at: Instant::now() });
+    state.last_judgment = Some(JudgmentRenderInfo {
+        judgment: final_judgment,
+        judged_at: Instant::now(),
+    });
     *state.judgment_counts.entry(final_grade).or_insert(0) += 1;
 
     state.miss_combo = 0;
@@ -645,23 +825,28 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
 fn update_judged_rows(state: &mut State) {
     loop {
         let max_row_index = state.notes.iter().map(|n| n.row_index).max().unwrap_or(0);
-        
+
         if state.judged_row_cursor > max_row_index {
             break;
         }
 
         let is_row_complete = {
-            let notes_on_row: Vec<&Note> = state.notes.iter()
-                .filter(|n| n.row_index == state.judged_row_cursor).collect();
+            let notes_on_row: Vec<&Note> = state
+                .notes
+                .iter()
+                .filter(|n| n.row_index == state.judged_row_cursor)
+                .collect();
             notes_on_row.is_empty() || notes_on_row.iter().all(|n| n.result.is_some())
         };
 
         if is_row_complete {
-            let judgments_on_row: Vec<Judgment> = state.notes.iter()
+            let judgments_on_row: Vec<Judgment> = state
+                .notes
+                .iter()
                 .filter(|n| n.row_index == state.judged_row_cursor)
                 .filter_map(|n| n.result.clone())
                 .collect();
-            
+
             finalize_row_judgment(state, judgments_on_row);
             state.judged_row_cursor += 1;
         } else {
@@ -698,9 +883,13 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
 
     let now = std::time::Instant::now();
     let music_time_sec = if now < state.song_start_instant {
-        -(state.song_start_instant.saturating_duration_since(now).as_secs_f32())
+        -(state
+            .song_start_instant
+            .saturating_duration_since(now)
+            .as_secs_f32())
     } else {
-        now.saturating_duration_since(state.song_start_instant).as_secs_f32()
+        now.saturating_duration_since(state.song_start_instant)
+            .as_secs_f32()
     };
     state.current_music_time = music_time_sec;
     state.current_beat = state.timing.get_beat_for_time(music_time_sec);
@@ -715,9 +904,11 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     }
     state.scroll_pixels_per_second = dynamic_speed;
 
-    let mut travel_time = state
-        .scroll_speed
-        .travel_time_seconds(screen_height(), current_bpm, state.scroll_reference_bpm);
+    let mut travel_time = state.scroll_speed.travel_time_seconds(
+        screen_height(),
+        current_bpm,
+        state.scroll_reference_bpm,
+    );
     if !travel_time.is_finite() || travel_time <= 0.0 {
         travel_time = screen_height() / dynamic_speed;
     }
@@ -729,7 +920,12 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
         return ScreenAction::Navigate(Screen::Evaluation);
     }
 
-    let current_inputs = [input.left, input.down, input.up, input.right];
+    let current_inputs = [
+        input.left || state.keyboard_inputs[0],
+        input.down || state.keyboard_inputs[1],
+        input.up || state.keyboard_inputs[2],
+        input.right || state.keyboard_inputs[3],
+    ];
     let prev_inputs = state.prev_inputs;
 
     for (col, (now_down, was_down)) in current_inputs.iter().copied().zip(prev_inputs).enumerate() {
@@ -740,6 +936,8 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
         }
     }
     state.prev_inputs = current_inputs;
+
+    update_active_holds(state, &current_inputs, music_time_sec);
 
     for timer in &mut state.receptor_glow_timers {
         *timer = (*timer - delta_time).max(0.0);
@@ -796,8 +994,10 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
                     row: note_row_index,
                 };
                 state.notes[note_index].result = Some(judgment);
-                info!("MISSED (pending): Row {}, Col {}, Beat {:.2}",
-                      note_row_index, arrow.column, arrow.beat);
+                info!(
+                    "MISSED (pending): Row {}, Col {}, Beat {:.2}",
+                    note_row_index, arrow.column, arrow.beat
+                );
                 missed = true;
             }
         }
@@ -854,16 +1054,17 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
 fn build_background(state: &State) -> Actor {
     let sw = screen_width();
     let sh = screen_height();
-    let screen_aspect = if sh > 0.0 { sw / sh } else { 16.0/9.0 };
+    let screen_aspect = if sh > 0.0 { sw / sh } else { 16.0 / 9.0 };
 
-    let (tex_w, tex_h) = if let Some(meta) = crate::assets::texture_dims(&state.background_texture_key) {
-        (meta.w as f32, meta.h as f32)
-    } else {
-        (1.0, 1.0) // fallback, will just fill screen
-    };
+    let (tex_w, tex_h) =
+        if let Some(meta) = crate::assets::texture_dims(&state.background_texture_key) {
+            (meta.w as f32, meta.h as f32)
+        } else {
+            (1.0, 1.0) // fallback, will just fill screen
+        };
 
     let tex_aspect = if tex_h > 0.0 { tex_w / tex_h } else { 1.0 };
-    
+
     if screen_aspect > tex_aspect {
         // screen is wider, match width to cover
         act!(sprite(state.background_texture_key.clone()):
@@ -899,29 +1100,70 @@ struct JudgmentDisplayInfo {
 
 static JUDGMENT_INFO: LazyLock<HashMap<JudgeGrade, JudgmentDisplayInfo>> = LazyLock::new(|| {
     HashMap::from([
-        (JudgeGrade::Fantastic, JudgmentDisplayInfo { label: "FANTASTIC", color: color::rgba_hex(color::JUDGMENT_HEX[0]) }),
-        (JudgeGrade::Excellent, JudgmentDisplayInfo { label: "EXCELLENT", color: color::rgba_hex(color::JUDGMENT_HEX[1]) }),
-        (JudgeGrade::Great,     JudgmentDisplayInfo { label: "GREAT",     color: color::rgba_hex(color::JUDGMENT_HEX[2]) }),
-        (JudgeGrade::Decent,    JudgmentDisplayInfo { label: "DECENT",    color: color::rgba_hex(color::JUDGMENT_HEX[3]) }),
-        (JudgeGrade::WayOff,    JudgmentDisplayInfo { label: "WAY OFF",   color: color::rgba_hex(color::JUDGMENT_HEX[4]) }),
-        (JudgeGrade::Miss,      JudgmentDisplayInfo { label: "MISS",      color: color::rgba_hex(color::JUDGMENT_HEX[5]) }),
+        (
+            JudgeGrade::Fantastic,
+            JudgmentDisplayInfo {
+                label: "FANTASTIC",
+                color: color::rgba_hex(color::JUDGMENT_HEX[0]),
+            },
+        ),
+        (
+            JudgeGrade::Excellent,
+            JudgmentDisplayInfo {
+                label: "EXCELLENT",
+                color: color::rgba_hex(color::JUDGMENT_HEX[1]),
+            },
+        ),
+        (
+            JudgeGrade::Great,
+            JudgmentDisplayInfo {
+                label: "GREAT",
+                color: color::rgba_hex(color::JUDGMENT_HEX[2]),
+            },
+        ),
+        (
+            JudgeGrade::Decent,
+            JudgmentDisplayInfo {
+                label: "DECENT",
+                color: color::rgba_hex(color::JUDGMENT_HEX[3]),
+            },
+        ),
+        (
+            JudgeGrade::WayOff,
+            JudgmentDisplayInfo {
+                label: "WAY OFF",
+                color: color::rgba_hex(color::JUDGMENT_HEX[4]),
+            },
+        ),
+        (
+            JudgeGrade::Miss,
+            JudgmentDisplayInfo {
+                label: "MISS",
+                color: color::rgba_hex(color::JUDGMENT_HEX[5]),
+            },
+        ),
     ])
 });
 
 fn format_game_time(s: f32, total_seconds: f32) -> String {
-    if s < 0.0 { return format_game_time(0.0, total_seconds); }
+    if s < 0.0 {
+        return format_game_time(0.0, total_seconds);
+    }
     let s_u64 = s as u64;
 
     let minutes = s_u64 / 60;
     let seconds = s_u64 % 60;
 
-    if total_seconds >= 3600.0 { // Over an hour total? use H:MM:SS
-         let hours = s_u64 / 3600;
-         let minutes = (s_u64 % 3600) / 60;
-         format!("{}:{:02}:{:02}", hours, minutes, seconds)
-    } else if total_seconds >= 600.0 { // Over 10 mins total? use MM:SS
+    if total_seconds >= 3600.0 {
+        // Over an hour total? use H:MM:SS
+        let hours = s_u64 / 3600;
+        let minutes = (s_u64 % 3600) / 60;
+        format!("{}:{:02}:{:02}", hours, minutes, seconds)
+    } else if total_seconds >= 600.0 {
+        // Over 10 mins total? use MM:SS
         format!("{:02}:{:02}", minutes, seconds)
-    } else { // Under 10 mins total? use M:SS
+    } else {
+        // Under 10 mins total? use M:SS
         format!("{}:{:02}", minutes, seconds)
     }
 }
@@ -948,7 +1190,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             z(-99) // Draw just above the background
         ));
     }
-    
+
     // --- Playfield Positioning (1:1 with Simply Love) ---
     let logical_screen_width = screen_width();
     let clamped_width = logical_screen_width.clamp(640.0, 854.0);
@@ -970,9 +1212,13 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             let ar = screen_width() / screen_height();
             let t = ((ar - (16.0 / 10.0)) / ((16.0 / 9.0) - (16.0 / 10.0))).clamp(0.0, 1.0);
             0.825 + (0.925 - 0.825) * t
-        } else { 1.0 };
+        } else {
+            1.0
+        };
         let mut local_banner_x = 70.0;
-        if note_field_is_centered && wide { local_banner_x = 72.0; }
+        if note_field_is_centered && wide {
+            local_banner_x = 72.0;
+        }
         let local_banner_y = -200.0;
 
         let banner_x = sidepane_center_x + (local_banner_x * banner_data_zoom);
@@ -1007,6 +1253,23 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 [width * scale, TARGET_EXPLOSION_PIXEL_SIZE]
             }
         };
+        let current_time = state.current_music_time;
+        let compute_lane_y = |beat: f32| -> f32 {
+            match state.scroll_speed {
+                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
+                    let beat_diff = beat - state.current_beat;
+                    let multiplier = state
+                        .scroll_speed
+                        .beat_multiplier(state.scroll_reference_bpm);
+                    receptor_y + (beat_diff * ScrollSpeedSetting::ARROW_SPACING * multiplier)
+                }
+                _ => {
+                    let note_time = state.timing.get_time_for_beat(beat);
+                    let time_diff = note_time - current_time;
+                    receptor_y + (time_diff * pixels_per_second)
+                }
+            }
+        };
 
         // Receptors + glow
         for i in 0..4 {
@@ -1016,7 +1279,9 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             let bop_zoom = if bop_timer > 0.0 {
                 let t = (0.11 - bop_timer) / 0.11;
                 0.75 + (1.0 - 0.75) * t
-            } else { 1.0 };
+            } else {
+                1.0
+            };
 
             let receptor_slot = &ns.receptor_off[i];
             let receptor_frame =
@@ -1044,6 +1309,42 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 ):
                 z(100)
             ));
+
+            if let Some(hold_slot) = state.active_holds[i]
+                .as_ref()
+                .filter(|active| active.is_engaged(current_time))
+                .and_then(|active| {
+                    let note_type = &state.notes[active.note_index].note_type;
+                    let visuals = if matches!(note_type, NoteType::Roll) {
+                        &ns.roll
+                    } else {
+                        &ns.hold
+                    };
+                    visuals
+                        .explosion
+                        .as_ref()
+                        .or_else(|| ns.hold.explosion.as_ref())
+                })
+            {
+                let hold_uv = hold_slot.uv_for_frame(0);
+                let hold_size = scale_explosion(hold_slot.size());
+                let receptor_rotation = ns
+                    .receptor_off
+                    .get(i)
+                    .map(|slot| slot.def.rotation_deg as f32)
+                    .unwrap_or(0.0);
+                let base_rotation = hold_slot.def.rotation_deg as f32;
+                let final_rotation = base_rotation + receptor_rotation;
+                actors.push(act!(sprite(hold_slot.texture_key().to_string()):
+                    align(0.5, 0.5):
+                    xy(playfield_center_x + col_x_offset as f32, receptor_y):
+                    zoomto(hold_size[0], hold_size[1]):
+                    rotationz(-final_rotation):
+                    customtexturerect(hold_uv[0], hold_uv[1], hold_uv[2], hold_uv[3]):
+                    blend(normal):
+                    z(101)
+                ));
+            }
 
             let glow_timer = state.receptor_glow_timers[i];
             if glow_timer > 0.0 {
@@ -1107,10 +1408,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     ));
 
                     let glow = visual.glow;
-                    let glow_strength = glow[0].abs()
-                        + glow[1].abs()
-                        + glow[2].abs()
-                        + glow[3].abs();
+                    let glow_strength =
+                        glow[0].abs() + glow[1].abs() + glow[2].abs() + glow[3].abs();
                     if glow_strength > f32::EPSILON {
                         actors.push(act!(sprite(slot.texture_key().to_string()):
                             align(0.5, 0.5):
@@ -1128,8 +1427,114 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             }
         }
 
+        for (note_index, note) in state.notes.iter().enumerate() {
+            if !matches!(note.note_type, NoteType::Hold | NoteType::Roll) {
+                continue;
+            }
+            let Some(hold) = &note.hold else {
+                continue;
+            };
+
+            if matches!(hold.result, Some(HoldResult::Held)) {
+                continue;
+            }
+
+            let head_y = compute_lane_y(note.beat);
+            let tail_y = compute_lane_y(hold.end_beat);
+            let head_is_top = head_y <= tail_y;
+            let mut top = head_y.min(tail_y);
+            let mut bottom = head_y.max(tail_y);
+            if bottom < -200.0 || top > screen_height() + 200.0 {
+                continue;
+            }
+            top = top.max(-400.0);
+            bottom = bottom.min(screen_height() + 400.0);
+            if bottom <= top {
+                continue;
+            }
+
+            let col_x_offset = ns.column_xs[note.column];
+            let active_state = state.active_holds[note.column]
+                .as_ref()
+                .filter(|h| h.note_index == note_index);
+            let engaged = active_state
+                .map(|h| h.is_engaged(current_time))
+                .unwrap_or(false);
+            let use_active = active_state
+                .map(|h| h.is_pressed && !h.let_go)
+                .unwrap_or(false);
+
+            if engaged {
+                if head_is_top {
+                    top = top.max(receptor_y);
+                } else {
+                    bottom = bottom.min(receptor_y);
+                }
+            }
+
+            if bottom <= top {
+                continue;
+            }
+
+            let center_y = (top + bottom) * 0.5;
+            let body_height = bottom - top;
+
+            let visuals = if matches!(note.note_type, NoteType::Roll) {
+                &ns.roll
+            } else {
+                &ns.hold
+            };
+
+            if let Some(body_slot) = if use_active {
+                visuals
+                    .body_active
+                    .as_ref()
+                    .or_else(|| visuals.body_inactive.as_ref())
+            } else {
+                visuals
+                    .body_inactive
+                    .as_ref()
+                    .or_else(|| visuals.body_active.as_ref())
+            } {
+                let body_uv = body_slot.uv_for_frame(0);
+                let body_width = TARGET_ARROW_PIXEL_SIZE;
+                actors.push(act!(sprite(body_slot.texture_key().to_string()):
+                    align(0.5, 0.5):
+                    xy(playfield_center_x + col_x_offset as f32, center_y):
+                    zoomto(body_width, body_height):
+                    customtexturerect(body_uv[0], body_uv[1], body_uv[2], body_uv[3]):
+                    z(99)
+                ));
+            }
+
+            let tail_slot = if use_active {
+                visuals
+                    .bottomcap_active
+                    .as_ref()
+                    .or_else(|| visuals.bottomcap_inactive.as_ref())
+            } else {
+                visuals
+                    .bottomcap_inactive
+                    .as_ref()
+                    .or_else(|| visuals.bottomcap_active.as_ref())
+            };
+            if let Some(cap_slot) = tail_slot {
+                let tail_position = tail_y;
+                if tail_position > -400.0 && tail_position < screen_height() + 400.0 {
+                    let cap_uv = cap_slot.uv_for_frame(0);
+                    let cap_size = scale_sprite(cap_slot.size());
+                    actors.push(act!(sprite(cap_slot.texture_key().to_string()):
+                        align(0.5, 0.5):
+                        xy(playfield_center_x + col_x_offset as f32, tail_position):
+                        zoomto(cap_size[0], cap_size[1]):
+                        customtexturerect(cap_uv[0], cap_uv[1], cap_uv[2], cap_uv[3]):
+                        z(100)
+                    ));
+                }
+            }
+        }
+
         // Active arrows
-        let current_time = state.current_music_time;
         for column_arrows in &state.arrows {
             for arrow in column_arrows {
                 let arrow_time = state.timing.get_time_for_beat(arrow.beat);
@@ -1137,23 +1542,28 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 let y_pos = match state.scroll_speed {
                     ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
                         let beat_diff = arrow.beat - state.current_beat;
-                        let multiplier =
-                            state.scroll_speed.beat_multiplier(state.scroll_reference_bpm);
-                        receptor_y
-                            + (beat_diff * ScrollSpeedSetting::ARROW_SPACING * multiplier)
+                        let multiplier = state
+                            .scroll_speed
+                            .beat_multiplier(state.scroll_reference_bpm);
+                        receptor_y + (beat_diff * ScrollSpeedSetting::ARROW_SPACING * multiplier)
                     }
                     _ => receptor_y + (time_diff * pixels_per_second),
                 };
-                
-                if y_pos < -100.0 || y_pos > screen_height() + 100.0 { continue; }
+
+                if y_pos < -100.0 || y_pos > screen_height() + 100.0 {
+                    continue;
+                }
 
                 let col_x_offset = ns.column_xs[arrow.column];
-                
+
                 let beat_fraction = arrow.beat.fract();
                 let quantization = match (beat_fraction * 192.0).round() as u32 {
-                    0 | 192 => Quantization::Q4th, 96 => Quantization::Q8th,
-                    48 | 144 => Quantization::Q16th, 24 | 72 | 120 | 168 => Quantization::Q32nd,
-                    64 | 128 => Quantization::Q12th, 32 | 160 => Quantization::Q24th,
+                    0 | 192 => Quantization::Q4th,
+                    96 => Quantization::Q8th,
+                    48 | 144 => Quantization::Q16th,
+                    24 | 72 | 120 | 168 => Quantization::Q32nd,
+                    64 | 128 => Quantization::Q12th,
+                    32 | 160 => Quantization::Q24th,
                     _ => Quantization::Q192nd,
                 };
 
@@ -1176,7 +1586,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             }
         }
     }
-    
+
     // Combo
     if state.miss_combo >= SHOW_COMBO_AT {
         actors.push(act!(text:
@@ -1191,14 +1601,16 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             match fc_grade {
                 JudgeGrade::Fantastic => (color::rgba_hex("#C8FFFF"), color::rgba_hex("#6BF0FF")),
                 JudgeGrade::Excellent => (color::rgba_hex("#FDFFC9"), color::rgba_hex("#FDDB85")),
-                JudgeGrade::Great     => (color::rgba_hex("#C9FFC9"), color::rgba_hex("#94FEC1")),
-                _                     => ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]),
+                JudgeGrade::Great => (color::rgba_hex("#C9FFC9"), color::rgba_hex("#94FEC1")),
+                _ => ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]),
             }
-        } else { ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0]) };
+        } else {
+            ([1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0])
+        };
 
         let effect_period = 0.8;
         let t = (state.total_elapsed_in_screen / effect_period).fract();
-        let anim_t = ( (t * 2.0 * std::f32::consts::PI).sin() + 1.0) / 2.0;
+        let anim_t = ((t * 2.0 * std::f32::consts::PI).sin() + 1.0) / 2.0;
 
         let final_color = [
             color1[0] + (color2[0] - color1[0]) * anim_t,
@@ -1206,7 +1618,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             color1[2] + (color2[2] - color1[2]) * anim_t,
             1.0,
         ];
-        
+
         actors.push(act!(text:
             font("wendy_combo"): settext(state.combo.to_string()):
             align(0.5, 0.5): xy(playfield_center_x, screen_center_y() + 30.0):
@@ -1215,7 +1627,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             z(90)
         ));
     }
-    
+
     // Judgment Sprite (Love)
     if let Some(render_info) = &state.last_judgment {
         let judgment = &render_info.judgment;
@@ -1235,7 +1647,9 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
             let offset_sec = judgment.time_error_ms / 1000.0;
             let mut frame_base = judgment.grade as usize;
-            if judgment.grade >= JudgeGrade::Excellent { frame_base += 1; }
+            if judgment.grade >= JudgeGrade::Excellent {
+                frame_base += 1;
+            }
             let frame_offset = if offset_sec < 0.0 { 0 } else { 1 };
             let linear_index = (frame_base * 2 + frame_offset) as u32;
 
@@ -1251,13 +1665,17 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let y = 56.0;
 
     let difficulty_index = color::FILE_DIFFICULTY_NAMES
-        .iter().position(|&name| name.eq_ignore_ascii_case(&state.chart.difficulty)).unwrap_or(2);
+        .iter()
+        .position(|&name| name.eq_ignore_ascii_case(&state.chart.difficulty))
+        .unwrap_or(2);
     let difficulty_color_index = state.active_color_index - (4 - difficulty_index) as i32;
     let difficulty_color = color::simply_love_rgba(difficulty_color_index);
     let meter_text = state.chart.meter.to_string();
 
     actors.push(Actor::Frame {
-        align: [0.5, 0.5], offset: [x, y], size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
+        align: [0.5, 0.5],
+        offset: [x, y],
+        size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
         children: vec![
             act!(quad:
                 align(0.5, 0.5): xy(0.0, 0.0): zoomto(30.0, 30.0):
@@ -1266,9 +1684,10 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             act!(text:
                 font("wendy"): settext(meter_text): align(0.5, 0.5): xy(0.0, 0.0):
                 zoom(0.4): diffuse(0.0, 0.0, 0.0, 1.0)
-            )
+            ),
         ],
-        background: None, z: 90,
+        background: None,
+        z: 90,
     });
 
     // Score Display (P1)
@@ -1278,7 +1697,9 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
     let score_percent = if state.possible_grade_points > 0 {
         (state.earned_grade_points as f32 / state.possible_grade_points as f32).max(0.0) * 100.0
-    } else { 0.0 };
+    } else {
+        0.0
+    };
     let percent_text = format!("{:.2}", score_percent);
 
     actors.push(act!(text:
@@ -1297,7 +1718,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         };
 
         let bpm_text = bpm_display.to_string();
-        
+
         // Final world-space positions derived from analyzing the SM Lua transforms.
         // The parent frame is bottom-aligned to y=52, and its children are positioned
         // relative to that y-coordinate, with a zoom of 1.33 applied to the whole group.
@@ -1307,8 +1728,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         // The BPM text is at y=0 relative to the frame's origin. Its final position is just the origin.
         let bpm_center_y = frame_origin_y;
         // The Rate text is at y=12 relative to the frame's origin. Its offset is scaled by the frame's zoom.
-        let rate_center_y = frame_origin_y + (12.0 * frame_zoom); 
-        
+        let rate_center_y = frame_origin_y + (12.0 * frame_zoom);
+
         let bpm_final_zoom = 1.0 * frame_zoom;
         let rate_final_zoom = 0.5 * frame_zoom;
 
@@ -1346,28 +1767,38 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         frame_children.push(act!(quad: align(0.5, 0.5): xy(w / 2.0, h / 2.0): zoomto(w - 4.0, h - 4.0): diffuse(0.0, 0.0, 0.0, 1.0): z(1) ));
 
         if state.song.total_length_seconds > 0 && state.current_music_time >= 0.0 {
-            let progress = (state.current_music_time / state.song.total_length_seconds as f32).clamp(0.0, 1.0);
+            let progress =
+                (state.current_music_time / state.song.total_length_seconds as f32).clamp(0.0, 1.0);
             frame_children.push(act!(quad:
                 align(0.0, 0.5): xy(2.0, h / 2.0): zoomto((w - 4.0) * progress, h - 4.0):
                 diffuse(state.player_color[0], state.player_color[1], state.player_color[2], 1.0): z(2)
             ));
         }
 
-        let full_title = if state.song.subtitle.trim().is_empty() { state.song.title.clone() } else { format!("{} {}", state.song.title, state.song.subtitle) };
+        let full_title = if state.song.subtitle.trim().is_empty() {
+            state.song.title.clone()
+        } else {
+            format!("{} {}", state.song.title, state.song.subtitle)
+        };
         frame_children.push(act!(text:
             font("miso"): settext(full_title): align(0.5, 0.5): xy(w / 2.0, h / 2.0):
             zoom(0.8): maxwidth(screen_width() / 2.5 - 10.0): horizalign(center): z(3)
         ));
 
         actors.push(Actor::Frame {
-            align: [0.5, 0.5], offset: [box_cx, box_cy], size: [SizeSpec::Px(w), SizeSpec::Px(h)],
-            background: None, z: 90, children: frame_children,
+            align: [0.5, 0.5],
+            offset: [box_cx, box_cy],
+            size: [SizeSpec::Px(w), SizeSpec::Px(h)],
+            background: None,
+            z: 90,
+            children: frame_children,
         });
     }
 
     // --- Life Meter (P1) ---  (drop-in replacement for the current block)
     {
-        let w = 136.0; let h = 18.0;
+        let w = 136.0;
+        let h = 18.0;
         let meter_cx = screen_center_x() - widescale(238.0, 288.0);
         let meter_cy = 20.0;
 
@@ -1377,10 +1808,18 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
         // Latch-to-zero for rendering the very frame we die.
         let dead = state.is_failing || state.life <= 0.0;
-        let life_for_render = if dead { 0.0 } else { state.life.clamp(0.0, 1.0) };
+        let life_for_render = if dead {
+            0.0
+        } else {
+            state.life.clamp(0.0, 1.0)
+        };
 
         let is_hot = !dead && life_for_render >= 1.0;
-        let life_color = if is_hot { [1.0, 1.0, 1.0, 1.0] } else { state.player_color };
+        let life_color = if is_hot {
+            [1.0, 1.0, 1.0, 1.0]
+        } else {
+            state.player_color
+        };
 
         let filled_width = w * life_for_render;
 
@@ -1408,10 +1847,17 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     }
 
     actors.push(screen_bar::build(ScreenBarParams {
-        title: "", title_placement: screen_bar::ScreenBarTitlePlacement::Center, position: screen_bar::ScreenBarPosition::Bottom,
-        transparent: true, fg_color: [1.0; 4], left_text: Some(&profile.display_name), center_text: None, right_text: None, left_avatar: None,
+        title: "",
+        title_placement: screen_bar::ScreenBarTitlePlacement::Center,
+        position: screen_bar::ScreenBarPosition::Bottom,
+        transparent: true,
+        fg_color: [1.0; 4],
+        left_text: Some(&profile.display_name),
+        center_text: None,
+        right_text: None,
+        left_avatar: None,
     }));
-    
+
     actors.extend(build_side_pane(state, asset_manager));
     actors.extend(build_holds_mines_rolls_pane(state, asset_manager));
 
@@ -1419,7 +1865,9 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 }
 
 fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
-    if !is_wide() { return vec![]; }
+    if !is_wide() {
+        return vec![];
+    }
     let mut actors = Vec::new();
 
     let sidepane_center_x = screen_width() * 0.75;
@@ -1433,7 +1881,9 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
         let ar = screen_width() / screen_height();
         let t = ((ar - (16.0 / 10.0)) / ((16.0 / 9.0) - (16.0 / 10.0))).clamp(0.0, 1.0);
         0.825 + (0.925 - 0.825) * t
-    } else { 1.0 };
+    } else {
+        1.0
+    };
     let local_x = 155.0;
     let local_y = -112.0;
     let frame_cx = sidepane_center_x + (local_x * banner_data_zoom);
@@ -1441,13 +1891,21 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
     let frame_zoom = banner_data_zoom;
 
     let categories = [
-        ("holds", state.chart.stats.holds),
-        ("mines", state.chart.stats.mines),
-        ("rolls", state.chart.stats.rolls),
+        ("holds", state.holds_held, state.holds_total),
+        ("mines", 0u32, state.chart.stats.mines as u32),
+        ("rolls", 0u32, state.chart.stats.rolls as u32),
     ];
 
-    let largest_count = categories.iter().map(|(_, count)| *count).max().unwrap_or(0);
-    let digits_needed = if largest_count == 0 { 1 } else { (largest_count as f32).log10().floor() as usize + 1 };
+    let largest_count = categories
+        .iter()
+        .map(|(_, achieved, total)| (*achieved).max(*total))
+        .max()
+        .unwrap_or(0);
+    let digits_needed = if largest_count == 0 {
+        1
+    } else {
+        (largest_count as f32).log10().floor() as usize + 1
+    };
     let digits_to_fmt = digits_needed.clamp(3, 4);
     let row_height = 28.0 * frame_zoom;
     let mut children = Vec::new();
@@ -1468,19 +1926,19 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
         const LOGICAL_CHAR_WIDTH_FOR_LABEL: f32 = 36.0;
         let fixed_char_width_scaled_for_label = LOGICAL_CHAR_WIDTH_FOR_LABEL * value_zoom;
 
-        for (i, (label_text, count)) in categories.iter().enumerate() {
+        for (i, (label_text, achieved, total)) in categories.iter().enumerate() {
             let item_y = (i as f32 - 1.0) * row_height;
             let right_anchor_x = 0.0;
             let mut cursor_x = right_anchor_x;
 
-            let possible_str = format!("{:0width$}", count, width = digits_to_fmt);
-            let achieved_str = format!("{:0width$}", 0u32, width = digits_to_fmt);
+            let possible_str = format!("{:0width$}", *total as usize, width = digits_to_fmt);
+            let achieved_str = format!("{:0width$}", *achieved as usize, width = digits_to_fmt);
 
             // --- Layout Numbers using MEASURED widths ---
             // 1. Draw "possible" number (right-most part)
             let first_nonzero_possible = possible_str.find(|c: char| c != '0').unwrap_or(possible_str.len());
             for (char_idx, ch) in possible_str.chars().rev().enumerate() {
-                let is_dim = if *count == 0 { char_idx > 0 } else {
+                let is_dim = if *total == 0 { char_idx > 0 } else {
                     let original_index = digits_to_fmt - 1 - char_idx;
                     original_index < first_nonzero_possible
                 };
@@ -1493,15 +1951,20 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
                 ));
             }
             cursor_x -= possible_str.len() as f32 * digit_width;
-            
+
             // 2. Draw slash
             children.push(act!(text: font("wendy_screenevaluation"): settext("/"): align(1.0, 0.5): xy(cursor_x, item_y): zoom(value_zoom): diffuse(gray[0], gray[1], gray[2], gray[3])));
             cursor_x -= slash_width;
 
             // 3. Draw "achieved" number
             let achieved_block_right_x = cursor_x;
+            let first_nonzero_achieved = achieved_str.find(|c: char| c != '0').unwrap_or(achieved_str.len());
             for (char_idx, ch) in achieved_str.chars().rev().enumerate() {
-                let color = if char_idx > 0 { gray } else { white };
+                let is_dim = if *achieved == 0 { char_idx > 0 } else {
+                    let original_index = digits_to_fmt - 1 - char_idx;
+                    original_index < first_nonzero_achieved
+                };
+                let color = if is_dim { gray } else { white };
                 let x_pos = achieved_block_right_x - (char_idx as f32 * digit_width);
                 children.push(act!(text:
                     font("wendy_screenevaluation"): settext(ch.to_string()):
@@ -1522,14 +1985,20 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
     }));
 
     actors.push(Actor::Frame {
-        align: [0.5, 0.5], offset: [frame_cx, frame_cy], size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
-        children, background: None, z: 70,
+        align: [0.5, 0.5],
+        offset: [frame_cx, frame_cy],
+        size: [SizeSpec::Px(0.0), SizeSpec::Px(0.0)],
+        children,
+        background: None,
+        z: 70,
     });
     actors
 }
 
 fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
-    if !is_wide() { return vec![]; }
+    if !is_wide() {
+        return vec![];
+    }
     let mut actors = Vec::new();
 
     let sidepane_center_x = screen_width() * 0.75;
@@ -1541,9 +2010,11 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let is_ultrawide = screen_width() / screen_height() > (21.0 / 9.0);
     let banner_data_zoom = if note_field_is_centered && is_wide() && !is_ultrawide {
         let ar = screen_width() / screen_height();
-        let t = ((ar - (16.0/10.0)) / ((16.0/9.0) - (16.0/10.0))).clamp(0.0, 1.0);
+        let t = ((ar - (16.0 / 10.0)) / ((16.0 / 9.0) - (16.0 / 10.0))).clamp(0.0, 1.0);
         0.825 + (0.925 - 0.825) * t
-    } else { 1.0 };
+    } else {
+        1.0
+    };
 
     let judgments_local_x = -widescale(152.0, 204.0);
     let final_judgments_center_x = sidepane_center_x + (judgments_local_x * banner_data_zoom);
@@ -1552,7 +2023,11 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let final_text_base_zoom = banner_data_zoom * parent_local_zoom;
 
     let total_tapnotes = state.chart.stats.total_steps as f32;
-    let digits = if total_tapnotes > 0.0 { (total_tapnotes.log10().floor() as usize + 1).max(4) } else { 4 };
+    let digits = if total_tapnotes > 0.0 {
+        (total_tapnotes.log10().floor() as usize + 1).max(4)
+    } else {
+        4
+    };
     let extra_digits = digits.saturating_sub(4) as f32;
     let base_label_local_x_offset = 80.0;
     const LABEL_DIGIT_STEP: f32 = 16.0;
