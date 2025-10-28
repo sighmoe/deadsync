@@ -1503,7 +1503,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     xy(playfield_center_x + col_x_offset as f32, center_y):
                     zoomto(body_width, body_height):
                     customtexturerect(body_uv[0], body_uv[1], body_uv[2], body_uv[3]):
-                    z(99)
+                    z(100)
                 ));
             }
 
@@ -1528,7 +1528,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         xy(playfield_center_x + col_x_offset as f32, tail_position):
                         zoomto(cap_size[0], cap_size[1]):
                         customtexturerect(cap_uv[0], cap_uv[1], cap_uv[2], cap_uv[3]):
-                        z(100)
+                        z(101)
                     ));
                 }
             }
