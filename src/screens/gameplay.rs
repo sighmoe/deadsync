@@ -1496,13 +1496,11 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     .as_ref()
                     .or_else(|| visuals.body_active.as_ref())
             } {
-                let body_uv = body_slot.uv_for_frame(0);
                 let body_width = TARGET_ARROW_PIXEL_SIZE;
                 actors.push(act!(sprite(body_slot.texture_key().to_string()):
                     align(0.5, 0.5):
                     xy(playfield_center_x + col_x_offset as f32, center_y):
                     zoomto(body_width, body_height):
-                    customtexturerect(body_uv[0], body_uv[1], body_uv[2], body_uv[3]):
                     z(100)
                 ));
             }
@@ -1521,13 +1519,11 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             if let Some(cap_slot) = tail_slot {
                 let tail_position = tail_y;
                 if tail_position > -400.0 && tail_position < screen_height() + 400.0 {
-                    let cap_uv = cap_slot.uv_for_frame(0);
                     let cap_size = scale_sprite(cap_slot.size());
                     actors.push(act!(sprite(cap_slot.texture_key().to_string()):
                         align(0.5, 0.5):
                         xy(playfield_center_x + col_x_offset as f32, tail_position):
                         zoomto(cap_size[0], cap_size[1]):
-                        customtexturerect(cap_uv[0], cap_uv[1], cap_uv[2], cap_uv[3]):
                         z(101)
                     ));
                 }
