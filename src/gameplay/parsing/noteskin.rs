@@ -150,15 +150,26 @@ impl SpriteSlot {
     pub fn uv_for_frame(&self, frame_index: usize) -> [f32; 4] {
         match self.source.as_ref() {
             SpriteSource::Atlas { tex_dims, .. } => {
-                let tw = tex_dims.0.max(1);
-                let th = tex_dims.1.max(1);
+                let tw = tex_dims.0.max(1) as f32;
+                let th = tex_dims.1.max(1) as f32;
                 let src = self.def.src;
                 let size = self.def.size;
-                let u0 = src[0] as f32 / tw as f32;
-                let v0 = src[1] as f32 / th as f32;
-                let u1 = (src[0] + size[0]) as f32 / tw as f32;
-                let v1 = (src[1] + size[1]) as f32 / th as f32;
-                [u0, v0, u1, v1]
+
+                let mut u0 = src[0] as f32;
+                let mut v0 = src[1] as f32;
+                let mut u1 = (src[0] + size[0]) as f32;
+                let mut v1 = (src[1] + size[1]) as f32;
+
+                if size[0] > 0 {
+                    u0 += 0.5;
+                    u1 -= 0.5;
+                }
+                if size[1] > 0 {
+                    v0 += 0.5;
+                    v1 -= 0.5;
+                }
+
+                [u0 / tw, v0 / th, u1 / tw, v1 / th]
             }
             SpriteSource::Animated {
                 tex_dims,
@@ -174,13 +185,24 @@ impl SpriteSlot {
                 let col = idx % cols;
                 let src_x = self.def.src[0] + (col as i32 * frame_size[0]);
                 let src_y = self.def.src[1] + (row as i32 * frame_size[1]);
-                let tw = tex_dims.0.max(1);
-                let th = tex_dims.1.max(1);
-                let u0 = src_x as f32 / tw as f32;
-                let v0 = src_y as f32 / th as f32;
-                let u1 = (src_x + frame_size[0]) as f32 / tw as f32;
-                let v1 = (src_y + frame_size[1]) as f32 / th as f32;
-                [u0, v0, u1, v1]
+                let tw = tex_dims.0.max(1) as f32;
+                let th = tex_dims.1.max(1) as f32;
+
+                let mut u0 = src_x as f32;
+                let mut v0 = src_y as f32;
+                let mut u1 = (src_x + frame_size[0]) as f32;
+                let mut v1 = (src_y + frame_size[1]) as f32;
+
+                if frame_size[0] > 0 {
+                    u0 += 0.5;
+                    u1 -= 0.5;
+                }
+                if frame_size[1] > 0 {
+                    v0 += 0.5;
+                    v1 -= 0.5;
+                }
+
+                [u0 / tw, v0 / th, u1 / tw, v1 / th]
             }
         }
     }
