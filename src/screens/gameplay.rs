@@ -6,7 +6,7 @@ use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
 use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::parsing::notes as note_parser;
-use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
+use crate::gameplay::parsing::noteskin::{self, NUM_QUANTIZATIONS, Noteskin, Quantization, Style};
 use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::gameplay::song::SongData;
 use crate::gameplay::timing::TimingData;
@@ -1020,13 +1020,9 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     }
 
     let way_off_window = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
-    let despawn_time = state.scroll_travel_time.max(way_off_window);
     for col_arrows in &mut state.arrows {
-        loop {
-            let Some(arrow) = col_arrows.first().cloned() else {
-                break;
-            };
-
+        let mut missed = false;
+        if let Some(arrow) = col_arrows.first().cloned() {
             let note_index = arrow.note_index;
             let (note_row_index, note_result_is_none, note_beat) = {
                 let note = &state.notes[note_index];
@@ -1034,11 +1030,9 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
             };
 
             let note_time = state.timing.get_time_for_beat(note_beat);
-            let time_past_hit = music_time_sec - note_time;
-
-            if note_result_is_none && time_past_hit > way_off_window {
+            if music_time_sec - note_time > way_off_window && note_result_is_none {
                 let judgment = Judgment {
-                    time_error_ms: time_past_hit * 1000.0,
+                    time_error_ms: ((music_time_sec - note_time) * 1000.0),
                     grade: JudgeGrade::Miss,
                     row: note_row_index,
                 };
@@ -1047,14 +1041,11 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
                     "MISSED (pending): Row {}, Col {}, Beat {:.2}",
                     note_row_index, arrow.column, arrow.beat
                 );
+                missed = true;
             }
-
-            if time_past_hit > despawn_time {
-                col_arrows.remove(0);
-                continue;
-            }
-
-            break;
+        }
+        if missed {
+            col_arrows.remove(0);
         }
     }
 
