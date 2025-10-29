@@ -100,6 +100,14 @@ const M_MOD_HIGH_CAP: f32 = 600.0;
 const RECEPTOR_GLOW_DURATION: f32 = 0.2; // How long the glow sprite is visible
 const SHOW_COMBO_AT: u32 = 4; // From Simply Love metrics
 
+// Z-order layers for key gameplay visuals (higher draws on top)
+const Z_RECEPTOR: i32 = 100;
+const Z_HOLD_BODY: i32 = 110;
+const Z_HOLD_CAP: i32 = 110;
+const Z_HOLD_EXPLOSION: i32 = 120;
+const Z_HOLD_GLOW: i32 = 130;
+const Z_TAP_NOTE: i32 = 140;
+
 // --- JUDGMENT WINDOWS (in seconds) ---
 // These are the base values from StepMania's defaults.
 // A small constant is added at runtime to match ITG's precise breakpoints,
@@ -1307,7 +1315,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     receptor_uv[2],
                     receptor_uv[3]
                 ):
-                z(100)
+                z(Z_RECEPTOR)
             ));
 
             if let Some(hold_slot) = state.active_holds[i]
@@ -1342,7 +1350,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     rotationz(-final_rotation):
                     customtexturerect(hold_uv[0], hold_uv[1], hold_uv[2], hold_uv[3]):
                     blend(normal):
-                    z(101)
+                    z(Z_HOLD_EXPLOSION)
                 ));
             }
 
@@ -1362,7 +1370,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         customtexturerect(glow_uv[0], glow_uv[1], glow_uv[2], glow_uv[3]):
                         diffuse(1.0, 1.0, 1.0, alpha):
                         blend(add):
-                        z(102)
+                        z(Z_HOLD_GLOW)
                     ));
                 }
             }
@@ -1552,7 +1560,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                                 xy(playfield_center_x + col_x_offset as f32, segment_center):
                                 zoomto(body_width, segment_size):
                                 customtexturerect(u0, v0, u1, v1):
-                                z(100)
+                                z(Z_HOLD_BODY)
                             ));
 
                             segment_bottom = segment_top;
@@ -1567,13 +1575,60 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 if tail_position > -400.0 && tail_position < screen_height() + 400.0 {
                     let cap_uv = cap_slot.uv_for_frame(0);
                     let cap_size = scale_sprite(cap_slot.size());
-                    actors.push(act!(sprite(cap_slot.texture_key().to_string()):
-                        align(0.5, 0.5):
-                        xy(playfield_center_x + col_x_offset as f32, tail_position):
-                        zoomto(cap_size[0], cap_size[1]):
-                        customtexturerect(cap_uv[0], cap_uv[1], cap_uv[2], cap_uv[3]):
-                        z(101)
-                    ));
+                    let cap_width = cap_size[0];
+                    let mut cap_height = cap_size[1];
+                    let mut cap_center = tail_position;
+                    let u0 = cap_uv[0];
+                    let u1 = cap_uv[2];
+                    let mut v0 = cap_uv[1];
+                    let mut v1 = cap_uv[3];
+
+                    if engaged && cap_height > std::f32::EPSILON {
+                        let cap_top = cap_center - cap_height * 0.5;
+                        let cap_bottom = cap_center + cap_height * 0.5;
+                        if receptor_y >= cap_top && receptor_y <= cap_bottom {
+                            let span = cap_bottom - cap_top;
+                            if span > std::f32::EPSILON {
+                                let v_span = v1 - v0;
+                                let distance_to_top = receptor_y - cap_top;
+                                let distance_to_bottom = cap_bottom - receptor_y;
+
+                                if distance_to_top <= distance_to_bottom {
+                                    let trimmed = distance_to_top;
+                                    let remaining = span - trimmed;
+                                    if remaining > std::f32::EPSILON {
+                                        let fraction = trimmed / span;
+                                        v0 += v_span * fraction;
+                                        cap_height = remaining;
+                                        cap_center = receptor_y + cap_height * 0.5;
+                                    } else {
+                                        cap_height = 0.0;
+                                    }
+                                } else {
+                                    let trimmed = distance_to_bottom;
+                                    let remaining = span - trimmed;
+                                    if remaining > std::f32::EPSILON {
+                                        let fraction = trimmed / span;
+                                        v1 -= v_span * fraction;
+                                        cap_height = remaining;
+                                        cap_center = receptor_y - cap_height * 0.5;
+                                    } else {
+                                        cap_height = 0.0;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if cap_height > std::f32::EPSILON {
+                        actors.push(act!(sprite(cap_slot.texture_key().to_string()):
+                            align(0.5, 0.5):
+                            xy(playfield_center_x + col_x_offset as f32, cap_center):
+                            zoomto(cap_width, cap_height):
+                            customtexturerect(u0, v0, u1, v1):
+                            z(Z_HOLD_CAP)
+                        ));
+                    }
                 }
             }
         }
@@ -1624,7 +1679,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         zoomto(note_size[0] as f32, note_size[1] as f32):
                         rotationz(-note_slot.def.rotation_deg as f32):
                         customtexturerect(note_uv[0], note_uv[1], note_uv[2], note_uv[3]):
-                        z(101)
+                        z(Z_TAP_NOTE)
                     ));
                 }
             }
