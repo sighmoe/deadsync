@@ -1476,36 +1476,11 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 continue;
             }
 
-            let center_y = (top + bottom) * 0.5;
-            let body_height = bottom - top;
-
             let visuals = if matches!(note.note_type, NoteType::Roll) {
                 &ns.roll
             } else {
                 &ns.hold
             };
-
-            if let Some(body_slot) = if use_active {
-                visuals
-                    .body_active
-                    .as_ref()
-                    .or_else(|| visuals.body_inactive.as_ref())
-            } else {
-                visuals
-                    .body_inactive
-                    .as_ref()
-                    .or_else(|| visuals.body_active.as_ref())
-            } {
-                let body_uv = body_slot.uv_for_frame(0);
-                let body_width = TARGET_ARROW_PIXEL_SIZE;
-                actors.push(act!(sprite(body_slot.texture_key().to_string()):
-                    align(0.5, 0.5):
-                    xy(playfield_center_x + col_x_offset as f32, center_y):
-                    zoomto(body_width, body_height):
-                    customtexturerect(body_uv[0], body_uv[1], body_uv[2], body_uv[3]):
-                    z(100)
-                ));
-            }
 
             let tail_slot = if use_active {
                 visuals
@@ -1518,6 +1493,75 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     .as_ref()
                     .or_else(|| visuals.bottomcap_active.as_ref())
             };
+
+            let mut body_bottom = bottom;
+            if let Some(cap_slot) = tail_slot {
+                let cap_size = scale_sprite(cap_slot.size());
+                let cap_height = cap_size[1];
+                if cap_height > std::f32::EPSILON {
+                    // Keep the body from poking through the bottom cap, but allow
+                    // a tiny overlap so the seam stays hidden like ITGmania.
+                    let cap_top = tail_y - cap_height * 0.5;
+                    body_bottom = body_bottom.min(cap_top + 1.0);
+                }
+            }
+
+            if body_bottom > top {
+                if let Some(body_slot) = if use_active {
+                    visuals
+                        .body_active
+                        .as_ref()
+                        .or_else(|| visuals.body_inactive.as_ref())
+                } else {
+                    visuals
+                        .body_inactive
+                        .as_ref()
+                        .or_else(|| visuals.body_active.as_ref())
+                } {
+                    let texture_size = body_slot.size();
+                    let texture_width = texture_size[0].max(1) as f32;
+                    let texture_height = texture_size[1].max(1) as f32;
+                    if texture_width > std::f32::EPSILON && texture_height > std::f32::EPSILON {
+                        let body_width = TARGET_ARROW_PIXEL_SIZE;
+                        let scale = body_width / texture_width;
+                        let segment_height = (texture_height * scale).max(std::f32::EPSILON);
+                        let body_uv = body_slot.uv_for_frame(0);
+                        let u0 = body_uv[0];
+                        let u1 = body_uv[2];
+                        let v_top = body_uv[1];
+                        let v_bottom = body_uv[3];
+                        let v_range = (v_bottom - v_top).abs();
+                        let mut segment_bottom = body_bottom;
+                        let max_segments = 2048;
+                        let mut emitted = 0;
+
+                        while segment_bottom - top > 0.01 && emitted < max_segments {
+                            let segment_top = (segment_bottom - segment_height).max(top);
+                            let segment_size = segment_bottom - segment_top;
+                            if segment_size <= std::f32::EPSILON {
+                                break;
+                            }
+
+                            let portion = (segment_size / segment_height).clamp(0.0, 1.0);
+                            let v0 = v_bottom - v_range * portion;
+                            let v1 = v_bottom;
+                            let segment_center = (segment_top + segment_bottom) * 0.5;
+
+                            actors.push(act!(sprite(body_slot.texture_key().to_string()):
+                                align(0.5, 0.5):
+                                xy(playfield_center_x + col_x_offset as f32, segment_center):
+                                zoomto(body_width, segment_size):
+                                customtexturerect(u0, v0, u1, v1):
+                                z(100)
+                            ));
+
+                            segment_bottom = segment_top;
+                            emitted += 1;
+                        }
+                    }
+                }
+            }
+
             if let Some(cap_slot) = tail_slot {
                 let tail_position = tail_y;
                 if tail_position > -400.0 && tail_position < screen_height() + 400.0 {
