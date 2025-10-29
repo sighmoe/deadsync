@@ -6,7 +6,7 @@ use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
 use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::parsing::notes as note_parser;
-use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
+use crate::gameplay::parsing::noteskin::{self, NUM_QUANTIZATIONS, Noteskin, Quantization, Style};
 use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::gameplay::song::SongData;
 use crate::gameplay::timing::TimingData;
@@ -129,7 +129,8 @@ pub const BASE_FANTASTIC_WINDOW: f32 = 0.0215; // W1 (0.0230 final)
 const BASE_EXCELLENT_WINDOW: f32 = 0.0430; // W2 (0.0445 final)
 const BASE_GREAT_WINDOW: f32 = 0.1020; // W3 (0.1035 final)
 const BASE_DECENT_WINDOW: f32 = 0.1350; // W4 (0.1365 final)
-                                        /* Notes outside the final WayOff window are considered a Miss. */
+
+/* Notes outside the final WayOff window are considered a Miss. */
 const BASE_WAY_OFF_WINDOW: f32 = 0.1800; // W5 (0.1815 final)
 
 // --- DATA STRUCTURES ---
@@ -373,8 +374,8 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32)
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
 const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
 const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
-                                                 // Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
-                                                 // Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
+// Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
+// Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
 const HOLD_DROP_TOLERANCE: f32 = 0.32;
 
 pub struct State {
@@ -1621,33 +1622,116 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         let u1 = body_uv[2];
                         let v_top = body_uv[1];
                         let v_bottom = body_uv[3];
-                        let v_range = (v_bottom - v_top).abs();
-                        let mut segment_bottom = body_bottom;
-                        let max_segments = 2048;
-                        let mut emitted = 0;
+                        let max_segments = 4096;
+                        if head_is_top {
+                            let mut segment_top = top;
+                            let mut emitted = 0;
 
-                        while segment_bottom - top > 0.01 && emitted < max_segments {
-                            let segment_top = (segment_bottom - segment_height).max(top);
-                            let segment_size = segment_bottom - segment_top;
-                            if segment_size <= std::f32::EPSILON {
-                                break;
+                            while segment_top < body_bottom - 0.01 && emitted < max_segments {
+                                let mut next_bottom =
+                                    (segment_top + segment_height).min(body_bottom);
+                                let mut segment_size = next_bottom - segment_top;
+                                if segment_size <= std::f32::EPSILON {
+                                    break;
+                                }
+
+                                let distance_from_head = segment_top - head_y;
+                                let mut tile_start = if segment_height > std::f32::EPSILON {
+                                    (distance_from_head / segment_height).rem_euclid(1.0)
+                                } else {
+                                    0.0
+                                };
+                                if !tile_start.is_finite() {
+                                    tile_start = 0.0;
+                                }
+
+                                let mut portion = (segment_size / segment_height).clamp(0.0, 1.0);
+                                if tile_start + portion > 1.0 + 1e-4 {
+                                    portion = (1.0 - tile_start).max(0.0);
+                                    if portion <= 1e-4 {
+                                        tile_start = 0.0;
+                                        portion = (segment_size / segment_height).clamp(0.0, 1.0);
+                                    } else {
+                                        segment_size = segment_height * portion;
+                                        next_bottom = segment_top + segment_size;
+                                    }
+                                }
+
+                                if segment_size <= std::f32::EPSILON || portion <= 0.0 {
+                                    segment_top = next_bottom;
+                                    continue;
+                                }
+
+                                let segment_center = (segment_top + next_bottom) * 0.5;
+                                let v_span = v_bottom - v_top;
+                                let v_start = v_top + v_span * tile_start;
+                                let v_end = v_start + v_span * portion;
+
+                                actors.push(act!(sprite(body_slot.texture_key().to_string()):
+                                    align(0.5, 0.5):
+                                    xy(playfield_center_x + col_x_offset as f32, segment_center):
+                                    zoomto(body_width, segment_size):
+                                    customtexturerect(u0, v_start, u1, v_end):
+                                    z(Z_HOLD_BODY)
+                                ));
+
+                                segment_top = next_bottom;
+                                emitted += 1;
                             }
+                        } else {
+                            let mut segment_bottom = body_bottom;
+                            let mut emitted = 0;
 
-                            let portion = (segment_size / segment_height).clamp(0.0, 1.0);
-                            let v0 = v_bottom - v_range * portion;
-                            let v1 = v_bottom;
-                            let segment_center = (segment_top + segment_bottom) * 0.5;
+                            while segment_bottom - top > 0.01 && emitted < max_segments {
+                                let mut next_top = (segment_bottom - segment_height).max(top);
+                                let mut segment_size = segment_bottom - next_top;
+                                if segment_size <= std::f32::EPSILON {
+                                    break;
+                                }
 
-                            actors.push(act!(sprite(body_slot.texture_key().to_string()):
-                                align(0.5, 0.5):
-                                xy(playfield_center_x + col_x_offset as f32, segment_center):
-                                zoomto(body_width, segment_size):
-                                customtexturerect(u0, v0, u1, v1):
-                                z(Z_HOLD_BODY)
-                            ));
+                                let distance_from_head = head_y - segment_bottom;
+                                let mut tile_start = if segment_height > std::f32::EPSILON {
+                                    (distance_from_head / segment_height).rem_euclid(1.0)
+                                } else {
+                                    0.0
+                                };
+                                if !tile_start.is_finite() {
+                                    tile_start = 0.0;
+                                }
 
-                            segment_bottom = segment_top;
-                            emitted += 1;
+                                let mut portion = (segment_size / segment_height).clamp(0.0, 1.0);
+                                if tile_start + portion > 1.0 + 1e-4 {
+                                    portion = (1.0 - tile_start).max(0.0);
+                                    if portion <= 1e-4 {
+                                        tile_start = 0.0;
+                                        portion = (segment_size / segment_height).clamp(0.0, 1.0);
+                                    } else {
+                                        segment_size = segment_height * portion;
+                                        next_top = segment_bottom - segment_size;
+                                    }
+                                }
+
+                                if segment_size <= std::f32::EPSILON || portion <= 0.0 {
+                                    segment_bottom = next_top;
+                                    continue;
+                                }
+
+                                let segment_center = (segment_bottom + next_top) * 0.5;
+                                let v_span = v_bottom - v_top;
+                                let v_end = v_top + v_span * tile_start;
+                                let v_start = v_end + v_span * portion;
+
+                                actors.push(act!(sprite(body_slot.texture_key().to_string()):
+                                    align(0.5, 0.5):
+                                    xy(playfield_center_x + col_x_offset as f32, segment_center):
+                                    zoomto(body_width, segment_size):
+                                    customtexturerect(u0, v_start, u1, v_end):
+                                    z(Z_HOLD_BODY)
+                                ));
+
+                                segment_bottom = next_top;
+                                emitted += 1;
+                            }
                         }
                     }
                 }
