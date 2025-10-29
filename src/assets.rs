@@ -199,7 +199,14 @@ impl AssetManager {
                 "judgements/Love 2x7 (doubleres).png".to_string(),
                 "judgements/Love 2x7 (doubleres).png".to_string(),
             ),
-            ("grades/grades 1x19.png".to_string(), "grades/grades 1x19.png".to_string()),
+            (
+                "hold_judgements/Love 1x2 (doubleres).png".to_string(),
+                "hold_judgements/Love 1x2 (doubleres).png".to_string(),
+            ),
+            (
+                "grades/grades 1x19.png".to_string(),
+                "grades/grades 1x19.png".to_string(),
+            ),
         ];
 
         if let Ok(entries) = fs::read_dir("assets/noteskins/cel") {

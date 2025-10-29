@@ -88,6 +88,14 @@ const TRANSITION_OUT_DURATION: f32 = 0.4;
 const RECEPTOR_Y_OFFSET_FROM_CENTER: f32 = -125.0; // From Simply Love metrics for standard up-scroll
 const TARGET_ARROW_PIXEL_SIZE: f32 = 64.0; // Match Simply Love's on-screen arrow height
 const TARGET_EXPLOSION_PIXEL_SIZE: f32 = 125.0; // Simply Love tap explosions top out around 125px tall
+const HOLD_JUDGMENT_Y_OFFSET_FROM_CENTER: f32 = -90.0; // Mirrors Simply Love metrics for hold judgments
+const LOVE_HOLD_JUDGMENT_NATIVE_FRAME_HEIGHT: f32 = 140.0; // Each frame in Love 1x2 (doubleres).png is 140px tall
+const HOLD_JUDGMENT_FINAL_HEIGHT: f32 = 32.0; // Matches Simply Love's final on-screen size
+const HOLD_JUDGMENT_INITIAL_HEIGHT: f32 = HOLD_JUDGMENT_FINAL_HEIGHT * 0.8; // Mirrors 0.4->0.5 zoom ramp in metrics
+const HOLD_JUDGMENT_FINAL_ZOOM: f32 =
+    HOLD_JUDGMENT_FINAL_HEIGHT / LOVE_HOLD_JUDGMENT_NATIVE_FRAME_HEIGHT;
+const HOLD_JUDGMENT_INITIAL_ZOOM: f32 =
+    HOLD_JUDGMENT_INITIAL_HEIGHT / LOVE_HOLD_JUDGMENT_NATIVE_FRAME_HEIGHT;
 
 //const DANGER_THRESHOLD: f32 = 0.2; // For implementation of red/green flashing light
 
@@ -99,6 +107,7 @@ const M_MOD_HIGH_CAP: f32 = 600.0;
 // Visual Feedback
 const RECEPTOR_GLOW_DURATION: f32 = 0.2; // How long the glow sprite is visible
 const SHOW_COMBO_AT: u32 = 4; // From Simply Love metrics
+const HOLD_JUDGMENT_TOTAL_DURATION: f32 = 0.8; // Hold judgment anim duration from Simply Love metrics
 
 // Z-order layers for key gameplay visuals (higher draws on top)
 const Z_RECEPTOR: i32 = 100;
@@ -147,7 +156,7 @@ pub enum NoteType {
     Roll,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum HoldResult {
     Held,
     LetGo,
@@ -185,6 +194,12 @@ pub struct Arrow {
 pub struct JudgmentRenderInfo {
     pub judgment: Judgment,
     pub judged_at: Instant,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct HoldJudgmentRenderInfo {
+    pub result: HoldResult,
+    pub triggered_at: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -271,6 +286,11 @@ fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
         hold.result = Some(HoldResult::LetGo);
     }
 
+    state.hold_judgments[column] = Some(HoldJudgmentRenderInfo {
+        result: HoldResult::LetGo,
+        triggered_at: Instant::now(),
+    });
+
     state.change_life(LifeChange::LET_GO);
     state.combo = 0;
     state.miss_combo = state.miss_combo.saturating_add(1);
@@ -282,7 +302,7 @@ fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
     state.receptor_glow_timers[column] = 0.0;
 }
 
-fn handle_hold_success(state: &mut State, note_index: usize) {
+fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
     if let Some(hold) = state.notes[note_index].hold.as_mut() {
         if hold.result == Some(HoldResult::Held) {
             return;
@@ -295,6 +315,11 @@ fn handle_hold_success(state: &mut State, note_index: usize) {
     }
     state.change_life(LifeChange::HELD);
     state.miss_combo = 0;
+
+    state.hold_judgments[column] = Some(HoldJudgmentRenderInfo {
+        result: HoldResult::Held,
+        triggered_at: Instant::now(),
+    });
 }
 
 fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32) {
@@ -323,7 +348,7 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32)
                     let note_index = active.note_index;
                     let still_engaged = active.is_engaged(current_time);
                     if still_engaged {
-                        handle_success = Some(note_index);
+                        handle_success = Some((column, note_index));
                     } else if !active.let_go {
                         active.let_go = true;
                         handle_let_go = Some((column, note_index));
@@ -337,8 +362,8 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32)
             handle_hold_let_go(state, column, note_index);
         }
 
-        if let Some(note_index) = handle_success {
-            handle_hold_success(state, note_index);
+        if let Some((column, note_index)) = handle_success {
+            handle_hold_success(state, column, note_index);
         }
     }
 }
@@ -373,6 +398,7 @@ pub struct State {
     pub first_fc_attempt_broken: bool,
     pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub last_judgment: Option<JudgmentRenderInfo>,
+    pub hold_judgments: [Option<HoldJudgmentRenderInfo>; 4],
 
     // Life Meter
     pub life: f32,             // 0.0 to 1.0
@@ -598,6 +624,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         full_combo_grade: None,
         first_fc_attempt_broken: false,
         last_judgment: None,
+        hold_judgments: Default::default(),
         life: 0.5,
         combo_after_miss: MAX_REGEN_COMBO_AFTER_MISS, // Start in a state where regen is active
         is_failing: false,
@@ -965,6 +992,14 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
 
             if lifetime <= 0.0 || active.elapsed >= lifetime {
                 *explosion = None;
+            }
+        }
+    }
+
+    for slot in &mut state.hold_judgments {
+        if let Some(render_info) = slot {
+            if render_info.triggered_at.elapsed().as_secs_f32() >= HOLD_JUDGMENT_TOTAL_DURATION {
+                *slot = None;
             }
         }
     }
@@ -1759,6 +1794,47 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         }
     }
 
+    let hold_judgment_y = screen_center_y() + HOLD_JUDGMENT_Y_OFFSET_FROM_CENTER;
+    for (column, render_info) in state.hold_judgments.iter().enumerate() {
+        let Some(render_info) = render_info else {
+            continue;
+        };
+
+        let elapsed = render_info.triggered_at.elapsed().as_secs_f32();
+        if elapsed >= HOLD_JUDGMENT_TOTAL_DURATION {
+            continue;
+        }
+
+        let zoom = if elapsed < 0.3 {
+            let progress = (elapsed / 0.3).clamp(0.0, 1.0);
+            HOLD_JUDGMENT_INITIAL_ZOOM
+                + progress * (HOLD_JUDGMENT_FINAL_ZOOM - HOLD_JUDGMENT_INITIAL_ZOOM)
+        } else {
+            HOLD_JUDGMENT_FINAL_ZOOM
+        };
+
+        let frame_index = match render_info.result {
+            HoldResult::Held => 0,
+            HoldResult::LetGo => 1,
+        } as u32;
+
+        let column_offset = state
+            .noteskin
+            .as_ref()
+            .and_then(|ns| ns.column_xs.get(column))
+            .map(|&x| x as f32)
+            .unwrap_or_else(|| ((column as f32) - 1.5) * TARGET_ARROW_PIXEL_SIZE);
+
+        actors.push(act!(sprite("hold_judgements/Love 1x2 (doubleres).png"):
+            align(0.5, 0.5):
+            xy(playfield_center_x + column_offset, hold_judgment_y):
+            z(195):
+            setstate(frame_index):
+            zoom(zoom):
+            diffusealpha(1.0)
+        ));
+    }
+
     // Difficulty Box
     let x = screen_center_x() - widescale(292.5, 342.5);
     let y = 56.0;
@@ -2014,7 +2090,7 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
         let label_zoom = 0.833 * frame_zoom;
         let gray = color::rgba_hex("#5A6166");
         let white = [1.0, 1.0, 1.0, 1.0];
-        
+
         // --- HYBRID LAYOUT LOGIC ---
         // 1. Measure real character widths for number layout.
         let digit_width = font::measure_line_width_logical(metrics_font, "0", all_fonts) as f32 * value_zoom;
@@ -2075,7 +2151,7 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
             // --- Position Label using HARDCODED width assumption ---
             let total_value_width_for_label = (achieved_str.len() + 1 + possible_str.len()) as f32 * fixed_char_width_scaled_for_label;
             let label_x = right_anchor_x - total_value_width_for_label - (10.0 * frame_zoom);
-            
+
             children.push(act!(text:
                 font("miso"): settext(*label_text): align(1.0, 0.5): xy(label_x, item_y):
                 zoom(label_zoom): diffuse(white[0], white[1], white[2], white[3])
@@ -2175,7 +2251,7 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
             let label_world_y = world_y + (1.0 * final_text_base_zoom);
             let label_zoom = final_text_base_zoom * 0.833;
-    
+
             actors.push(act!(text:
                 font("miso"): settext(info.label): align(0.0, 0.5):
                 xy(label_world_x, label_world_y): zoom(label_zoom):
@@ -2188,7 +2264,7 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         // --- Time Display (Remaining / Total) ---
         {
             let local_y = -40.0 * banner_data_zoom;
-            
+
             let total_seconds = state.song.total_length_seconds.max(0) as f32;
             let total_time_str = format_game_time(total_seconds, total_seconds);
 
@@ -2208,11 +2284,11 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             let red_color = color::rgba_hex("#ff3030");
             let white_color = [1.0, 1.0, 1.0, 1.0];
             let remaining_color = if state.is_failing { red_color } else { white_color };
-            
+
             // --- Total Time Row ---
             let y_pos_total = sidepane_center_y + local_y + 20.0;
             let label_offset = 32.0;
-            
+
             actors.push(act!(text: font(font_name): settext(total_time_str):
                 align(0.0, 0.5): horizalign(left):
                 xy(numbers_left_x, y_pos_total):
@@ -2225,7 +2301,7 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 zoom(text_zoom): z(71):
                 diffuse(white_color[0], white_color[1], white_color[2], white_color[3])
             ));
-            
+
             // --- Remaining Time Row ---
             let y_pos_remaining = sidepane_center_y + local_y;
 
