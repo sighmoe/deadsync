@@ -129,7 +129,8 @@ pub const BASE_FANTASTIC_WINDOW: f32 = 0.0215; // W1 (0.0230 final)
 const BASE_EXCELLENT_WINDOW: f32 = 0.0430; // W2 (0.0445 final)
 const BASE_GREAT_WINDOW: f32 = 0.1020; // W3 (0.1035 final)
 const BASE_DECENT_WINDOW: f32 = 0.1350; // W4 (0.1365 final)
-                                        /* Notes outside the final WayOff window are considered a Miss. */
+
+/* Notes outside the final WayOff window are considered a Miss. */
 const BASE_WAY_OFF_WINDOW: f32 = 0.1800; // W5 (0.1815 final)
 
 // --- DATA STRUCTURES ---
@@ -169,6 +170,7 @@ pub struct HoldData {
     pub end_row_index: usize,
     pub end_beat: f32,
     pub result: Option<HoldResult>,
+    pub life: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -217,17 +219,13 @@ struct ActiveHold {
     end_time: f32,
     note_type: NoteType,
     let_go: bool,
-    last_input_time: f32,
     is_pressed: bool,
+    life: f32,
 }
 
 impl ActiveHold {
-    fn is_engaged(&self, now: f32) -> bool {
-        if self.let_go {
-            return false;
-        }
-
-        self.is_pressed || (now - self.last_input_time) <= HOLD_DROP_TOLERANCE
+    fn is_engaged(&self) -> bool {
+        !self.let_go && self.life > 0.0
     }
 }
 
@@ -286,6 +284,7 @@ fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
             return;
         }
         hold.result = Some(HoldResult::LetGo);
+        hold.life = 0.0;
     }
 
     state.hold_judgments[column] = Some(HoldJudgmentRenderInfo {
@@ -310,6 +309,7 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
             return;
         }
         hold.result = Some(HoldResult::Held);
+        hold.life = MAX_HOLD_LIFE;
     }
 
     if matches!(state.notes[note_index].note_type, NoteType::Hold) {
@@ -329,7 +329,7 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
     });
 }
 
-fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32) {
+fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32, delta_time: f32) {
     for column in 0..state.active_holds.len() {
         let mut handle_let_go = None;
         let mut handle_success = None;
@@ -337,29 +337,53 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32)
         {
             let active_opt = &mut state.active_holds[column];
             if let Some(active) = active_opt {
-                if inputs[column] {
-                    active.last_input_time = current_time;
-                    active.is_pressed = true;
-                } else {
-                    active.is_pressed = false;
-                    if !active.let_go
-                        && current_time < active.end_time
-                        && (current_time - active.last_input_time) > HOLD_DROP_TOLERANCE
-                    {
-                        active.let_go = true;
-                        handle_let_go = Some((column, active.note_index));
+                let Some(hold) = state.notes[active.note_index].hold.as_mut() else {
+                    *active_opt = None;
+                    continue;
+                };
+
+                let pressed = inputs[column];
+                active.is_pressed = pressed;
+
+                if !active.let_go {
+                    let window = match active.note_type {
+                        NoteType::Hold => TIMING_WINDOW_SECONDS_HOLD,
+                        NoteType::Roll => TIMING_WINDOW_SECONDS_ROLL,
+                        _ => TIMING_WINDOW_SECONDS_HOLD,
+                    };
+
+                    if pressed && matches!(active.note_type, NoteType::Hold | NoteType::Roll) {
+                        active.life = MAX_HOLD_LIFE;
+                    } else {
+                        if window > 0.0 {
+                            active.life -= delta_time / window;
+                        } else {
+                            active.life = 0.0;
+                        }
+
+                        if active.life < 0.0 {
+                            active.life = 0.0;
+                        }
                     }
+                }
+
+                hold.life = active.life;
+
+                if !active.let_go && active.life <= 0.0 {
+                    active.let_go = true;
+                    handle_let_go = Some((column, active.note_index));
                 }
 
                 if current_time >= active.end_time {
                     let note_index = active.note_index;
-                    let still_engaged = active.is_engaged(current_time);
-                    if still_engaged {
+                    if !active.let_go && active.life > 0.0 {
                         handle_success = Some((column, note_index));
                     } else if !active.let_go {
                         active.let_go = true;
                         handle_let_go = Some((column, note_index));
                     }
+                    *active_opt = None;
+                } else if active.let_go {
                     *active_opt = None;
                 }
             }
@@ -375,12 +399,16 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32)
     }
 }
 
+const MAX_HOLD_LIFE: f32 = 1.0;
+const INITIAL_HOLD_LIFE: f32 = 1.0;
+const TIMING_WINDOW_SECONDS_HOLD: f32 = 0.32;
+const TIMING_WINDOW_SECONDS_ROLL: f32 = 0.35;
+
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
 const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
 const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
                                                  // Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
                                                  // Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
-const HOLD_DROP_TOLERANCE: f32 = 0.32;
 
 pub struct State {
     // Song & Chart data
@@ -537,6 +565,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
                     end_row_index: tail_row,
                     end_beat,
                     result: None,
+                    life: INITIAL_HOLD_LIFE,
                 })
             }
             _ => None,
@@ -730,13 +759,16 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
 
             if matches!(note_type, NoteType::Hold | NoteType::Roll) {
                 if let Some(end_time) = hold_end_time {
+                    if let Some(hold) = state.notes[note_index].hold.as_mut() {
+                        hold.life = MAX_HOLD_LIFE;
+                    }
                     state.active_holds[column] = Some(ActiveHold {
                         note_index,
                         end_time,
                         note_type,
                         let_go: false,
-                        last_input_time: current_time,
                         is_pressed: true,
+                        life: MAX_HOLD_LIFE,
                     });
                 }
             }
@@ -993,7 +1025,7 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     }
     state.prev_inputs = current_inputs;
 
-    update_active_holds(state, &current_inputs, music_time_sec);
+    update_active_holds(state, &current_inputs, music_time_sec, delta_time);
 
     for timer in &mut state.receptor_glow_timers {
         *timer = (*timer - delta_time).max(0.0);
@@ -1408,7 +1440,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
             if let Some(hold_slot) = state.active_holds[i]
                 .as_ref()
-                .filter(|active| active.is_engaged(current_time))
+                .filter(|active| active.is_engaged())
                 .and_then(|active| {
                     let note_type = &state.notes[active.note_index].note_type;
                     let visuals = if matches!(note_type, NoteType::Roll) {
@@ -1553,9 +1585,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             let active_state = state.active_holds[note.column]
                 .as_ref()
                 .filter(|h| h.note_index == note_index);
-            let engaged = active_state
-                .map(|h| h.is_engaged(current_time))
-                .unwrap_or(false);
+            let engaged = active_state.map(|h| h.is_engaged()).unwrap_or(false);
             let use_active = active_state
                 .map(|h| h.is_pressed && !h.let_go)
                 .unwrap_or(false);
