@@ -1666,38 +1666,37 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     let mut v0 = cap_uv[1];
                     let mut v1 = cap_uv[3];
 
-                    if engaged && cap_height > std::f32::EPSILON {
-                        let cap_top = cap_center - cap_height * 0.5;
-                        let cap_bottom = cap_center + cap_height * 0.5;
-                        if receptor_y >= cap_top && receptor_y <= cap_bottom {
-                            let span = cap_bottom - cap_top;
-                            if span > std::f32::EPSILON {
-                                let v_span = v1 - v0;
-                                let distance_to_top = receptor_y - cap_top;
-                                let distance_to_bottom = cap_bottom - receptor_y;
+                    if cap_height > std::f32::EPSILON {
+                        let mut cap_top = cap_center - cap_height * 0.5;
+                        let mut cap_bottom = cap_center + cap_height * 0.5;
+                        let v_span = v1 - v0;
 
-                                if distance_to_top <= distance_to_bottom {
-                                    let trimmed = distance_to_top;
-                                    let remaining = span - trimmed;
-                                    if remaining > std::f32::EPSILON {
-                                        let fraction = trimmed / span;
-                                        v0 += v_span * fraction;
-                                        cap_height = remaining;
-                                        cap_center = receptor_y + cap_height * 0.5;
-                                    } else {
-                                        cap_height = 0.0;
-                                    }
-                                } else {
-                                    let trimmed = distance_to_bottom;
-                                    let remaining = span - trimmed;
-                                    if remaining > std::f32::EPSILON {
-                                        let fraction = trimmed / span;
-                                        v1 -= v_span * fraction;
-                                        cap_height = remaining;
-                                        cap_center = receptor_y - cap_height * 0.5;
-                                    } else {
-                                        cap_height = 0.0;
-                                    }
+                        if head_is_top {
+                            let head_limit = top;
+                            if head_limit > cap_top {
+                                let trimmed = (head_limit - cap_top).clamp(0.0, cap_height);
+                                if trimmed >= cap_height - std::f32::EPSILON {
+                                    cap_height = 0.0;
+                                } else if trimmed > std::f32::EPSILON {
+                                    let fraction = trimmed / cap_height;
+                                    v0 += v_span * fraction;
+                                    cap_top += trimmed;
+                                    cap_center = (cap_top + cap_bottom) * 0.5;
+                                    cap_height = cap_bottom - cap_top;
+                                }
+                            }
+                        } else {
+                            let head_limit = bottom;
+                            if head_limit < cap_bottom {
+                                let trimmed = (cap_bottom - head_limit).clamp(0.0, cap_height);
+                                if trimmed >= cap_height - std::f32::EPSILON {
+                                    cap_height = 0.0;
+                                } else if trimmed > std::f32::EPSILON {
+                                    let fraction = trimmed / cap_height;
+                                    v1 -= v_span * fraction;
+                                    cap_bottom -= trimmed;
+                                    cap_center = (cap_top + cap_bottom) * 0.5;
+                                    cap_height = cap_bottom - cap_top;
                                 }
                             }
                         }
