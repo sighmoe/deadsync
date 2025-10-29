@@ -319,6 +319,11 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
     state.change_life(LifeChange::HELD);
     state.miss_combo = 0;
 
+    // In Simply Love, a successful hold completion always produces an Excellent explosion
+    // regardless of the original tap judgment. Mirror that behavior here so hold releases
+    // receive the same visual feedback when parity is achieved with itgmania.
+    trigger_tap_explosion(state, column, JudgeGrade::Excellent);
+
     state.hold_judgments[column] = Some(HoldJudgmentRenderInfo {
         result: HoldResult::Held,
         triggered_at: Instant::now(),
