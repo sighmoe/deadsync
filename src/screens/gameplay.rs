@@ -6,7 +6,7 @@ use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
 use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::parsing::notes as note_parser;
-use crate::gameplay::parsing::noteskin::{self, NUM_QUANTIZATIONS, Noteskin, Quantization, Style};
+use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
 use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::gameplay::song::SongData;
 use crate::gameplay::timing::TimingData;
@@ -108,6 +108,8 @@ const M_MOD_HIGH_CAP: f32 = 600.0;
 const RECEPTOR_GLOW_DURATION: f32 = 0.2; // How long the glow sprite is visible
 const SHOW_COMBO_AT: u32 = 4; // From Simply Love metrics
 const HOLD_JUDGMENT_TOTAL_DURATION: f32 = 0.8; // Hold judgment anim duration from Simply Love metrics
+const DRAW_DISTANCE_BEFORE_TARGETS_MULTIPLIER: f32 = 1.5; // Simply Love's DrawDistanceBeforeTargetsPixels
+const DRAW_DISTANCE_AFTER_TARGETS: f32 = 130.0; // Simply Love's DrawDistanceAfterTargetsPixels (absolute value)
 
 // Z-order layers for key gameplay visuals (higher draws on top)
 const Z_RECEPTOR: i32 = 100;
@@ -127,8 +129,8 @@ pub const BASE_FANTASTIC_WINDOW: f32 = 0.0215; // W1 (0.0230 final)
 const BASE_EXCELLENT_WINDOW: f32 = 0.0430; // W2 (0.0445 final)
 const BASE_GREAT_WINDOW: f32 = 0.1020; // W3 (0.1035 final)
 const BASE_DECENT_WINDOW: f32 = 0.1350; // W4 (0.1365 final)
+                                        /* Notes outside the final WayOff window are considered a Miss. */
 const BASE_WAY_OFF_WINDOW: f32 = 0.1800; // W5 (0.1815 final)
-// Notes outside the final WayOff window are considered a Miss.
 
 // --- DATA STRUCTURES ---
 
@@ -371,8 +373,8 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32)
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
 const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
 const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
-// Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
-// Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
+                                                 // Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
+                                                 // Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
 const HOLD_DROP_TOLERANCE: f32 = 0.32;
 
 pub struct State {
@@ -419,6 +421,8 @@ pub struct State {
     pub scroll_reference_bpm: f32,
     pub scroll_pixels_per_second: f32,
     pub scroll_travel_time: f32,
+    pub draw_distance_before_targets: f32,
+    pub draw_distance_after_targets: f32,
     pub receptor_glow_timers: [f32; 4], // Timers for glow effect on each receptor
     pub receptor_bop_timers: [f32; 4],  // Timers for the "bop" animation on empty press
     pub tap_explosions: [Option<ActiveTapExplosion>; 4],
@@ -587,10 +591,12 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         pixels_per_second =
             ScrollSpeedSetting::default().pixels_per_second(initial_bpm, reference_bpm);
     }
+    let draw_distance_before_targets = screen_height() * DRAW_DISTANCE_BEFORE_TARGETS_MULTIPLIER;
+    let draw_distance_after_targets = DRAW_DISTANCE_AFTER_TARGETS;
     let mut travel_time =
-        scroll_speed.travel_time_seconds(screen_height(), initial_bpm, reference_bpm);
+        scroll_speed.travel_time_seconds(draw_distance_before_targets, initial_bpm, reference_bpm);
     if !travel_time.is_finite() || travel_time <= 0.0 {
-        travel_time = screen_height() / pixels_per_second;
+        travel_time = draw_distance_before_targets / pixels_per_second;
     }
     info!(
         "Scroll speed set to {} ({:.2} BPM at start), {:.2} px/s",
@@ -639,6 +645,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         scroll_reference_bpm: reference_bpm,
         scroll_pixels_per_second: pixels_per_second,
         scroll_travel_time: travel_time,
+        draw_distance_before_targets,
+        draw_distance_after_targets,
         receptor_glow_timers: [0.0; 4],
         receptor_bop_timers: [0.0; 4],
         tap_explosions: Default::default(),
@@ -657,7 +665,12 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 // --- INPUT HANDLING ---
 
 fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
-    if let Some(arrow_to_judge) = state.arrows[column].first().cloned() {
+    if let Some((arrow_list_index, arrow_to_judge)) = state.arrows[column]
+        .iter()
+        .enumerate()
+        .find(|(_, arrow)| state.notes[arrow.note_index].result.is_none())
+        .map(|(idx, arrow)| (idx, arrow.clone()))
+    {
         let note_index = arrow_to_judge.note_index;
         let (note_beat, note_row_index) = {
             let note = &state.notes[note_index];
@@ -706,7 +719,7 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
                 grade
             );
 
-            state.arrows[column].remove(0);
+            state.arrows[column].remove(arrow_list_index);
             state.receptor_glow_timers[column] = RECEPTOR_GLOW_DURATION;
             trigger_tap_explosion(state, column, grade);
 
@@ -939,13 +952,16 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     }
     state.scroll_pixels_per_second = dynamic_speed;
 
+    let draw_distance_before_targets = screen_height() * DRAW_DISTANCE_BEFORE_TARGETS_MULTIPLIER;
+    state.draw_distance_before_targets = draw_distance_before_targets;
+    state.draw_distance_after_targets = DRAW_DISTANCE_AFTER_TARGETS;
     let mut travel_time = state.scroll_speed.travel_time_seconds(
-        screen_height(),
+        draw_distance_before_targets,
         current_bpm,
         state.scroll_reference_bpm,
     );
     if !travel_time.is_finite() || travel_time <= 0.0 {
-        travel_time = screen_height() / dynamic_speed;
+        travel_time = draw_distance_before_targets / dynamic_speed;
     }
     state.scroll_travel_time = travel_time;
 
@@ -1020,33 +1036,65 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     }
 
     let way_off_window = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
+    for (col_idx, col_arrows) in state.arrows.iter_mut().enumerate() {
+        let Some(next_arrow_index) = col_arrows
+            .iter()
+            .position(|arrow| state.notes[arrow.note_index].result.is_none())
+        else {
+            continue;
+        };
+
+        let arrow = &col_arrows[next_arrow_index];
+        let note_index = arrow.note_index;
+        let (note_row_index, note_beat) = {
+            let note = &state.notes[note_index];
+            (note.row_index, note.beat)
+        };
+
+        let note_time = state.timing.get_time_for_beat(note_beat);
+        if music_time_sec - note_time > way_off_window {
+            let judgment = Judgment {
+                time_error_ms: ((music_time_sec - note_time) * 1000.0),
+                grade: JudgeGrade::Miss,
+                row: note_row_index,
+            };
+            state.notes[note_index].result = Some(judgment);
+            info!(
+                "MISSED (pending): Row {}, Col {}, Beat {:.2}",
+                note_row_index, col_idx, arrow.beat
+            );
+        }
+    }
+
+    let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
+    let miss_cull_threshold = receptor_y - state.draw_distance_after_targets;
     for col_arrows in &mut state.arrows {
-        let mut missed = false;
-        if let Some(arrow) = col_arrows.first().cloned() {
-            let note_index = arrow.note_index;
-            let (note_row_index, note_result_is_none, note_beat) = {
-                let note = &state.notes[note_index];
-                (note.row_index, note.result.is_none(), note.beat)
+        col_arrows.retain(|arrow| {
+            let Some(judgment) = state.notes[arrow.note_index].result.as_ref() else {
+                return true;
             };
 
-            let note_time = state.timing.get_time_for_beat(note_beat);
-            if music_time_sec - note_time > way_off_window && note_result_is_none {
-                let judgment = Judgment {
-                    time_error_ms: ((music_time_sec - note_time) * 1000.0),
-                    grade: JudgeGrade::Miss,
-                    row: note_row_index,
-                };
-                state.notes[note_index].result = Some(judgment);
-                info!(
-                    "MISSED (pending): Row {}, Col {}, Beat {:.2}",
-                    note_row_index, arrow.column, arrow.beat
-                );
-                missed = true;
+            if judgment.grade != JudgeGrade::Miss {
+                return false;
             }
-        }
-        if missed {
-            col_arrows.remove(0);
-        }
+
+            let y_pos = match state.scroll_speed {
+                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
+                    let beat_diff = arrow.beat - state.current_beat;
+                    let multiplier = state
+                        .scroll_speed
+                        .beat_multiplier(state.scroll_reference_bpm);
+                    receptor_y + (beat_diff * ScrollSpeedSetting::ARROW_SPACING * multiplier)
+                }
+                _ => {
+                    let note_time = state.timing.get_time_for_beat(arrow.beat);
+                    let time_diff = note_time - music_time_sec;
+                    receptor_y + (time_diff * state.scroll_pixels_per_second)
+                }
+            };
+
+            y_pos >= miss_cull_threshold
+        });
     }
 
     update_judged_rows(state);
@@ -1684,7 +1732,9 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     _ => receptor_y + (time_diff * pixels_per_second),
                 };
 
-                if y_pos < -100.0 || y_pos > screen_height() + 100.0 {
+                if y_pos < receptor_y - state.draw_distance_after_targets
+                    || y_pos > receptor_y + state.draw_distance_before_targets
+                {
                     continue;
                 }
 
