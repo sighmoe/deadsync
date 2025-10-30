@@ -35,6 +35,10 @@ pub struct ScoreInfo {
     pub score_percent: f64,
     pub grade: scores::Grade,
     pub speed_mod: ScrollSpeedSetting,
+    pub holds_held: u32,
+    pub holds_total: u32,
+    pub rolls_held: u32,
+    pub rolls_total: u32,
 }
 
 pub struct State {
@@ -66,6 +70,10 @@ pub fn init(gameplay_results: Option<gameplay::State>) -> State {
             score_percent,
             grade,
             speed_mod: gs.scroll_speed,
+            holds_held: gs.holds_held,
+            holds_total: gs.holds_total,
+            rolls_held: gs.rolls_held,
+            rolls_total: gs.rolls_total,
         }
     });
 
@@ -231,25 +239,25 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
         
         // --- RADAR LABELS & NUMBERS ---
         let radar_categories = [
-            ("hands", score_info.chart.stats.hands),
-            ("holds", score_info.chart.stats.holds),
-            ("mines", score_info.chart.stats.mines),
-            ("rolls", score_info.chart.stats.rolls),
+            ("hands", 0_u32, score_info.chart.stats.hands),
+            ("holds", score_info.holds_held, score_info.holds_total),
+            ("mines", 0_u32, score_info.chart.stats.mines),
+            ("rolls", score_info.rolls_held, score_info.rolls_total),
         ];
 
         let gray_color_possible = color::rgba_hex("#5A6166");
         let gray_color_achieved = color::rgba_hex("#444444");
         let white_color = [1.0, 1.0, 1.0, 1.0];
 
-        for (i, (label, possible)) in radar_categories.iter().enumerate() {
+        for (i, (label, achieved, possible)) in radar_categories.iter().cloned().enumerate() {
             let label_local_x = -160.0;
             let label_local_y = (i as f32 * 28.0) + 41.0;
-            actors.push(act!(text: font("miso"): settext(*label):
+            actors.push(act!(text: font("miso"): settext(label.to_string()):
                 align(1.0, 0.5): xy(labels_frame_origin_x + label_local_x, frame_origin_y + label_local_y): zoom(0.833): z(101)
             ));
 
-            let achieved = 0;
-            let possible_clamped = (*possible).min(999);
+            let possible_clamped = possible.min(999);
+            let achieved_clamped = achieved.min(999);
             
             let number_local_y = (i as f32 * 35.0) + 53.0;
             let number_final_y = frame_origin_y + (number_local_y * numbers_frame_zoom);
@@ -286,7 +294,7 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
             cursor_x -= slash_width;
 
             // 3. Draw "achieved" number (left-most part)
-            let achieved_str = format!("{:03}", achieved);
+            let achieved_str = format!("{:03}", achieved_clamped);
             let first_nonzero_achieved = achieved_str.find(|c: char| c != '0').unwrap_or(achieved_str.len());
 
             // The 'achieved' block must have its own right-anchor for alignment within the group.
