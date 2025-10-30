@@ -289,6 +289,7 @@ pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
         left_text: None,
         center_text: None,
         right_text: None,
+        left_avatar: None,
         fg_color: FG,
     }));
 

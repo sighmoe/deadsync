@@ -17,6 +17,8 @@ pub struct Config {
     pub video_renderer: BackendType,
     pub simply_love_color: i32,
     pub global_offset_seconds: f32,
+    pub fastload: bool,
+    pub cachesongs: bool,
 }
 
 impl Default for Config {
@@ -30,6 +32,8 @@ impl Default for Config {
             video_renderer: BackendType::OpenGL,
             simply_love_color: 2, // Corresponds to DEFAULT_COLOR_INDEX
             global_offset_seconds: -0.008,
+            fastload: true,
+            cachesongs: true,
         }
     }
 }
@@ -52,6 +56,8 @@ fn create_default_config_file() -> Result<(), std::io::Error> {
     conf.set("Options", "DisplayHeight", Some(default.display_height.to_string()));
     conf.set("Options", "VideoRenderer", Some(default.video_renderer.to_string()));
     conf.set("Options", "GlobalOffsetSeconds", Some(default.global_offset_seconds.to_string()));
+    conf.set("Options", "FastLoad", Some((if default.fastload { "1" } else { "0" }).to_string()));
+    conf.set("Options", "CacheSongs", Some((if default.cachesongs { "1" } else { "0" }).to_string()));
     conf.set("Theme", "SimplyLoveColor", Some(default.simply_love_color.to_string()));
 
     conf.write(CONFIG_PATH)
@@ -68,21 +74,32 @@ pub fn load() {
     let mut conf = Ini::new();
     match conf.load(CONFIG_PATH) {
         Ok(_) => {
-            let mut cfg = CONFIG.lock().unwrap();
-            let default = Config::default();
-            
-            cfg.vsync = conf.get("Options", "Vsync").and_then(|v| v.parse::<u8>().ok()).map_or(default.vsync, |v| v != 0);
-            cfg.windowed = conf.get("Options", "Windowed").and_then(|v| v.parse::<u8>().ok()).map_or(default.windowed, |v| v != 0);
-            cfg.show_stats = conf.get("Options", "ShowStats").and_then(|v| v.parse::<u8>().ok()).map_or(default.show_stats, |v| v != 0);
-            cfg.display_width = conf.get("Options", "DisplayWidth").and_then(|v| v.parse().ok()).unwrap_or(default.display_width);
-            cfg.display_height = conf.get("Options", "DisplayHeight").and_then(|v| v.parse().ok()).unwrap_or(default.display_height);
-            cfg.video_renderer = conf.get("Options", "VideoRenderer")
-                .and_then(|s| BackendType::from_str(&s).ok())
-                .unwrap_or(default.video_renderer);
-            cfg.global_offset_seconds = conf.get("Options", "GlobalOffsetSeconds").and_then(|v| v.parse().ok()).unwrap_or(default.global_offset_seconds);
-            cfg.simply_love_color = conf.get("Theme", "SimplyLoveColor").and_then(|v| v.parse().ok()).unwrap_or(default.simply_love_color);
-            
-            info!("Configuration loaded from '{}'.", CONFIG_PATH);
+            // This block populates the global CONFIG struct from the file,
+            // using default values for any missing keys.
+            {
+                let mut cfg = CONFIG.lock().unwrap();
+                let default = Config::default();
+                
+                cfg.vsync = conf.get("Options", "Vsync").and_then(|v| v.parse::<u8>().ok()).map_or(default.vsync, |v| v != 0);
+                cfg.windowed = conf.get("Options", "Windowed").and_then(|v| v.parse::<u8>().ok()).map_or(default.windowed, |v| v != 0);
+                cfg.show_stats = conf.get("Options", "ShowStats").and_then(|v| v.parse::<u8>().ok()).map_or(default.show_stats, |v| v != 0);
+                cfg.display_width = conf.get("Options", "DisplayWidth").and_then(|v| v.parse().ok()).unwrap_or(default.display_width);
+                cfg.display_height = conf.get("Options", "DisplayHeight").and_then(|v| v.parse().ok()).unwrap_or(default.display_height);
+                cfg.video_renderer = conf.get("Options", "VideoRenderer")
+                    .and_then(|s| BackendType::from_str(&s).ok())
+                    .unwrap_or(default.video_renderer);
+                cfg.global_offset_seconds = conf.get("Options", "GlobalOffsetSeconds").and_then(|v| v.parse().ok()).unwrap_or(default.global_offset_seconds);
+                cfg.fastload = conf.get("Options", "FastLoad").and_then(|v| v.parse::<u8>().ok()).map_or(default.fastload, |v| v != 0);
+                cfg.cachesongs = conf.get("Options", "CacheSongs").and_then(|v| v.parse::<u8>().ok()).map_or(default.cachesongs, |v| v != 0);
+                cfg.simply_love_color = conf.get("Theme", "SimplyLoveColor").and_then(|v| v.parse().ok()).unwrap_or(default.simply_love_color);
+                
+                info!("Configuration loaded from '{}'.", CONFIG_PATH);
+            } // Lock on CONFIG is released here.
+
+            // Now, write the fully-populated config back to disk. This preserves existing
+            // user settings while adding any new fields with their default values.
+            save();
+            info!("'{}' updated with default values for any missing fields.", CONFIG_PATH);
         }
         Err(e) => {
             warn!("Failed to load '{}': {}. Using default values.", CONFIG_PATH, e);
@@ -101,6 +118,8 @@ fn save() {
     conf.set("Options", "DisplayHeight", Some(cfg.display_height.to_string()));
     conf.set("Options", "VideoRenderer", Some(cfg.video_renderer.to_string()));
     conf.set("Options", "GlobalOffsetSeconds", Some(cfg.global_offset_seconds.to_string()));
+    conf.set("Options", "FastLoad", Some((if cfg.fastload { "1" } else { "0" }).to_string()));
+    conf.set("Options", "CacheSongs", Some((if cfg.cachesongs { "1" } else { "0" }).to_string()));
     conf.set("Theme", "SimplyLoveColor", Some(cfg.simply_love_color.to_string()));
     
     if let Err(e) = conf.write(CONFIG_PATH) {

@@ -201,6 +201,7 @@ pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
         left_text: None,     // keep this None to avoid overlap with left title
         center_text: None,   // later: Some("01:23")
         right_text: None,    // later: Some("P1 • READY")
+        left_avatar: None,
         fg_color: FG,
     }));
     ui_actors.push(screen_bar::build(screen_bar::ScreenBarParams {
@@ -211,6 +212,7 @@ pub fn get_actors(state: &State, alpha_multiplier: f32) -> Vec<Actor> {
         left_text: None,
         center_text: None,
         right_text: Some("NOT PRESENT"),
+        left_avatar: None,
         fg_color: FG,
     }));
 

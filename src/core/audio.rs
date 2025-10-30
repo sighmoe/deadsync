@@ -17,10 +17,17 @@ use std::thread;
 pub struct Cut {
     pub start_sec: f64,
     pub length_sec: f64,
+    pub fade_in_sec: f64,
+    pub fade_out_sec: f64,
 }
 impl Default for Cut {
     fn default() -> Self {
-        Self { start_sec: 0.0, length_sec: f64::INFINITY }
+        Self {
+            start_sec: 0.0,
+            length_sec: f64::INFINITY,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+        }
     }
 }
 
@@ -263,6 +270,70 @@ fn spawn_music_decoder_thread(path: PathBuf, cut: Cut, looping: bool, ring: Arc<
     MusicStream { thread, stop_signal }
 }
 
+#[inline]
+fn secs_to_frames(seconds: f64, sample_rate: u32) -> u64 {
+    if !seconds.is_finite() {
+        0
+    } else {
+        (seconds.max(0.0) * sample_rate as f64).round() as u64
+    }
+}
+
+#[inline]
+fn volume_for_frame(position: u64, full_volume_frame: u64, silence_frame: u64) -> f32 {
+    if full_volume_frame == silence_frame {
+        return 1.0;
+    }
+
+    let full = full_volume_frame as f64;
+    let silence = silence_frame as f64;
+    let pos = position as f64;
+    let denom = silence - full;
+    if denom.abs() < f64::EPSILON {
+        return if silence > full { 0.0 } else { 1.0 };
+    }
+
+    let volume = ((pos - full) * (0.0 - 1.0) / denom) + 1.0;
+    volume.clamp(0.0, 1.0) as f32
+}
+
+fn apply_fade_envelope(samples: &mut [i16], channels: usize, start_frame: u64, fade: Option<(u64, u64)>) {
+    let Some((full_volume_frame, silence_frame)) = fade else { return; };
+    if samples.is_empty() || channels == 0 {
+        return;
+    }
+    if full_volume_frame == silence_frame {
+        return;
+    }
+
+    let frames = samples.len() / channels;
+    if frames == 0 {
+        return;
+    }
+
+    let start_volume = volume_for_frame(start_frame, full_volume_frame, silence_frame);
+    let end_volume = volume_for_frame(start_frame + frames as u64, full_volume_frame, silence_frame);
+    if start_volume > 0.9999 && end_volume > 0.9999 {
+        return;
+    }
+
+    let frames_f = frames as f32;
+    for frame in 0..frames {
+        let t = frame as f32 / frames_f;
+        let mut volume = start_volume + (end_volume - start_volume) * t;
+        volume = volume.clamp(0.0, 1.0);
+        if (volume - 1.0).abs() < 0.0001 {
+            continue;
+        }
+
+        for c in 0..channels {
+            let idx = frame * channels + c;
+            let scaled = (samples[idx] as f32) * volume;
+            samples[idx] = scaled.round().clamp(-32768.0, 32767.0) as i16;
+        }
+    }
+}
+
 /// The decoder loop, mirrored from v1 (seek+preroll, cut capping, flush).
 fn music_decoder_thread_loop(
     path: PathBuf, cut: Cut, looping: bool, ring: Arc<internal::SpscRingI16>, stop: Arc<std::sync::atomic::AtomicBool>
@@ -322,10 +393,31 @@ fn music_decoder_thread_loop(
         // If seek failed, decode and drop input frames until we hit start
         let mut to_drop_in: u64 = if seek_ok { 0 } else { start_floor };
 
+        let fade_in_frames = secs_to_frames(cut.fade_in_sec, out_hz);
+        let fade_out_frames = secs_to_frames(cut.fade_out_sec, out_hz);
+
         // Optional cut length in output frames
         let mut frames_left_out: Option<u64> = if cut.length_sec.is_finite() {
             Some((cut.length_sec * out_hz as f64).round().max(0.0) as u64)
         } else { None };
+        let total_frames_target = frames_left_out;
+
+        let fade_spec = if let Some(total) = total_frames_target {
+            let fade_out_frames = fade_out_frames.min(total);
+            if fade_out_frames > 0 {
+                Some((total.saturating_sub(fade_out_frames), total))
+            } else if fade_in_frames > 0 {
+                Some((fade_in_frames, 0))
+            } else {
+                None
+            }
+        } else if fade_in_frames > 0 {
+            Some((fade_in_frames, 0))
+        } else {
+            None
+        };
+
+        let mut frames_emitted_total: u64 = 0;
 
         #[inline(always)]
         fn cap_out_frames(out_tmp: &mut Vec<i16>, out_ch: usize, frames_left_out: &mut Option<u64>) -> bool {
@@ -382,6 +474,11 @@ fn music_decoder_thread_loop(
 
             let finished = cap_out_frames(&mut out_tmp, out_ch, &mut frames_left_out);
 
+            if !out_tmp.is_empty() {
+                apply_fade_envelope(&mut out_tmp, out_ch, frames_emitted_total, fade_spec);
+                frames_emitted_total = frames_emitted_total.saturating_add((out_tmp.len() / out_ch) as u64);
+            }
+
             // Push to ring (producer thread), back off if full (like v1)
             let mut off = 0;
             while off < out_tmp.len() {
@@ -405,6 +502,11 @@ fn music_decoder_thread_loop(
         }
 
         let _ = cap_out_frames(&mut out_tmp, out_ch, &mut frames_left_out);
+
+        if !out_tmp.is_empty() {
+            apply_fade_envelope(&mut out_tmp, out_ch, frames_emitted_total, fade_spec);
+            frames_emitted_total = frames_emitted_total.saturating_add((out_tmp.len() / out_ch) as u64);
+        }
 
         let mut off = 0;
         while off < out_tmp.len() {

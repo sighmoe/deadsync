@@ -4,7 +4,7 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;
 use crate::ui::components::{heart_bg, pad_display, screen_bar};
-use crate::ui::components::screen_bar::{ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
+use crate::ui::components::screen_bar::{AvatarParams, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::core::space::widescale;
 
 use crate::screens::gameplay::{self, JudgeGrade};
@@ -13,12 +13,14 @@ use crate::gameplay::chart::ChartData;
 use crate::gameplay::scores;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
+use crate::gameplay::profile::ScrollSpeedSetting;
 use crate::assets::AssetManager;
 use crate::ui::font;
 
 use crate::gameplay::profile;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use chrono::Local;
 
 /* ---------------------------- transitions ---------------------------- */
 const TRANSITION_IN_DURATION: f32 = 0.4;
@@ -32,6 +34,11 @@ pub struct ScoreInfo {
     pub judgment_counts: HashMap<JudgeGrade, u32>,
     pub score_percent: f64,
     pub grade: scores::Grade,
+    pub speed_mod: ScrollSpeedSetting,
+    pub holds_held: u32,
+    pub holds_total: u32,
+    pub rolls_held: u32,
+    pub rolls_total: u32,
 }
 
 pub struct State {
@@ -62,6 +69,11 @@ pub fn init(gameplay_results: Option<gameplay::State>) -> State {
             judgment_counts: gs.judgment_counts.clone(),
             score_percent,
             grade,
+            speed_mod: gs.scroll_speed,
+            holds_held: gs.holds_held,
+            holds_total: gs.holds_total,
+            rolls_held: gs.rolls_held,
+            rolls_total: gs.rolls_total,
         }
     });
 
@@ -179,7 +191,9 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
         let numbers_frame_zoom = 0.8;
         let final_numbers_zoom = numbers_frame_zoom * 0.5;
         let digit_width = font::measure_line_width_logical(metrics_font, "0", all_fonts) as f32 * final_numbers_zoom;
+        let slash_width = font::measure_line_width_logical(metrics_font, "/", all_fonts) as f32 * final_numbers_zoom;
         if digit_width <= 0.0 { return; }
+        let slash_width = if slash_width > 0.0 { slash_width } else { digit_width };
 
         // --- Judgment Labels & Numbers ---
         let labels_frame_origin_x = p1_side_offset + 50.0;
@@ -225,25 +239,25 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
         
         // --- RADAR LABELS & NUMBERS ---
         let radar_categories = [
-            ("hands", score_info.chart.stats.hands),
-            ("holds", score_info.chart.stats.holds),
-            ("mines", score_info.chart.stats.mines),
-            ("rolls", score_info.chart.stats.rolls),
+            ("hands", 0_u32, score_info.chart.stats.hands),
+            ("holds", score_info.holds_held, score_info.holds_total),
+            ("mines", 0_u32, score_info.chart.stats.mines),
+            ("rolls", score_info.rolls_held, score_info.rolls_total),
         ];
 
         let gray_color_possible = color::rgba_hex("#5A6166");
         let gray_color_achieved = color::rgba_hex("#444444");
         let white_color = [1.0, 1.0, 1.0, 1.0];
 
-        for (i, (label, possible)) in radar_categories.iter().enumerate() {
+        for (i, (label, achieved, possible)) in radar_categories.iter().cloned().enumerate() {
             let label_local_x = -160.0;
             let label_local_y = (i as f32 * 28.0) + 41.0;
-            actors.push(act!(text: font("miso"): settext(*label):
+            actors.push(act!(text: font("miso"): settext(label.to_string()):
                 align(1.0, 0.5): xy(labels_frame_origin_x + label_local_x, frame_origin_y + label_local_y): zoom(0.833): z(101)
             ));
 
-            let achieved = 0;
-            let possible_clamped = (*possible).min(999);
+            let possible_clamped = possible.min(999);
+            let achieved_clamped = achieved.min(999);
             
             let number_local_y = (i as f32 * 35.0) + 53.0;
             let number_final_y = frame_origin_y + (number_local_y * numbers_frame_zoom);
@@ -277,14 +291,14 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
                 align(1.0, 0.5): xy(cursor_x, number_final_y): zoom(final_numbers_zoom):
                 diffuse(gray_color_possible[0], gray_color_possible[1], gray_color_possible[2], gray_color_possible[3]): z(101)
             ));
-            cursor_x -= digit_width;
+            cursor_x -= slash_width;
 
             // 3. Draw "achieved" number (left-most part)
-            let achieved_str = format!("{:03}", achieved);
+            let achieved_str = format!("{:03}", achieved_clamped);
             let first_nonzero_achieved = achieved_str.find(|c: char| c != '0').unwrap_or(achieved_str.len());
 
             // The 'achieved' block must have its own right-anchor for alignment within the group.
-            let achieved_block_right_x = cursor_x; 
+            let achieved_block_right_x = cursor_x;
 
             for (char_idx_from_right, ch) in achieved_str.chars().rev().enumerate() {
                  let is_dim = if achieved == 0 { 
@@ -419,7 +433,7 @@ fn build_p2_timing_pane(_state: &State) -> Vec<Actor> {
 
 
 /// Builds the modifiers display pane for P1.
-fn build_modifiers_pane(_state: &State) -> Vec<Actor> {
+fn build_modifiers_pane(state: &State) -> Vec<Actor> {
     // These positions are derived from the original ActorFrame layout to place
     // the text in the exact same world-space position without the frame.
     let p1_side_offset = screen_center_x() - 155.0;
@@ -434,9 +448,13 @@ fn build_modifiers_pane(_state: &State) -> Vec<Actor> {
     // The original large background pane is at z=100. This text needs to be on top.
     let text_z = 101;
 
+    // Get the speed mod from state.score_info
+    let speed_mod_text = state.score_info.as_ref().unwrap().speed_mod.to_string();
+    let final_text = format!("{}, Overhead", speed_mod_text);
+
     let modifier_text = act!(text:
         font("miso"):
-        settext("Overhead"): // Static text as requested
+        settext(final_text):
         align(0.0, 0.0):
         xy(text_x, text_y):
         zoom(font_zoom):
@@ -466,6 +484,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         transparent: false,
         fg_color: [1.0; 4],
         left_text: None, center_text: None, right_text: None,
+        left_avatar: None,
     }));
 
     // Session Timer
@@ -597,29 +616,33 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     // --- Breakdown Text (under grade) ---
     let breakdown_text = {
         let chart = &score_info.chart;
-        // This logic mimics the Lua script's loop to find the best-fitting text.
-        asset_manager.with_fonts(|all_fonts| asset_manager.with_font("miso", |miso_font| -> String {
-            let width_constraint = 155.0;
-            let text_zoom = 0.7;
-            // The max width is applied to the final zoomed width, so we check if the logical width
-            // will fit once scaled down.
-            let max_allowed_logical_width = width_constraint / text_zoom;
+        // Match the Lua script by progressively minimizing the breakdown text until it fits.
+        asset_manager
+            .with_fonts(|all_fonts| {
+                asset_manager.with_font("miso", |miso_font| -> Option<String> {
+                    let width_constraint = 155.0;
+                    let text_zoom = 0.7;
+                    // Measure at logical width (zoom 1.0) and ensure it fits once scaled down.
+                    let max_allowed_logical_width = width_constraint / text_zoom;
 
-            let check_width = |text: &str| {
-                let logical_width = font::measure_line_width_logical(miso_font, text, all_fonts) as f32;
-                logical_width <= max_allowed_logical_width
-            };
+                    let fits = |text: &str| {
+                        let logical_width = font::measure_line_width_logical(miso_font, text, all_fonts) as f32;
+                        logical_width <= max_allowed_logical_width
+                    };
 
-            if check_width(&chart.detailed_breakdown) {
-                chart.detailed_breakdown.clone()
-            } else if check_width(&chart.partial_breakdown) {
-                chart.partial_breakdown.clone()
-            } else {
-                // If even the simplest doesn't fit, we still use it and let `maxwidth` clamp it.
-                // This matches the Lua script which doesn't have a final fallback beyond level 3.
-                chart.simple_breakdown.clone()
-            }
-        })).unwrap_or_else(|| score_info.chart.simple_breakdown.clone()) // Fallback if font is not loaded
+                    if fits(&chart.detailed_breakdown) {
+                        Some(chart.detailed_breakdown.clone())
+                    } else if fits(&chart.partial_breakdown) {
+                        Some(chart.partial_breakdown.clone())
+                    } else if fits(&chart.simple_breakdown) {
+                        Some(chart.simple_breakdown.clone())
+                    } else {
+                        Some(format!("{} Total", chart.total_streams))
+                    }
+                })
+            })
+            .flatten()
+            .unwrap_or_else(|| chart.simple_breakdown.clone()) // Fallback if font isn't found
     };
 
     // Position based on P1, left-aligned. The y-value is from the original theme.
@@ -705,6 +728,10 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     }
 
     // 3. Bottom Bar
+    let footer_avatar = profile
+        .avatar_texture_key
+        .as_deref()
+        .map(|texture_key| AvatarParams { texture_key });
     actors.push(screen_bar::build(ScreenBarParams {
         title: "",
         title_placement: screen_bar::ScreenBarTitlePlacement::Center,
@@ -712,7 +739,23 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         transparent: true,
         fg_color: [1.0; 4],
         left_text: Some(&profile.display_name), center_text: None, right_text: None,
+        left_avatar: footer_avatar,
     }));
+
+     // --- Date/Time in footer (like ScreenEvaluation decorations) ---
+    let now = Local::now();
+    // The format matches YYYY/MM/DD HH:MM from the Lua script.
+    let timestamp_text = now.format("%Y/%m/%d %H:%M").to_string();
+
+    actors.push(act!(text:
+        font("wendy_monospace_numbers"):
+        settext(timestamp_text):
+        align(0.5, 1.0): // align bottom-center of text block
+        xy(screen_center_x(), screen_height() - 14.0):
+        zoom(0.18):
+        horizalign(center):
+        z(121) // a bit above the screen bar (z=120)
+    ));
 
     actors
 }

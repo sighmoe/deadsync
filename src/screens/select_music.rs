@@ -5,7 +5,9 @@ use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
 use crate::ui::components::{heart_bg, pad_display, music_wheel};
-use crate::ui::components::screen_bar::{self, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
+use crate::ui::components::screen_bar::{
+    self, AvatarParams, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement,
+};
 use crate::ui::actors::SizeSpec;
 use crate::core::space::is_wide;
 use crate::core::gamepad::{PadDir, PadButton};
@@ -42,6 +44,7 @@ const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
 const NAV_INITIAL_HOLD_DELAY: Duration = Duration::from_millis(200);
 const NAV_REPEAT_SCROLL_INTERVAL: Duration = Duration::from_millis(40);
 const PREVIEW_DELAY_SECONDS: f32 = 0.25;
+const PREVIEW_FADE_OUT_SECONDS: f64 = 1.5;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum NavDirection { Left, Right }
@@ -283,22 +286,26 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                 KeyCode::ArrowRight | KeyCode::KeyD => {
                     if num_entries > 0 {
                         state.selected_index = (state.selected_index + 1) % num_entries;
-                        state.selection_animation_timer = 0.0;
-                        state.nav_key_held_direction = Some(NavDirection::Right);
-                        state.nav_key_held_since = Some(Instant::now());
-                        state.nav_key_last_scrolled_at = Some(Instant::now());
-                        state.time_since_selection_change = 0.0;
+                    } else {
+                        state.selected_index = state.selected_index.wrapping_add(1);
                     }
+                    state.selection_animation_timer = 0.0;
+                    state.nav_key_held_direction = Some(NavDirection::Right);
+                    state.nav_key_held_since = Some(Instant::now());
+                    state.nav_key_last_scrolled_at = Some(Instant::now());
+                    state.time_since_selection_change = 0.0;
                 }
                 KeyCode::ArrowLeft | KeyCode::KeyA => {
                     if num_entries > 0 {
                         state.selected_index = (state.selected_index + num_entries - 1) % num_entries;
-                        state.selection_animation_timer = 0.0;
-                        state.nav_key_held_direction = Some(NavDirection::Left);
-                        state.nav_key_held_since = Some(Instant::now());
-                        state.nav_key_last_scrolled_at = Some(Instant::now());
-                        state.time_since_selection_change = 0.0;
+                    } else {
+                        state.selected_index = state.selected_index.wrapping_sub(1);
                     }
+                    state.selection_animation_timer = 0.0;
+                    state.nav_key_held_direction = Some(NavDirection::Left);
+                    state.nav_key_held_since = Some(Instant::now());
+                    state.nav_key_last_scrolled_at = Some(Instant::now());
+                    state.time_since_selection_change = 0.0;
                 }
                 KeyCode::ArrowUp | KeyCode::KeyW => {
                     if is_song_selected {
@@ -349,11 +356,16 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
                     }
                 }
                 KeyCode::Enter => {
+                    if state.entries.is_empty() {
+                        audio::play_sfx("assets/sounds/expand.ogg");
+                        return ScreenAction::None;
+                    }
+
                     if let Some(entry) = state.entries.get(state.selected_index).cloned() {
                         match entry {
                             MusicWheelEntry::Song(song) => {
                                 info!("Selected song: '{}'. It has {} charts.", song.title, song.charts.len());
-                                return ScreenAction::Navigate(Screen::Gameplay);
+                                return ScreenAction::Navigate(Screen::PlayerOptions);
                             }
                             MusicWheelEntry::PackHeader { name, .. } => {
                                 audio::play_sfx("assets/sounds/expand.ogg");
@@ -393,30 +405,33 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
 // Handle D-pad / left-stick as if arrow keys were used.
 pub fn handle_pad_dir(state: &mut State, dir: PadDir, pressed: bool) -> ScreenAction {
     use winit::keyboard::KeyCode;
+    let num_entries = state.entries.len();
 
     if pressed {
         match dir {
             PadDir::Right => {
-                let n = state.entries.len();
-                if n > 0 {
-                    state.selected_index = (state.selected_index + 1) % n;
-                    state.selection_animation_timer = 0.0;
-                    state.nav_key_held_direction = Some(NavDirection::Right);
-                    state.nav_key_held_since = Some(Instant::now());
-                    state.nav_key_last_scrolled_at = Some(Instant::now());
-                    state.time_since_selection_change = 0.0;
+                if num_entries > 0 {
+                    state.selected_index = (state.selected_index + 1) % num_entries;
+                } else {
+                    state.selected_index = state.selected_index.wrapping_add(1);
                 }
+                state.selection_animation_timer = 0.0;
+                state.nav_key_held_direction = Some(NavDirection::Right);
+                state.nav_key_held_since = Some(Instant::now());
+                state.nav_key_last_scrolled_at = Some(Instant::now());
+                state.time_since_selection_change = 0.0;
             }
             PadDir::Left => {
-                let n = state.entries.len();
-                if n > 0 {
-                    state.selected_index = (state.selected_index + n - 1) % n;
-                    state.selection_animation_timer = 0.0;
-                    state.nav_key_held_direction = Some(NavDirection::Left);
-                    state.nav_key_held_since = Some(Instant::now());
-                    state.nav_key_last_scrolled_at = Some(Instant::now());
-                    state.time_since_selection_change = 0.0;
+                if num_entries > 0 {
+                    state.selected_index = (state.selected_index + num_entries - 1) % num_entries;
+                } else {
+                    state.selected_index = state.selected_index.wrapping_sub(1);
                 }
+                state.selection_animation_timer = 0.0;
+                state.nav_key_held_direction = Some(NavDirection::Left);
+                state.nav_key_held_since = Some(Instant::now());
+                state.nav_key_last_scrolled_at = Some(Instant::now());
+                state.time_since_selection_change = 0.0;
             }
             PadDir::Up => {
                 // Mirror ArrowUp pressed (double-tap → easier)
@@ -506,11 +521,16 @@ pub fn handle_pad_button(state: &mut State, btn: PadButton, pressed: bool) -> Sc
     if !pressed { return ScreenAction::None; }
     match btn {
         PadButton::Confirm => {
+            if state.entries.is_empty() {
+                audio::play_sfx("assets/sounds/expand.ogg");
+                return ScreenAction::None;
+            }
+
             if let Some(entry) = state.entries.get(state.selected_index).cloned() {
                 match entry {
                     MusicWheelEntry::Song(_song) => {
                         // same as Enter on a song
-                        return ScreenAction::Navigate(Screen::Gameplay);
+                        return ScreenAction::Navigate(Screen::PlayerOptions);
                     }
                     MusicWheelEntry::PackHeader { name, .. } => {
                         // toggle expand/collapse (same as Enter on pack)
@@ -567,10 +587,15 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
                         NavDirection::Left => state.selected_index = (state.selected_index + num_entries - 1) % num_entries,
                         NavDirection::Right => state.selected_index = (state.selected_index + 1) % num_entries,
                     }
-                    state.nav_key_last_scrolled_at = Some(now);
-                    // Reset the preview delay timer each time we auto-scroll.
-                    state.time_since_selection_change = 0.0;
+                } else {
+                    match direction {
+                        NavDirection::Left => state.selected_index = state.selected_index.wrapping_sub(1),
+                        NavDirection::Right => state.selected_index = state.selected_index.wrapping_add(1),
+                    }
                 }
+                state.nav_key_last_scrolled_at = Some(now);
+                // Reset the preview delay timer each time we auto-scroll.
+                state.time_since_selection_change = 0.0;
             }
         }
     }
@@ -624,7 +649,12 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
                 if let (Some(path), Some(start), Some(length)) = (&song.music_path, song.sample_start, song.sample_length) {
                     if length > 0.0 {
                         info!("Playing preview for '{}' at {:.2}s for {:.2}s", song.title, start, length);
-                        let cut = audio::Cut { start_sec: start as f64, length_sec: length as f64 };
+                        let cut = audio::Cut {
+                            start_sec: start as f64,
+                            length_sec: length as f64,
+                            fade_out_sec: PREVIEW_FADE_OUT_SECONDS,
+                            ..Default::default()
+                        };
                         audio::play_music(path.clone(), cut, true);
                         played = true;
                     }
@@ -719,7 +749,12 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         transparent: false,
         fg_color: [1.0; 4],
         left_text: None, center_text: None, right_text: None,
+        left_avatar: None,
     }));
+    let footer_avatar = profile
+        .avatar_texture_key
+        .as_deref()
+        .map(|texture_key| AvatarParams { texture_key });
     actors.push(screen_bar::build(ScreenBarParams {
         title: "EVENT MODE",
         title_placement: ScreenBarTitlePlacement::Center,
@@ -727,6 +762,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         transparent: false,
         fg_color: [1.0; 4],
         left_text: Some(&profile.display_name), center_text: None, right_text: Some("PRESS START"),
+        left_avatar: footer_avatar,
     }));
  
     // Calculate the color for the currently selected difficulty based on the active theme color
@@ -940,8 +976,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     chart.tech_counts.brackets.to_string(),
                 )
             } else {
-                // When a pack is selected, or chart doesn't exist for difficulty, show "--"
-                ("--".to_string(), "--".to_string(), "--".to_string(), "--".to_string(), "--".to_string())
+                // When a pack is selected, or chart doesn't exist for difficulty, show "0"
+                ("0".to_string(), "0".to_string(), "0".to_string(), "0".to_string(), "0".to_string())
             };
 
         let step_artist_text = selected_chart_data.as_ref().map_or("".to_string(), |c| c.step_artist.clone());
@@ -1082,10 +1118,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     }
 
     // --- Density graph panel (SL 1:1, Player 1, top-left anchored) ---
-    // NEW: detect if a pack is selected
-    let is_pack_selected =
-        matches!(state.entries.get(state.selected_index), Some(MusicWheelEntry::PackHeader { .. }));
-
+    // Check if a song is selected to determine if graph content should be shown.
+    let is_song_selected = matches!(state.entries.get(state.selected_index), Some(MusicWheelEntry::Song(_)));
     let panel_w = if is_wide() { 286.0 } else { 276.0 };
     let panel_h = 64.0;
 
@@ -1100,7 +1134,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     ));
 
     // Only draw the graph sprite + labels + breakdown when a SONG is selected
-    if !is_pack_selected {
+    if is_song_selected {
         // Density graph image fills the panel
         graph_children.push(act!(sprite(state.current_graph_key.clone()):
             align(0.0, 0.0):
@@ -1184,7 +1218,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
             // Stat value (right-aligned)
             actors.push(act!(text: font("miso"): settext(*value):
-                align(1.0, 0.5): xy(pane_cx + col_x, pane_top + row_y):
+                align(1.0, 0.5): horizalign(right): xy(pane_cx + col_x, pane_top + row_y):
                 zoom(text_zoom): z(121): diffuse(0.0, 0.0, 0.0, 1.0)
             ));
             // Stat label (left-aligned, +3px offset)
@@ -1245,7 +1279,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         };
         
         let mut meter_actor = act!(text: font("wendy"): settext(meter_text):
-            align(1.0, 0.5):
+            align(1.0, 0.5): horizalign(right):
             xy(pane_cx + cols_x[3], pane_top + rows_y[1]):
             z(121): diffuse(0.0, 0.0, 0.0, 1.0)
         );
@@ -1294,6 +1328,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         match max_value_w {
             Some(maxw) => actors.push(act!(text: font("miso"): settext(value_text):
                 align(1.0, 0.5):
+                horizalign(right):
                 xy(x_val, y):
                 maxwidth(maxw):
                 zoom(text_zoom):
@@ -1302,6 +1337,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             )),
             None => actors.push(act!(text: font("miso"): settext(value_text):
                 align(1.0, 0.5):
+                horizalign(right):
                 xy(x_val, y):
                 zoom(text_zoom):
                 z(121):
@@ -1312,6 +1348,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         // label (left-aligned) — no clamp for SL parity
         actors.push(act!(text: font("miso"): settext(label_text):
             align(0.0, 0.5):
+            horizalign(left):
             xy(x_label, y):
             zoom(text_zoom):
             z(121):

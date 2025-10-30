@@ -6,6 +6,7 @@ use crate::ui::color;
 
 // --- Constants ---
 const BAR_H: f32 = 32.0;
+const AVATAR_SIZE: f32 = 32.0;
 
 // --- Positioning for the main title on the top bar when left-aligned ---
 const TOP_TITLE_OFFSET_X: f32 = 10.0;
@@ -21,6 +22,11 @@ pub enum ScreenBarTitlePlacement {
     Center,
 }
 
+#[derive(Clone, Copy)]
+pub struct AvatarParams<'a> {
+    pub texture_key: &'a str,
+}
+
 pub struct ScreenBarParams<'a> {
     pub title: &'a str,
     pub title_placement: ScreenBarTitlePlacement,
@@ -33,6 +39,8 @@ pub struct ScreenBarParams<'a> {
     pub left_text: Option<&'a str>,
     pub center_text: Option<&'a str>,
     pub right_text: Option<&'a str>,
+
+    pub left_avatar: Option<AvatarParams<'a>>,
 
     pub fg_color: [f32; 4], // text color
 }
@@ -108,6 +116,15 @@ pub fn build(params: ScreenBarParams) -> Actor {
 
             // Small side texts (Miso), positioned like Simply Love credits
             let text_zoom = wide_scale(0.8, 0.9);
+
+            if let Some(avatar) = params.left_avatar {
+                children.push(act!(sprite(avatar.texture_key):
+                    align(0.0, 1.0):
+                    xy(0.0, BAR_H):
+                    setsize(AVATAR_SIZE, AVATAR_SIZE):
+                    z(2)
+                ));
+            }
 
             if let Some(text) = params.left_text {
                 let margin_x = wide_scale(38.0, 45.0);

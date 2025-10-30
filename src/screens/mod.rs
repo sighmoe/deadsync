@@ -6,6 +6,7 @@ pub mod select_color;
 pub mod select_music;
 pub mod sandbox;
 pub mod evaluation;
+pub mod player_options;
 use std::path::PathBuf;
 
 use crate::gameplay::chart::ChartData;
@@ -29,4 +30,5 @@ pub enum Screen {
     SelectMusic,
     Sandbox,
     Evaluation,
+    PlayerOptions,
 }
