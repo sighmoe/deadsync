@@ -13,6 +13,8 @@ HoldBottomCap { state="inactive"; texture="Down Hold BottomCap Inactive (res 256
 HoldBottomCap { state="active"; texture="Down Hold BottomCap Active (res 256x256).png"; grid=1,1; frames=1; frame_size=256,256 }
 HoldExplosion { texture="down hold explosion (res 256x256).png"; grid=1,1; frames=1; frame_size=256,256 }
 
+HoldLetGoGrayPercent = 0.25
+
 ReceptorSheet { texture="_Down Receptor tex 4x1 (res 1024x256).png"; grid=4,1; frames=4; frame_size=256,256; fps=1; AnimationIsBeatBased=1; state=off }
 ReceptorPulse { base_color=0.1,0.1,0.1,1; beat_color=1,1,1,1; effect_timing=0.25,0.50,0,0,0.25; effect_offset=-0.25 }
 

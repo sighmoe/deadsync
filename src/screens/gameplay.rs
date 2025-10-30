@@ -6,7 +6,7 @@ use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
 use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::parsing::notes as note_parser;
-use crate::gameplay::parsing::noteskin::{self, NUM_QUANTIZATIONS, Noteskin, Quantization, Style};
+use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
 use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::gameplay::song::SongData;
 use crate::gameplay::timing::TimingData;
@@ -407,8 +407,8 @@ const TIMING_WINDOW_SECONDS_ROLL: f32 = 0.35;
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
 const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
 const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
-// Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
-// Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
+                                                 // Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
+                                                 // Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
 
 pub struct State {
     // Song & Chart data
@@ -1095,6 +1095,14 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
                 grade: JudgeGrade::Miss,
                 row: note_row_index,
             };
+
+            if let Some(hold) = state.notes[note_index].hold.as_mut() {
+                if hold.result != Some(HoldResult::Held) {
+                    hold.result = Some(HoldResult::LetGo);
+                    hold.life = 0.0;
+                }
+            }
+
             state.notes[note_index].result = Some(judgment);
             info!(
                 "MISSED (pending): Row {}, Col {}, Beat {:.2}",
@@ -1590,6 +1598,11 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 .map(|h| h.is_pressed && !h.let_go)
                 .unwrap_or(false);
 
+            let let_go_gray = ns.hold_let_go_gray_percent.clamp(0.0, 1.0);
+            let hold_life = hold.life.clamp(0.0, 1.0);
+            let hold_color_scale = let_go_gray + (1.0 - let_go_gray) * hold_life;
+            let hold_diffuse = [hold_color_scale, hold_color_scale, hold_color_scale, 1.0];
+
             if engaged {
                 if head_is_top {
                     top = top.max(receptor_y);
@@ -1725,6 +1738,12 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                                     xy(playfield_center_x + col_x_offset as f32, segment_center):
                                     zoomto(body_width, segment_size):
                                     customtexturerect(u0, v0, u1, v1):
+                                    diffuse(
+                                        hold_diffuse[0],
+                                        hold_diffuse[1],
+                                        hold_diffuse[2],
+                                        hold_diffuse[3]
+                                    ):
                                     z(Z_HOLD_BODY)
                                 ));
 
@@ -1758,6 +1777,12 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                                     xy(playfield_center_x + col_x_offset as f32, segment_center):
                                     zoomto(body_width, segment_size):
                                     customtexturerect(u0, v0, u1, v1):
+                                    diffuse(
+                                        hold_diffuse[0],
+                                        hold_diffuse[1],
+                                        hold_diffuse[2],
+                                        hold_diffuse[3]
+                                    ):
                                     z(Z_HOLD_BODY)
                                 ));
 
@@ -1824,6 +1849,12 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                             xy(playfield_center_x + col_x_offset as f32, cap_center):
                             zoomto(cap_width, cap_height):
                             customtexturerect(u0, v0, u1, v1):
+                            diffuse(
+                                hold_diffuse[0],
+                                hold_diffuse[1],
+                                hold_diffuse[2],
+                                hold_diffuse[3]
+                            ):
                             z(Z_HOLD_CAP)
                         ));
                     }

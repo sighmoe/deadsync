@@ -418,6 +418,7 @@ pub struct Noteskin {
     pub field_right_x: i32,
     pub tap_explosions: HashMap<String, TapExplosion>,
     pub receptor_pulse: ReceptorPulse,
+    pub hold_let_go_gray_percent: f32,
     pub hold: HoldVisuals,
     pub roll: HoldVisuals,
 }
@@ -531,6 +532,7 @@ struct NoteskinBuilder {
     default_sources: HashMap<String, Arc<SpriteSource>>,
     tap_explosions: HashMap<String, ExplosionBuilder>,
     receptor_pulse: ReceptorPulse,
+    hold_let_go_gray_percent: f32,
     hold_body_inactive: Option<SlotBuilder>,
     hold_body_active: Option<SlotBuilder>,
     hold_bottomcap_inactive: Option<SlotBuilder>,
@@ -557,6 +559,7 @@ impl NoteskinBuilder {
             default_sources: HashMap::new(),
             tap_explosions: HashMap::new(),
             receptor_pulse: ReceptorPulse::default(),
+            hold_let_go_gray_percent: 0.25,
             hold_body_inactive: None,
             hold_body_active: None,
             hold_bottomcap_inactive: None,
@@ -819,6 +822,7 @@ impl NoteskinBuilder {
             field_right_x,
             tap_explosions,
             receptor_pulse: self.receptor_pulse,
+            hold_let_go_gray_percent: self.hold_let_go_gray_percent,
             hold: hold_visuals,
             roll: roll_visuals,
         })
@@ -964,6 +968,14 @@ pub fn load(path: &Path, style: &Style) -> Result<Noteskin, String> {
                             .insert("Receptor-glow".to_string(), src);
                     }
                 }
+                "HoldLetGoGrayPercent" => match value.parse::<f32>() {
+                    Ok(parsed) => {
+                        builder.hold_let_go_gray_percent = parsed.clamp(0.0, 1.0);
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse HoldLetGoGrayPercent '{}': {}", value, e);
+                    }
+                },
                 _ => {}
             }
         }
@@ -1540,7 +1552,11 @@ fn parse_color4(args: &[&str]) -> Option<[f32; 4]> {
         values[i] = arg.parse().ok()?;
     }
 
-    if args.len() < 4 { None } else { Some(values) }
+    if args.len() < 4 {
+        None
+    } else {
+        Some(values)
+    }
 }
 
 fn apply_basic_sprite_properties(slot: &mut SlotBuilder, props: &HashMap<&str, &str>) {
