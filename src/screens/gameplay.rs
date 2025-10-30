@@ -6,7 +6,7 @@ use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
 use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::parsing::notes as note_parser;
-use crate::gameplay::parsing::noteskin::{self, NUM_QUANTIZATIONS, Noteskin, Quantization, Style};
+use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
 use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::gameplay::song::SongData;
 use crate::gameplay::timing::TimingData;
@@ -173,6 +173,8 @@ pub struct HoldData {
     pub life: f32,
     pub let_go_started_at: Option<f32>,
     pub let_go_starting_life: f32,
+    pub last_held_row_index: usize,
+    pub last_held_beat: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -317,6 +319,8 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
         hold.life = MAX_HOLD_LIFE;
         hold.let_go_started_at = None;
         hold.let_go_starting_life = 0.0;
+        hold.last_held_row_index = hold.end_row_index;
+        hold.last_held_beat = hold.end_beat;
     }
 
     if matches!(state.notes[note_index].note_type, NoteType::Hold) {
@@ -344,10 +348,39 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32,
         {
             let active_opt = &mut state.active_holds[column];
             if let Some(active) = active_opt {
-                let Some(hold) = state.notes[active.note_index].hold.as_mut() else {
+                let note_index = active.note_index;
+                let note_start_row = state.notes[note_index].row_index;
+                let note_start_beat = state.notes[note_index].beat;
+
+                let Some(hold) = state.notes[note_index].hold.as_mut() else {
                     *active_opt = None;
                     continue;
                 };
+
+                if !active.let_go && active.life > 0.0 {
+                    let prev_row = hold.last_held_row_index;
+                    let prev_beat = hold.last_held_beat;
+                    let mut current_row = state
+                        .timing
+                        .get_row_for_beat(state.current_beat)
+                        .unwrap_or(note_start_row);
+                    current_row = current_row.clamp(note_start_row, hold.end_row_index);
+                    let final_row = prev_row.max(current_row);
+                    if final_row != prev_row {
+                        hold.last_held_row_index = final_row;
+                        let mut new_beat = state
+                            .timing
+                            .get_beat_for_row(final_row)
+                            .unwrap_or(state.current_beat);
+                        new_beat = new_beat.clamp(note_start_beat, hold.end_beat);
+                        if new_beat < prev_beat {
+                            new_beat = prev_beat;
+                        }
+                        hold.last_held_beat = new_beat;
+                    } else {
+                        hold.last_held_beat = prev_beat.clamp(note_start_beat, hold.end_beat);
+                    }
+                }
 
                 let pressed = inputs[column];
                 active.is_pressed = pressed;
@@ -380,11 +413,10 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32,
 
                 if !active.let_go && active.life <= 0.0 {
                     active.let_go = true;
-                    handle_let_go = Some((column, active.note_index));
+                    handle_let_go = Some((column, note_index));
                 }
 
                 if current_time >= active.end_time {
-                    let note_index = active.note_index;
                     if !active.let_go && active.life > 0.0 {
                         handle_success = Some((column, note_index));
                     } else if !active.let_go {
@@ -416,8 +448,8 @@ const TIMING_WINDOW_SECONDS_ROLL: f32 = 0.35;
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
 const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
 const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
-// Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
-// Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
+                                                 // Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
+                                                 // Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
 
 pub struct State {
     // Song & Chart data
@@ -577,6 +609,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
                     life: INITIAL_HOLD_LIFE,
                     let_go_started_at: None,
                     let_go_starting_life: 0.0,
+                    last_held_row_index: parsed.row_index,
+                    last_held_beat: beat,
                 })
             }
             _ => None,
@@ -1622,7 +1656,11 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 continue;
             }
 
-            let head_y = compute_lane_y(note.beat);
+            let mut head_beat = note.beat;
+            if hold.let_go_started_at.is_some() || hold.result == Some(HoldResult::LetGo) {
+                head_beat = hold.last_held_beat.clamp(note.beat, hold.end_beat);
+            }
+            let head_y = compute_lane_y(head_beat);
             let tail_y = compute_lane_y(hold.end_beat);
             let head_is_top = head_y <= tail_y;
             let mut top = head_y.min(tail_y);
@@ -1762,8 +1800,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                             while phase + SEGMENT_PHASE_EPS < phase_end_adjusted
                                 && emitted < max_segments
                             {
-                                let mut next_phase =
-                                    (phase.floor() + 1.0).min(phase_end_adjusted);
+                                let mut next_phase = (phase.floor() + 1.0).min(phase_end_adjusted);
                                 if next_phase - phase < SEGMENT_PHASE_EPS {
                                     next_phase = phase_end_adjusted;
                                 }
@@ -1926,6 +1963,46 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                                 hold_diffuse[3]
                             ):
                             z(Z_HOLD_CAP)
+                        ));
+                    }
+                }
+            }
+
+            if hold.let_go_started_at.is_some() || hold.result == Some(HoldResult::LetGo) {
+                if head_y >= receptor_y - state.draw_distance_after_targets
+                    && head_y <= receptor_y + state.draw_distance_before_targets
+                {
+                    let beat_fraction = note.beat.fract();
+                    let quantization = match (beat_fraction * 192.0).round() as u32 {
+                        0 | 192 => Quantization::Q4th,
+                        96 => Quantization::Q8th,
+                        48 | 144 => Quantization::Q16th,
+                        24 | 72 | 120 | 168 => Quantization::Q32nd,
+                        64 | 128 => Quantization::Q12th,
+                        32 | 160 => Quantization::Q24th,
+                        _ => Quantization::Q192nd,
+                    };
+
+                    let note_idx = (note.column % 4) * NUM_QUANTIZATIONS + quantization as usize;
+                    if let Some(note_slot) = ns.notes.get(note_idx) {
+                        let frame = note_slot
+                            .frame_index(state.total_elapsed_in_screen, state.current_beat);
+                        let uv = note_slot.uv_for_frame(frame);
+                        let size = scale_sprite(note_slot.size());
+
+                        actors.push(act!(sprite(note_slot.texture_key().to_string()):
+                            align(0.5, 0.5):
+                            xy(playfield_center_x + col_x_offset as f32, head_y):
+                            zoomto(size[0] as f32, size[1] as f32):
+                            rotationz(-note_slot.def.rotation_deg as f32):
+                            customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                            diffuse(
+                                hold_diffuse[0],
+                                hold_diffuse[1],
+                                hold_diffuse[2],
+                                hold_diffuse[3]
+                            ):
+                            z(Z_TAP_NOTE)
                         ));
                     }
                 }

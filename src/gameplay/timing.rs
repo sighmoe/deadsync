@@ -1,5 +1,6 @@
 use log::info;
 use rssp::bpm::{normalize_float_digits, parse_bpm_map};
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Default)]
@@ -108,6 +109,36 @@ impl TimingData {
 
     pub fn get_beat_for_row(&self, row_index: usize) -> Option<f32> {
         self.row_to_beat.get(row_index).copied()
+    }
+
+    pub fn get_row_for_beat(&self, target_beat: f32) -> Option<usize> {
+        let rows = self.row_to_beat.as_ref();
+        if rows.is_empty() {
+            return None;
+        }
+
+        let idx = match rows
+            .binary_search_by(|beat| beat.partial_cmp(&target_beat).unwrap_or(Ordering::Less))
+        {
+            Ok(i) => i,
+            Err(i) => {
+                if i == 0 {
+                    0
+                } else if i >= rows.len() {
+                    rows.len() - 1
+                } else {
+                    let lower = rows[i - 1];
+                    let upper = rows[i];
+                    if (target_beat - lower).abs() <= (upper - target_beat).abs() {
+                        i - 1
+                    } else {
+                        i
+                    }
+                }
+            }
+        };
+
+        Some(idx)
     }
 
     pub fn get_beat_for_time(&self, target_time_sec: f32) -> f32 {
