@@ -249,6 +249,12 @@ impl LifeChange {
     const LET_GO: f32 = -0.080;
 }
 
+struct HoldScore;
+impl HoldScore {
+    const HELD: i32 = 5;
+    const LET_GO: i32 = 0;
+}
+
 fn grade_to_window(grade: JudgeGrade) -> Option<&'static str> {
     match grade {
         JudgeGrade::Fantastic => Some("W1"),
@@ -300,6 +306,9 @@ fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
     });
 
     state.change_life(LifeChange::LET_GO);
+    if !state.is_dead() {
+        state.earned_grade_points += HoldScore::LET_GO;
+    }
     state.combo = 0;
     state.miss_combo = state.miss_combo.saturating_add(1);
     state.combo_after_miss = 0;
@@ -333,6 +342,9 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
         _ => {}
     }
     state.change_life(LifeChange::HELD);
+    if !state.is_dead() {
+        state.earned_grade_points += HoldScore::HELD;
+    }
     state.miss_combo = 0;
 
     // In Simply Love, a successful hold completion always produces an Excellent explosion
@@ -681,9 +693,12 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     let rolls_total = chart.stats.rolls as u32;
 
     let num_taps_and_holds = notes.len() as u64;
-    // Possible grade points are based on taps/hold heads only.
-    // The max score is W1 (Fantastic), which has a PercentScoreWeight of 5.
-    let possible_grade_points = (num_taps_and_holds * 5) as i32;
+    // Possible grade points mirror ITGmania's scoring: taps + hold/roll heads use the
+    // Fantastic weight (5) and successful hold/roll completions add the Held weight (5).
+    let possible_grade_points = (num_taps_and_holds * 5)
+        + (holds_total as u64 * HoldScore::HELD as u64)
+        + (rolls_total as u64 * HoldScore::HELD as u64);
+    let possible_grade_points = possible_grade_points as i32;
 
     info!("Parsed {} notes from chart data.", notes.len());
 
@@ -983,7 +998,7 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
 
     state.miss_combo = 0;
 
-    if has_miss || matches!(final_grade, JudgeGrade::WayOff) {
+    if has_miss || matches!(final_grade, JudgeGrade::Decent | JudgeGrade::WayOff) {
         state.combo = 0;
         if state.full_combo_grade.is_some() {
             state.first_fc_attempt_broken = true;
