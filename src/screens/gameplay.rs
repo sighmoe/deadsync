@@ -2568,7 +2568,7 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
 
             children.push(act!(text:
                 font("miso"): settext(*label_text): align(1.0, 0.5): xy(label_x, item_y):
-                zoom(label_zoom): diffuse(white[0], white[1], white[2], white[3])
+                zoom(label_zoom): horizalign(right): diffuse(white[0], white[1], white[2], white[3])
             ));
         }
     }));
@@ -2693,15 +2693,15 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             let text_zoom = banner_data_zoom * 0.833;
 
             let numbers_block_width = (digits as f32) * max_digit_w;
-            let numbers_left_x = numbers_cx - numbers_block_width;
+            let numbers_left_x = numbers_cx - numbers_block_width + 2.0;
 
             let red_color = color::rgba_hex("#ff3030");
             let white_color = [1.0, 1.0, 1.0, 1.0];
             let remaining_color = if state.is_failing { red_color } else { white_color };
 
             // --- Total Time Row ---
-            let y_pos_total = sidepane_center_y + local_y + 20.0;
-            let label_offset = 32.0;
+            let y_pos_total = sidepane_center_y + local_y + 13.0;
+            let label_offset = 29.0;
 
             actors.push(act!(text: font(font_name): settext(total_time_str):
                 align(0.0, 0.5): horizalign(left):
@@ -2711,13 +2711,13 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             ));
             actors.push(act!(text: font(font_name): settext(" song"):
                 align(0.0, 0.5): horizalign(left):
-                xy(numbers_left_x + label_offset, y_pos_total - 1.0):
+                xy(numbers_left_x + label_offset, y_pos_total + 1.0):
                 zoom(text_zoom): z(71):
                 diffuse(white_color[0], white_color[1], white_color[2], white_color[3])
             ));
 
             // --- Remaining Time Row ---
-            let y_pos_remaining = sidepane_center_y + local_y;
+            let y_pos_remaining = sidepane_center_y + local_y - 7.0;
 
             actors.push(act!(text: font(font_name): settext(remaining_time_str):
                 align(0.0, 0.5): horizalign(left):
@@ -2727,7 +2727,7 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             ));
             actors.push(act!(text: font(font_name): settext(" remaining"):
                 align(0.0, 0.5): horizalign(left):
-                xy(numbers_left_x + label_offset, y_pos_remaining - 1.0):
+                xy(numbers_left_x + label_offset, y_pos_remaining + 1.0):
                 zoom(text_zoom): z(71):
                 diffuse(white_color[0], white_color[1], white_color[2], white_color[3])
             ));
