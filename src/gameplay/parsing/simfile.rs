@@ -249,6 +249,7 @@ impl From<SerializableSongData> for SongData {
 
 #[derive(Serialize, Deserialize, Encode, Decode)]
 struct CachedSong {
+    rssp_version: String,
     source_hash: u64,
     data: SerializableSongData,
 }
@@ -403,11 +404,15 @@ fn load_song_from_file(path: &Path, fastload: bool, cachesongs: bool) -> Result<
                     let mut buffer = Vec::new();
                     if file.read_to_end(&mut buffer).is_ok() {
                         if let Ok((cached_song, _)) = bincode::decode_from_slice::<CachedSong, _>(&buffer, bincode::config::standard()) {
-                            if cached_song.source_hash == ch {
+                            if cached_song.source_hash == ch && cached_song.rssp_version == rssp::RSSP_VERSION {
                                 info!("Cache hit for: {:?}", path.file_name().unwrap_or_default());
                                 return Ok(cached_song.data.into());
                             } else {
-                                info!("Cache stale for: {:?}", path.file_name().unwrap_or_default());
+                                if cached_song.source_hash != ch {
+                                    info!("Cache stale (content hash mismatch) for: {:?}", path.file_name().unwrap_or_default());
+                                } else {
+                                    info!("Cache stale (rssp version mismatch) for: {:?}", path.file_name().unwrap_or_default());
+                                }
                             }
                         }
                     }
@@ -428,6 +433,7 @@ fn load_song_from_file(path: &Path, fastload: bool, cachesongs: bool) -> Result<
         if let (Some(cp), Some(ch)) = (cache_path, content_hash) {
             let serializable_data: SerializableSongData = (&song_data).into();
             let cached_song = CachedSong {
+                rssp_version: rssp::RSSP_VERSION.to_string(),
                 source_hash: ch,
                 data: serializable_data,
             };
