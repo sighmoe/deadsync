@@ -1883,8 +1883,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                                 let distance_end = (next_phase - phase_offset) * segment_height;
                                 let y_start = natural_top + distance_start;
                                 let y_end = natural_top + distance_end;
-                                let mut segment_top = y_start.max(top);
-                                let mut segment_bottom = y_end.min(body_bottom);
+                                let segment_top = y_start.max(top);
+                                let segment_bottom = y_end.min(body_bottom);
                                 if segment_bottom - segment_top <= std::f32::EPSILON {
                                     phase = next_phase;
                                     continue;

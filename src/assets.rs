@@ -1,4 +1,6 @@
+// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/deadsync/src/assets.rs =====
 use crate::core::gfx::{Backend, Texture as GfxTexture};
+use crate::gameplay::profile;
 use crate::ui::font::{self, Font, FontLoadData};
 use image::RgbaImage;
 use log::{info, warn};
@@ -241,16 +243,15 @@ impl AssetManager {
             match h.join().expect("texture decode thread panicked") {
                 Ok((key, rgba)) => {
                     let texture = backend.create_texture(&rgba)?;
-                    self.textures.insert(key.to_string(), texture);
-                    register_texture_dims(key, rgba.width(), rgba.height());
+                    register_texture_dims(&key, rgba.width(), rgba.height());
                     info!("Loaded texture: {}", key);
                     self.textures.insert(key, texture);
                 }
                 Err((key, msg)) => {
                     warn!("Failed to load texture for key '{}': {}. Using fallback.", key, msg);
                     let texture = backend.create_texture(&fallback_image)?;
-                    self.textures.insert(key.to_string(), texture);
-                    register_texture_dims(key, fallback_image.width(), fallback_image.height());
+                    register_texture_dims(&key, fallback_image.width(), fallback_image.height());
+                    self.textures.insert(key, texture);
                 }
             }
         }
@@ -444,7 +445,7 @@ impl AssetManager {
             match image::open(&path) {
                 Ok(img) => {
                     let rgba = img.to_rgba8();
-                    match renderer::create_texture(backend, &rgba) {
+                    match backend.create_texture(&rgba) {
                         Ok(texture) => {
                             let key = path.to_string_lossy().into_owned();
                             self.textures.insert(key.clone(), texture);
@@ -491,9 +492,7 @@ impl AssetManager {
 
     fn destroy_current_profile_avatar(&mut self, backend: &mut Backend) {
         if let Some((key, _)) = self.current_profile_avatar.take() {
-            if let Backend::Vulkan(vk_state) = backend {
-                if let Some(device) = &vk_state.device { unsafe { let _ = device.device_wait_idle(); } }
-            }
+            backend.wait_for_idle();
             self.textures.remove(&key);
         }
         profile::set_avatar_texture_key(None);
