@@ -2203,7 +2203,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
             actors.push(act!(sprite("judgements/Love 2x7 (doubleres).png"):
                 align(0.5, 0.5): xy(playfield_center_x, screen_center_y() - 30.0):
-                z(200): zoomtoheight(64.0): setstate(linear_index): zoom(zoom)
+                z(200): zoomtoheight(76.0): setstate(linear_index): zoom(zoom)
             ));
         }
     }
