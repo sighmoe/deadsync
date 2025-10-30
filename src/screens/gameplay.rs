@@ -1739,17 +1739,40 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                             let mut phase = visible_top_distance / segment_height;
                             let phase_end = visible_bottom_distance / segment_height;
 
-                            while phase + SEGMENT_PHASE_EPS < phase_end && emitted < max_segments {
-                                let mut next_phase = (phase.floor() + 1.0).min(phase_end);
+                            // Shift the fractional remainder of the hold body height to the first
+                            // segment so the final segment can remain a full tile that lines up with
+                            // the tail cap. This avoids a visible seam between the last two body
+                            // segments. Base the offset on the full hold length so the amount trimmed
+                            // from the first segment stays consistent even when the hold is only
+                            // partially visible on screen.
+                            let mut phase_offset = 0.0_f32;
+                            let total_phase = hold_length / segment_height;
+                            if total_phase >= 1.0 + SEGMENT_PHASE_EPS {
+                                let fractional = total_phase.fract();
+                                if fractional > SEGMENT_PHASE_EPS
+                                    && (1.0 - fractional) > SEGMENT_PHASE_EPS
+                                {
+                                    phase_offset = 1.0 - fractional;
+                                }
+                            }
+
+                            phase += phase_offset;
+                            let phase_end_adjusted = phase_end + phase_offset;
+
+                            while phase + SEGMENT_PHASE_EPS < phase_end_adjusted
+                                && emitted < max_segments
+                            {
+                                let mut next_phase =
+                                    (phase.floor() + 1.0).min(phase_end_adjusted);
                                 if next_phase - phase < SEGMENT_PHASE_EPS {
-                                    next_phase = phase_end;
+                                    next_phase = phase_end_adjusted;
                                 }
                                 if next_phase - phase < SEGMENT_PHASE_EPS {
                                     break;
                                 }
 
-                                let distance_start = phase * segment_height;
-                                let distance_end = next_phase * segment_height;
+                                let distance_start = (phase - phase_offset) * segment_height;
+                                let distance_end = (next_phase - phase_offset) * segment_height;
                                 let y_start = natural_top + distance_start;
                                 let y_end = natural_top + distance_end;
                                 let mut segment_top = y_start.max(top);
@@ -1768,7 +1791,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                                 let segment_size = segment_bottom - segment_top;
                                 let portion = (segment_size / segment_height).clamp(0.0, 1.0);
                                 let is_last_segment = (body_bottom - segment_bottom).abs() <= 0.5
-                                    || next_phase >= phase_end - SEGMENT_PHASE_EPS;
+                                    || next_phase >= phase_end_adjusted - SEGMENT_PHASE_EPS;
 
                                 if is_last_segment {
                                     if v_range >= 0.0 {
