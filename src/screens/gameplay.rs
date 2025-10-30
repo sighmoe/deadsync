@@ -6,7 +6,7 @@ use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
 use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::parsing::notes as note_parser;
-use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
+use crate::gameplay::parsing::noteskin::{self, NUM_QUANTIZATIONS, Noteskin, Quantization, Style};
 use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::gameplay::song::SongData;
 use crate::gameplay::timing::TimingData;
@@ -171,6 +171,8 @@ pub struct HoldData {
     pub end_beat: f32,
     pub result: Option<HoldResult>,
     pub life: f32,
+    pub let_go_started_at: Option<f32>,
+    pub let_go_starting_life: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -284,7 +286,10 @@ fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
             return;
         }
         hold.result = Some(HoldResult::LetGo);
-        hold.life = 0.0;
+        if hold.let_go_started_at.is_none() {
+            hold.let_go_started_at = Some(state.current_music_time);
+            hold.let_go_starting_life = hold.life.clamp(0.0, MAX_HOLD_LIFE);
+        }
     }
 
     state.hold_judgments[column] = Some(HoldJudgmentRenderInfo {
@@ -310,6 +315,8 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
         }
         hold.result = Some(HoldResult::Held);
         hold.life = MAX_HOLD_LIFE;
+        hold.let_go_started_at = None;
+        hold.let_go_starting_life = 0.0;
     }
 
     if matches!(state.notes[note_index].note_type, NoteType::Hold) {
@@ -368,6 +375,8 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32,
                 }
 
                 hold.life = active.life;
+                hold.let_go_started_at = None;
+                hold.let_go_starting_life = 0.0;
 
                 if !active.let_go && active.life <= 0.0 {
                     active.let_go = true;
@@ -407,8 +416,8 @@ const TIMING_WINDOW_SECONDS_ROLL: f32 = 0.35;
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
 const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
 const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
-                                                 // Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
-                                                 // Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
+// Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
+// Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
 
 pub struct State {
     // Song & Chart data
@@ -566,6 +575,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
                     end_beat,
                     result: None,
                     life: INITIAL_HOLD_LIFE,
+                    let_go_started_at: None,
+                    let_go_starting_life: 0.0,
                 })
             }
             _ => None,
@@ -1027,6 +1038,39 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
 
     update_active_holds(state, &current_inputs, music_time_sec, delta_time);
 
+    // Mirror ITGmania's gradual hold-life decay after a let go so missed holds fade out
+    // instead of snapping to the noteskin's gray immediately.
+    for note in &mut state.notes {
+        let Some(hold) = note.hold.as_mut() else {
+            continue;
+        };
+        if hold.result == Some(HoldResult::Held) {
+            continue;
+        }
+        let Some(start_time) = hold.let_go_started_at else {
+            continue;
+        };
+
+        let base_life = hold.let_go_starting_life.clamp(0.0, MAX_HOLD_LIFE);
+        if base_life <= 0.0 {
+            hold.life = 0.0;
+            continue;
+        }
+
+        let window = match note.note_type {
+            NoteType::Roll => TIMING_WINDOW_SECONDS_ROLL,
+            _ => TIMING_WINDOW_SECONDS_HOLD,
+        };
+        if window <= 0.0 {
+            hold.life = 0.0;
+            continue;
+        }
+
+        let elapsed = (state.current_music_time - start_time).max(0.0);
+        let new_life = (base_life - elapsed / window).max(0.0);
+        hold.life = new_life;
+    }
+
     for timer in &mut state.receptor_glow_timers {
         *timer = (*timer - delta_time).max(0.0);
     }
@@ -1099,7 +1143,10 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
             if let Some(hold) = state.notes[note_index].hold.as_mut() {
                 if hold.result != Some(HoldResult::Held) {
                     hold.result = Some(HoldResult::LetGo);
-                    hold.life = 0.0;
+                    if hold.let_go_started_at.is_none() {
+                        hold.let_go_started_at = Some(music_time_sec);
+                        hold.let_go_starting_life = hold.life.clamp(0.0, MAX_HOLD_LIFE);
+                    }
                 }
             }
 
