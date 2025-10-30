@@ -323,8 +323,14 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
         hold.last_held_beat = hold.end_beat;
     }
 
-    if matches!(state.notes[note_index].note_type, NoteType::Hold) {
-        state.holds_held = state.holds_held.saturating_add(1);
+    match state.notes[note_index].note_type {
+        NoteType::Hold => {
+            state.holds_held = state.holds_held.saturating_add(1);
+        }
+        NoteType::Roll => {
+            state.rolls_held = state.rolls_held.saturating_add(1);
+        }
+        _ => {}
     }
     state.change_life(LifeChange::HELD);
     state.miss_combo = 0;
@@ -338,6 +344,31 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
         result: HoldResult::Held,
         triggered_at: Instant::now(),
     });
+}
+
+fn refresh_roll_life_on_step(state: &mut State, column: usize) {
+    let Some(active) = state.active_holds[column].as_mut() else {
+        return;
+    };
+
+    if !matches!(active.note_type, NoteType::Roll) || active.let_go {
+        return;
+    }
+
+    let Some(note) = state.notes.get_mut(active.note_index) else {
+        return;
+    };
+    let Some(hold) = note.hold.as_mut() else {
+        return;
+    };
+    if hold.result == Some(HoldResult::LetGo) {
+        return;
+    }
+
+    active.life = MAX_HOLD_LIFE;
+    hold.life = MAX_HOLD_LIFE;
+    hold.let_go_started_at = None;
+    hold.let_go_starting_life = 0.0;
 }
 
 fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32, delta_time: f32) {
@@ -392,18 +423,36 @@ fn update_active_holds(state: &mut State, inputs: &[bool; 4], current_time: f32,
                         _ => TIMING_WINDOW_SECONDS_HOLD,
                     };
 
-                    if pressed && matches!(active.note_type, NoteType::Hold | NoteType::Roll) {
-                        active.life = MAX_HOLD_LIFE;
-                    } else {
-                        if window > 0.0 {
-                            active.life -= delta_time / window;
-                        } else {
-                            active.life = 0.0;
+                    match active.note_type {
+                        NoteType::Hold => {
+                            if pressed {
+                                active.life = MAX_HOLD_LIFE;
+                            } else if window > 0.0 {
+                                active.life -= delta_time / window;
+                            } else {
+                                active.life = 0.0;
+                            }
                         }
+                        NoteType::Roll => {
+                            if window > 0.0 {
+                                active.life -= delta_time / window;
+                            } else {
+                                active.life = 0.0;
+                            }
+                        }
+                        _ => {
+                            if window > 0.0 {
+                                active.life -= delta_time / window;
+                            } else {
+                                active.life = 0.0;
+                            }
+                        }
+                    }
 
-                        if active.life < 0.0 {
-                            active.life = 0.0;
-                        }
+                    if active.life < 0.0 {
+                        active.life = 0.0;
+                    } else if active.life > MAX_HOLD_LIFE {
+                        active.life = MAX_HOLD_LIFE;
                     }
                 }
 
@@ -503,6 +552,8 @@ pub struct State {
     pub active_holds: [Option<ActiveHold>; 4],
     pub holds_total: u32,
     pub holds_held: u32,
+    pub rolls_total: u32,
+    pub rolls_held: u32,
 
     // Animation timing for this screen
     pub total_elapsed_in_screen: f32,
@@ -627,6 +678,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     }
 
     let holds_total = chart.stats.holds as u32;
+    let rolls_total = chart.stats.rolls as u32;
 
     let num_taps_and_holds = notes.len() as u64;
     // Possible grade points are based on taps/hold heads only.
@@ -732,6 +784,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         active_holds: Default::default(),
         holds_total,
         holds_held: 0,
+        rolls_total,
+        rolls_held: 0,
         total_elapsed_in_screen: 0.0,
         hold_to_exit_key: None,
         hold_to_exit_start: None,
@@ -1063,7 +1117,9 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
 
     for (col, (now_down, was_down)) in current_inputs.iter().copied().zip(prev_inputs).enumerate() {
         if now_down && !was_down {
-            if !judge_a_tap(state, col, music_time_sec) {
+            let hit_note = judge_a_tap(state, col, music_time_sec);
+            refresh_roll_life_on_step(state, col);
+            if !hit_note {
                 state.receptor_bop_timers[col] = 0.11;
             }
         }
@@ -2411,7 +2467,7 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
     let categories = [
         ("holds", state.holds_held, state.holds_total),
         ("mines", 0u32, state.chart.stats.mines as u32),
-        ("rolls", 0u32, state.chart.stats.rolls as u32),
+        ("rolls", state.rolls_held, state.rolls_total),
     ];
 
     let largest_count = categories
