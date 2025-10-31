@@ -6,7 +6,9 @@ use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
 use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::parsing::notes as note_parser;
-use crate::gameplay::parsing::noteskin::{self, Noteskin, Quantization, Style, NUM_QUANTIZATIONS};
+use crate::gameplay::parsing::noteskin::{
+    self, Noteskin, Quantization, SpriteSlot, Style, NUM_QUANTIZATIONS,
+};
 use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::gameplay::song::SongData;
 use crate::gameplay::timing::TimingData;
@@ -16,10 +18,11 @@ use crate::ui::color;
 use crate::ui::components::screen_bar::{self, ScreenBarParams};
 use crate::ui::font;
 use log::{info, warn};
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::f32::consts::TAU;
 use std::path::Path;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -119,6 +122,7 @@ const Z_HOLD_CAP: i32 = 110;
 const Z_HOLD_EXPLOSION: i32 = 120;
 const Z_HOLD_GLOW: i32 = 130;
 const Z_TAP_NOTE: i32 = 140;
+const MINE_CORE_SIZE_RATIO: f32 = 0.5;
 
 // --- JUDGMENT WINDOWS (in seconds) ---
 // These are the base values from StepMania's defaults.
@@ -137,6 +141,137 @@ const BASE_WAY_OFF_WINDOW: f32 = 0.1800; // W5 (0.1815 final)
 // --- DATA STRUCTURES ---
 
 const BASE_MINE_WINDOW: f32 = 0.0700; // ITG mine window before adjustment
+
+#[derive(Hash, PartialEq, Eq, Clone)]
+struct MineGradientKey {
+    texture_key: String,
+    src: [i32; 2],
+    size: [i32; 2],
+}
+
+type MineGradientCache = HashMap<MineGradientKey, Arc<Vec<[f32; 4]>>>;
+
+static MINE_GRADIENT_CACHE: LazyLock<Mutex<MineGradientCache>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn mine_fill_color(slot: &SpriteSlot, beat: f32) -> Option<[f32; 4]> {
+    let colors = {
+        let key = MineGradientKey {
+            texture_key: slot.texture_key().to_string(),
+            src: slot.def.src,
+            size: slot.def.size,
+        };
+
+        let mut cache = MINE_GRADIENT_CACHE.lock().ok()?;
+        match cache.entry(key.clone()) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                let colors = Arc::new(load_mine_gradient_colors(slot)?);
+                entry.insert(colors.clone());
+                colors
+            }
+        }
+    };
+
+    if colors.is_empty() {
+        return None;
+    }
+
+    let phase = beat.rem_euclid(1.0);
+    let idx_float = phase * (colors.len() - 1) as f32;
+    let idx = idx_float.floor() as usize;
+    let next_idx = (idx + 1).min(colors.len() - 1);
+    let t = (idx_float - idx as f32).clamp(0.0, 1.0);
+    let mut result = [0.0_f32; 4];
+    for i in 0..4 {
+        let a = colors[idx][i];
+        let b = colors[next_idx][i];
+        result[i] = a + (b - a) * t;
+    }
+    Some(result)
+}
+
+fn load_mine_gradient_colors(slot: &SpriteSlot) -> Option<Vec<[f32; 4]>> {
+    let texture_key = slot.texture_key();
+    let path = Path::new("assets").join(texture_key);
+    let image = image::open(&path).ok()?.to_rgba8();
+
+    let mut width = slot.def.size[0];
+    let mut height = slot.def.size[1];
+    if width <= 0 || height <= 0 {
+        if let Some(frame) = slot.source.frame_size() {
+            width = frame[0];
+            height = frame[1];
+        }
+    }
+
+    if width <= 0 || height <= 0 {
+        warn!("Mine fill slot has invalid size for gradient sampling");
+        return None;
+    }
+
+    let mut src_x = slot.def.src[0].max(0) as u32;
+    let mut src_y = slot.def.src[1].max(0) as u32;
+    let mut sample_width = width as u32;
+    let mut sample_height = height as u32;
+
+    if src_x >= image.width() || src_y >= image.height() {
+        warn!(
+            "Mine fill region ({}, {}) is outside of texture {}",
+            src_x, src_y, texture_key
+        );
+        return None;
+    }
+
+    if src_x + sample_width > image.width() {
+        sample_width = image.width().saturating_sub(src_x);
+    }
+    if src_y + sample_height > image.height() {
+        sample_height = image.height().saturating_sub(src_y);
+    }
+
+    if sample_width == 0 || sample_height == 0 {
+        warn!(
+            "Mine fill region has zero sample size for texture {}",
+            texture_key
+        );
+        return None;
+    }
+
+    let mut colors = Vec::with_capacity(sample_width as usize);
+    for dx in 0..sample_width {
+        let mut r = 0.0_f32;
+        let mut g = 0.0_f32;
+        let mut b = 0.0_f32;
+        let mut alpha_weight = 0.0_f32;
+
+        for dy in 0..sample_height {
+            let pixel = image.get_pixel(src_x + dx, src_y + dy);
+            let a = pixel[3] as f32 / 255.0;
+            if a <= f32::EPSILON {
+                continue;
+            }
+            r += pixel[0] as f32 * a;
+            g += pixel[1] as f32 * a;
+            b += pixel[2] as f32 * a;
+            alpha_weight += a;
+        }
+
+        if alpha_weight <= f32::EPSILON {
+            colors.push([0.0, 0.0, 0.0, 0.0]);
+        } else {
+            let inv = 1.0 / alpha_weight;
+            colors.push([
+                (r * inv) / 255.0,
+                (g * inv) / 255.0,
+                (b * inv) / 255.0,
+                (alpha_weight / sample_height as f32).clamp(0.0, 1.0),
+            ]);
+        }
+    }
+
+    Some(colors)
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum JudgeGrade {
@@ -2205,25 +2340,42 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         .unwrap_or(0.0);
                     let time = state.total_elapsed_in_screen;
                     let beat = state.current_beat;
-                    let pulse = 1.0 + 0.08 * (beat * TAU).sin();
+
+                    let circle_reference = frame_slot
+                        .map(|slot| scale_sprite(slot.size()))
+                        .or_else(|| fill_slot.map(|slot| scale_sprite(slot.size())))
+                        .unwrap_or([TARGET_ARROW_PIXEL_SIZE, TARGET_ARROW_PIXEL_SIZE]);
 
                     if let Some(slot) = fill_slot {
-                        let frame = slot.frame_index(time, beat);
-                        let uv = slot.uv_for_frame(frame);
-                        let size = scale_sprite(slot.size());
-                        let width = size[0] * pulse;
-                        let height = size[1] * pulse;
-                        let rotation = base_rotation - time * 45.0;
+                        if let Some(color) = mine_fill_color(slot, state.current_beat) {
+                            let width = circle_reference[0] * MINE_CORE_SIZE_RATIO;
+                            let height = circle_reference[1] * MINE_CORE_SIZE_RATIO;
 
-                        actors.push(act!(sprite(slot.texture_key().to_string()):
-                            align(0.5, 0.5):
-                            xy(playfield_center_x + col_x_offset as f32, y_pos):
-                            zoomto(width, height):
-                            rotationz(rotation):
-                            customtexturerect(uv[0], uv[1], uv[2], uv[3]):
-                            diffuse(1.0, 1.0, 1.0, 0.9):
-                            z(Z_TAP_NOTE - 1)
-                        ));
+                            actors.push(act!(sprite("circle.png"):
+                                align(0.5, 0.5):
+                                xy(playfield_center_x + col_x_offset as f32, y_pos):
+                                zoomto(width, height):
+                                diffuse(color[0], color[1], color[2], 1.0):
+                                z(Z_TAP_NOTE - 2)
+                            ));
+                        } else {
+                            let frame = slot.frame_index(time, beat);
+                            let uv = slot.uv_for_frame(frame);
+                            let size = scale_sprite(slot.size());
+                            let width = size[0];
+                            let height = size[1];
+                            let rotation = base_rotation - time * 45.0;
+
+                            actors.push(act!(sprite(slot.texture_key().to_string()):
+                                align(0.5, 0.5):
+                                xy(playfield_center_x + col_x_offset as f32, y_pos):
+                                zoomto(width, height):
+                                rotationz(rotation):
+                                customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                                diffuse(1.0, 1.0, 1.0, 0.9):
+                                z(Z_TAP_NOTE - 1)
+                            ));
+                        }
                     }
 
                     if let Some(slot) = frame_slot {

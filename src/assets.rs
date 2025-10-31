@@ -179,6 +179,7 @@ impl AssetManager {
             ("dance.png".to_string(), "dance.png".to_string()),
             ("meter_arrow.png".to_string(), "meter_arrow.png".to_string()),
             ("rounded-square.png".to_string(), "rounded-square.png".to_string()),
+            ("circle.png".to_string(), "circle.png".to_string()),
             ("swoosh.png".to_string(), "swoosh.png".to_string()),
             ("heart.png".to_string(), "heart.png".to_string()),
             ("banner1.png".to_string(), "_fallback/banner1.png".to_string()),

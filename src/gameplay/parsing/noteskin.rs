@@ -92,7 +92,7 @@ impl SpriteSource {
         }
     }
 
-    fn frame_size(&self) -> Option<[i32; 2]> {
+    pub fn frame_size(&self) -> Option<[i32; 2]> {
         match self {
             SpriteSource::Atlas { .. } => None,
             SpriteSource::Animated { frame_size, .. } => Some(*frame_size),
