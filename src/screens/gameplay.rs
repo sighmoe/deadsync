@@ -7,7 +7,7 @@ use crate::core::space::{is_wide, widescale};
 use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
 use crate::gameplay::parsing::notes as note_parser;
 use crate::gameplay::parsing::noteskin::{
-    self, Noteskin, Quantization, SpriteSlot, Style, NUM_QUANTIZATIONS,
+    self, NUM_QUANTIZATIONS, Noteskin, Quantization, SpriteSlot, Style,
 };
 use crate::gameplay::profile::{self, ScrollSpeedSetting};
 use crate::gameplay::song::SongData;
@@ -19,8 +19,8 @@ use crate::ui::components::screen_bar::{self, ScreenBarParams};
 use crate::ui::font;
 use log::{info, warn};
 use std::array::from_fn;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::f32::consts::TAU;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -458,6 +458,11 @@ impl HoldScore {
     const LET_GO: i32 = 0;
 }
 
+struct MineScore;
+impl MineScore {
+    const HIT: i32 = -6;
+}
+
 fn grade_to_window(grade: JudgeGrade) -> Option<&'static str> {
     match grade {
         JudgeGrade::Fantastic => Some("W1"),
@@ -525,6 +530,9 @@ fn handle_mine_hit(
 
     state.arrows[column].remove(arrow_list_index);
     state.change_life(LifeChange::HIT_MINE);
+    if !state.is_dead() {
+        state.earned_grade_points += MineScore::HIT;
+    }
     state.combo = 0;
     state.miss_combo = state.miss_combo.saturating_add(1);
     state.combo_after_miss = 0;
@@ -785,8 +793,8 @@ const TIMING_WINDOW_SECONDS_ROLL: f32 = 0.35;
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
 const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
 const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
-                                                 // Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
-                                                 // Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
+// Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
+// Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
 
 pub struct State {
     // Song & Chart data
@@ -1120,13 +1128,7 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
         let abs_time_error = time_error.abs();
 
         if matches!(note_type, NoteType::Mine) {
-            if handle_mine_hit(
-                state,
-                column,
-                arrow_list_index,
-                note_index,
-                time_error,
-            ) {
+            if handle_mine_hit(state, column, arrow_list_index, note_index, time_error) {
                 return true;
             }
             return false;
