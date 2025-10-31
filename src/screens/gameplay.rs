@@ -1712,24 +1712,23 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
         let note_time = state.timing.get_time_for_beat(note_beat);
 
         if matches!(note_type, NoteType::Mine) {
-            if state.notes[note_index].mine_result.is_some() {
-                col_arrows.remove(next_arrow_index);
-                continue;
-            }
-
-            let mine_window = BASE_MINE_WINDOW + TIMING_WINDOW_ADD;
-            if music_time_sec - note_time > mine_window {
-                if state.notes[note_index].mine_result.is_none() {
-                    state.notes[note_index].mine_result = Some(MineResult::Avoided);
-                    state.mines_avoided = state.mines_avoided.saturating_add(1);
+            match state.notes[note_index].mine_result {
+                Some(MineResult::Hit) => {
+                    col_arrows.remove(next_arrow_index);
                 }
+                Some(MineResult::Avoided) => {}
+                None => {
+                    let mine_window = BASE_MINE_WINDOW + TIMING_WINDOW_ADD;
+                    if music_time_sec - note_time > mine_window {
+                        state.notes[note_index].mine_result = Some(MineResult::Avoided);
+                        state.mines_avoided = state.mines_avoided.saturating_add(1);
 
-                info!(
-                    "MINE AVOIDED: Row {}, Col {}, Time: {:.2}s",
-                    note_row_index, col_idx, music_time_sec
-                );
-
-                col_arrows.remove(next_arrow_index);
+                        info!(
+                            "MINE AVOIDED: Row {}, Col {}, Time: {:.2}s",
+                            note_row_index, col_idx, music_time_sec
+                        );
+                    }
+                }
             }
 
             continue;
@@ -1765,12 +1764,22 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
     let miss_cull_threshold = receptor_y - state.draw_distance_after_targets;
     for col_arrows in &mut state.arrows {
         col_arrows.retain(|arrow| {
-            let Some(judgment) = state.notes[arrow.note_index].result.as_ref() else {
-                return true;
-            };
+            let note = &state.notes[arrow.note_index];
 
-            if judgment.grade != JudgeGrade::Miss {
-                return false;
+            if matches!(note.note_type, NoteType::Mine) {
+                match note.mine_result {
+                    Some(MineResult::Avoided) => {}
+                    Some(MineResult::Hit) => return false,
+                    None => return true,
+                }
+            } else {
+                let Some(judgment) = note.result.as_ref() else {
+                    return true;
+                };
+
+                if judgment.grade != JudgeGrade::Miss {
+                    return false;
+                }
             }
 
             let y_pos = match state.scroll_speed {
