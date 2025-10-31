@@ -53,11 +53,13 @@ pub struct State {
 
 pub fn init(gameplay_results: Option<gameplay::State>) -> State {
     let score_info = gameplay_results.map(|gs| {
-        let score_percent = if gs.possible_grade_points > 0 {
-            (gs.earned_grade_points as f64 / gs.possible_grade_points as f64).max(0.0)
-        } else {
-            0.0
-        };
+        let score_percent = gameplay::calculate_itg_score_percent(
+            &gs.scoring_counts,
+            gs.holds_held_for_score,
+            gs.rolls_held_for_score,
+            gs.mines_hit_for_score,
+            gs.possible_grade_points,
+        );
 
         let grade = if gs.is_failing || !gs.song_completed_naturally {
             scores::Grade::Failed

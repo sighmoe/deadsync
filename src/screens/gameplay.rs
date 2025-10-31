@@ -463,6 +463,64 @@ impl MineScore {
     const HIT: i32 = -6;
 }
 
+fn grade_points_for(grade: JudgeGrade) -> i32 {
+    match grade {
+        JudgeGrade::Fantastic => 5,
+        JudgeGrade::Excellent => 4,
+        JudgeGrade::Great => 2,
+        JudgeGrade::Decent => 0,
+        JudgeGrade::WayOff => -6,
+        JudgeGrade::Miss => -12,
+    }
+}
+
+fn calculate_itg_grade_points(
+    scoring_counts: &HashMap<JudgeGrade, u32>,
+    holds_held_for_score: u32,
+    rolls_held_for_score: u32,
+    mines_hit_for_score: u32,
+) -> i32 {
+    let mut total = 0i32;
+    for (grade, count) in scoring_counts {
+        total += grade_points_for(*grade) * (*count as i32);
+    }
+
+    total += holds_held_for_score as i32 * HoldScore::HELD;
+    total += rolls_held_for_score as i32 * HoldScore::HELD;
+    total += mines_hit_for_score as i32 * MineScore::HIT;
+    total
+}
+
+pub(crate) fn calculate_itg_score_percent(
+    scoring_counts: &HashMap<JudgeGrade, u32>,
+    holds_held_for_score: u32,
+    rolls_held_for_score: u32,
+    mines_hit_for_score: u32,
+    possible_grade_points: i32,
+) -> f64 {
+    if possible_grade_points <= 0 {
+        return 0.0;
+    }
+
+    let total_points = calculate_itg_grade_points(
+        scoring_counts,
+        holds_held_for_score,
+        rolls_held_for_score,
+        mines_hit_for_score,
+    );
+
+    (total_points as f64 / possible_grade_points as f64).max(0.0)
+}
+
+fn update_itg_grade_totals(state: &mut State) {
+    state.earned_grade_points = calculate_itg_grade_points(
+        &state.scoring_counts,
+        state.holds_held_for_score,
+        state.rolls_held_for_score,
+        state.mines_hit_for_score,
+    );
+}
+
 fn grade_to_window(grade: JudgeGrade) -> Option<&'static str> {
     match grade {
         JudgeGrade::Fantastic => Some("W1"),
@@ -519,6 +577,7 @@ fn handle_mine_hit(
 
     state.notes[note_index].mine_result = Some(MineResult::Hit);
     state.mines_hit = state.mines_hit.saturating_add(1);
+    let mut updated_scoring = false;
 
     let note_row_index = state.notes[note_index].row_index;
     info!(
@@ -531,7 +590,8 @@ fn handle_mine_hit(
     state.arrows[column].remove(arrow_list_index);
     state.change_life(LifeChange::HIT_MINE);
     if !state.is_dead() {
-        state.earned_grade_points += MineScore::HIT;
+        state.mines_hit_for_score = state.mines_hit_for_score.saturating_add(1);
+        updated_scoring = true;
     }
     state.combo = 0;
     state.miss_combo = state.miss_combo.saturating_add(1);
@@ -543,6 +603,10 @@ fn handle_mine_hit(
     state.receptor_glow_timers[column] = 0.0;
     trigger_mine_explosion(state, column);
     audio::play_sfx("assets/sounds/boom.ogg");
+
+    if updated_scoring {
+        update_itg_grade_totals(state);
+    }
 
     true
 }
@@ -591,7 +655,7 @@ fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
 
     state.change_life(LifeChange::LET_GO);
     if !state.is_dead() {
-        state.earned_grade_points += HoldScore::LET_GO;
+        update_itg_grade_totals(state);
     }
     state.combo = 0;
     state.miss_combo = state.miss_combo.saturating_add(1);
@@ -616,18 +680,28 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
         hold.last_held_beat = hold.end_beat;
     }
 
+    let mut updated_scoring = false;
     match state.notes[note_index].note_type {
         NoteType::Hold => {
             state.holds_held = state.holds_held.saturating_add(1);
+            if !state.is_dead() {
+                state.holds_held_for_score = state.holds_held_for_score.saturating_add(1);
+                updated_scoring = true;
+            }
         }
         NoteType::Roll => {
             state.rolls_held = state.rolls_held.saturating_add(1);
+            if !state.is_dead() {
+                state.rolls_held_for_score = state.rolls_held_for_score.saturating_add(1);
+                updated_scoring = true;
+            }
         }
         _ => {}
     }
     state.change_life(LifeChange::HELD);
-    if !state.is_dead() {
-        state.earned_grade_points += HoldScore::HELD;
+
+    if updated_scoring {
+        update_itg_grade_totals(state);
     }
     state.miss_combo = 0;
 
@@ -818,6 +892,7 @@ pub struct State {
     pub full_combo_grade: Option<JudgeGrade>,
     pub first_fc_attempt_broken: bool,
     pub judgment_counts: HashMap<JudgeGrade, u32>,
+    pub scoring_counts: HashMap<JudgeGrade, u32>,
     pub last_judgment: Option<JudgmentRenderInfo>,
     pub hold_judgments: [Option<HoldJudgmentRenderInfo>; 4],
 
@@ -849,10 +924,13 @@ pub struct State {
     pub active_holds: [Option<ActiveHold>; 4],
     pub holds_total: u32,
     pub holds_held: u32,
+    pub holds_held_for_score: u32,
     pub rolls_total: u32,
     pub rolls_held: u32,
+    pub rolls_held_for_score: u32,
     pub mines_total: u32,
     pub mines_hit: u32,
+    pub mines_hit_for_score: u32,
     pub mines_avoided: u32,
 
     // Animation timing for this screen
@@ -940,6 +1018,9 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
     let parsed_notes = note_parser::parse_chart_notes(&chart.notes);
     let mut notes: Vec<Note> = Vec::with_capacity(parsed_notes.len());
+    let mut holds_total: u32 = 0;
+    let mut rolls_total: u32 = 0;
+    let mut mines_total: u32 = 0;
     for parsed in parsed_notes {
         let Some(beat) = timing.get_beat_for_row(parsed.row_index) else {
             continue;
@@ -947,9 +1028,18 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
         let note_type = match parsed.note_type {
             ChartNoteType::Tap => NoteType::Tap,
-            ChartNoteType::Hold => NoteType::Hold,
-            ChartNoteType::Roll => NoteType::Roll,
-            ChartNoteType::Mine => NoteType::Mine,
+            ChartNoteType::Hold => {
+                holds_total = holds_total.saturating_add(1);
+                NoteType::Hold
+            }
+            ChartNoteType::Roll => {
+                rolls_total = rolls_total.saturating_add(1);
+                NoteType::Roll
+            }
+            ChartNoteType::Mine => {
+                mines_total = mines_total.saturating_add(1);
+                NoteType::Mine
+            }
         };
 
         let hold = match (&note_type, parsed.tail_row_index) {
@@ -978,10 +1068,6 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
             mine_result: None,
         });
     }
-
-    let holds_total = chart.stats.holds as u32;
-    let rolls_total = chart.stats.rolls as u32;
-    let mines_total = chart.stats.mines as u32;
 
     let num_taps_and_holds = notes
         .iter()
@@ -1065,6 +1151,14 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
             (JudgeGrade::WayOff, 0),
             (JudgeGrade::Miss, 0),
         ]),
+        scoring_counts: HashMap::from_iter([
+            (JudgeGrade::Fantastic, 0),
+            (JudgeGrade::Excellent, 0),
+            (JudgeGrade::Great, 0),
+            (JudgeGrade::Decent, 0),
+            (JudgeGrade::WayOff, 0),
+            (JudgeGrade::Miss, 0),
+        ]),
         combo: 0,
         miss_combo: 0,
         full_combo_grade: None,
@@ -1094,10 +1188,13 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         active_holds: Default::default(),
         holds_total,
         holds_held: 0,
+        holds_held_for_score: 0,
         rolls_total,
         rolls_held: 0,
+        rolls_held_for_score: 0,
         mines_total,
         mines_hit: 0,
+        mines_hit_for_score: 0,
         mines_avoided: 0,
         total_elapsed_in_screen: 0.0,
         hold_to_exit_key: None,
@@ -1241,20 +1338,18 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
         return;
     }
 
-    // If the player is not dead, update the score points.
-    if !state.is_dead() {
-        for judgment in &judgments_in_row {
-            // Update Grade Points (for percentage display) using PercentScoreWeight values.
-            let grade_points = match judgment.grade {
-                JudgeGrade::Fantastic => 5,
-                JudgeGrade::Excellent => 4,
-                JudgeGrade::Great => 2,
-                JudgeGrade::Decent => 0,
-                JudgeGrade::WayOff => -6,
-                JudgeGrade::Miss => -12,
-            };
-            state.earned_grade_points += grade_points;
+    let mut updated_scoring = false;
+    for judgment in &judgments_in_row {
+        *state.judgment_counts.entry(judgment.grade).or_insert(0) += 1;
+
+        if !state.is_dead() {
+            *state.scoring_counts.entry(judgment.grade).or_insert(0) += 1;
+            updated_scoring = true;
         }
+    }
+
+    if updated_scoring {
+        update_itg_grade_totals(state);
     }
 
     // Select the representative judgment for the row (ITG logic)
@@ -1300,8 +1395,6 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
         judgment: final_judgment,
         judged_at: Instant::now(),
     });
-    *state.judgment_counts.entry(final_grade).or_insert(0) += 1;
-
     state.miss_combo = 0;
 
     if has_miss || matches!(final_grade, JudgeGrade::Decent | JudgeGrade::WayOff) {
@@ -2766,11 +2859,13 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let score_x = screen_center_x() - clamped_width / 4.3;
     let score_y = 56.0;
 
-    let score_percent = if state.possible_grade_points > 0 {
-        (state.earned_grade_points as f32 / state.possible_grade_points as f32).max(0.0) * 100.0
-    } else {
-        0.0
-    };
+    let score_percent = (calculate_itg_score_percent(
+        &state.scoring_counts,
+        state.holds_held_for_score,
+        state.rolls_held_for_score,
+        state.mines_hit_for_score,
+        state.possible_grade_points,
+    ) * 100.0) as f32;
     let percent_text = format!("{:.2}", score_percent);
 
     actors.push(act!(text:
