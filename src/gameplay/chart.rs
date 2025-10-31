@@ -26,4 +26,5 @@ pub enum NoteType {
     Tap,
     Hold,
     Roll,
+    Mine,
 }

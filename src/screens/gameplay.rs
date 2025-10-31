@@ -17,6 +17,7 @@ use crate::ui::components::screen_bar::{self, ScreenBarParams};
 use crate::ui::font;
 use log::{info, warn};
 use std::collections::HashMap;
+use std::f32::consts::TAU;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -135,6 +136,8 @@ const BASE_WAY_OFF_WINDOW: f32 = 0.1800; // W5 (0.1815 final)
 
 // --- DATA STRUCTURES ---
 
+const BASE_MINE_WINDOW: f32 = 0.0700; // ITG mine window before adjustment
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum JudgeGrade {
     Fantastic, // W1
@@ -157,12 +160,19 @@ pub enum NoteType {
     Tap,
     Hold,
     Roll,
+    Mine,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum HoldResult {
     Held,
     LetGo,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum MineResult {
+    Hit,
+    Avoided,
 }
 
 #[derive(Clone, Debug)]
@@ -186,6 +196,7 @@ pub struct Note {
     pub row_index: usize,
     pub result: Option<Judgment>,
     pub hold: Option<HoldData>,
+    pub mine_result: Option<MineResult>,
 }
 
 #[derive(Clone, Debug)]
@@ -566,6 +577,9 @@ pub struct State {
     pub holds_held: u32,
     pub rolls_total: u32,
     pub rolls_held: u32,
+    pub mines_total: u32,
+    pub mines_hit: u32,
+    pub mines_avoided: u32,
 
     // Animation timing for this screen
     pub total_elapsed_in_screen: f32,
@@ -661,6 +675,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
             ChartNoteType::Tap => NoteType::Tap,
             ChartNoteType::Hold => NoteType::Hold,
             ChartNoteType::Roll => NoteType::Roll,
+            ChartNoteType::Mine => NoteType::Mine,
         };
 
         let hold = match (&note_type, parsed.tail_row_index) {
@@ -686,13 +701,18 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
             row_index: parsed.row_index,
             result: None,
             hold,
+            mine_result: None,
         });
     }
 
     let holds_total = chart.stats.holds as u32;
     let rolls_total = chart.stats.rolls as u32;
+    let mines_total = chart.stats.mines as u32;
 
-    let num_taps_and_holds = notes.len() as u64;
+    let num_taps_and_holds = notes
+        .iter()
+        .filter(|note| !matches!(note.note_type, NoteType::Mine))
+        .count() as u64;
     // Possible grade points mirror ITGmania's scoring: taps + hold/roll heads use the
     // Fantastic weight (5) and successful hold/roll completions add the Held weight (5).
     let possible_grade_points = (num_taps_and_holds * 5)
@@ -801,6 +821,9 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         holds_held: 0,
         rolls_total,
         rolls_held: 0,
+        mines_total,
+        mines_hit: 0,
+        mines_avoided: 0,
         total_elapsed_in_screen: 0.0,
         hold_to_exit_key: None,
         hold_to_exit_start: None,
@@ -824,9 +847,40 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
             let note = &state.notes[note_index];
             (note.beat, note.row_index)
         };
+        let note_type = state.notes[note_index].note_type.clone();
         let note_time = state.timing.get_time_for_beat(note_beat);
         let time_error = current_time - note_time;
         let abs_time_error = time_error.abs();
+
+        if matches!(note_type, NoteType::Mine) {
+            let mine_window = BASE_MINE_WINDOW + TIMING_WINDOW_ADD;
+            if abs_time_error <= mine_window {
+                if state.notes[note_index].mine_result.is_none() {
+                    state.notes[note_index].mine_result = Some(MineResult::Hit);
+                    state.mines_hit = state.mines_hit.saturating_add(1);
+                }
+
+                info!(
+                    "MINE HIT: Row {}, Col {}, Error: {:.2}ms",
+                    note_row_index,
+                    column,
+                    time_error * 1000.0
+                );
+
+                state.arrows[column].remove(arrow_list_index);
+                state.change_life(LifeChange::HIT_MINE);
+                state.combo = 0;
+                state.miss_combo = state.miss_combo.saturating_add(1);
+                state.combo_after_miss = 0;
+                if state.full_combo_grade.is_some() {
+                    state.first_fc_attempt_broken = true;
+                }
+                state.full_combo_grade = None;
+                state.receptor_glow_timers[column] = 0.0;
+
+                return true;
+            }
+        }
 
         let fantastic_window = BASE_FANTASTIC_WINDOW + TIMING_WINDOW_ADD;
         let excellent_window = BASE_EXCELLENT_WINDOW + TIMING_WINDOW_ADD;
@@ -1035,7 +1089,11 @@ fn update_judged_rows(state: &mut State) {
                 .iter()
                 .filter(|n| n.row_index == state.judged_row_cursor)
                 .collect();
-            notes_on_row.is_empty() || notes_on_row.iter().all(|n| n.result.is_some())
+            notes_on_row.is_empty()
+                || notes_on_row.iter().all(|n| match n.note_type {
+                    NoteType::Mine => n.mine_result.is_some(),
+                    _ => n.result.is_some(),
+                })
         };
 
         if is_row_complete {
@@ -1043,6 +1101,7 @@ fn update_judged_rows(state: &mut State) {
                 .notes
                 .iter()
                 .filter(|n| n.row_index == state.judged_row_cursor)
+                .filter(|n| !matches!(n.note_type, NoteType::Mine))
                 .filter_map(|n| n.result.clone())
                 .collect();
 
@@ -1230,14 +1289,39 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
             continue;
         };
 
-        let arrow = &col_arrows[next_arrow_index];
+        let arrow = col_arrows[next_arrow_index].clone();
         let note_index = arrow.note_index;
-        let (note_row_index, note_beat) = {
+        let (note_row_index, note_beat, note_type) = {
             let note = &state.notes[note_index];
-            (note.row_index, note.beat)
+            (note.row_index, note.beat, note.note_type.clone())
         };
 
         let note_time = state.timing.get_time_for_beat(note_beat);
+
+        if matches!(note_type, NoteType::Mine) {
+            if state.notes[note_index].mine_result.is_some() {
+                col_arrows.remove(next_arrow_index);
+                continue;
+            }
+
+            let mine_window = BASE_MINE_WINDOW + TIMING_WINDOW_ADD;
+            if music_time_sec - note_time > mine_window {
+                if state.notes[note_index].mine_result.is_none() {
+                    state.notes[note_index].mine_result = Some(MineResult::Avoided);
+                    state.mines_avoided = state.mines_avoided.saturating_add(1);
+                }
+
+                info!(
+                    "MINE AVOIDED: Row {}, Col {}, Time: {:.2}s",
+                    note_row_index, col_idx, music_time_sec
+                );
+
+                col_arrows.remove(next_arrow_index);
+            }
+
+            continue;
+        }
+
         if music_time_sec - note_time > way_off_window {
             let judgment = Judgment {
                 time_error_ms: ((music_time_sec - note_time) * 1000.0),
@@ -2103,6 +2187,63 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                 }
 
                 let col_x_offset = ns.column_xs[arrow.column];
+
+                if matches!(arrow.note_type, NoteType::Mine) {
+                    let fill_slot = ns.mines.get(arrow.column).and_then(|slot| slot.as_ref());
+                    let frame_slot = ns
+                        .mine_frames
+                        .get(arrow.column)
+                        .and_then(|slot| slot.as_ref());
+
+                    if fill_slot.is_none() && frame_slot.is_none() {
+                        continue;
+                    }
+
+                    let base_rotation = fill_slot
+                        .map(|slot| -slot.def.rotation_deg as f32)
+                        .or_else(|| frame_slot.map(|slot| -slot.def.rotation_deg as f32))
+                        .unwrap_or(0.0);
+                    let time = state.total_elapsed_in_screen;
+                    let beat = state.current_beat;
+                    let pulse = 1.0 + 0.08 * (beat * TAU).sin();
+
+                    if let Some(slot) = fill_slot {
+                        let frame = slot.frame_index(time, beat);
+                        let uv = slot.uv_for_frame(frame);
+                        let size = scale_sprite(slot.size());
+                        let width = size[0] * pulse;
+                        let height = size[1] * pulse;
+                        let rotation = base_rotation - time * 45.0;
+
+                        actors.push(act!(sprite(slot.texture_key().to_string()):
+                            align(0.5, 0.5):
+                            xy(playfield_center_x + col_x_offset as f32, y_pos):
+                            zoomto(width, height):
+                            rotationz(rotation):
+                            customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                            diffuse(1.0, 1.0, 1.0, 0.9):
+                            z(Z_TAP_NOTE - 1)
+                        ));
+                    }
+
+                    if let Some(slot) = frame_slot {
+                        let frame = slot.frame_index(time, beat);
+                        let uv = slot.uv_for_frame(frame);
+                        let size = scale_sprite(slot.size());
+                        let rotation = base_rotation + time * 120.0;
+
+                        actors.push(act!(sprite(slot.texture_key().to_string()):
+                            align(0.5, 0.5):
+                            xy(playfield_center_x + col_x_offset as f32, y_pos):
+                            zoomto(size[0], size[1]):
+                            rotationz(rotation):
+                            customtexturerect(uv[0], uv[1], uv[2], uv[3]):
+                            z(Z_TAP_NOTE)
+                        ));
+                    }
+
+                    continue;
+                }
 
                 let beat_fraction = arrow.beat.fract();
                 let quantization = match (beat_fraction * 192.0).round() as u32 {

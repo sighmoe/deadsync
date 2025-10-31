@@ -413,6 +413,8 @@ pub struct Noteskin {
     pub notes: Vec<SpriteSlot>,
     pub receptor_off: Vec<SpriteSlot>,
     pub receptor_glow: Vec<Option<SpriteSlot>>,
+    pub mines: Vec<Option<SpriteSlot>>,
+    pub mine_frames: Vec<Option<SpriteSlot>>,
     pub column_xs: Vec<i32>,
     pub field_left_x: i32,
     pub field_right_x: i32,
@@ -527,6 +529,8 @@ struct NoteskinBuilder {
     notes: Vec<SlotBuilder>,
     receptor_off: Vec<SlotBuilder>,
     receptor_glow: Vec<SlotBuilder>,
+    mines: Vec<SlotBuilder>,
+    mine_frames: Vec<SlotBuilder>,
     column_xs: Vec<i32>,
     defaults: HashMap<String, SpriteDefinition>,
     default_sources: HashMap<String, Arc<SpriteSource>>,
@@ -548,10 +552,13 @@ struct NoteskinBuilder {
 impl NoteskinBuilder {
     fn new(style: &Style) -> Self {
         let note_slots = style.num_players * style.num_cols * NUM_QUANTIZATIONS;
+        let mine_slots = style.num_players * style.num_cols;
         Self {
             notes: vec![SlotBuilder::default(); note_slots],
             receptor_off: vec![SlotBuilder::default(); style.num_cols],
             receptor_glow: vec![SlotBuilder::default(); style.num_cols],
+            mines: vec![SlotBuilder::default(); mine_slots],
+            mine_frames: vec![SlotBuilder::default(); mine_slots],
             column_xs: (0..style.num_cols)
                 .map(|i| (i as i32 * 68) - ((style.num_cols - 1) as i32 * 34))
                 .collect(),
@@ -654,6 +661,10 @@ impl NoteskinBuilder {
             self.receptor_glow,
             self.default_sources.get("Receptor-glow"),
         );
+
+        let mines = finalize_optional_slots(self.mines, self.default_sources.get("Mine"));
+        let mine_frames =
+            finalize_optional_slots(self.mine_frames, self.default_sources.get("Mine-frame"));
 
         let hold_body_inactive = finalize_single_slot(
             self.hold_body_inactive,
@@ -817,6 +828,8 @@ impl NoteskinBuilder {
             notes,
             receptor_off,
             receptor_glow,
+            mines,
+            mine_frames,
             column_xs,
             field_left_x,
             field_right_x,
@@ -856,6 +869,7 @@ pub fn load(path: &Path, style: &Style) -> Result<Noteskin, String> {
 
                 match tag {
                     "NoteSheet" => parse_note_sheet(&noteskin_dir, &mut builder, style, &props),
+                    "MineSheet" => parse_mine_sheet(&noteskin_dir, &mut builder, style, &props),
                     "ReceptorSheet" => {
                         parse_receptor_sheet(&noteskin_dir, &mut builder, style, &props)
                     }
@@ -1073,6 +1087,64 @@ fn parse_note_sheet(
                     slot.def.src = parse_src_offset(props).unwrap_or([0, 0]);
                     slot.set_source(source.clone());
                 }
+            }
+        }
+    }
+}
+
+fn parse_mine_sheet(
+    noteskin_dir: &str,
+    builder: &mut NoteskinBuilder,
+    style: &Style,
+    props: &HashMap<&str, &str>,
+) {
+    let Some(texture) = props.get("texture").map(|s| s.trim().trim_matches('"')) else {
+        warn!("MineSheet missing texture attribute");
+        return;
+    };
+
+    let source = match build_sheet_source(noteskin_dir, texture, props, 24.0) {
+        Some(src) => src,
+        None => return,
+    };
+
+    let layer = props
+        .get("layer")
+        .map(|s| s.trim_matches('"').to_ascii_lowercase())
+        .unwrap_or_else(|| "fill".to_string());
+
+    let (slots, default_key, default_tag) = match layer.as_str() {
+        "frame" | "overlay" | "ring" => (&mut builder.mine_frames, "Mine-frame", "Mine-frame"),
+        _ => (&mut builder.mines, "Mine", "Mine"),
+    };
+
+    let frame_size = source.frame_size().unwrap_or_else(|| {
+        builder
+            .defaults
+            .get(default_tag)
+            .map(|d| d.size)
+            .unwrap_or([0, 0])
+    });
+
+    builder
+        .default_sources
+        .entry(default_key.to_string())
+        .or_insert_with(|| source.clone());
+
+    let players = parse_index(props.get("player"), style.num_players as u32);
+    let cols = parse_index(props.get("col"), style.num_cols as u32);
+
+    for p in players {
+        for c in &cols {
+            let idx = (p as usize * style.num_cols) + *c as usize;
+            if idx >= slots.len() {
+                continue;
+            }
+
+            if let Some(slot) = slots.get_mut(idx) {
+                slot.def.size = frame_size;
+                slot.def.src = parse_src_offset(props).unwrap_or([0, 0]);
+                slot.set_source(source.clone());
             }
         }
     }
@@ -1608,6 +1680,12 @@ fn parse_sprite_rule(
             def.mirror_h = mirror_str.contains('h');
             def.mirror_v = mirror_str.contains('v');
         }
+        if tag == "Mine" {
+            builder
+                .defaults
+                .entry("Mine-frame".to_string())
+                .or_insert_with(|| def.clone());
+        }
         builder.defaults.insert(tag.to_string(), def);
     }
 
@@ -1650,6 +1728,15 @@ fn parse_sprite_rule(
                 "Receptor" => {
                     if let Some(x_str) = props.get("x") {
                         builder.column_xs[*c as usize] = x_str.parse().unwrap_or(0);
+                    }
+                }
+                "Mine" => {
+                    let idx = (*p as usize * style.num_cols) + *c as usize;
+                    if let Some(slot) = builder.mines.get_mut(idx) {
+                        apply_properties(slot);
+                    }
+                    if let Some(slot) = builder.mine_frames.get_mut(idx) {
+                        apply_properties(slot);
                     }
                 }
                 _ => {}

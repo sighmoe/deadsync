@@ -53,6 +53,14 @@ pub fn parse_chart_notes(raw_note_bytes: &[u8]) -> Vec<ParsedNote> {
                         });
                         hold_heads[col_index] = Some(note_index);
                     }
+                    b'M' | b'm' => {
+                        notes.push(ParsedNote {
+                            row_index,
+                            column: col_index,
+                            note_type: NoteType::Mine,
+                            tail_row_index: None,
+                        });
+                    }
                     b'3' => {
                         if let Some(head_idx) = hold_heads[col_index].take() {
                             if let Some(note) = notes.get_mut(head_idx) {
