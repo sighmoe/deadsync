@@ -35,6 +35,7 @@ pub struct ScoreInfo {
     pub score_percent: f64,
     pub grade: scores::Grade,
     pub speed_mod: ScrollSpeedSetting,
+    pub hands_achieved: u32,
     pub holds_held: u32,
     pub holds_total: u32,
     pub rolls_held: u32,
@@ -74,6 +75,7 @@ pub fn init(gameplay_results: Option<gameplay::State>) -> State {
             score_percent,
             grade,
             speed_mod: gs.scroll_speed,
+            hands_achieved: gs.hands_achieved,
             holds_held: gs.holds_held,
             holds_total: gs.holds_total,
             rolls_held: gs.rolls_held,
@@ -245,7 +247,7 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
         
         // --- RADAR LABELS & NUMBERS ---
         let radar_categories = [
-            ("hands", 0_u32, score_info.chart.stats.hands),
+            ("hands", score_info.hands_achieved, score_info.chart.stats.hands),
             ("holds", score_info.holds_held, score_info.holds_total),
             ("mines", score_info.mines_avoided, score_info.mines_total),
             ("rolls", score_info.rolls_held, score_info.rolls_total),

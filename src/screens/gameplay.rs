@@ -340,6 +340,7 @@ pub struct Judgment {
     pub time_error_ms: f32,
     pub grade: JudgeGrade, // The grade of this specific note
     pub row: usize,        // The row this judgment belongs to
+    pub column: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -648,6 +649,10 @@ fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
         }
     }
 
+    if state.hands_holding_count_for_stats > 0 {
+        state.hands_holding_count_for_stats -= 1;
+    }
+
     state.hold_judgments[column] = Some(HoldJudgmentRenderInfo {
         result: HoldResult::LetGo,
         triggered_at: Instant::now(),
@@ -678,6 +683,10 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
         hold.let_go_starting_life = 0.0;
         hold.last_held_row_index = hold.end_row_index;
         hold.last_held_beat = hold.end_beat;
+    }
+
+    if state.hands_holding_count_for_stats > 0 {
+        state.hands_holding_count_for_stats -= 1;
     }
 
     let mut updated_scoring = false;
@@ -922,6 +931,7 @@ pub struct State {
     pub tap_explosions: [Option<ActiveTapExplosion>; 4],
     pub mine_explosions: [Option<ActiveMineExplosion>; 4],
     pub active_holds: [Option<ActiveHold>; 4],
+    pub hands_achieved: u32,
     pub holds_total: u32,
     pub holds_held: u32,
     pub holds_held_for_score: u32,
@@ -932,6 +942,7 @@ pub struct State {
     pub mines_hit: u32,
     pub mines_hit_for_score: u32,
     pub mines_avoided: u32,
+    hands_holding_count_for_stats: i32,
 
     // Animation timing for this screen
     pub total_elapsed_in_screen: f32,
@@ -1186,6 +1197,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         tap_explosions: Default::default(),
         mine_explosions: Default::default(),
         active_holds: Default::default(),
+        hands_achieved: 0,
         holds_total,
         holds_held: 0,
         holds_held_for_score: 0,
@@ -1196,6 +1208,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         mines_hit: 0,
         mines_hit_for_score: 0,
         mines_avoided: 0,
+        hands_holding_count_for_stats: 0,
         total_elapsed_in_screen: 0.0,
         hold_to_exit_key: None,
         hold_to_exit_start: None,
@@ -1254,6 +1267,7 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
                 time_error_ms: time_error * 1000.0,
                 grade,
                 row: note_row_index,
+                column,
             };
 
             state.notes[note_index].result = Some(judgment);
@@ -1333,7 +1347,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
     ScreenAction::None
 }
 
-fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
+fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: Vec<Judgment>) {
     if judgments_in_row.is_empty() {
         return;
     }
@@ -1418,6 +1432,41 @@ fn finalize_row_judgment(state: &mut State, judgments_in_row: Vec<Judgment>) {
             state.full_combo_grade = Some(new_grade);
         }
     }
+
+    let mut successful_steps: u32 = 0;
+    let mut holds_started_this_row: u32 = 0;
+
+    for note in state
+        .notes
+        .iter()
+        .filter(|n| n.row_index == row_index && !matches!(n.note_type, NoteType::Mine))
+    {
+        if note
+            .result
+            .as_ref()
+            .is_some_and(|judgment| judgment.grade != JudgeGrade::Miss)
+        {
+            successful_steps = successful_steps.saturating_add(1);
+            if matches!(note.note_type, NoteType::Hold | NoteType::Roll) {
+                holds_started_this_row = holds_started_this_row.saturating_add(1);
+            }
+        }
+    }
+
+    if successful_steps >= 3 {
+        state.hands_achieved = state.hands_achieved.saturating_add(1);
+    }
+
+    let holding_before_row = state.hands_holding_count_for_stats.max(0) as u32;
+    if (holding_before_row == 1 && successful_steps >= 2)
+        || (holding_before_row >= 2 && successful_steps >= 1)
+    {
+        state.hands_achieved = state.hands_achieved.saturating_add(1);
+    }
+
+    state.hands_holding_count_for_stats = state
+        .hands_holding_count_for_stats
+        .saturating_add(holds_started_this_row as i32);
 }
 
 fn update_judged_rows(state: &mut State) {
@@ -1450,7 +1499,7 @@ fn update_judged_rows(state: &mut State) {
                 .filter_map(|n| n.result.clone())
                 .collect();
 
-            finalize_row_judgment(state, judgments_on_row);
+            finalize_row_judgment(state, state.judged_row_cursor, judgments_on_row);
             state.judged_row_cursor += 1;
         } else {
             break;
@@ -1683,6 +1732,7 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
                 time_error_ms: ((music_time_sec - note_time) * 1000.0),
                 grade: JudgeGrade::Miss,
                 row: note_row_index,
+                column: col_idx,
             };
 
             if let Some(hold) = state.notes[note_index].hold.as_mut() {
