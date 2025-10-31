@@ -2963,7 +2963,7 @@ fn build_holds_mines_rolls_pane(state: &State, asset_manager: &AssetManager) -> 
 
     let categories = [
         ("holds", state.holds_held, state.holds_total),
-        ("mines", 0u32, state.chart.stats.mines as u32),
+        ("mines", state.mines_avoided, state.mines_total),
         ("rolls", state.rolls_held, state.rolls_total),
     ];
 

@@ -39,6 +39,8 @@ pub struct ScoreInfo {
     pub holds_total: u32,
     pub rolls_held: u32,
     pub rolls_total: u32,
+    pub mines_avoided: u32,
+    pub mines_total: u32,
 }
 
 pub struct State {
@@ -74,6 +76,8 @@ pub fn init(gameplay_results: Option<gameplay::State>) -> State {
             holds_total: gs.holds_total,
             rolls_held: gs.rolls_held,
             rolls_total: gs.rolls_total,
+            mines_avoided: gs.mines_avoided,
+            mines_total: gs.mines_total,
         }
     });
 
@@ -241,7 +245,7 @@ fn build_p1_stats_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor
         let radar_categories = [
             ("hands", 0_u32, score_info.chart.stats.hands),
             ("holds", score_info.holds_held, score_info.holds_total),
-            ("mines", 0_u32, score_info.chart.stats.mines),
+            ("mines", score_info.mines_avoided, score_info.mines_total),
             ("rolls", score_info.rolls_held, score_info.rolls_total),
         ];
 
