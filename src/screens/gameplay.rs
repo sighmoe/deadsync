@@ -18,6 +18,7 @@ use crate::ui::color;
 use crate::ui::components::screen_bar::{self, ScreenBarParams};
 use crate::ui::font;
 use log::{info, warn};
+use std::array::from_fn;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::f32::consts::TAU;
@@ -122,7 +123,9 @@ const Z_HOLD_CAP: i32 = 110;
 const Z_HOLD_EXPLOSION: i32 = 120;
 const Z_HOLD_GLOW: i32 = 130;
 const Z_TAP_NOTE: i32 = 140;
-const MINE_CORE_SIZE_RATIO: f32 = 0.5;
+const MINE_CORE_SIZE_RATIO: f32 = 0.45;
+const MINE_FILL_LAYERS: usize = 32;
+const MINE_GRADIENT_SAMPLES: usize = 64;
 
 // --- JUDGMENT WINDOWS (in seconds) ---
 // These are the base values from StepMania's defaults.
@@ -154,7 +157,12 @@ type MineGradientCache = HashMap<MineGradientKey, Arc<Vec<[f32; 4]>>>;
 static MINE_GRADIENT_CACHE: LazyLock<Mutex<MineGradientCache>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn mine_fill_color(slot: &SpriteSlot, beat: f32) -> Option<[f32; 4]> {
+#[derive(Clone, Debug)]
+struct MineFillState {
+    layers: [[f32; 4]; MINE_FILL_LAYERS],
+}
+
+fn mine_fill_state(slot: &SpriteSlot, beat: f32) -> Option<MineFillState> {
     let colors = {
         let key = MineGradientKey {
             texture_key: slot.texture_key().to_string(),
@@ -178,17 +186,23 @@ fn mine_fill_color(slot: &SpriteSlot, beat: f32) -> Option<[f32; 4]> {
     }
 
     let phase = beat.rem_euclid(1.0);
-    let idx_float = phase * (colors.len() - 1) as f32;
-    let idx = idx_float.floor() as usize;
-    let next_idx = (idx + 1).min(colors.len() - 1);
-    let t = (idx_float - idx as f32).clamp(0.0, 1.0);
-    let mut result = [0.0_f32; 4];
-    for i in 0..4 {
-        let a = colors[idx][i];
-        let b = colors[next_idx][i];
-        result[i] = a + (b - a) * t;
+    let len = colors.len();
+    if len == 0 {
+        return None;
     }
-    Some(result)
+
+    let idx_float = phase * len as f32;
+    let idx = (idx_float.floor() as usize) % len;
+
+    let layers = from_fn(|layer| {
+        let offset = layer % len;
+        let sample_index = (idx + len - offset) % len;
+        let mut color = colors[sample_index];
+        color[3] = 1.0;
+        color
+    });
+
+    Some(MineFillState { layers })
 }
 
 fn load_mine_gradient_colors(slot: &SpriteSlot) -> Option<Vec<[f32; 4]>> {
@@ -270,7 +284,43 @@ fn load_mine_gradient_colors(slot: &SpriteSlot) -> Option<Vec<[f32; 4]>> {
         }
     }
 
-    Some(colors)
+    if colors.is_empty() {
+        return None;
+    }
+
+    if colors.len() == 1 {
+        let mut color = colors[0];
+        color[3] = 1.0;
+        return Some(vec![color; MINE_GRADIENT_SAMPLES.max(1)]);
+    }
+
+    let max_index = (colors.len() - 1) as f32;
+    let mut samples = Vec::with_capacity(MINE_GRADIENT_SAMPLES);
+    let divisor = (MINE_GRADIENT_SAMPLES.saturating_sub(1)).max(1) as f32;
+    for i in 0..MINE_GRADIENT_SAMPLES {
+        let t = i as f32 / divisor;
+        let position = t * max_index;
+        let base_index = position.floor() as usize;
+        let next_index = (base_index + 1).min(colors.len() - 1);
+        let frac = (position - base_index as f32).clamp(0.0, 1.0);
+
+        let c0 = colors[base_index];
+        let c1 = colors[next_index];
+        let mut sampled = [
+            c0[0] + (c1[0] - c0[0]) * frac,
+            c0[1] + (c1[1] - c0[1]) * frac,
+            c0[2] + (c1[2] - c0[2]) * frac,
+            1.0,
+        ];
+
+        sampled[0] = sampled[0].clamp(0.0, 1.0);
+        sampled[1] = sampled[1].clamp(0.0, 1.0);
+        sampled[2] = sampled[2].clamp(0.0, 1.0);
+
+        samples.push(sampled);
+    }
+
+    Some(samples)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -2347,17 +2397,28 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         .unwrap_or([TARGET_ARROW_PIXEL_SIZE, TARGET_ARROW_PIXEL_SIZE]);
 
                     if let Some(slot) = fill_slot {
-                        if let Some(color) = mine_fill_color(slot, state.current_beat) {
+                        if let Some(fill_state) = mine_fill_state(slot, state.current_beat) {
                             let width = circle_reference[0] * MINE_CORE_SIZE_RATIO;
                             let height = circle_reference[1] * MINE_CORE_SIZE_RATIO;
 
-                            actors.push(act!(sprite("circle.png"):
-                                align(0.5, 0.5):
-                                xy(playfield_center_x + col_x_offset as f32, y_pos):
-                                zoomto(width, height):
-                                diffuse(color[0], color[1], color[2], 1.0):
-                                z(Z_TAP_NOTE - 2)
-                            ));
+                            for layer_idx in (0..MINE_FILL_LAYERS).rev() {
+                                let color = fill_state.layers[layer_idx];
+                                let scale = (layer_idx as f32 + 1.0) / MINE_FILL_LAYERS as f32;
+                                let layer_width = width * scale;
+                                let layer_height = height * scale;
+
+                                if layer_width <= 0.0 || layer_height <= 0.0 {
+                                    continue;
+                                }
+
+                                actors.push(act!(sprite("circle.png"):
+                                    align(0.5, 0.5):
+                                    xy(playfield_center_x + col_x_offset as f32, y_pos):
+                                    zoomto(layer_width, layer_height):
+                                    diffuse(color[0], color[1], color[2], 1.0):
+                                    z(Z_TAP_NOTE - 2)
+                                ));
+                            }
                         } else {
                             let frame = slot.frame_index(time, beat);
                             let uv = slot.uv_for_frame(frame);
