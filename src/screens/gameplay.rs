@@ -1453,14 +1453,8 @@ fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: 
         }
     }
 
-    if successful_steps >= 3 {
-        state.hands_achieved = state.hands_achieved.saturating_add(1);
-    }
-
     let holding_before_row = state.hands_holding_count_for_stats.max(0) as u32;
-    if (holding_before_row == 1 && successful_steps >= 2)
-        || (holding_before_row >= 2 && successful_steps >= 1)
-    {
+    if successful_steps > 0 && successful_steps + holding_before_row >= 3 {
         state.hands_achieved = state.hands_achieved.saturating_add(1);
     }
 
