@@ -1,5 +1,5 @@
 use crate::act;
-use crate::assets::AssetManager;
+use crate::assets::{self, AssetManager};
 use crate::core::audio;
 use crate::core::input::InputState;
 use crate::core::space::*;
@@ -115,6 +115,7 @@ const SHOW_COMBO_AT: u32 = 4; // From Simply Love metrics
 const HOLD_JUDGMENT_TOTAL_DURATION: f32 = 0.8; // Hold judgment anim duration from Simply Love metrics
 const DRAW_DISTANCE_BEFORE_TARGETS_MULTIPLIER: f32 = 1.5; // Simply Love's DrawDistanceBeforeTargetsPixels
 const DRAW_DISTANCE_AFTER_TARGETS: f32 = 130.0; // Simply Love's DrawDistanceAfterTargetsPixels (absolute value)
+const MINE_EXPLOSION_DURATION: f32 = 0.6; // Mirrors Simply Love's HitMineCommand timing (0.3 + 0.3 seconds)
 
 // Z-order layers for key gameplay visuals (higher draws on top)
 const Z_RECEPTOR: i32 = 100;
@@ -122,6 +123,7 @@ const Z_HOLD_BODY: i32 = 110;
 const Z_HOLD_CAP: i32 = 110;
 const Z_HOLD_EXPLOSION: i32 = 120;
 const Z_HOLD_GLOW: i32 = 130;
+const Z_MINE_EXPLOSION: i32 = 101;
 const Z_TAP_NOTE: i32 = 140;
 const MINE_CORE_SIZE_RATIO: f32 = 0.45;
 const MINE_FILL_LAYERS: usize = 32;
@@ -414,6 +416,11 @@ struct ActiveTapExplosion {
 }
 
 #[derive(Clone, Debug)]
+struct ActiveMineExplosion {
+    elapsed: f32,
+}
+
+#[derive(Clone, Debug)]
 struct ActiveHold {
     note_index: usize,
     end_time: f32,
@@ -482,6 +489,79 @@ fn trigger_tap_explosion(state: &mut State, column: usize, grade: JudgeGrade) {
             start_beat: state.current_beat,
         });
     }
+}
+
+fn trigger_mine_explosion(state: &mut State, column: usize) {
+    state.mine_explosions[column] = Some(ActiveMineExplosion { elapsed: 0.0 });
+}
+
+fn handle_mine_hit(
+    state: &mut State,
+    column: usize,
+    arrow_list_index: usize,
+    note_index: usize,
+    time_error: f32,
+) -> bool {
+    let abs_time_error = time_error.abs();
+    let mine_window = BASE_MINE_WINDOW + TIMING_WINDOW_ADD;
+    if abs_time_error > mine_window {
+        return false;
+    }
+
+    if state.notes[note_index].mine_result.is_some() {
+        return false;
+    }
+
+    state.notes[note_index].mine_result = Some(MineResult::Hit);
+    state.mines_hit = state.mines_hit.saturating_add(1);
+
+    let note_row_index = state.notes[note_index].row_index;
+    info!(
+        "MINE HIT: Row {}, Col {}, Error: {:.2}ms",
+        note_row_index,
+        column,
+        time_error * 1000.0
+    );
+
+    state.arrows[column].remove(arrow_list_index);
+    state.change_life(LifeChange::HIT_MINE);
+    state.combo = 0;
+    state.miss_combo = state.miss_combo.saturating_add(1);
+    state.combo_after_miss = 0;
+    if state.full_combo_grade.is_some() {
+        state.first_fc_attempt_broken = true;
+    }
+    state.full_combo_grade = None;
+    state.receptor_glow_timers[column] = 0.0;
+    trigger_mine_explosion(state, column);
+    audio::play_sfx("assets/sounds/boom.ogg");
+
+    true
+}
+
+fn try_hit_mine_while_held(state: &mut State, column: usize, current_time: f32) -> bool {
+    let candidate = {
+        let arrows = &state.arrows[column];
+        let notes = &state.notes;
+        let timing = &state.timing;
+
+        arrows.iter().enumerate().find_map(|(idx, arrow)| {
+            let note = &notes[arrow.note_index];
+            if !matches!(note.note_type, NoteType::Mine) || note.mine_result.is_some() {
+                return None;
+            }
+
+            let note_time = timing.get_time_for_beat(arrow.beat);
+            Some((idx, arrow.note_index, note_time))
+        })
+    };
+
+    let Some((arrow_idx, note_index, note_time)) = candidate else {
+        return false;
+    };
+
+    let time_error = current_time - note_time;
+    handle_mine_hit(state, column, arrow_idx, note_index, time_error)
 }
 
 fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
@@ -757,6 +837,7 @@ pub struct State {
     pub receptor_glow_timers: [f32; 4], // Timers for glow effect on each receptor
     pub receptor_bop_timers: [f32; 4],  // Timers for the "bop" animation on empty press
     pub tap_explosions: [Option<ActiveTapExplosion>; 4],
+    pub mine_explosions: [Option<ActiveMineExplosion>; 4],
     pub active_holds: [Option<ActiveHold>; 4],
     pub holds_total: u32,
     pub holds_held: u32,
@@ -1001,6 +1082,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         receptor_glow_timers: [0.0; 4],
         receptor_bop_timers: [0.0; 4],
         tap_explosions: Default::default(),
+        mine_explosions: Default::default(),
         active_holds: Default::default(),
         holds_total,
         holds_held: 0,
@@ -1038,33 +1120,16 @@ fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool {
         let abs_time_error = time_error.abs();
 
         if matches!(note_type, NoteType::Mine) {
-            let mine_window = BASE_MINE_WINDOW + TIMING_WINDOW_ADD;
-            if abs_time_error <= mine_window {
-                if state.notes[note_index].mine_result.is_none() {
-                    state.notes[note_index].mine_result = Some(MineResult::Hit);
-                    state.mines_hit = state.mines_hit.saturating_add(1);
-                }
-
-                info!(
-                    "MINE HIT: Row {}, Col {}, Error: {:.2}ms",
-                    note_row_index,
-                    column,
-                    time_error * 1000.0
-                );
-
-                state.arrows[column].remove(arrow_list_index);
-                state.change_life(LifeChange::HIT_MINE);
-                state.combo = 0;
-                state.miss_combo = state.miss_combo.saturating_add(1);
-                state.combo_after_miss = 0;
-                if state.full_combo_grade.is_some() {
-                    state.first_fc_attempt_broken = true;
-                }
-                state.full_combo_grade = None;
-                state.receptor_glow_timers[column] = 0.0;
-
+            if handle_mine_hit(
+                state,
+                column,
+                arrow_list_index,
+                note_index,
+                time_error,
+            ) {
                 return true;
             }
+            return false;
         }
 
         let fantastic_window = BASE_FANTASTIC_WINDOW + TIMING_WINDOW_ADD;
@@ -1381,6 +1446,8 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
             if !hit_note {
                 state.receptor_bop_timers[col] = 0.11;
             }
+        } else if now_down && was_down {
+            let _ = try_hit_mine_while_held(state, col, music_time_sec);
         }
     }
     state.prev_inputs = current_inputs;
@@ -1437,6 +1504,15 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
                 .unwrap_or(0.0);
 
             if lifetime <= 0.0 || active.elapsed >= lifetime {
+                *explosion = None;
+            }
+        }
+    }
+
+    for explosion in &mut state.mine_explosions {
+        if let Some(active) = explosion {
+            active.elapsed += delta_time;
+            if active.elapsed >= MINE_EXPLOSION_DURATION {
                 *explosion = None;
             }
         }
@@ -1828,6 +1904,19 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             }
         };
 
+        let mine_explosion_size = {
+            let base = assets::texture_dims("hit_mine_explosion.png")
+                .map(|meta| [meta.w.max(1) as f32, meta.h.max(1) as f32])
+                .unwrap_or([TARGET_EXPLOSION_PIXEL_SIZE, TARGET_EXPLOSION_PIXEL_SIZE]);
+
+            if base[1] <= 0.0 {
+                base
+            } else {
+                let scale = TARGET_EXPLOSION_PIXEL_SIZE / base[1];
+                [base[0] * scale, TARGET_EXPLOSION_PIXEL_SIZE]
+            }
+        };
+
         // Receptors + glow
         for i in 0..4 {
             let col_x_offset = ns.column_xs[i];
@@ -1981,6 +2070,43 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         ));
                     }
                 }
+            }
+        }
+
+        // Mine explosions
+        for i in 0..4 {
+            if let Some(active) = state.mine_explosions[i].as_ref() {
+                let duration = MINE_EXPLOSION_DURATION.max(f32::EPSILON);
+                let progress = (active.elapsed / duration).clamp(0.0, 1.0);
+                let alpha = if progress < 0.5 {
+                    1.0
+                } else {
+                    1.0 - ((progress - 0.5) / 0.5)
+                }
+                .clamp(0.0, 1.0);
+
+                if alpha <= f32::EPSILON {
+                    continue;
+                }
+
+                let rotation_progress = 180.0 * progress;
+                let col_x_offset = ns.column_xs[i];
+                let base_rotation = ns
+                    .receptor_off
+                    .get(i)
+                    .map(|slot| slot.def.rotation_deg as f32)
+                    .unwrap_or(0.0);
+                let final_rotation = base_rotation + rotation_progress;
+
+                actors.push(act!(sprite("hit_mine_explosion.png"):
+                    align(0.5, 0.5):
+                    xy(playfield_center_x + col_x_offset as f32, receptor_y):
+                    zoomto(mine_explosion_size[0], mine_explosion_size[1]):
+                    rotationz(-final_rotation):
+                    diffuse(1.0, 1.0, 1.0, alpha):
+                    blend(add):
+                    z(Z_MINE_EXPLOSION)
+                ));
             }
         }
 

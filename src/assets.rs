@@ -1,4 +1,3 @@
-// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/deadsync/src/assets.rs =====
 use crate::core::gfx::{Backend, Texture as GfxTexture};
 use crate::gameplay::profile;
 use crate::ui::font::{self, Font, FontLoadData};
@@ -182,6 +181,10 @@ impl AssetManager {
             ("circle.png".to_string(), "circle.png".to_string()),
             ("swoosh.png".to_string(), "swoosh.png".to_string()),
             ("heart.png".to_string(), "heart.png".to_string()),
+            (
+                "hit_mine_explosion.png".to_string(),
+                "hit_mine_explosion.png".to_string(),
+            ),
             ("banner1.png".to_string(), "_fallback/banner1.png".to_string()),
             ("banner2.png".to_string(), "_fallback/banner2.png".to_string()),
             ("banner3.png".to_string(), "_fallback/banner3.png".to_string()),
