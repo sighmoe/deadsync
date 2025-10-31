@@ -1508,9 +1508,17 @@ fn update_judged_rows(state: &mut State) {
 }
 
 fn get_music_end_time(state: &State) -> f32 {
-    let last_note_beat = state.notes.last().map_or(0.0, |n| n.beat);
-    let last_step_seconds = state.timing.get_time_for_beat(last_note_beat);
-    let last_hittable_second = last_step_seconds + (BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD);
+    let last_relevant_second = state.notes.iter().fold(0.0_f32, |acc, note| {
+        let mut relevant_beat = note.beat;
+        if let Some(hold) = note.hold.as_ref() {
+            relevant_beat = relevant_beat.max(hold.end_beat);
+        }
+
+        let note_second = state.timing.get_time_for_beat(relevant_beat);
+        acc.max(note_second)
+    });
+
+    let last_hittable_second = last_relevant_second + (BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD);
     last_hittable_second + TRANSITION_OUT_DURATION
 }
 
