@@ -1,9 +1,8 @@
-// ===== FILE: /mnt/c/Users/PerfectTaste/Documents/GitHub/deadsync/src/app.rs =====
 use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList};
 use crate::core::input;
 use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
-use crate::game::{profile, scores};
+use crate::game::{profile, scores, scroll::ScrollSpeedSetting};
 use crate::assets::AssetManager;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, player_options, Screen as CurrentScreen, ScreenAction, Screen};
@@ -908,9 +907,9 @@ impl ApplicationHandler for App {
                         if prev == CurrentScreen::PlayerOptions {
                             if let Some(po_state) = &self.player_options_state {
                                 let setting = match po_state.speed_mod.mod_type.as_str() {
-                                    "C" => Some(profile::ScrollSpeedSetting::CMod(po_state.speed_mod.value)),
-                                    "X" => Some(profile::ScrollSpeedSetting::XMod(po_state.speed_mod.value)),
-                                    "M" => Some(profile::ScrollSpeedSetting::MMod(po_state.speed_mod.value)),
+                                    "C" => Some(ScrollSpeedSetting::CMod(po_state.speed_mod.value)),
+                                    "X" => Some(ScrollSpeedSetting::XMod(po_state.speed_mod.value)),
+                                    "M" => Some(ScrollSpeedSetting::MMod(po_state.speed_mod.value)),
                                     _ => None,
                                 };
 

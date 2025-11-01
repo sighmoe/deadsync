@@ -13,7 +13,7 @@ use crate::game::chart::ChartData;
 use crate::game::scores;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
-use crate::game::profile::ScrollSpeedSetting;
+use crate::game::scroll::ScrollSpeedSetting;
 use crate::assets::AssetManager;
 use crate::ui::font;
 

@@ -1,7 +1,7 @@
+pub use super::scroll::ScrollSpeedSetting;
 use configparser::ini::Ini;
 use log::{info, warn};
 use once_cell::sync::Lazy;
-use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -13,7 +13,6 @@ const PROFILE_INI_PATH: &str = "save/profiles/00000000/profile.ini";
 const GROOVESTATS_INI_PATH: &str = "save/profiles/00000000/groovestats.ini";
 const PROFILE_AVATAR_PATH: &str = "save/profiles/00000000/profile.png";
 
-// This enum is now part of the profile system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackgroundFilter {
     Off,
@@ -48,99 +47,6 @@ impl core::fmt::Display for BackgroundFilter {
             Self::Dark => write!(f, "Dark"),
             Self::Darker => write!(f, "Darker"),
             Self::Darkest => write!(f, "Darkest"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ScrollSpeedSetting {
-    CMod(f32),
-    XMod(f32),
-    MMod(f32),
-}
-
-impl Default for ScrollSpeedSetting {
-    fn default() -> Self {
-        ScrollSpeedSetting::CMod(600.0)
-    }
-}
-
-impl fmt::Display for ScrollSpeedSetting {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ScrollSpeedSetting::CMod(bpm) => {
-                if (*bpm - bpm.round()).abs() < f32::EPSILON {
-                    write!(f, "C{}", bpm.round() as i32)
-                } else {
-                    write!(f, "C{}", bpm)
-                }
-            }
-            ScrollSpeedSetting::XMod(multiplier) => {
-                if (*multiplier - multiplier.round()).abs() < f32::EPSILON {
-                    write!(f, "X{}", multiplier.round() as i32)
-                } else {
-                    write!(f, "X{:.2}", multiplier)
-                }
-            }
-            ScrollSpeedSetting::MMod(bpm) => {
-                if (*bpm - bpm.round()).abs() < f32::EPSILON {
-                    write!(f, "M{}", bpm.round() as i32)
-                } else {
-                    write!(f, "M{}", bpm)
-                }
-            }
-        }
-    }
-}
-
-impl FromStr for ScrollSpeedSetting {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let trimmed = s.trim();
-        if trimmed.is_empty() {
-            return Err("ScrollSpeed value is empty".to_string());
-        }
-
-        let (variant, value_str) = if let Some(rest) = trimmed.strip_prefix('C') {
-            ("C", rest)
-        } else if let Some(rest) = trimmed.strip_prefix('c') {
-            ("C", rest)
-        } else if let Some(rest) = trimmed.strip_prefix('X') {
-            ("X", rest)
-        } else if let Some(rest) = trimmed.strip_prefix('x') {
-            ("X", rest)
-        } else if let Some(rest) = trimmed.strip_prefix('M') {
-            ("M", rest)
-        } else if let Some(rest) = trimmed.strip_prefix('m') {
-            ("M", rest)
-        } else {
-            return Err(format!(
-                "ScrollSpeed '{}' must start with 'C', 'X', or 'M'",
-                trimmed
-            ));
-        };
-
-        let value: f32 = value_str
-            .trim()
-            .parse()
-            .map_err(|_| format!("ScrollSpeed '{}' is not a valid number", trimmed))?;
-
-        if value <= 0.0 {
-            return Err(format!(
-                "ScrollSpeed '{}' must be greater than zero",
-                trimmed
-            ));
-        }
-
-        match variant {
-            "C" => Ok(ScrollSpeedSetting::CMod(value)),
-            "X" => Ok(ScrollSpeedSetting::XMod(value)),
-            "M" => Ok(ScrollSpeedSetting::MMod(value)),
-            _ => Err(format!(
-                "ScrollSpeed '{}' has an unsupported modifier",
-                trimmed
-            )),
         }
     }
 }

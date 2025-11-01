@@ -7,11 +7,11 @@ use crate::core::space::{is_wide, widescale};
 use crate::game::chart::{ChartData, NoteType as ChartNoteType};
 use crate::game::parsing::notes as note_parser;
 use crate::game::parsing::noteskin::{
-    self, NUM_QUANTIZATIONS, Noteskin, Quantization, SpriteSlot, Style,
+    self, Noteskin, Quantization, SpriteSlot, Style, NUM_QUANTIZATIONS,
 };
-use crate::game::profile::{self, ScrollSpeedSetting};
 use crate::game::song::SongData;
 use crate::game::timing::TimingData;
+use crate::game::{profile, scroll::ScrollSpeedSetting};
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;
@@ -19,69 +19,14 @@ use crate::ui::components::screen_bar::{self, ScreenBarParams};
 use crate::ui::font;
 use log::{info, warn};
 use std::array::from_fn;
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::f32::consts::TAU;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
-
-impl ScrollSpeedSetting {
-    pub const ARROW_SPACING: f32 = 64.0;
-
-    pub fn effective_bpm(self, current_chart_bpm: f32, reference_bpm: f32) -> f32 {
-        match self {
-            ScrollSpeedSetting::CMod(bpm) => bpm,
-            ScrollSpeedSetting::XMod(multiplier) => current_chart_bpm * multiplier,
-            ScrollSpeedSetting::MMod(target_bpm) => {
-                if reference_bpm > 0.0 {
-                    current_chart_bpm * (target_bpm / reference_bpm)
-                } else {
-                    current_chart_bpm
-                }
-            }
-        }
-    }
-
-    pub fn beat_multiplier(self, reference_bpm: f32) -> f32 {
-        match self {
-            ScrollSpeedSetting::XMod(multiplier) => multiplier,
-            ScrollSpeedSetting::MMod(target_bpm) => {
-                if reference_bpm > 0.0 {
-                    target_bpm / reference_bpm
-                } else {
-                    1.0
-                }
-            }
-            _ => 1.0,
-        }
-    }
-
-    pub fn pixels_per_second(self, current_chart_bpm: f32, reference_bpm: f32) -> f32 {
-        let bpm = self.effective_bpm(current_chart_bpm, reference_bpm);
-        if !bpm.is_finite() || bpm <= 0.0 {
-            0.0
-        } else {
-            (bpm / 60.0) * Self::ARROW_SPACING
-        }
-    }
-
-    pub fn travel_time_seconds(
-        self,
-        draw_distance: f32,
-        current_chart_bpm: f32,
-        reference_bpm: f32,
-    ) -> f32 {
-        let speed = self.pixels_per_second(current_chart_bpm, reference_bpm);
-        if speed <= 0.0 {
-            0.0
-        } else {
-            draw_distance / speed
-        }
-    }
-}
 
 // --- CONSTANTS ---
 
@@ -875,9 +820,10 @@ const TIMING_WINDOW_SECONDS_ROLL: f32 = 0.35;
 
 const REGEN_COMBO_AFTER_MISS: u32 = 5;
 const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
-const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD; // In SM, this is tied to LifePercentChangeHeld
+// In SM, this is tied to LifePercentChangeHeld.
 // Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
 // Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
+const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD;
 
 pub struct State {
     // Song & Chart data

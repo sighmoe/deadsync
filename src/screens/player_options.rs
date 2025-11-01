@@ -156,15 +156,15 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
 pub fn init(song: Arc<SongData>, chart_difficulty_index: usize, active_color_index: i32) -> State {
     let profile = crate::game::profile::get();
     let speed_mod = match profile.scroll_speed {
-        crate::game::profile::ScrollSpeedSetting::CMod(bpm) => SpeedMod {
+        crate::game::scroll::ScrollSpeedSetting::CMod(bpm) => SpeedMod {
             mod_type: "C".to_string(),
             value: bpm,
         },
-        crate::game::profile::ScrollSpeedSetting::XMod(mult) => SpeedMod {
+        crate::game::scroll::ScrollSpeedSetting::XMod(mult) => SpeedMod {
             mod_type: "X".to_string(),
             value: mult,
         },
-        crate::game::profile::ScrollSpeedSetting::MMod(bpm) => SpeedMod {
+        crate::game::scroll::ScrollSpeedSetting::MMod(bpm) => SpeedMod {
             mod_type: "M".to_string(),
             value: bpm,
         },
