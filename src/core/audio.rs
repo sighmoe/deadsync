@@ -505,7 +505,6 @@ fn music_decoder_thread_loop(
 
         if !out_tmp.is_empty() {
             apply_fade_envelope(&mut out_tmp, out_ch, frames_emitted_total, fade_spec);
-            frames_emitted_total = frames_emitted_total.saturating_add((out_tmp.len() / out_ch) as u64);
         }
 
         let mut off = 0;

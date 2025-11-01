@@ -138,8 +138,8 @@ fn load_mine_gradient_colors(slot: &SpriteSlot) -> Option<Vec<[f32; 4]>> {
         return None;
     }
 
-    let mut src_x = slot.def.src[0].max(0) as u32;
-    let mut src_y = slot.def.src[1].max(0) as u32;
+    let src_x = slot.def.src[0].max(0) as u32;
+    let src_y = slot.def.src[1].max(0) as u32;
     let mut sample_width = width as u32;
     let mut sample_height = height as u32;
 

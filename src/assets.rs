@@ -153,7 +153,7 @@ impl AssetManager {
         }
     }
 
-    // --- Font Management (moved from ui/font.rs global static) ---
+    // --- Font Management ---
 
     pub fn register_font(&mut self, name: &'static str, font: Font) {
         self.fonts.insert(name, font);
@@ -173,7 +173,7 @@ impl AssetManager {
         self.fonts.get(name).map(f)
     }
 
-    // --- Loading Logic (moved from app.rs) ---
+    // --- Loading Logic ---
 
     pub fn load_initial_assets(&mut self, backend: &mut Backend) -> Result<(), Box<dyn Error>> {
         self.load_initial_textures(backend)?;
