@@ -5,6 +5,7 @@ use crate::core::input::InputState;
 use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
 use crate::game::chart::{ChartData, NoteType as ChartNoteType};
+use crate::game::judgment::{self, JudgeGrade, Judgment};
 use crate::game::parsing::notes as note_parser;
 use crate::game::parsing::noteskin::{
     self, Noteskin, Quantization, SpriteSlot, Style, NUM_QUANTIZATIONS,
@@ -270,24 +271,6 @@ fn load_mine_gradient_colors(slot: &SpriteSlot) -> Option<Vec<[f32; 4]>> {
     Some(samples)
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum JudgeGrade {
-    Fantastic, // W1
-    Excellent, // W2
-    Great,     // W3
-    Decent,    // W4
-    WayOff,    // W5
-    Miss,
-}
-
-#[derive(Clone, Debug)]
-pub struct Judgment {
-    pub time_error_ms: f32,
-    pub grade: JudgeGrade, // The grade of this specific note
-    pub row: usize,        // The row this judgment belongs to
-    pub column: usize,
-}
-
 #[derive(Clone, Debug)]
 pub enum NoteType {
     Tap,
@@ -398,68 +381,8 @@ impl LifeChange {
     const LET_GO: f32 = -0.080;
 }
 
-struct HoldScore;
-impl HoldScore {
-    const HELD: i32 = 5;
-    const LET_GO: i32 = 0;
-}
-
-struct MineScore;
-impl MineScore {
-    const HIT: i32 = -6;
-}
-
-fn grade_points_for(grade: JudgeGrade) -> i32 {
-    match grade {
-        JudgeGrade::Fantastic => 5,
-        JudgeGrade::Excellent => 4,
-        JudgeGrade::Great => 2,
-        JudgeGrade::Decent => 0,
-        JudgeGrade::WayOff => -6,
-        JudgeGrade::Miss => -12,
-    }
-}
-
-fn calculate_itg_grade_points(
-    scoring_counts: &HashMap<JudgeGrade, u32>,
-    holds_held_for_score: u32,
-    rolls_held_for_score: u32,
-    mines_hit_for_score: u32,
-) -> i32 {
-    let mut total = 0i32;
-    for (grade, count) in scoring_counts {
-        total += grade_points_for(*grade) * (*count as i32);
-    }
-
-    total += holds_held_for_score as i32 * HoldScore::HELD;
-    total += rolls_held_for_score as i32 * HoldScore::HELD;
-    total += mines_hit_for_score as i32 * MineScore::HIT;
-    total
-}
-
-pub(crate) fn calculate_itg_score_percent(
-    scoring_counts: &HashMap<JudgeGrade, u32>,
-    holds_held_for_score: u32,
-    rolls_held_for_score: u32,
-    mines_hit_for_score: u32,
-    possible_grade_points: i32,
-) -> f64 {
-    if possible_grade_points <= 0 {
-        return 0.0;
-    }
-
-    let total_points = calculate_itg_grade_points(
-        scoring_counts,
-        holds_held_for_score,
-        rolls_held_for_score,
-        mines_hit_for_score,
-    );
-
-    (total_points as f64 / possible_grade_points as f64).max(0.0)
-}
-
 fn update_itg_grade_totals(state: &mut State) {
-    state.earned_grade_points = calculate_itg_grade_points(
+    state.earned_grade_points = judgment::calculate_itg_grade_points(
         &state.scoring_counts,
         state.holds_held_for_score,
         state.rolls_held_for_score,
@@ -1033,8 +956,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     // Possible grade points mirror ITGmania's scoring: taps + hold/roll heads use the
     // Fantastic weight (5) and successful hold/roll completions add the Held weight (5).
     let possible_grade_points = (num_taps_and_holds * 5)
-        + (holds_total as u64 * HoldScore::HELD as u64)
-        + (rolls_total as u64 * HoldScore::HELD as u64);
+        + (holds_total as u64 * judgment::HOLD_SCORE_HELD as u64)
+        + (rolls_total as u64 * judgment::HOLD_SCORE_HELD as u64);
     let possible_grade_points = possible_grade_points as i32;
 
     info!("Parsed {} notes from chart data.", notes.len());
@@ -2866,7 +2789,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let score_x = screen_center_x() - clamped_width / 4.3;
     let score_y = 56.0;
 
-    let score_percent = (calculate_itg_score_percent(
+    let score_percent = (judgment::calculate_itg_score_percent(
         &state.scoring_counts,
         state.holds_held_for_score,
         state.rolls_held_for_score,

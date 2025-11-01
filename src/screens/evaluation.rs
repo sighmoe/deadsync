@@ -7,7 +7,8 @@ use crate::ui::components::{heart_bg, pad_display, screen_bar};
 use crate::ui::components::screen_bar::{AvatarParams, ScreenBarParams, ScreenBarPosition, ScreenBarTitlePlacement};
 use crate::core::space::widescale;
 
-use crate::screens::gameplay::{self, JudgeGrade};
+use crate::game::judgment::{self, JudgeGrade};
+use crate::screens::gameplay;
 use crate::game::song::SongData;
 use crate::game::chart::ChartData;
 use crate::game::scores;
@@ -54,7 +55,7 @@ pub struct State {
 
 pub fn init(gameplay_results: Option<gameplay::State>) -> State {
     let score_info = gameplay_results.map(|gs| {
-        let score_percent = gameplay::calculate_itg_score_percent(
+        let score_percent = judgment::calculate_itg_score_percent(
             &gs.scoring_counts,
             gs.holds_held_for_score,
             gs.rolls_held_for_score,
