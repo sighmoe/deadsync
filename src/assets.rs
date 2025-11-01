@@ -1,5 +1,5 @@
 use crate::core::gfx::{Backend, Texture as GfxTexture};
-use crate::gameplay::profile;
+use crate::game::profile;
 use crate::ui::font::{self, Font, FontLoadData};
 use image::RgbaImage;
 use log::{info, warn};

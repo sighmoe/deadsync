@@ -4,7 +4,7 @@ use crate::core::space::{widescale};
 use crate::screens::select_music::MusicWheelEntry;
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;
-use crate::gameplay::scores;
+use crate::game::scores;
 use std::collections::HashMap;
 
 // --- Colors ---

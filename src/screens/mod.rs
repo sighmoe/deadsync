@@ -9,7 +9,7 @@ pub mod evaluation;
 pub mod player_options;
 use std::path::PathBuf;
 
-use crate::gameplay::chart::ChartData;
+use crate::game::chart::ChartData;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScreenAction {
     None,

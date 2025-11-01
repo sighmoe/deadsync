@@ -1,5 +1,5 @@
 use crate::core::network;
-use crate::gameplay::profile::Profile;
+use crate::game::profile::Profile;
 use log::{info, warn};
 use once_cell::sync::Lazy;
 use serde::Deserialize;

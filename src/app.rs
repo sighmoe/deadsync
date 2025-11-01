@@ -3,11 +3,11 @@ use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList
 use crate::core::input;
 use crate::core::input::InputState;
 use crate::core::space::{self as space, Metrics};
-use crate::gameplay::{profile, scores};
+use crate::game::{profile, scores};
 use crate::assets::AssetManager;
 use crate::ui::color;
 use crate::screens::{gameplay, menu, options, init, select_color, select_music, sandbox, evaluation, player_options, Screen as CurrentScreen, ScreenAction, Screen};
-use crate::gameplay::parsing::simfile as song_loading;
+use crate::game::parsing::simfile as song_loading;
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,

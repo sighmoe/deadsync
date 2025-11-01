@@ -1,4 +1,4 @@
-use crate::gameplay::chart::NoteType;
+use crate::game::chart::NoteType;
 use log::info;
 
 #[derive(Clone, Debug)]

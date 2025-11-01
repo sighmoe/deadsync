@@ -23,10 +23,10 @@ use std::fs;
 
 // --- engine imports ---
 use crate::core::space::widescale;
-use crate::gameplay::song::{SongData, get_song_cache, SongPack};
+use crate::game::song::{SongData, get_song_cache, SongPack};
 use crate::assets::AssetManager;
-use crate::gameplay::profile;
-use crate::gameplay::scores;
+use crate::game::profile;
+use crate::game::scores;
 
 
 /* ---------------------------- transitions ---------------------------- */

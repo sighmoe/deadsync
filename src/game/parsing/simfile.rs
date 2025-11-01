@@ -1,4 +1,4 @@
-use crate::gameplay::{
+use crate::game::{
     chart::ChartData,
     song::{set_song_cache, SongData, SongPack},
 };

@@ -4,14 +4,14 @@ use crate::core::audio;
 use crate::core::input::InputState;
 use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
-use crate::gameplay::chart::{ChartData, NoteType as ChartNoteType};
-use crate::gameplay::parsing::notes as note_parser;
-use crate::gameplay::parsing::noteskin::{
+use crate::game::chart::{ChartData, NoteType as ChartNoteType};
+use crate::game::parsing::notes as note_parser;
+use crate::game::parsing::noteskin::{
     self, NUM_QUANTIZATIONS, Noteskin, Quantization, SpriteSlot, Style,
 };
-use crate::gameplay::profile::{self, ScrollSpeedSetting};
-use crate::gameplay::song::SongData;
-use crate::gameplay::timing::TimingData;
+use crate::game::profile::{self, ScrollSpeedSetting};
+use crate::game::song::SongData;
+use crate::game::timing::TimingData;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;
@@ -1965,10 +1965,10 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     actors.push(build_background(state));
 
     let filter_alpha = match profile.background_filter {
-        crate::gameplay::profile::BackgroundFilter::Off => 0.0,
-        crate::gameplay::profile::BackgroundFilter::Dark => 0.5,
-        crate::gameplay::profile::BackgroundFilter::Darker => 0.75,
-        crate::gameplay::profile::BackgroundFilter::Darkest => 0.95,
+        crate::game::profile::BackgroundFilter::Off => 0.0,
+        crate::game::profile::BackgroundFilter::Dark => 0.5,
+        crate::game::profile::BackgroundFilter::Darker => 0.75,
+        crate::game::profile::BackgroundFilter::Darkest => 0.95,
     };
 
     if filter_alpha > 0.0 {

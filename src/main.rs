@@ -3,12 +3,12 @@ mod ui;
 mod screens;
 mod app;
 mod config;
-mod gameplay;
+mod game;
 mod assets;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     config::load();
-    gameplay::profile::load();
+    game::profile::load();
     if let Err(e) = core::audio::init() {
         // The game can run without audio; log the error and continue.
         log::error!("Failed to initialize audio engine: {}", e);

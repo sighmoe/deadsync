@@ -1,7 +1,7 @@
 use crate::act;
 use crate::core::audio;
 use crate::core::space::*;
-use crate::gameplay::song::SongData;
+use crate::game::song::SongData;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
 use crate::ui::color;
@@ -154,17 +154,17 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
 }
 
 pub fn init(song: Arc<SongData>, chart_difficulty_index: usize, active_color_index: i32) -> State {
-    let profile = crate::gameplay::profile::get();
+    let profile = crate::game::profile::get();
     let speed_mod = match profile.scroll_speed {
-        crate::gameplay::profile::ScrollSpeedSetting::CMod(bpm) => SpeedMod {
+        crate::game::profile::ScrollSpeedSetting::CMod(bpm) => SpeedMod {
             mod_type: "C".to_string(),
             value: bpm,
         },
-        crate::gameplay::profile::ScrollSpeedSetting::XMod(mult) => SpeedMod {
+        crate::game::profile::ScrollSpeedSetting::XMod(mult) => SpeedMod {
             mod_type: "X".to_string(),
             value: mult,
         },
-        crate::gameplay::profile::ScrollSpeedSetting::MMod(bpm) => SpeedMod {
+        crate::game::profile::ScrollSpeedSetting::MMod(bpm) => SpeedMod {
             mod_type: "M".to_string(),
             value: bpm,
         },

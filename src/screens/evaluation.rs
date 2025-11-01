@@ -8,16 +8,16 @@ use crate::ui::components::screen_bar::{AvatarParams, ScreenBarParams, ScreenBar
 use crate::core::space::widescale;
 
 use crate::screens::gameplay::{self, JudgeGrade};
-use crate::gameplay::song::SongData;
-use crate::gameplay::chart::ChartData;
-use crate::gameplay::scores;
+use crate::game::song::SongData;
+use crate::game::chart::ChartData;
+use crate::game::scores;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
-use crate::gameplay::profile::ScrollSpeedSetting;
+use crate::game::profile::ScrollSpeedSetting;
 use crate::assets::AssetManager;
 use crate::ui::font;
 
-use crate::gameplay::profile;
+use crate::game::profile;
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use chrono::Local;

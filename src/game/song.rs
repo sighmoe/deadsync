@@ -1,4 +1,4 @@
-use crate::gameplay::chart::ChartData;
+use crate::game::chart::ChartData;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
