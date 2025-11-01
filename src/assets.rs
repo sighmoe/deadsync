@@ -38,68 +38,95 @@ pub fn canonical_texture_key<P: AsRef<Path>>(p: P) -> String {
 }
 
 pub fn parse_sprite_sheet_dims(filename: &str) -> (u32, u32) {
-    let s = filename;
-    let bytes = s.as_bytes();
-    let n = bytes.len();
-
-    let lower = s.to_ascii_lowercase();
-    let lb = lower.as_bytes();
-    let mut res_spans: Vec<(usize, usize)> = Vec::new();
-    let mut i = 0usize;
-    while i < n {
-        if lb[i] == b'(' && i + 4 <= n && &lb[i..i + 4] == b"(res" {
-            let mut j = i + 4;
-            while j < n && lb[j] != b')' {
-                j += 1;
-            }
-            if j < n && lb[j] == b')' {
-                res_spans.push((i, j));
-                i = j + 1;
-                continue;
-            }
+    #[inline(always)]
+    fn parse_ascii_digits(bytes: &[u8]) -> Option<u32> {
+        if bytes.is_empty() {
+            return None;
         }
-        i += 1;
+        let mut value: u32 = 0;
+        for &b in bytes {
+            if !b.is_ascii_digit() {
+                return None;
+            }
+            let digit = (b - b'0') as u32;
+            value = value.checked_mul(10)?.checked_add(digit)?;
+        }
+        Some(value)
     }
-    let in_res = |idx: usize| -> bool {
-        for (a, b) in &res_spans {
-            if idx >= *a && idx <= *b {
-                return true;
-            }
-        }
-        false
-    };
 
-    let mut pairs: Vec<(usize, u32, u32)> = Vec::new();
-    i = 0;
-    while i < n {
-        if (bytes[i] == b'x' || bytes[i] == b'X') && i > 0 && bytes[i - 1].is_ascii_digit() {
-            let mut l = i;
-            while l > 0 && bytes[l - 1].is_ascii_digit() {
-                l -= 1;
+    #[inline(always)]
+    fn is_res_tag(bytes: &[u8], idx: usize) -> bool {
+        idx + 4 <= bytes.len()
+            && bytes[idx] == b'('
+            && bytes[idx + 1].eq_ignore_ascii_case(&b'r')
+            && bytes[idx + 2].eq_ignore_ascii_case(&b'e')
+            && bytes[idx + 3].eq_ignore_ascii_case(&b's')
+    }
+
+    #[inline(always)]
+    fn skip_parenthetical(bytes: &[u8], start: usize) -> usize {
+        let mut depth = 0usize;
+        let mut idx = start;
+        while idx < bytes.len() {
+            match bytes[idx] {
+                b'(' => depth += 1,
+                b')' => {
+                    if depth == 0 {
+                        return idx + 1;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        return idx + 1;
+                    }
+                }
+                _ => {}
             }
-            let mut r = i + 1;
-            while r < n && bytes[r].is_ascii_digit() {
-                r += 1;
+            idx += 1;
+        }
+        bytes.len()
+    }
+
+    let bytes = filename.as_bytes();
+    let mut dims: Option<(u32, u32)> = None;
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        if is_res_tag(bytes, i) {
+            i = skip_parenthetical(bytes, i);
+            continue;
+        }
+
+        let b = bytes[i];
+        if (b == b'x' || b == b'X') && i > 0 && bytes[i - 1].is_ascii_digit() {
+            let mut left = i;
+            while left > 0 && bytes[left - 1].is_ascii_digit() {
+                left -= 1;
             }
-            if l < i && i + 1 < r {
-                if let (Ok(ws), Ok(hs)) = (std::str::from_utf8(&bytes[l..i]), std::str::from_utf8(&bytes[i + 1..r])) {
-                    if let (Ok(w), Ok(h)) = (ws.parse::<u32>(), hs.parse::<u32>()) {
-                        if w > 0 && h > 0 {
-                            pairs.push((l, w, h));
-                        }
+
+            let mut right = i + 1;
+            while right < bytes.len() && bytes[right].is_ascii_digit() {
+                right += 1;
+            }
+
+            if left < i && i + 1 < right {
+                if let (Some(w), Some(h)) = (
+                    parse_ascii_digits(&bytes[left..i]),
+                    parse_ascii_digits(&bytes[i + 1..right]),
+                ) {
+                    if w > 0 && h > 0 {
+                        dims = Some((w, h));
                     }
                 }
             }
+
+            i = right;
+            continue;
         }
+
         i += 1;
     }
 
-    for (pos, w, h) in pairs.into_iter().rev() {
-        if !in_res(pos) {
-            return (w, h);
-        }
-    }
-    (1, 1)
+    dims.unwrap_or((1, 1))
 }
 
 
