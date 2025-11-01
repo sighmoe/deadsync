@@ -4,8 +4,9 @@ use crate::core::audio;
 use crate::core::input::InputState;
 use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
-use crate::game::chart::{ChartData, NoteType as ChartNoteType};
+use crate::game::chart::ChartData;
 use crate::game::judgment::{self, JudgeGrade, Judgment};
+use crate::game::note::{HoldData, HoldResult, MineResult, Note, NoteType};
 use crate::game::parsing::notes as note_parser;
 use crate::game::parsing::noteskin::{
     self, Noteskin, Quantization, SpriteSlot, Style, NUM_QUANTIZATIONS,
@@ -22,7 +23,6 @@ use log::{info, warn};
 use std::array::from_fn;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::f32::consts::TAU;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -269,50 +269,6 @@ fn load_mine_gradient_colors(slot: &SpriteSlot) -> Option<Vec<[f32; 4]>> {
     }
 
     Some(samples)
-}
-
-#[derive(Clone, Debug)]
-pub enum NoteType {
-    Tap,
-    Hold,
-    Roll,
-    Mine,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum HoldResult {
-    Held,
-    LetGo,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum MineResult {
-    Hit,
-    Avoided,
-}
-
-#[derive(Clone, Debug)]
-pub struct HoldData {
-    pub end_row_index: usize,
-    pub end_beat: f32,
-    pub result: Option<HoldResult>,
-    pub life: f32,
-    pub let_go_started_at: Option<f32>,
-    pub let_go_starting_life: f32,
-    pub last_held_row_index: usize,
-    pub last_held_beat: f32,
-}
-
-#[derive(Clone, Debug)]
-pub struct Note {
-    pub beat: f32,
-    pub column: usize,
-    pub note_type: NoteType,
-    // NEW: Add a row index for grouping and a place to store results
-    pub row_index: usize,
-    pub result: Option<Judgment>,
-    pub hold: Option<HoldData>,
-    pub mine_result: Option<MineResult>,
 }
 
 #[derive(Clone, Debug)]
@@ -902,27 +858,26 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     let mut rolls_total: u32 = 0;
     let mut mines_total: u32 = 0;
     for parsed in parsed_notes {
-        let Some(beat) = timing.get_beat_for_row(parsed.row_index) else {
+        let row_index = parsed.row_index;
+        let Some(beat) = timing.get_beat_for_row(row_index) else {
             continue;
         };
 
-        let note_type = match parsed.note_type {
-            ChartNoteType::Tap => NoteType::Tap,
-            ChartNoteType::Hold => {
+        let note_type = parsed.note_type;
+        match note_type {
+            NoteType::Hold => {
                 holds_total = holds_total.saturating_add(1);
-                NoteType::Hold
             }
-            ChartNoteType::Roll => {
+            NoteType::Roll => {
                 rolls_total = rolls_total.saturating_add(1);
-                NoteType::Roll
             }
-            ChartNoteType::Mine => {
+            NoteType::Mine => {
                 mines_total = mines_total.saturating_add(1);
-                NoteType::Mine
             }
-        };
+            NoteType::Tap => {}
+        }
 
-        let hold = match (&note_type, parsed.tail_row_index) {
+        let hold = match (note_type, parsed.tail_row_index) {
             (NoteType::Hold | NoteType::Roll, Some(tail_row)) => {
                 timing.get_beat_for_row(tail_row).map(|end_beat| HoldData {
                     end_row_index: tail_row,
@@ -931,7 +886,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
                     life: INITIAL_HOLD_LIFE,
                     let_go_started_at: None,
                     let_go_starting_life: 0.0,
-                    last_held_row_index: parsed.row_index,
+                    last_held_row_index: row_index,
                     last_held_beat: beat,
                 })
             }
@@ -942,13 +897,12 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
             beat,
             column: parsed.column,
             note_type,
-            row_index: parsed.row_index,
+            row_index,
             result: None,
             hold,
             mine_result: None,
         });
     }
-
     let num_taps_and_holds = notes
         .iter()
         .filter(|note| !matches!(note.note_type, NoteType::Mine))
