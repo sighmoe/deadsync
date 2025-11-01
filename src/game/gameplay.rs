@@ -819,7 +819,6 @@ pub fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool 
                 time_error_ms: time_error * 1000.0,
                 grade,
                 row: note_row_index,
-                column,
             };
 
             state.notes[note_index].result = Some(judgment);
@@ -1275,7 +1274,6 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
                 time_error_ms: ((music_time_sec - note_time) * 1000.0),
                 grade: JudgeGrade::Miss,
                 row: note_row_index,
-                column: col_idx,
             };
 
             if let Some(hold) = state.notes[note_index].hold.as_mut() {

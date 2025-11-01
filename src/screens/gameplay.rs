@@ -19,13 +19,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
-pub use crate::game::gameplay::{handle_key_press, init, judge_a_tap, update};
-pub use crate::game::gameplay::{
-    ActiveHold, ActiveMineExplosion, ActiveTapExplosion, Arrow, HoldJudgmentRenderInfo,
-    JudgmentRenderInfo, State, DRAW_DISTANCE_AFTER_TARGETS,
-    DRAW_DISTANCE_BEFORE_TARGETS_MULTIPLIER, HOLD_JUDGMENT_TOTAL_DURATION, MINE_EXPLOSION_DURATION,
-    RECEPTOR_GLOW_DURATION, RECEPTOR_Y_OFFSET_FROM_CENTER, TRANSITION_IN_DURATION,
-    TRANSITION_OUT_DURATION,
+pub use crate::game::gameplay::{handle_key_press, init, update, State};
+use crate::game::gameplay::{
+    HOLD_JUDGMENT_TOTAL_DURATION, MINE_EXPLOSION_DURATION, RECEPTOR_GLOW_DURATION,
+    RECEPTOR_Y_OFFSET_FROM_CENTER, TRANSITION_IN_DURATION, TRANSITION_OUT_DURATION,
 };
 
 // --- CONSTANTS ---

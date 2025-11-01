@@ -357,7 +357,7 @@ fn create_opengl_context(
         let preference = DisplayApiPreference::Egl;
         let display = unsafe { Display::new(display_handle, preference)? };
         
-        let vsync_logic = move |display: &Display, surface: &Surface<WindowSurface>, context: &PossiblyCurrentContext| {
+        let vsync_logic = move |_display: &Display, surface: &Surface<WindowSurface>, context: &PossiblyCurrentContext| {
             use glutin::surface::SwapInterval;
             let interval = if vsync_enabled {
                 SwapInterval::Wait(std::num::NonZeroU32::new(1).unwrap())

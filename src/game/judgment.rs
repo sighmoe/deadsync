@@ -15,11 +15,9 @@ pub struct Judgment {
     pub time_error_ms: f32,
     pub grade: JudgeGrade, // The grade of this specific note
     pub row: usize,        // The row this judgment belongs to
-    pub column: usize,
 }
 
 pub const HOLD_SCORE_HELD: i32 = 5;
-pub const HOLD_SCORE_LET_GO: i32 = 0;
 pub const MINE_SCORE_HIT: i32 = -6;
 
 pub fn grade_points_for(grade: JudgeGrade) -> i32 {

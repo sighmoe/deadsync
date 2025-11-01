@@ -416,8 +416,6 @@ pub struct Noteskin {
     pub mines: Vec<Option<SpriteSlot>>,
     pub mine_frames: Vec<Option<SpriteSlot>>,
     pub column_xs: Vec<i32>,
-    pub field_left_x: i32,
-    pub field_right_x: i32,
     pub tap_explosions: HashMap<String, TapExplosion>,
     pub receptor_pulse: ReceptorPulse,
     pub hold_let_go_gray_percent: f32,
@@ -813,17 +811,6 @@ impl NoteskinBuilder {
             .collect();
 
         let column_xs = self.column_xs;
-        let field_left_x = column_xs.first().cloned().unwrap_or(0)
-            - receptor_off
-                .first()
-                .map(|slot| slot.def.size[0] / 2)
-                .unwrap_or(0);
-        let field_right_x = column_xs.last().cloned().unwrap_or(0)
-            + receptor_off
-                .last()
-                .map(|slot| slot.def.size[0] / 2)
-                .unwrap_or(0);
-
         Ok(Noteskin {
             notes,
             receptor_off,
@@ -831,8 +818,6 @@ impl NoteskinBuilder {
             mines,
             mine_frames,
             column_xs,
-            field_left_x,
-            field_right_x,
             tap_explosions,
             receptor_pulse: self.receptor_pulse,
             hold_let_go_gray_percent: self.hold_let_go_gray_percent,
