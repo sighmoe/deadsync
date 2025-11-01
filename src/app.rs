@@ -1,6 +1,5 @@
 use crate::core::gfx::{self as renderer, create_backend, BackendType, RenderList};
-use crate::core::input;
-use crate::core::input::InputState;
+use crate::core::input::{self, InputSource, InputState, Lane};
 use crate::core::space::{self as space, Metrics};
 use crate::game::{profile, scores, scroll::ScrollSpeedSetting};
 use crate::assets::AssetManager;
@@ -348,6 +347,7 @@ impl App {
         key_event: winit::event::KeyEvent,
     ) {
         let is_transitioning = !matches!(self.transition, TransitionState::Idle);
+        let event_timestamp = Instant::now();
 
         // IMPORTANT: do NOT mirror keyboard arrows into InputState while in Gameplay.
         // Gameplay judges directly from KeyEvent; InputState is reserved for gamepad.
@@ -406,7 +406,7 @@ impl App {
             CurrentScreen::Menu => menu::handle_key_press(&mut self.menu_state, &key_event),
             CurrentScreen::Gameplay => {
                 if let Some(gs) = &mut self.gameplay_state {
-                    gameplay::handle_key_press(gs, &key_event)
+                    gameplay::handle_key_press(gs, &key_event, event_timestamp)
                 } else {
                     ScreenAction::None
                 }
@@ -435,12 +435,26 @@ impl App {
 
     #[inline(always)]
     fn apply_dir_from_pad(&mut self, event_loop: &ActiveEventLoop, dir: PadDir, pressed: bool) {
+        let timestamp = Instant::now();
+        let lane = match dir {
+            PadDir::Left => Lane::Left,
+            PadDir::Down => Lane::Down,
+            PadDir::Up => Lane::Up,
+            PadDir::Right => Lane::Right,
+        };
+
         // 1) always update InputState so gameplay can read it for arrow hits
         match dir {
             PadDir::Up    => self.input_state.up = pressed,
             PadDir::Down  => self.input_state.down = pressed,
             PadDir::Left  => self.input_state.left = pressed,
             PadDir::Right => self.input_state.right = pressed,
+        }
+
+        if self.current_screen == CurrentScreen::Gameplay {
+            if let Some(gs) = &mut self.gameplay_state {
+                gs.queue_input_edge(InputSource::Gamepad, lane, pressed, timestamp);
+            }
         }
 
         // 2) SelectMusic has complex wheel logic that is handled in its own module.
@@ -810,7 +824,7 @@ impl ApplicationHandler for App {
                     TransitionState::Idle => {
                         match self.current_screen {
                             CurrentScreen::Gameplay => if let Some(gs) = &mut self.gameplay_state {
-                                let action = gameplay::update(gs, &self.input_state, delta_time);
+                                let action = gameplay::update(gs, delta_time);
                                 if let ScreenAction::Navigate(_) | ScreenAction::Exit = action.clone() {
                                     if self.handle_action(action, event_loop).is_err() {}
                                 }

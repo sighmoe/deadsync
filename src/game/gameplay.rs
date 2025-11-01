@@ -1,5 +1,5 @@
 use crate::core::audio;
-use crate::core::input::InputState;
+use crate::core::input::{InputEdge, InputSource, Lane, lane_from_keycode};
 use crate::core::space::*;
 use crate::game::chart::ChartData;
 use crate::game::judgment::{self, JudgeGrade, Judgment};
@@ -9,14 +9,14 @@ use crate::game::parsing::noteskin::{self, Noteskin, Style};
 use crate::game::song::SongData;
 use crate::game::timing::TimingData;
 use crate::game::{
-    life::{LifeChange, LIFE_REGEN_AMOUNT, MAX_REGEN_COMBO_AFTER_MISS, REGEN_COMBO_AFTER_MISS},
+    life::{LIFE_REGEN_AMOUNT, LifeChange, MAX_REGEN_COMBO_AFTER_MISS, REGEN_COMBO_AFTER_MISS},
     profile,
     scroll::ScrollSpeedSetting,
 };
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::color;
 use log::{info, warn};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -164,7 +164,9 @@ pub struct State {
     pub hold_to_exit_key: Option<KeyCode>,
     pub hold_to_exit_start: Option<Instant>,
     prev_inputs: [bool; 4],
-    keyboard_inputs: [bool; 4],
+    keyboard_lane_state: [bool; 4],
+    gamepad_lane_state: [bool; 4],
+    pending_edges: VecDeque<InputEdge>,
 
     log_timer: f32,
 }
@@ -205,6 +207,21 @@ impl State {
             self.is_failing = true;
             info!("Player has failed!");
         }
+    }
+
+    pub fn queue_input_edge(
+        &mut self,
+        source: InputSource,
+        lane: Lane,
+        pressed: bool,
+        timestamp: Instant,
+    ) {
+        self.pending_edges.push_back(InputEdge {
+            lane,
+            pressed,
+            source,
+            timestamp,
+        });
     }
 }
 
@@ -415,7 +432,9 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         hold_to_exit_key: None,
         hold_to_exit_start: None,
         prev_inputs: [false; 4],
-        keyboard_inputs: [false; 4],
+        keyboard_lane_state: [false; 4],
+        gamepad_lane_state: [false; 4],
+        pending_edges: VecDeque::new(),
         log_timer: 0.0,
     }
 }
@@ -861,29 +880,22 @@ pub fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool 
     false
 }
 
-pub fn handle_key_press(state: &mut State, event: &KeyEvent) -> ScreenAction {
+pub fn handle_key_press(state: &mut State, event: &KeyEvent, timestamp: Instant) -> ScreenAction {
     if let PhysicalKey::Code(key_code) = event.physical_key {
         if event.state == ElementState::Pressed && event.repeat {
             return ScreenAction::None;
         }
 
-        let column = match key_code {
-            KeyCode::ArrowLeft | KeyCode::KeyD => Some(0),
-            KeyCode::ArrowDown | KeyCode::KeyF => Some(1),
-            KeyCode::ArrowUp | KeyCode::KeyJ => Some(2),
-            KeyCode::ArrowRight | KeyCode::KeyK => Some(3),
-            _ => None,
-        };
-
-        if let Some(col_idx) = column {
-            state.keyboard_inputs[col_idx] = event.state == ElementState::Pressed;
+        if let Some(lane) = lane_from_keycode(key_code) {
+            let pressed = event.state == ElementState::Pressed;
+            state.queue_input_edge(InputSource::Keyboard, lane, pressed, timestamp);
         }
 
         match event.state {
             ElementState::Pressed => {
                 if key_code == KeyCode::Escape || key_code == KeyCode::Enter {
                     state.hold_to_exit_key = Some(key_code);
-                    state.hold_to_exit_start = Some(Instant::now());
+                    state.hold_to_exit_start = Some(timestamp);
                     return ScreenAction::None;
                 }
             }
@@ -1063,7 +1075,7 @@ fn get_music_end_time(state: &State) -> f32 {
     last_hittable_second + TRANSITION_OUT_DURATION
 }
 
-pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenAction {
+pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
     if let (Some(key), Some(start_time)) = (state.hold_to_exit_key, state.hold_to_exit_start) {
         if start_time.elapsed() >= std::time::Duration::from_secs(1) {
             state.hold_to_exit_key = None;
@@ -1120,25 +1132,42 @@ pub fn update(state: &mut State, input: &InputState, delta_time: f32) -> ScreenA
         return ScreenAction::Navigate(Screen::Evaluation);
     }
 
+    while let Some(edge) = state.pending_edges.pop_front() {
+        let lane_idx = edge.lane.index();
+        let was_down = state.keyboard_lane_state[lane_idx] || state.gamepad_lane_state[lane_idx];
+
+        match edge.source {
+            InputSource::Keyboard => state.keyboard_lane_state[lane_idx] = edge.pressed,
+            InputSource::Gamepad => state.gamepad_lane_state[lane_idx] = edge.pressed,
+        }
+
+        let is_down = state.keyboard_lane_state[lane_idx] || state.gamepad_lane_state[lane_idx];
+
+        if edge.pressed && is_down && !was_down {
+            let elapsed = now.saturating_duration_since(edge.timestamp).as_secs_f32();
+            let event_music_time = music_time_sec - elapsed;
+            let hit_note = judge_a_tap(state, lane_idx, event_music_time);
+            refresh_roll_life_on_step(state, lane_idx);
+            if !hit_note {
+                state.receptor_bop_timers[lane_idx] = 0.11;
+            }
+        }
+    }
+
     let current_inputs = [
-        input.left || state.keyboard_inputs[0],
-        input.down || state.keyboard_inputs[1],
-        input.up || state.keyboard_inputs[2],
-        input.right || state.keyboard_inputs[3],
+        state.keyboard_lane_state[0] || state.gamepad_lane_state[0],
+        state.keyboard_lane_state[1] || state.gamepad_lane_state[1],
+        state.keyboard_lane_state[2] || state.gamepad_lane_state[2],
+        state.keyboard_lane_state[3] || state.gamepad_lane_state[3],
     ];
     let prev_inputs = state.prev_inputs;
 
     for (col, (now_down, was_down)) in current_inputs.iter().copied().zip(prev_inputs).enumerate() {
-        if now_down && !was_down {
-            let hit_note = judge_a_tap(state, col, music_time_sec);
-            refresh_roll_life_on_step(state, col);
-            if !hit_note {
-                state.receptor_bop_timers[col] = 0.11;
-            }
-        } else if now_down && was_down {
+        if now_down && was_down {
             let _ = try_hit_mine_while_held(state, col, music_time_sec);
         }
     }
+
     state.prev_inputs = current_inputs;
 
     update_active_holds(state, &current_inputs, music_time_sec, delta_time);
