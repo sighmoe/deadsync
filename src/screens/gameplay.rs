@@ -13,7 +13,11 @@ use crate::game::parsing::noteskin::{
 };
 use crate::game::song::SongData;
 use crate::game::timing::TimingData;
-use crate::game::{profile, scroll::ScrollSpeedSetting};
+use crate::game::{
+    life::{LifeChange, LIFE_REGEN_AMOUNT, MAX_REGEN_COMBO_AFTER_MISS, REGEN_COMBO_AFTER_MISS},
+    profile,
+    scroll::ScrollSpeedSetting,
+};
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;
@@ -319,22 +323,6 @@ impl ActiveHold {
     fn is_engaged(&self) -> bool {
         !self.let_go && self.life > 0.0
     }
-}
-
-// NEW: Life change constants
-struct LifeChange;
-impl LifeChange {
-    const FANTASTIC: f32 = 0.008;
-    const EXCELLENT: f32 = 0.008;
-    const GREAT: f32 = 0.004;
-    const DECENT: f32 = 0.0;
-    const WAY_OFF: f32 = -0.050;
-    const MISS: f32 = -0.100;
-    #[allow(dead_code)]
-    const HIT_MINE: f32 = -0.050;
-    const HELD: f32 = 0.008;
-    #[allow(dead_code)]
-    const LET_GO: f32 = -0.080;
 }
 
 fn update_itg_grade_totals(state: &mut State) {
@@ -696,13 +684,6 @@ const MAX_HOLD_LIFE: f32 = 1.0;
 const INITIAL_HOLD_LIFE: f32 = 1.0;
 const TIMING_WINDOW_SECONDS_HOLD: f32 = 0.32;
 const TIMING_WINDOW_SECONDS_ROLL: f32 = 0.35;
-
-const REGEN_COMBO_AFTER_MISS: u32 = 5;
-const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
-// In SM, this is tied to LifePercentChangeHeld.
-// Simply Love sets TimingWindowSecondsHold to 0.32s, so mirror that grace window.
-// Reference: itgmania/Themes/Simply Love/Scripts/SL_Init.lua
-const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD;
 
 pub struct State {
     // Song & Chart data

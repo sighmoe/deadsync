@@ -1,5 +1,6 @@
 pub mod chart;
 pub mod judgment;
+pub mod life;
 pub mod note;
 pub mod parsing;
 pub mod profile;
