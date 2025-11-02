@@ -45,6 +45,8 @@ pub const DRAW_DISTANCE_AFTER_TARGETS: f32 = 130.0;
 pub const MINE_EXPLOSION_DURATION: f32 = 0.6;
 pub const HOLD_JUDGMENT_TOTAL_DURATION: f32 = 0.8;
 pub const RECEPTOR_GLOW_DURATION: f32 = 0.2;
+pub const COMBO_HUNDRED_MILESTONE_DURATION: f32 = 0.6;
+pub const COMBO_THOUSAND_MILESTONE_DURATION: f32 = 0.7;
 
 const MAX_HOLD_LIFE: f32 = 1.0;
 const INITIAL_HOLD_LIFE: f32 = 1.0;
@@ -81,6 +83,18 @@ pub struct ActiveTapExplosion {
 
 #[derive(Clone, Debug)]
 pub struct ActiveMineExplosion {
+    pub elapsed: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComboMilestoneKind {
+    Hundred,
+    Thousand,
+}
+
+#[derive(Clone, Debug)]
+pub struct ActiveComboMilestone {
+    pub kind: ComboMilestoneKind,
     pub elapsed: f32,
 }
 
@@ -146,6 +160,7 @@ pub struct State {
     pub tap_explosions: [Option<ActiveTapExplosion>; 4],
     pub mine_explosions: [Option<ActiveMineExplosion>; 4],
     pub active_holds: [Option<ActiveHold>; 4],
+    pub combo_milestones: Vec<ActiveComboMilestone>,
     pub hands_achieved: u32,
     pub holds_total: u32,
     pub holds_held: u32,
@@ -416,6 +431,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         tap_explosions: Default::default(),
         mine_explosions: Default::default(),
         active_holds: Default::default(),
+        combo_milestones: Vec::new(),
         hands_achieved: 0,
         holds_total,
         holds_held: 0,
@@ -483,6 +499,20 @@ fn trigger_tap_explosion(state: &mut State, column: usize, grade: JudgeGrade) {
 
 fn trigger_mine_explosion(state: &mut State, column: usize) {
     state.mine_explosions[column] = Some(ActiveMineExplosion { elapsed: 0.0 });
+}
+
+fn trigger_combo_milestone(state: &mut State, kind: ComboMilestoneKind) {
+    if let Some(index) = state
+        .combo_milestones
+        .iter()
+        .position(|milestone| milestone.kind == kind)
+    {
+        state.combo_milestones[index].elapsed = 0.0;
+    } else {
+        state
+            .combo_milestones
+            .push(ActiveComboMilestone { kind, elapsed: 0.0 });
+    }
 }
 
 fn handle_mine_hit(
@@ -995,6 +1025,14 @@ fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: 
     } else {
         state.combo += 1;
 
+        let combo = state.combo;
+        if combo > 0 && combo % 1000 == 0 {
+            trigger_combo_milestone(state, ComboMilestoneKind::Thousand);
+            trigger_combo_milestone(state, ComboMilestoneKind::Hundred);
+        } else if combo > 0 && combo % 100 == 0 {
+            trigger_combo_milestone(state, ComboMilestoneKind::Hundred);
+        }
+
         if !state.first_fc_attempt_broken {
             let new_grade = if let Some(current_fc_grade) = &state.full_combo_grade {
                 final_grade.max(*current_fc_grade)
@@ -1222,6 +1260,14 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
     for timer in &mut state.receptor_bop_timers {
         *timer = (*timer - delta_time).max(0.0);
     }
+    state.combo_milestones.retain_mut(|milestone| {
+        milestone.elapsed += delta_time;
+        let max_duration = match milestone.kind {
+            ComboMilestoneKind::Hundred => COMBO_HUNDRED_MILESTONE_DURATION,
+            ComboMilestoneKind::Thousand => COMBO_THOUSAND_MILESTONE_DURATION,
+        };
+        milestone.elapsed < max_duration
+    });
     for explosion in &mut state.tap_explosions {
         if let Some(active) = explosion {
             active.elapsed += delta_time;

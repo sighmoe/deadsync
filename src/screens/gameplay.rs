@@ -2,12 +2,12 @@ use crate::act;
 use crate::assets::{self, AssetManager};
 use crate::core::space::*;
 use crate::core::space::{is_wide, widescale};
+use crate::game::judgment;
 use crate::game::judgment::JudgeGrade;
+use crate::game::note::HoldResult;
+use crate::game::note::NoteType;
 use crate::game::parsing::noteskin::{Quantization, SpriteSlot, NUM_QUANTIZATIONS};
 use crate::game::{profile, scroll::ScrollSpeedSetting};
-use crate::game::note::HoldResult;
-use crate::game::judgment;
-use crate::game::note::NoteType;
 use crate::ui::actors::{Actor, SizeSpec};
 use crate::ui::color;
 use crate::ui::components::screen_bar::{self, ScreenBarParams};
@@ -21,6 +21,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 pub use crate::game::gameplay::{handle_key_press, init, update, State};
 use crate::game::gameplay::{
+    ComboMilestoneKind, COMBO_HUNDRED_MILESTONE_DURATION, COMBO_THOUSAND_MILESTONE_DURATION,
     HOLD_JUDGMENT_TOTAL_DURATION, MINE_EXPLOSION_DURATION, RECEPTOR_GLOW_DURATION,
     RECEPTOR_Y_OFFSET_FROM_CENTER, TRANSITION_IN_DURATION, TRANSITION_OUT_DURATION,
 };
@@ -1186,6 +1187,115 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                         customtexturerect(note_uv[0], note_uv[1], note_uv[2], note_uv[3]):
                         z(Z_TAP_NOTE)
                     ));
+                }
+            }
+        }
+    }
+
+    // Combo Milestone Explosions (100 / 1000 combo)
+    if !state.combo_milestones.is_empty() {
+        let combo_center_x = playfield_center_x;
+        let combo_center_y = screen_center_y() + 30.0;
+        let player_color = state.player_color;
+
+        let ease_out_quad = |t: f32| -> f32 {
+            let t = t.clamp(0.0, 1.0);
+            1.0 - (1.0 - t).powi(2)
+        };
+
+        for milestone in &state.combo_milestones {
+            match milestone.kind {
+                ComboMilestoneKind::Hundred => {
+                    let elapsed = milestone.elapsed;
+                    let explosion_duration = 0.5_f32;
+                    if elapsed <= explosion_duration {
+                        let progress = (elapsed / explosion_duration).clamp(0.0, 1.0);
+                        let zoom = 2.0 - progress;
+                        let alpha = (0.5 * (1.0 - progress)).max(0.0);
+                        for &direction in &[1.0_f32, -1.0_f32] {
+                            let rotation = 90.0 * direction * progress;
+                            actors.push(act!(sprite("combo_explosion.png"):
+                                align(0.5, 0.5):
+                                xy(combo_center_x, combo_center_y):
+                                zoom(zoom):
+                                rotationz(rotation):
+                                diffuse(1.0, 1.0, 1.0, alpha):
+                                blend(add):
+                                z(89)
+                            ));
+                        }
+                    }
+
+                    if elapsed <= COMBO_HUNDRED_MILESTONE_DURATION {
+                        let progress = (elapsed / COMBO_HUNDRED_MILESTONE_DURATION).clamp(0.0, 1.0);
+                        let eased = ease_out_quad(progress);
+                        let zoom = 0.25 + (2.0 - 0.25) * eased;
+                        let alpha = (0.6 * (1.0 - eased)).max(0.0);
+                        let rotation = 10.0 + (0.0 - 10.0) * eased;
+                        actors.push(act!(sprite("combo_100milestone_splode.png"):
+                            align(0.5, 0.5):
+                            xy(combo_center_x, combo_center_y):
+                            zoom(zoom):
+                            rotationz(rotation):
+                            diffuse(
+                                player_color[0],
+                                player_color[1],
+                                player_color[2],
+                                alpha
+                            ):
+                            blend(add):
+                            z(89)
+                        ));
+
+                        let mini_duration = 0.4_f32;
+                        if elapsed <= mini_duration {
+                            let mini_progress = (elapsed / mini_duration).clamp(0.0, 1.0);
+                            let mini_zoom = 0.25 + (1.8 - 0.25) * mini_progress;
+                            let mini_alpha = (1.0 - mini_progress).max(0.0);
+                            let mini_rotation = 10.0 + (0.0 - 10.0) * mini_progress;
+                            actors.push(act!(sprite("combo_100milestone_minisplode.png"):
+                                align(0.5, 0.5):
+                                xy(combo_center_x, combo_center_y):
+                                zoom(mini_zoom):
+                                rotationz(mini_rotation):
+                                diffuse(
+                                    player_color[0],
+                                    player_color[1],
+                                    player_color[2],
+                                    mini_alpha
+                                ):
+                                blend(add):
+                                z(89)
+                            ));
+                        }
+                    }
+                }
+                ComboMilestoneKind::Thousand => {
+                    let elapsed = milestone.elapsed;
+                    if elapsed <= COMBO_THOUSAND_MILESTONE_DURATION {
+                        let progress =
+                            (elapsed / COMBO_THOUSAND_MILESTONE_DURATION).clamp(0.0, 1.0);
+                        let zoom = 0.25 + (3.0 - 0.25) * progress;
+                        let alpha = (0.7 * (1.0 - progress)).max(0.0);
+                        let x_offset = 100.0 * progress;
+                        for &direction in &[1.0_f32, -1.0_f32] {
+                            let final_x = combo_center_x + x_offset * direction;
+                            actors.push(act!(sprite("combo_1000milestone_swoosh.png"):
+                                align(0.5, 0.5):
+                                xy(final_x, combo_center_y):
+                                zoom(zoom):
+                                zoomx(zoom * direction):
+                                diffuse(
+                                    player_color[0],
+                                    player_color[1],
+                                    player_color[2],
+                                    alpha
+                                ):
+                                blend(add):
+                                z(89)
+                            ));
+                        }
+                    }
                 }
             }
         }

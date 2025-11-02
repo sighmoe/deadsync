@@ -208,6 +208,19 @@ impl AssetManager {
             ("circle.png".to_string(), "circle.png".to_string()),
             ("swoosh.png".to_string(), "swoosh.png".to_string()),
             ("heart.png".to_string(), "heart.png".to_string()),
+            ("combo_explosion.png".to_string(), "combo_explosion.png".to_string()),
+            (
+                "combo_100milestone_splode.png".to_string(),
+                "combo_100milestone_splode.png".to_string(),
+            ),
+            (
+                "combo_100milestone_minisplode.png".to_string(),
+                "combo_100milestone_minisplode.png".to_string(),
+            ),
+            (
+                "combo_1000milestone_swoosh.png".to_string(),
+                "combo_1000milestone_swoosh.png".to_string(),
+            ),
             (
                 "hit_mine_explosion.png".to_string(),
                 "hit_mine_explosion.png".to_string(),
