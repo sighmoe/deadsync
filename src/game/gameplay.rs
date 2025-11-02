@@ -1,5 +1,5 @@
 use crate::core::audio;
-use crate::core::input::{InputEdge, InputSource, Lane, lane_from_keycode};
+use crate::core::input::{lane_from_keycode, InputEdge, InputSource, Lane};
 use crate::core::space::*;
 use crate::game::chart::ChartData;
 use crate::game::judgment::{self, JudgeGrade, Judgment};
@@ -9,7 +9,7 @@ use crate::game::parsing::noteskin::{self, Noteskin, Style};
 use crate::game::song::SongData;
 use crate::game::timing::TimingData;
 use crate::game::{
-    life::{LIFE_REGEN_AMOUNT, LifeChange, MAX_REGEN_COMBO_AFTER_MISS, REGEN_COMBO_AFTER_MISS},
+    life::{LifeChange, LIFE_REGEN_AMOUNT, MAX_REGEN_COMBO_AFTER_MISS, REGEN_COMBO_AFTER_MISS},
     profile,
     scroll::ScrollSpeedSetting,
 };
@@ -521,7 +521,6 @@ fn handle_mine_hit(
         updated_scoring = true;
     }
     state.combo = 0;
-    state.miss_combo = state.miss_combo.saturating_add(1);
     state.combo_after_miss = 0;
     if state.full_combo_grade.is_some() {
         state.first_fc_attempt_broken = true;
@@ -915,6 +914,16 @@ fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: 
         return;
     }
 
+    let row_has_miss = judgments_in_row
+        .iter()
+        .any(|judgment| judgment.grade == JudgeGrade::Miss);
+    let row_has_successful_hit = judgments_in_row.iter().any(|judgment| {
+        matches!(
+            judgment.grade,
+            JudgeGrade::Fantastic | JudgeGrade::Excellent | JudgeGrade::Great
+        )
+    });
+
     let mut updated_scoring = false;
     for judgment in &judgments_in_row {
         *state.judgment_counts.entry(judgment.grade).or_insert(0) += 1;
@@ -929,23 +938,23 @@ fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: 
         update_itg_grade_totals(state);
     }
 
-    let mut representative_judgment = None;
-    let mut has_miss = false;
-    let mut latest_offset = f32::NEG_INFINITY;
+    let final_judgment = if row_has_miss {
+        judgments_in_row
+            .iter()
+            .find(|judgment| judgment.grade == JudgeGrade::Miss)
+            .cloned()
+    } else {
+        judgments_in_row
+            .iter()
+            .max_by(|a, b| {
+                a.time_error_ms
+                    .partial_cmp(&b.time_error_ms)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .cloned()
+    };
 
-    for judgment in judgments_in_row {
-        if judgment.grade == JudgeGrade::Miss {
-            representative_judgment = Some(judgment.clone());
-            has_miss = true;
-            break;
-        }
-        if judgment.time_error_ms > latest_offset {
-            latest_offset = judgment.time_error_ms;
-            representative_judgment = Some(judgment.clone());
-        }
-    }
-
-    let Some(final_judgment) = representative_judgment else {
+    let Some(final_judgment) = final_judgment else {
         return;
     };
     let final_grade = final_judgment.grade;
@@ -969,18 +978,22 @@ fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: 
         judgment: final_judgment,
         judged_at: Instant::now(),
     });
-    state.miss_combo = 0;
 
-    if has_miss || matches!(final_grade, JudgeGrade::Decent | JudgeGrade::WayOff) {
+    if row_has_successful_hit {
+        state.miss_combo = 0;
+    }
+    if row_has_miss {
+        state.miss_combo = state.miss_combo.saturating_add(1);
+    }
+
+    if row_has_miss || matches!(final_grade, JudgeGrade::Decent | JudgeGrade::WayOff) {
         state.combo = 0;
         if state.full_combo_grade.is_some() {
             state.first_fc_attempt_broken = true;
         }
         state.full_combo_grade = None;
     } else {
-        if !state.is_dead() {
-            state.combo += 1;
-        }
+        state.combo += 1;
 
         if !state.first_fc_attempt_broken {
             let new_grade = if let Some(current_fc_grade) = &state.full_combo_grade {
