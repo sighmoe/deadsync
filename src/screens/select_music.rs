@@ -1,3 +1,4 @@
+// src/screens/select_music.rs
 use crate::act;
 use crate::core::audio;
 use crate::core::space::*;
@@ -27,6 +28,7 @@ use crate::game::song::{SongData, get_song_cache, SongPack};
 use crate::assets::AssetManager;
 use crate::game::profile;
 use crate::game::scores;
+use crate::game::chart::ChartData;
 
 
 /* ---------------------------- transitions ---------------------------- */
@@ -79,6 +81,7 @@ pub struct State {
     currently_playing_preview_path: Option<PathBuf>,
     prev_selected_index: usize,
     time_since_selection_change: f32,
+    pub displayed_chart_data: Option<Arc<ChartData>>,
 }
 
 /// Helper function to check if a specific difficulty index has a playable chart
@@ -234,6 +237,7 @@ pub fn init() -> State {
         session_elapsed: 0.0,
         prev_selected_index: 0,
         time_since_selection_change: 0.0,
+        displayed_chart_data: None,
     };
 
     rebuild_displayed_entries(&mut state);
@@ -565,14 +569,8 @@ pub fn handle_pad_button(state: &mut State, btn: PadButton, pressed: bool) -> Sc
 }
 
 pub fn update(state: &mut State, dt: f32) -> ScreenAction {
-    // Increment the timer every frame since the last selection change.
     state.time_since_selection_change += dt;
-    
-    // Handle the visual pulsing animation of the selected wheel item.
-    state.selection_animation_timer += dt;
-    if state.selection_animation_timer > SELECTION_ANIMATION_CYCLE_DURATION {
-        state.selection_animation_timer -= SELECTION_ANIMATION_CYCLE_DURATION;
-    }
+    state.selection_animation_timer = (state.selection_animation_timer + dt) % SELECTION_ANIMATION_CYCLE_DURATION;
 
     // Handle rapid scrolling when a navigation key is held down.
     if let (Some(direction), Some(held_since), Some(last_scrolled_at)) =
@@ -594,26 +592,25 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
                     }
                 }
                 state.nav_key_last_scrolled_at = Some(now);
-                // Reset the preview delay timer each time we auto-scroll.
                 state.time_since_selection_change = 0.0;
             }
         }
     }
 
-    // --- Song/Difficulty Change Logic ---
     if state.selected_index != state.prev_selected_index {
         audio::play_sfx("assets/sounds/change.ogg");
         state.prev_selected_index = state.selected_index;
-        state.time_since_selection_change = 0.0; // Reset preview timer on any change.
+        state.time_since_selection_change = 0.0;
 
-        // When the song changes, find the best matching difficulty based on the user's PREFERENCE.
+        // NEW: Clear displayed data only if we scroll onto a pack header.
+        if let Some(MusicWheelEntry::PackHeader { .. }) = state.entries.get(state.selected_index) {
+            state.displayed_chart_data = None;
+        }
+
         if let Some(MusicWheelEntry::Song(song)) = state.entries.get(state.selected_index) {
-            let preferred_difficulty = state.preferred_difficulty_index; // Use the stored preference
+            let preferred_difficulty = state.preferred_difficulty_index;
             let mut best_match_index = None;
             let mut min_diff = i32::MAX;
-
-            // Iterate through difficulties in canonical order (Beginner -> Challenge)
-            // to ensure tie-breaking favors easier charts.
             for i in 0..color::FILE_DIFFICULTY_NAMES.len() {
                 if is_difficulty_playable(song, i) {
                     let diff = (i as i32 - preferred_difficulty as i32).abs();
@@ -623,12 +620,11 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
                     }
                 }
             }
-            // Update the *current* selection, but NOT the preference.
             if let Some(best_index) = best_match_index { state.selected_difficulty_index = best_index; }
         }
-    }    
+    }
 
-    // Get the currently selected song or pack header.
+    // --- Get current selection for IMMEDIATE updates ---
     let (selected_song, selected_pack) = if let Some(entry) = state.entries.get(state.selected_index) {
         match entry {
             MusicWheelEntry::Song(song) => (Some(song.clone()), None),
@@ -638,12 +634,19 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
         (None, None)
     };
 
-    // --- MUSIC PREVIEW LOGIC WITH DELAY ---
+    // --- IMMEDIATE UPDATES (Banner) ---
+    let new_banner_path = selected_song.as_ref().and_then(|s| s.banner_path.clone()).or_else(|| selected_pack.and_then(|(_, path)| path));
+    if state.last_requested_banner_path != new_banner_path {
+        state.last_requested_banner_path = new_banner_path.clone();
+        return ScreenAction::RequestBanner(new_banner_path);
+    }
+    
+    // --- DELAYED UPDATES ---
     if state.time_since_selection_change >= PREVIEW_DELAY_SECONDS {
+        // Music Preview
         let music_path_for_preview = selected_song.as_ref().and_then(|s| s.music_path.clone());
         if state.currently_playing_preview_path != music_path_for_preview {
             state.currently_playing_preview_path = music_path_for_preview;
-
             let mut played = false;
             if let Some(song) = &selected_song {
                 if let (Some(path), Some(start), Some(length)) = (&song.music_path, song.sample_start, song.sample_length) {
@@ -664,32 +667,26 @@ pub fn update(state: &mut State, dt: f32) -> ScreenAction {
                 audio::stop_music();
             }
         }
+        
+        // Update displayed chart for UI and Graph
+        let chart_to_display = selected_song.as_ref().and_then(|song| {
+            let difficulty_name = color::FILE_DIFFICULTY_NAMES[state.selected_difficulty_index];
+            song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).cloned()
+        });
+        state.displayed_chart_data = chart_to_display.clone().map(Arc::new);
+        
+        // Density Graph
+        let new_chart_hash = chart_to_display.as_ref().map(|c| c.short_hash.clone());
+        if state.last_requested_chart_hash != new_chart_hash {
+            state.last_requested_chart_hash = new_chart_hash;
+            return ScreenAction::RequestDensityGraph(chart_to_display);
+        }
+
     } else if state.currently_playing_preview_path.is_some() {
-        // If we haven't met the delay yet but music is playing, stop it.
         state.currently_playing_preview_path = None;
         audio::stop_music();
     }
     
-    // --- DYNAMIC TEXTURE REQUEST LOGIC ---
-    // Request a new density graph if the selected chart has changed.
-    let chart_to_display = selected_song.as_ref().and_then(|song| {
-        let difficulty_name = color::FILE_DIFFICULTY_NAMES[state.selected_difficulty_index];
-        song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).cloned()
-    });
-    
-    let new_chart_hash = chart_to_display.as_ref().map(|c| c.short_hash.clone());
-    if state.last_requested_chart_hash != new_chart_hash {
-        state.last_requested_chart_hash = new_chart_hash;
-        return ScreenAction::RequestDensityGraph(chart_to_display);
-    }
-    
-    // Request a new banner if the selected song or pack has changed.
-    let new_banner_path = selected_song.as_ref().and_then(|s| s.banner_path.clone()).or_else(|| selected_pack.and_then(|(_, path)| path));
-    if state.last_requested_banner_path != new_banner_path {
-        state.last_requested_banner_path = new_banner_path.clone();
-        return ScreenAction::RequestBanner(new_banner_path);
-    }
-
     ScreenAction::None
 }
 
@@ -958,60 +955,63 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
     actors.push(main_frame);
 
-    // --- Get data for the selected chart ---
-        let selected_entry = state.entries.get(state.selected_index);
-        let selected_chart_data = if let Some(MusicWheelEntry::Song(song)) = selected_entry {
-            song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(color::FILE_DIFFICULTY_NAMES[state.selected_difficulty_index])).cloned()
+    // --- Get data for the various info panes ---
+    // IMMEDIATE data for things that update instantly (stats, artist, etc.)
+    let immediate_chart_data = if let Some(MusicWheelEntry::Song(song)) = selected_entry {
+        song.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(color::FILE_DIFFICULTY_NAMES[state.selected_difficulty_index])).cloned()
+    } else {
+        None
+    };
+
+    // DELAYED data for things that update after a pause (tech, density graph text)
+    let displayed_chart_data = state.displayed_chart_data.as_deref();
+
+    let (crossovers_text, footswitches_text, sideswitches_text, jacks_text, brackets_text) =
+        if let Some(chart) = displayed_chart_data {
+            (
+                chart.tech_counts.crossovers.to_string(),
+                chart.tech_counts.footswitches.to_string(),
+                chart.tech_counts.sideswitches.to_string(),
+                chart.tech_counts.jacks.to_string(),
+                chart.tech_counts.brackets.to_string(),
+            )
         } else {
-            None
+            // When a pack is selected, or chart doesn't exist for difficulty, show "0"
+            ("0".to_string(), "0".to_string(), "0".to_string(), "0".to_string(), "0".to_string())
         };
 
-        let (crossovers_text, footswitches_text, sideswitches_text, jacks_text, brackets_text) =
-            if let Some(chart) = &selected_chart_data {
-                (
-                    chart.tech_counts.crossovers.to_string(),
-                    chart.tech_counts.footswitches.to_string(),
-                    chart.tech_counts.sideswitches.to_string(),
-                    chart.tech_counts.jacks.to_string(),
-                    chart.tech_counts.brackets.to_string(),
-                )
-            } else {
-                // When a pack is selected, or chart doesn't exist for difficulty, show "0"
-                ("0".to_string(), "0".to_string(), "0".to_string(), "0".to_string(), "0".to_string())
+    let step_artist_text = immediate_chart_data.as_ref().map_or("".to_string(), |c| c.step_artist.clone());
+    let peak_nps_text = displayed_chart_data.map_or("".to_string(), |c| format!("Peak NPS: {:.1}", c.max_nps));
+    let breakdown_text = if let Some(chart) = displayed_chart_data {
+        asset_manager.with_fonts(|all_fonts| asset_manager.with_font("miso", |miso_font| -> Option<String> {
+            let panel_w = if is_wide() { 286.0 } else { 276.0 };
+            let text_zoom = 0.8;
+            let horizontal_padding = 16.0; // 8px padding on each side
+            let max_allowed_width = panel_w - horizontal_padding;
+
+            let check_width = |text: &str| {
+                let logical_width = font::measure_line_width_logical(miso_font, text, all_fonts) as f32;
+                let final_width = logical_width * text_zoom;
+                final_width <= max_allowed_width
             };
-
-        let step_artist_text = selected_chart_data.as_ref().map_or("".to_string(), |c| c.step_artist.clone());
-        let peak_nps_text = selected_chart_data.as_ref().map_or("Peak NPS: --".to_string(), |c| format!("Peak NPS: {:.1}", c.max_nps));
-        let breakdown_text = if let Some(chart) = &selected_chart_data {
-            asset_manager.with_fonts(|all_fonts| asset_manager.with_font("miso", |miso_font| -> Option<String> {
-                let panel_w = if is_wide() { 286.0 } else { 276.0 };
-                let text_zoom = 0.8;
-                let horizontal_padding = 16.0; // 8px padding on each side
-                let max_allowed_width = panel_w - horizontal_padding;
-
-                let check_width = |text: &str| {
-                    let logical_width = font::measure_line_width_logical(miso_font, text, all_fonts) as f32;
-                    let final_width = logical_width * text_zoom;
-                    final_width <= max_allowed_width
-                };
-        
-                if check_width(&chart.detailed_breakdown) {
-                    Some(chart.detailed_breakdown.clone())
-                } else if check_width(&chart.partial_breakdown) {
-                    Some(chart.partial_breakdown.clone())
-                } else if check_width(&chart.simple_breakdown) {
-                    Some(chart.simple_breakdown.clone())
-                } else {
-                    Some(format!("{} Total", chart.total_streams))
-                }
-            })).flatten().unwrap_or_else(|| chart.simple_breakdown.clone()) // Fallback if font isn't found
-        } else {
-            "".to_string()
-        };
+    
+            if check_width(&chart.detailed_breakdown) {
+                Some(chart.detailed_breakdown.clone())
+            } else if check_width(&chart.partial_breakdown) {
+                Some(chart.partial_breakdown.clone())
+            } else if check_width(&chart.simple_breakdown) {
+                Some(chart.simple_breakdown.clone())
+            } else {
+                Some(format!("{} Total", chart.total_streams))
+            }
+        })).flatten().unwrap_or_else(|| chart.simple_breakdown.clone()) // Fallback if font isn't found
+    } else {
+        "".to_string()
+    };
 
     // --- Get stats for the PaneDisplay ---
     let (steps_text, jumps_text, holds_text, mines_text, hands_text, rolls_text) =
-        if let Some(chart) = &selected_chart_data {
+        if let Some(chart) = &immediate_chart_data {
             (
                 chart.stats.total_steps.to_string(),
                 chart.stats.jumps.to_string(),
@@ -1118,13 +1118,11 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     }
 
     // --- Density graph panel (SL 1:1, Player 1, top-left anchored) ---
-    // Check if a song is selected to determine if graph content should be shown.
-    let is_song_selected = matches!(state.entries.get(state.selected_index), Some(MusicWheelEntry::Song(_)));
     let panel_w = if is_wide() { 286.0 } else { 276.0 };
     let panel_h = 64.0;
-
+    
     let mut graph_children: Vec<Actor> = Vec::new();
-
+    
     // Background quad (#1e282f), always drawn and exactly panel-sized
     graph_children.push(act!(quad:
         align(0.0, 0.0):
@@ -1132,16 +1130,16 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         setsize(panel_w, panel_h):
         diffuse(UI_BOX_BG_COLOR[0], UI_BOX_BG_COLOR[1], UI_BOX_BG_COLOR[2], UI_BOX_BG_COLOR[3])
     ));
-
-    // Only draw the graph sprite + labels + breakdown when a SONG is selected
-    if is_song_selected {
+    
+    // Only draw the graph sprite + labels + breakdown when we have delayed chart data to show
+    if state.displayed_chart_data.is_some() {
         // Density graph image fills the panel
         graph_children.push(act!(sprite(state.current_graph_key.clone()):
             align(0.0, 0.0):
             xy(0.0, 0.0):
             setsize(panel_w, panel_h)
         ));
-
+    
         // Peak NPS text
         graph_children.push(act!(text: font("miso"): settext(peak_nps_text):
             align(0.0, 0.5):
@@ -1149,7 +1147,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             zoom(0.8):
             diffuse(1.0, 1.0, 1.0, 1.0)
         ));
-
+    
         // Breakdown strip + centered text at the bottom of the panel
         graph_children.push(act!(quad:
             align(0.0, 0.0):
@@ -1161,10 +1159,10 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             align(0.5, 0.5):
             xy(0.5 * panel_w, panel_h - 17.0 + 8.5):
             zoom(0.8):
-            maxheight(15.0) // Use maxheight to ensure it doesn't overflow, but width is handled by string selection.
+            maxheight(15.0)
         ));
     }
-
+    
     let density_graph_panel = Actor::Frame {
         align: [0.0, 0.0],
         offset: [
@@ -1230,7 +1228,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         
         // --- High Scores ---
         // NEW LOGIC: Default to "----", then fill with initials if a score is found.
-        let (score_name, score_percent) = if let Some(chart) = &selected_chart_data {
+        let (score_name, score_percent) = if let Some(chart) = &immediate_chart_data {
              if let Some(cached_score) = scores::get_cached_score(&chart.short_hash) {
                  // A 'Failed' grade from GS means no score was found. Don't show 0.00%.
                  if cached_score.grade != scores::Grade::Failed {
@@ -1272,7 +1270,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         // --- Difficulty Meter ---
         let meter_text = if let Some(MusicWheelEntry::Song(_)) = selected_entry {
             // It's a song, show meter or "?" if no chart exists for the difficulty
-            selected_chart_data.as_ref().map_or("?".to_string(), |c| c.meter.to_string())
+            immediate_chart_data.as_ref().map_or("?".to_string(), |c| c.meter.to_string())
         } else {
             // It's a pack header, show nothing
             "".to_string()
@@ -1368,7 +1366,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     add_item(0, 2, &brackets_text,  "Brackets",     None);
 
     // Total Stream value text (only this one is clamped to 100 like SL)
-    let total_stream_value = if let Some(chart) = &selected_chart_data {
+    let total_stream_value = if let Some(chart) = displayed_chart_data {
         if chart.total_measures > 0 {
             let pct = (chart.total_streams as f32 / chart.total_measures as f32) * 100.0;
             format!("{}/{} ({:.1}%)", chart.total_streams, chart.total_measures, pct)
