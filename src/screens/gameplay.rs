@@ -1552,7 +1552,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         });
     }
 
-    // --- Life Meter (P1) ---  (drop-in replacement for the current block)
+    // --- Life Meter (P1) ---
     {
         let w = 136.0;
         let h = 18.0;
