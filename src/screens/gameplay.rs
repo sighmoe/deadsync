@@ -1902,5 +1902,28 @@ fn build_side_pane(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         }
     }));
 
+    // --- Peak NPS Display (as seen in Simply Love's Step Statistics) ---
+    if is_wide() {
+        let peak_nps_text = format!("Peak NPS: {:.2}", state.chart.max_nps);
+
+        // Positioned based on visual parity with Simply Love's Step Statistics pane
+        // for Player 1, which is on the right side of the screen.
+        let peak_nps_x = screen_width() - 59.0;
+        let peak_nps_y = screen_center_y() + 126.0;
+
+        actors.push(act!(text:
+            font("miso"):
+            settext(peak_nps_text):
+            // Pivot point is the text's right-center
+            align(1.0, 0.5):
+            xy(peak_nps_x, peak_nps_y):
+            zoom(0.9):
+            diffuse(1.0, 1.0, 1.0, 1.0):
+            // Align the text content itself to the right
+            horizalign(right):
+            z(200)
+        ));
+    }
+
     actors
 }
