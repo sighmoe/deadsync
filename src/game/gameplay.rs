@@ -140,6 +140,8 @@ pub struct State {
     pub life: f32,
     pub combo_after_miss: u32,
     pub is_failing: bool,
+    pub is_in_freeze: bool,
+    pub is_in_delay: bool,
     pub fail_time: Option<f32>,
 
     pub earned_grade_points: i32,
@@ -257,12 +259,19 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
     let config = crate::config::get();
     let timing = Arc::new(TimingData::from_chart_data(
-        -song.offset,
-        config.global_offset_seconds,
-        None,
+        -song.offset, config.global_offset_seconds,
+        chart.chart_bpms.as_deref(),
         &song.normalized_bpms,
-        None,
-        "",
+		chart.chart_stops.as_deref(),
+		&song.normalized_stops,
+		chart.chart_delays.as_deref(),
+		&song.normalized_delays,
+		chart.chart_warps.as_deref(),
+		&song.normalized_warps,
+		chart.chart_speeds.as_deref(),
+		&song.normalized_speeds,
+		chart.chart_scrolls.as_deref(),
+		&song.normalized_scrolls,
         &chart.notes,
     ));
 
@@ -413,6 +422,8 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         life: 0.5,
         combo_after_miss: MAX_REGEN_COMBO_AFTER_MISS,
         is_failing: false,
+        is_in_freeze: false,
+        is_in_delay: false,
         fail_time: None,
         earned_grade_points: 0,
         possible_grade_points,
@@ -1152,9 +1163,13 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
             .as_secs_f32()
     };
     state.current_music_time = music_time_sec;
-    state.current_beat = state.timing.get_beat_for_time(music_time_sec);
+	let beat_info = state.timing.get_beat_info_from_time(music_time_sec);
+	state.current_beat = beat_info.beat;
+	state.is_in_freeze = beat_info.is_in_freeze;
+	state.is_in_delay = beat_info.is_in_delay;
 
     let current_bpm = state.timing.get_bpm_for_beat(state.current_beat);
+
     let mut dynamic_speed = state
         .scroll_speed
         .pixels_per_second(current_bpm, state.scroll_reference_bpm);
@@ -1383,39 +1398,45 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
     }
 
     let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
-    let miss_cull_threshold = receptor_y - state.draw_distance_after_targets;
-    for col_arrows in &mut state.arrows {
-        col_arrows.retain(|arrow| {
-            let note = &state.notes[arrow.note_index];
+	let miss_cull_threshold = receptor_y - state.draw_distance_after_targets;
+	for col_arrows in &mut state.arrows {
+		col_arrows.retain(|arrow| {
+			let note = &state.notes[arrow.note_index];
 
-            if matches!(note.note_type, NoteType::Mine) {
-                match note.mine_result {
-                    Some(MineResult::Avoided) => {}
-                    Some(MineResult::Hit) => return false,
-                    None => return true,
-                }
-            } else {
-                let Some(judgment) = note.result.as_ref() else {
-                    return true;
-                };
+			if matches!(note.note_type, NoteType::Mine) {
+				match note.mine_result {
+					Some(MineResult::Avoided) => {}
+					Some(MineResult::Hit) => return false,
+					None => return true,
+				}
+			} else {
+				let Some(judgment) = note.result.as_ref() else {
+					return true;
+				};
 
-                if judgment.grade != JudgeGrade::Miss {
-                    return false;
-                }
+				if judgment.grade != JudgeGrade::Miss {
+					return false;
+				}
             }
 
             let y_pos = match state.scroll_speed {
-                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
-                    let beat_diff = arrow.beat - state.current_beat;
-                    let multiplier = state
-                        .scroll_speed
-                        .beat_multiplier(state.scroll_reference_bpm);
-                    receptor_y + (beat_diff * ScrollSpeedSetting::ARROW_SPACING * multiplier)
+                ScrollSpeedSetting::CMod(c_bpm) => {
+					let pps = (c_bpm / 60.0) * ScrollSpeedSetting::ARROW_SPACING;
+					let note_time = state.timing.get_time_for_beat(arrow.beat);
+					let time_diff = note_time - music_time_sec;
+					receptor_y + time_diff * pps
                 }
-                _ => {
-                    let note_time = state.timing.get_time_for_beat(arrow.beat);
-                    let time_diff = note_time - music_time_sec;
-                    receptor_y + (time_diff * state.scroll_pixels_per_second)
+                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => { // Beat-based mods
+                    let speed_multiplier = state.timing.get_speed_multiplier(state.current_beat, state.current_music_time);
+                    
+                    let note_disp_beat = state.timing.get_displayed_beat(arrow.beat);
+                    let curr_disp_beat = state.timing.get_displayed_beat(state.current_beat);
+                    let beat_diff_disp = note_disp_beat - curr_disp_beat;
+                    
+                    let player_multiplier = state.scroll_speed.beat_multiplier(state.scroll_reference_bpm);
+                    let final_multiplier = player_multiplier * speed_multiplier;
+
+                    receptor_y + beat_diff_disp * ScrollSpeedSetting::ARROW_SPACING * final_multiplier
                 }
             };
 

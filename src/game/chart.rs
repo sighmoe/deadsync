@@ -18,4 +18,10 @@ pub struct ChartData {
     pub simple_breakdown: String,
     pub total_measures: usize,
     pub measure_nps_vec: Vec<f64>,
+    pub chart_bpms: Option<String>,
+    pub chart_stops: Option<String>,
+    pub chart_delays: Option<String>,
+    pub chart_warps: Option<String>,
+    pub chart_speeds: Option<String>,
+    pub chart_scrolls: Option<String>,
 }

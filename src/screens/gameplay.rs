@@ -407,7 +407,6 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let playfield_center_x = screen_center_x() - (clamped_width * 0.25);
 
     let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
-    let pixels_per_second = state.scroll_pixels_per_second;
 
     // --- Banner (1:1 with Simply Love, including parent frame logic) ---
     if let Some(banner_path) = &state.song.banner_path {
@@ -464,19 +463,31 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             }
         };
         let current_time = state.current_music_time;
+        let current_bpm = state.timing.get_bpm_for_beat(state.current_beat);
         let compute_lane_y = |beat: f32| -> f32 {
             match state.scroll_speed {
-                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
-                    let beat_diff = beat - state.current_beat;
-                    let multiplier = state
-                        .scroll_speed
-                        .beat_multiplier(state.scroll_reference_bpm);
-                    receptor_y + (beat_diff * ScrollSpeedSetting::ARROW_SPACING * multiplier)
-                }
-                _ => {
+                ScrollSpeedSetting::CMod(c_bpm) => {
+                    // C-Mod is time-based. Visual scroll speed is constant and must ignore #SPEEDS.
+                    let pps = (c_bpm / 60.0) * ScrollSpeedSetting::ARROW_SPACING;
+
+                    // note_time correctly includes offsets from stops/delays.
                     let note_time = state.timing.get_time_for_beat(beat);
+
+                    // current_music_time is monotonic and does not pause during stops.
+                    // The difference decreases constantly, making notes scroll through stops.
                     let time_diff = note_time - current_time;
-                    receptor_y + (time_diff * pixels_per_second)
+                    receptor_y + time_diff * pps
+                }
+                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => { // Beat-based mods
+                    // This logic is correct for both frozen and non-frozen states for beat-based mods.
+                    let speed_multiplier = state.timing.get_speed_multiplier(state.current_beat, state.current_music_time);
+                    let note_disp_beat = state.timing.get_displayed_beat(beat);
+                    let curr_disp_beat = state.timing.get_displayed_beat(state.current_beat);
+                    let beat_diff_disp = note_disp_beat - curr_disp_beat;
+
+                    let player_multiplier = state.scroll_speed.beat_multiplier(state.scroll_reference_bpm);
+                    let final_multiplier = player_multiplier * speed_multiplier;
+                    receptor_y + (beat_diff_disp * ScrollSpeedSetting::ARROW_SPACING * final_multiplier)
                 }
             }
         };
@@ -1057,16 +1068,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             for arrow in column_arrows {
                 let arrow_time = state.timing.get_time_for_beat(arrow.beat);
                 let time_diff = arrow_time - current_time;
-                let y_pos = match state.scroll_speed {
-                    ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
-                        let beat_diff = arrow.beat - state.current_beat;
-                        let multiplier = state
-                            .scroll_speed
-                            .beat_multiplier(state.scroll_reference_bpm);
-                        receptor_y + (beat_diff * ScrollSpeedSetting::ARROW_SPACING * multiplier)
-                    }
-                    _ => receptor_y + (time_diff * pixels_per_second),
-                };
+                let y_pos = compute_lane_y(arrow.beat);
 
                 if y_pos < receptor_y - state.draw_distance_after_targets
                     || y_pos > receptor_y + state.draw_distance_before_targets

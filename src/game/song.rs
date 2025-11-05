@@ -17,6 +17,11 @@ pub struct SongData {
     pub min_bpm: f64,
     pub max_bpm: f64,
     pub normalized_bpms: String,
+    pub normalized_stops: String,
+    pub normalized_delays: String,
+    pub normalized_warps: String,
+    pub normalized_speeds: String,
+    pub normalized_scrolls: String,
     pub total_length_seconds: i32,
     pub charts: Vec<ChartData>,
 }
