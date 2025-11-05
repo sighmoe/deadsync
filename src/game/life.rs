@@ -17,5 +17,3 @@ impl LifeChange {
     pub const HELD: f32 = 0.008;
     pub const LET_GO: f32 = -0.080;
 }
-
-pub const LIFE_REGEN_AMOUNT: f32 = LifeChange::HELD;

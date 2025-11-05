@@ -1,3 +1,4 @@
+// ===== PROJECT: deadsync FILE: src/game/gameplay.rs =====
 use crate::core::audio;
 use crate::core::input::{lane_from_keycode, InputEdge, InputSource, Lane};
 use crate::core::space::*;
@@ -9,7 +10,7 @@ use crate::game::parsing::noteskin::{self, Noteskin, Style};
 use crate::game::song::SongData;
 use crate::game::timing::TimingData;
 use crate::game::{
-    life::{LifeChange, LIFE_REGEN_AMOUNT, MAX_REGEN_COMBO_AFTER_MISS, REGEN_COMBO_AFTER_MISS},
+    life::{LifeChange, REGEN_COMBO_AFTER_MISS},
     profile,
     scroll::ScrollSpeedSetting,
 };
@@ -204,14 +205,16 @@ impl State {
         let mut final_delta = delta;
 
         if final_delta > 0.0 {
-            if self.combo_after_miss < REGEN_COMBO_AFTER_MISS {
-                self.combo_after_miss += 1;
-            } else {
-                final_delta += LIFE_REGEN_AMOUNT;
-                self.combo_after_miss = (self.combo_after_miss + 1).min(MAX_REGEN_COMBO_AFTER_MISS);
+            // If we are in the regeneration cooldown period...
+            if self.combo_after_miss > 0 {
+                // Suppress life gain and decrement the counter.
+                final_delta = 0.0;
+                self.combo_after_miss -= 1;
             }
         } else if final_delta < 0.0 {
-            self.combo_after_miss = 0;
+            // Any life loss resets the regeneration cooldown.
+            // This uses the constant from `life.rs`, which is 5.
+            self.combo_after_miss = REGEN_COMBO_AFTER_MISS;
         }
 
         self.life = (self.life + final_delta).clamp(0.0, 1.0);
@@ -420,7 +423,7 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         last_judgment: None,
         hold_judgments: Default::default(),
         life: 0.5,
-        combo_after_miss: MAX_REGEN_COMBO_AFTER_MISS,
+        combo_after_miss: 0,
         is_failing: false,
         is_in_freeze: false,
         is_in_delay: false,
@@ -562,7 +565,7 @@ fn handle_mine_hit(
         updated_scoring = true;
     }
     state.combo = 0;
-    state.combo_after_miss = 0;
+    state.miss_combo = state.miss_combo.saturating_add(1);
     if state.full_combo_grade.is_some() {
         state.first_fc_attempt_broken = true;
     }
@@ -630,7 +633,6 @@ fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
     }
     state.combo = 0;
     state.miss_combo = state.miss_combo.saturating_add(1);
-    state.combo_after_miss = 0;
     if state.full_combo_grade.is_some() {
         state.first_fc_attempt_broken = true;
     }
