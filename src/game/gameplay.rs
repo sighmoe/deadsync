@@ -87,7 +87,7 @@ pub struct ActiveMineExplosion {
     pub elapsed: f32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ComboMilestoneKind {
     Hundred,
     Thousand,
@@ -245,6 +245,23 @@ impl State {
     }
 }
 
+/// Parses the #DISPLAYBPM string to get a reference BPM for M-mods.
+/// Returns None if the tag is missing, random (*), or invalid.
+fn get_reference_bpm_from_display_tag(display_bpm_str: &str) -> Option<f32> {
+    let s = display_bpm_str.trim();
+    if s.is_empty() || s == "*" {
+        return None;
+    }
+
+    // Check for a range (e.g., "100:200" or "100.00:200.00")
+    if let Some((_, max_str)) = s.split_once(':') {
+        return max_str.trim().parse::<f32>().ok();
+    }
+
+    // Otherwise, it should be a single number
+    s.parse::<f32>().ok()
+}
+
 pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32) -> State {
     info!("Initializing Gameplay Screen...");
     info!(
@@ -360,7 +377,20 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
     let profile = profile::get();
     let scroll_speed = profile.scroll_speed;
     let initial_bpm = timing.get_bpm_for_beat(first_note_beat);
-    let mut reference_bpm = timing.get_capped_max_bpm(Some(M_MOD_HIGH_CAP));
+
+    // THIS IS THE KEY CHANGE: Determine the reference BPM for M-Mods.
+    let mut reference_bpm = 
+        get_reference_bpm_from_display_tag(&song.display_bpm)
+        .unwrap_or_else(|| {
+            // Fallback logic: if #DISPLAYBPM is missing, '*', or invalid,
+            // use the song's actual max BPM, capped for sanity.
+            let mut actual_max = timing.get_capped_max_bpm(Some(M_MOD_HIGH_CAP));
+            if !actual_max.is_finite() || actual_max <= 0.0 {
+                actual_max = initial_bpm.max(120.0);
+            }
+            actual_max
+        });
+    
     if !reference_bpm.is_finite() || reference_bpm <= 0.0 {
         reference_bpm = initial_bpm.max(120.0);
     }
@@ -382,8 +412,9 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         travel_time = draw_distance_before_targets / pixels_per_second;
     }
     info!(
-        "Scroll speed set to {} ({:.2} BPM at start), {:.2} px/s",
+        "Scroll speed set to {} (ref BPM: {:.2}, effective BPM at start: {:.2}), {:.2} px/s",
         scroll_speed,
+        reference_bpm,
         scroll_speed.effective_bpm(initial_bpm, reference_bpm),
         pixels_per_second
     );
