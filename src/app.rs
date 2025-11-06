@@ -453,7 +453,7 @@ impl App {
 
         if self.current_screen == CurrentScreen::Gameplay {
             if let Some(gs) = &mut self.gameplay_state {
-                gs.queue_input_edge(InputSource::Gamepad, lane, pressed, timestamp);
+                crate::game::gameplay::queue_input_edge(gs, InputSource::Gamepad, lane, pressed, timestamp);
             }
         }
 

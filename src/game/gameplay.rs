@@ -109,10 +109,9 @@ pub struct ActiveHold {
     pub life: f32,
 }
 
-impl ActiveHold {
-    pub fn is_engaged(&self) -> bool {
-        !self.let_go && self.life > 0.0
-    }
+#[inline(always)]
+pub fn active_hold_is_engaged(active: &ActiveHold) -> bool {
+    !active.let_go && active.life > 0.0
 }
 
 pub struct State {
@@ -194,60 +193,54 @@ pub struct State {
     log_timer: f32,
 }
 
-impl State {
-    #[inline(always)]
-    fn is_dead(&self) -> bool {
-        self.is_failing || self.life <= 0.0
+#[inline(always)]
+fn is_state_dead(state: &State) -> bool {
+    state.is_failing || state.life <= 0.0
+}
+
+fn apply_life_change(state: &mut State, delta: f32) {
+    if is_state_dead(state) {
+        state.life = 0.0;
+        state.is_failing = true;
+        return;
     }
 
-    fn change_life(&mut self, delta: f32) {
-        if self.is_dead() {
-            self.life = 0.0;
-            self.is_failing = true;
-            return;
+    let mut final_delta = delta;
+
+    if final_delta > 0.0 {
+        if state.combo_after_miss > 0 {
+            final_delta = 0.0;
+            state.combo_after_miss -= 1;
         }
-
-        let mut final_delta = delta;
-
-        if final_delta > 0.0 {
-            // If we are in the regeneration cooldown period...
-            if self.combo_after_miss > 0 {
-                // Suppress life gain and decrement the counter.
-                final_delta = 0.0;
-                self.combo_after_miss -= 1;
-            }
-        } else if final_delta < 0.0 {
-            // Any life loss resets the regeneration cooldown.
-            // This uses the constant from `life.rs`, which is 5.
-            self.combo_after_miss = REGEN_COMBO_AFTER_MISS;
-        }
-
-        self.life = (self.life + final_delta).clamp(0.0, 1.0);
-
-        if self.life <= 0.0 {
-            if !self.is_failing {
-                self.fail_time = Some(self.current_music_time);
-            }
-            self.life = 0.0;
-            self.is_failing = true;
-            info!("Player has failed!");
-        }
+    } else if final_delta < 0.0 {
+        state.combo_after_miss = REGEN_COMBO_AFTER_MISS;
     }
 
-    pub fn queue_input_edge(
-        &mut self,
-        source: InputSource,
-        lane: Lane,
-        pressed: bool,
-        timestamp: Instant,
-    ) {
-        self.pending_edges.push_back(InputEdge {
-            lane,
-            pressed,
-            source,
-            timestamp,
-        });
+    state.life = (state.life + final_delta).clamp(0.0, 1.0);
+
+    if state.life <= 0.0 {
+        if !state.is_failing {
+            state.fail_time = Some(state.current_music_time);
+        }
+        state.life = 0.0;
+        state.is_failing = true;
+        info!("Player has failed!");
     }
+}
+
+pub fn queue_input_edge(
+    state: &mut State,
+    source: InputSource,
+    lane: Lane,
+    pressed: bool,
+    timestamp: Instant,
+) {
+    state.pending_edges.push_back(InputEdge {
+        lane,
+        pressed,
+        source,
+        timestamp,
+    });
 }
 
 /// Parses the #DISPLAYBPM string to get a reference BPM for M-mods.
@@ -634,8 +627,8 @@ fn handle_mine_hit(
     );
 
     state.arrows[column].remove(arrow_list_index);
-    state.change_life(LifeChange::HIT_MINE);
-    if !state.is_dead() {
+    apply_life_change(state, LifeChange::HIT_MINE);
+    if !is_state_dead(state) {
         state.mines_hit_for_score = state.mines_hit_for_score.saturating_add(1);
         updated_scoring = true;
     }
@@ -702,8 +695,8 @@ fn handle_hold_let_go(state: &mut State, column: usize, note_index: usize) {
         triggered_at: Instant::now(),
     });
 
-    state.change_life(LifeChange::LET_GO);
-    if !state.is_dead() {
+    apply_life_change(state, LifeChange::LET_GO);
+    if !is_state_dead(state) {
         update_itg_grade_totals(state);
     }
     state.combo = 0;
@@ -736,21 +729,21 @@ fn handle_hold_success(state: &mut State, column: usize, note_index: usize) {
     match state.notes[note_index].note_type {
         NoteType::Hold => {
             state.holds_held = state.holds_held.saturating_add(1);
-            if !state.is_dead() {
+            if !is_state_dead(state) {
                 state.holds_held_for_score = state.holds_held_for_score.saturating_add(1);
                 updated_scoring = true;
             }
         }
         NoteType::Roll => {
             state.rolls_held = state.rolls_held.saturating_add(1);
-            if !state.is_dead() {
+            if !is_state_dead(state) {
                 state.rolls_held_for_score = state.rolls_held_for_score.saturating_add(1);
                 updated_scoring = true;
             }
         }
         _ => {}
     }
-    state.change_life(LifeChange::HELD);
+    apply_life_change(state, LifeChange::HELD);
 
     if updated_scoring {
         update_itg_grade_totals(state);
@@ -1002,7 +995,7 @@ pub fn handle_key_press(state: &mut State, event: &KeyEvent, timestamp: Instant)
 
         if let Some(lane) = lane_from_keycode(key_code) {
             let pressed = event.state == ElementState::Pressed;
-            state.queue_input_edge(InputSource::Keyboard, lane, pressed, timestamp);
+            queue_input_edge(state, InputSource::Keyboard, lane, pressed, timestamp);
         }
 
         match event.state {
@@ -1063,7 +1056,7 @@ fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: 
 
     // Increment counts ONCE per row (jumps/hands should not overcount).
     *state.judgment_counts.entry(final_grade).or_insert(0) += 1;
-    if !state.is_dead() {
+    if !is_state_dead(state) {
         *state.scoring_counts.entry(final_grade).or_insert(0) += 1;
         update_itg_grade_totals(state);
     }
@@ -1081,7 +1074,7 @@ fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: 
         JudgeGrade::WayOff => LifeChange::WAY_OFF,
         JudgeGrade::Miss => LifeChange::MISS,
     };
-    state.change_life(life_delta);
+    apply_life_change(state, life_delta);
 
     state.last_judgment = Some(JudgmentRenderInfo {
         judgment: final_judgment,

@@ -20,6 +20,7 @@ use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
 
 pub use crate::game::gameplay::{handle_key_press, init, update, State};
+use crate::game::gameplay::active_hold_is_engaged;
 use crate::game::gameplay::{
     ComboMilestoneKind, COMBO_HUNDRED_MILESTONE_DURATION, COMBO_THOUSAND_MILESTONE_DURATION,
     HOLD_JUDGMENT_TOTAL_DURATION, MINE_EXPLOSION_DURATION, RECEPTOR_GLOW_DURATION,
@@ -546,7 +547,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
 
             if let Some(hold_slot) = state.active_holds[i]
                 .as_ref()
-                .filter(|active| active.is_engaged())
+                .filter(|active| active_hold_is_engaged(active))
                 .and_then(|active| {
                     let note_type = &state.notes[active.note_index].note_type;
                     let visuals = if matches!(note_type, NoteType::Roll) {
@@ -732,7 +733,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             let active_state = state.active_holds[note.column]
                 .as_ref()
                 .filter(|h| h.note_index == note_index);
-            let engaged = active_state.map(|h| h.is_engaged()).unwrap_or(false);
+            let engaged = active_state.map(|h| active_hold_is_engaged(h)).unwrap_or(false);
             let use_active = active_state
                 .map(|h| h.is_pressed && !h.let_go)
                 .unwrap_or(false);
