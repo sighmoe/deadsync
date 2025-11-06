@@ -44,3 +44,42 @@ pub fn get_song_cache() -> std::sync::MutexGuard<'static, Vec<SongPack>> {
 pub(super) fn set_song_cache(packs: Vec<SongPack>) {
     *SONG_CACHE.lock().unwrap() = packs;
 }
+
+impl SongData {
+    /// Formats the display BPM for the UI, prioritizing #DISPLAYBPM and cleaning up the format
+    /// to match ITGmania (e.g., "128" instead of "128.000000"). Falls back to the
+    /// calculated min-max range if #DISPLAYBPM is absent or set to "*".
+    pub fn formatted_display_bpm(&self) -> String {
+        if !self.display_bpm.is_empty() && &self.display_bpm != "*" {
+            let s = &self.display_bpm;
+            // Handle range "min:max" or "min - max"
+            let parts: Vec<&str> = s.split(|c| c == ':' || c == '-').map(str::trim).collect();
+            if parts.len() == 2 {
+                if let (Some(min), Some(max)) = (parts[0].parse::<f32>().ok(), parts[1].parse::<f32>().ok()) {
+                    let min_i = min.round() as i32;
+                    let max_i = max.round() as i32;
+                    if min_i == max_i {
+                        format!("{}", min_i)
+                    } else {
+                        format!("{} - {}", min_i.min(max_i), min_i.max(max_i))
+                    }
+                } else {
+                    s.clone() // Fallback if parsing fails
+                }
+            } else if let Ok(val) = s.parse::<f32>() {
+                // Handle single value "128.000000"
+                format!("{}", val.round() as i32)
+            } else {
+                s.clone() // Fallback for other formats
+            }
+        } else {
+            let min = self.min_bpm.round() as i32;
+            let max = self.max_bpm.round() as i32;
+            if (self.min_bpm - self.max_bpm).abs() < 1e-6 {
+                format!("{}", min)
+            } else {
+                format!("{} - {}", min, max)
+            }
+        }
+    }
+}

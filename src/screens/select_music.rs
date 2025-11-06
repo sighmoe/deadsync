@@ -854,15 +854,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             MusicWheelEntry::Song(song) => {
                 let minutes = song.total_length_seconds / 60;
                 let seconds = song.total_length_seconds % 60;
-                let formatted_bpm = {
-                    let min = song.min_bpm.round() as i32;
-                    let max = song.max_bpm.round() as i32;
-                    if (song.min_bpm - song.max_bpm).abs() < 1e-6 {
-                        format!("{}", min)
-                    } else {
-                        format!("{} - {}", min, max)
-                    }
-                };
+                let formatted_bpm = song.formatted_display_bpm();
                 (
                     song.artist.clone(),
                     formatted_bpm,
