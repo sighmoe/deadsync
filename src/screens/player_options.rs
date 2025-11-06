@@ -4,6 +4,7 @@ use crate::core::space::*;
 use crate::game::song::SongData;
 use crate::screens::{Screen, ScreenAction};
 use crate::ui::actors::Actor;
+use crate::assets::AssetManager;
 use crate::ui::color;
 use crate::ui::components::heart_bg;
 use crate::ui::components::screen_bar::{
@@ -380,7 +381,7 @@ pub fn update(state: &mut State, _dt: f32) {
     }
 }
 
-pub fn get_actors(state: &State) -> Vec<Actor> {
+pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let mut actors: Vec<Actor> = Vec::with_capacity(64);
 
     actors.extend(state.bg.build(heart_bg::Params {
@@ -403,8 +404,7 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     // Speed Mod Helper Display (from overlay.lua)
     let speed_mod_y = 48.0;
-    // Slightly more to the right for parity
-    let speed_mod_x = screen_center_x() + widescale(-67.0, -90.0);
+    let speed_mod_x = screen_center_x() + widescale(-77.0, -100.0);
     let speed_color = color::simply_love_rgba(state.active_color_index);
     let speed_text = if state.speed_mod.mod_type == "X" {
         format!("{:.2}x", state.speed_mod.value)
@@ -500,6 +500,65 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
         } else {
             sl_gray
         };
+
+        // Encircling cursor around the active option value (programmatic border, Simply Love style)
+        if is_active {
+            // Measure text width in logical units and scale by our zoom
+            let value_zoom = 0.8;
+            asset_manager.with_fonts(|all_fonts| {
+                asset_manager.with_font("miso", |metrics_font| {
+                    let mut text_w = crate::ui::font::measure_line_width_logical(metrics_font, choice_text, all_fonts) as f32;
+                    if !text_w.is_finite() || text_w <= 0.0 { text_w = 1.0; }
+                    let text_h = (metrics_font.height as f32).max(1.0);
+                    let draw_w = text_w * value_zoom;
+                    let draw_h = text_h * value_zoom;
+                    // Padding and border thickness
+                    let pad_x = widescale(16.0, 20.0);
+                    let pad_y = widescale(6.0, 8.0);
+                    let border_w = widescale(4.0, 5.0);
+                    let ring_w = draw_w + pad_x * 2.0;
+                    let ring_h = draw_h + pad_y * 2.0;
+
+                    // Rectangle edges (four quads) — white, fairly opaque
+                    let left = choice_inner_left - pad_x;
+                    let right = left + ring_w;
+                    let top = current_row_y - ring_h * 0.5;
+                    let bottom = current_row_y + ring_h * 0.5;
+                    // Use active Simply Love accent color, fully opaque
+                    let mut ring_color = color::simply_love_rgba(state.active_color_index);
+                    ring_color[3] = 1.0;
+
+                    // Top border
+                    actors.push(act!(quad:
+                        align(0.5, 0.5): xy((left + right) * 0.5, top + border_w * 0.5):
+                        zoomto(ring_w, border_w):
+                        diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                        z(101)
+                    ));
+                    // Bottom border
+                    actors.push(act!(quad:
+                        align(0.5, 0.5): xy((left + right) * 0.5, bottom - border_w * 0.5):
+                        zoomto(ring_w, border_w):
+                        diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                        z(101)
+                    ));
+                    // Left border
+                    actors.push(act!(quad:
+                        align(0.5, 0.5): xy(left + border_w * 0.5, (top + bottom) * 0.5):
+                        zoomto(border_w, ring_h):
+                        diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                        z(101)
+                    ));
+                    // Right border
+                    actors.push(act!(quad:
+                        align(0.5, 0.5): xy(right - border_w * 0.5, (top + bottom) * 0.5):
+                        zoomto(border_w, ring_h):
+                        diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                        z(101)
+                    ));
+                });
+            });
+        }
 
         actors.push(act!(text: font("miso"): settext(choice_text.clone()):
             align(0.0, 0.5): xy(choice_inner_left, current_row_y): zoom(0.8):

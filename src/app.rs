@@ -218,7 +218,7 @@ impl App {
             CurrentScreen::Options  => options::get_actors(&self.options_state, screen_alpha_multiplier),
             CurrentScreen::PlayerOptions => {
                 if let Some(pos) = &self.player_options_state {
-                    player_options::get_actors(pos)
+                    player_options::get_actors(pos, &self.asset_manager)
                 } else { vec![] }
             },
             CurrentScreen::SelectColor => select_color::get_actors(&self.select_color_state, screen_alpha_multiplier),
