@@ -346,11 +346,19 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
             mine_result: None,
         });
     }
-    let num_taps_and_holds = notes
-        .iter()
-        .filter(|note| !matches!(note.note_type, NoteType::Mine))
-        .count() as u64;
-    let possible_grade_points = (num_taps_and_holds * 5)
+    // ITG scoring counts one tap judgment per row (chords count as one).
+    // Compute unique non-mine rows to determine possible tap grade points.
+    let num_tap_rows = {
+        use std::collections::HashSet;
+        let mut rows: HashSet<usize> = HashSet::new();
+        for n in &notes {
+            if !matches!(n.note_type, NoteType::Mine) {
+                rows.insert(n.row_index);
+            }
+        }
+        rows.len() as u64
+    };
+    let possible_grade_points = (num_tap_rows * 5)
         + (holds_total as u64 * judgment::HOLD_SCORE_HELD as u64)
         + (rolls_total as u64 * judgment::HOLD_SCORE_HELD as u64);
     let possible_grade_points = possible_grade_points as i32;
@@ -998,20 +1006,7 @@ fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: 
         )
     });
 
-    let mut updated_scoring = false;
-    for judgment in &judgments_in_row {
-        *state.judgment_counts.entry(judgment.grade).or_insert(0) += 1;
-
-        if !state.is_dead() {
-            *state.scoring_counts.entry(judgment.grade).or_insert(0) += 1;
-            updated_scoring = true;
-        }
-    }
-
-    if updated_scoring {
-        update_itg_grade_totals(state);
-    }
-
+    // Determine the single, row-level judgment used for life/combo/scoring.
     let final_judgment = if row_has_miss {
         judgments_in_row
             .iter()
@@ -1032,6 +1027,13 @@ fn finalize_row_judgment(state: &mut State, row_index: usize, judgments_in_row: 
         return;
     };
     let final_grade = final_judgment.grade;
+
+    // Increment counts ONCE per row (jumps/hands should not overcount).
+    *state.judgment_counts.entry(final_grade).or_insert(0) += 1;
+    if !state.is_dead() {
+        *state.scoring_counts.entry(final_grade).or_insert(0) += 1;
+        update_itg_grade_totals(state);
+    }
 
     info!(
         "FINALIZED: Row {}, Grade: {:?}, Offset: {:.2}ms",
