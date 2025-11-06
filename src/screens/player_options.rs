@@ -67,7 +67,7 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
 
     vec![
         Row {
-            name: "Speed Mod Type".to_string(),
+            name: "Type of Speed Mod".to_string(),
             choices: vec![
                 "X (multiplier)".to_string(),
                 "C (constant)".to_string(),
@@ -79,16 +79,21 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
                 "M" => 2,
                 _ => 1, // Default to C
             },
-            help: vec![
-                "Adjust the scroll speed of the arrows.".to_string(),
-                "x: Multiplier | C: Constant BPM | M: Max BPM".to_string(),
-            ],
+            help: vec!["Change the way the arrows react to changing BPMs.".to_string()],
         },
         Row {
             name: "Speed Mod".to_string(),
             choices: vec![speed_mod_value_str], // Display only the current value
             selected_choice_index: 0,
-            help: vec!["Use Left/Right to adjust the speed value.".to_string()],
+            help: vec!["Adjust the speed at which arrows travel towards the targets.".to_string()],
+        },
+        Row {
+            name: "Mini".to_string(),
+            choices: vec![
+                "0%".to_string(),
+            ],
+            selected_choice_index: 0,
+            help: vec!["Change the size of your arrows.".to_string()],
         },
         Row {
             name: "Perspective".to_string(),
@@ -100,18 +105,10 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
                 "Space".to_string(),
             ],
             selected_choice_index: 0,
-            help: vec!["Changes the camera perspective.".to_string()],
+            help: vec!["Change the viewing angle of the arrow stream.".to_string()],
         },
         Row {
-            name: "Mini".to_string(),
-            choices: vec![
-                "0%".to_string(),
-            ],
-            selected_choice_index: 0,
-            help: vec!["Changes the camera perspective.".to_string()],
-        },
-        Row {
-            name: "Note Skin".to_string(),
+            name: "NoteSkin".to_string(),
             choices: vec!["cel".to_string(), "metal".to_string(), "note".to_string()],
             selected_choice_index: 0,
             help: vec!["Change the appearance of the arrows.".to_string()],
@@ -125,31 +122,37 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
                 "Darkest".to_string(),
             ],
             selected_choice_index: 3,
-            help: vec!["Dims the background video or artwork.".to_string()],
+            help: vec![
+                "Darken the underside of the playing field.".to_string(),
+                "This will partially obscure background art.".to_string(),
+            ],
         },
         Row {
             name: "Visual Delay".to_string(),
             choices: vec!["0ms".to_string()],
             selected_choice_index: 0,
-            help: vec!["Adjust audio-visual synchronization.".to_string()],
+            help: vec![
+                "Player specific visual delay. Negative values shifts the arrows".to_string(),
+                "upwards, while positive values move them down.".to_string(),
+            ],
         },
         Row {
             name: "Music Rate".to_string(),
             choices: vec!["1.00x".to_string()],
             selected_choice_index: 0,
-            help: vec!["Change the playback speed of the song.".to_string()],
+            help: vec!["Change the native speed of the music itself.".to_string()],
         },
         Row {
             name: "Stepchart".to_string(),
             choices: vec!["(Current)".to_string()],
             selected_choice_index: 0,
-            help: vec!["Change to a different chart for this song.".to_string()],
+            help: vec!["Choose the stepchart you wish to play.".to_string()],
         },
         Row {
             name: "Exit".to_string(),
             choices: vec!["Start Game".to_string(), "Go Back".to_string()],
             selected_choice_index: 0,
-            help: vec!["Begin the song or return to the music wheel.".to_string()],
+            help: vec!["".to_string()],
         },
     ]
 }
