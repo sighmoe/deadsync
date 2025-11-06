@@ -128,6 +128,11 @@ pub struct State {
     pub note_spawn_cursor: usize,
     pub judged_row_cursor: usize,
     pub arrows: [Vec<Arrow>; 4],
+    // Cached per-note timing to avoid per-frame recomputation
+    pub note_time_cache: Vec<f32>,
+    pub note_display_beat_cache: Vec<f32>,
+    pub hold_end_time_cache: Vec<Option<f32>>,
+    pub music_end_time: f32,
 
     pub combo: u32,
     pub miss_combo: u32,
@@ -365,6 +370,20 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
 
     info!("Parsed {} notes from chart data.", notes.len());
 
+    // Build immutable caches for timing-intensive lookups
+    let note_time_cache: Vec<f32> = notes
+        .iter()
+        .map(|n| timing.get_time_for_beat(n.beat))
+        .collect();
+    let note_display_beat_cache: Vec<f32> = notes
+        .iter()
+        .map(|n| timing.get_displayed_beat(n.beat))
+        .collect();
+    let hold_end_time_cache: Vec<Option<f32>> = notes
+        .iter()
+        .map(|n| n.hold.as_ref().map(|h| timing.get_time_for_beat(h.end_beat)))
+        .collect();
+
     let first_note_beat = notes.first().map_or(0.0, |n| n.beat);
     let first_second = timing.get_time_for_beat(first_note_beat);
     let start_delay = (MIN_SECONDS_TO_STEP - first_second).max(MIN_SECONDS_TO_MUSIC);
@@ -427,6 +446,19 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         pixels_per_second
     );
 
+    // Compute and cache the final music end time once per song load
+    let last_relevant_second = notes
+        .iter()
+        .enumerate()
+        .fold(0.0_f32, |acc, (i, _)| {
+            let start = note_time_cache[i];
+            let end = hold_end_time_cache[i].unwrap_or(start);
+            acc.max(end)
+        });
+    let music_end_time = last_relevant_second
+        + (BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD)
+        + TRANSITION_OUT_DURATION;
+
     State {
         song,
         chart,
@@ -439,6 +471,10 @@ pub fn init(song: Arc<SongData>, chart: Arc<ChartData>, active_color_index: i32)
         note_spawn_cursor: 0,
         judged_row_cursor: 0,
         arrows: [vec![], vec![], vec![], vec![]],
+        note_time_cache,
+        note_display_beat_cache,
+        hold_end_time_cache,
+        music_end_time,
         judgment_counts: HashMap::from_iter([
             (JudgeGrade::Fantastic, 0),
             (JudgeGrade::Excellent, 0),
@@ -624,7 +660,7 @@ fn try_hit_mine_while_held(state: &mut State, column: usize, current_time: f32) 
     let candidate = {
         let arrows = &state.arrows[column];
         let notes = &state.notes;
-        let timing = &state.timing;
+        let note_times = &state.note_time_cache;
 
         arrows.iter().enumerate().find_map(|(idx, arrow)| {
             let note = &notes[arrow.note_index];
@@ -632,7 +668,7 @@ fn try_hit_mine_while_held(state: &mut State, column: usize, current_time: f32) 
                 return None;
             }
 
-            let note_time = timing.get_time_for_beat(arrow.beat);
+            let note_time = note_times[arrow.note_index];
             Some((idx, arrow.note_index, note_time))
         })
     };
@@ -885,7 +921,7 @@ pub fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool 
             (note.beat, note.row_index)
         };
         let note_type = state.notes[note_index].note_type.clone();
-        let note_time = state.timing.get_time_for_beat(note_beat);
+        let note_time = state.note_time_cache[note_index];
         let time_error = current_time - note_time;
         let abs_time_error = time_error.abs();
 
@@ -923,10 +959,7 @@ pub fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool 
 
             state.notes[note_index].result = Some(judgment);
             let note_type = state.notes[note_index].note_type.clone();
-            let hold_end_time = state.notes[note_index]
-                .hold
-                .as_ref()
-                .map(|hold| state.timing.get_time_for_beat(hold.end_beat));
+            let hold_end_time = state.hold_end_time_cache[note_index];
             info!(
                 "JUDGED (pending): Row {}, Col {}, Error: {:.2}ms, Grade: {:?}",
                 note_row_index,
@@ -1158,18 +1191,8 @@ fn update_judged_rows(state: &mut State) {
 }
 
 fn get_music_end_time(state: &State) -> f32 {
-    let last_relevant_second = state.notes.iter().fold(0.0_f32, |acc, note| {
-        let mut relevant_beat = note.beat;
-        if let Some(hold) = note.hold.as_ref() {
-            relevant_beat = relevant_beat.max(hold.end_beat);
-        }
-
-        let note_second = state.timing.get_time_for_beat(relevant_beat);
-        acc.max(note_second)
-    });
-
-    let last_hittable_second = last_relevant_second + (BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD);
-    last_hittable_second + TRANSITION_OUT_DURATION
+    // Cached at init; see State.music_end_time
+    state.music_end_time
 }
 
 pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
@@ -1227,7 +1250,7 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
     }
     state.scroll_travel_time = travel_time;
 
-    if state.current_music_time >= get_music_end_time(state) {
+    if state.current_music_time >= state.music_end_time {
         info!("Music end time reached. Transitioning to evaluation.");
         state.song_completed_naturally = true;
         return ScreenAction::Navigate(Screen::Evaluation);
@@ -1382,7 +1405,7 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
             (note.row_index, note.beat, note.note_type.clone())
         };
 
-        let note_time = state.timing.get_time_for_beat(note_beat);
+        let note_time = state.note_time_cache[note_index];
 
         if matches!(note_type, NoteType::Mine) {
             match state.notes[note_index].mine_result {
@@ -1434,6 +1457,25 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
 
     let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
 	let miss_cull_threshold = receptor_y - state.draw_distance_after_targets;
+
+    // Precompute frame-constants used by retain closures
+    let (cmod_pps_opt, curr_disp_beat, beatmod_multiplier) = match state.scroll_speed {
+        ScrollSpeedSetting::CMod(c_bpm) => {
+            let pps = (c_bpm / 60.0) * ScrollSpeedSetting::ARROW_SPACING;
+            (Some(pps), 0.0, 0.0)
+        }
+        ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
+            let curr_disp = state.timing.get_displayed_beat(state.current_beat);
+            let speed_multiplier = state
+                .timing
+                .get_speed_multiplier(state.current_beat, state.current_music_time);
+            let player_multiplier = state
+                .scroll_speed
+                .beat_multiplier(state.scroll_reference_bpm);
+            (None, curr_disp, player_multiplier * speed_multiplier)
+        }
+    };
+
 	for col_arrows in &mut state.arrows {
 		col_arrows.retain(|arrow| {
 			let note = &state.notes[arrow.note_index];
@@ -1455,23 +1497,19 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
             }
 
             let y_pos = match state.scroll_speed {
-                ScrollSpeedSetting::CMod(c_bpm) => {
-					let pps = (c_bpm / 60.0) * ScrollSpeedSetting::ARROW_SPACING;
-					let note_time = state.timing.get_time_for_beat(arrow.beat);
-					let time_diff = note_time - music_time_sec;
-					receptor_y + time_diff * pps
+                ScrollSpeedSetting::CMod(_) => {
+                    let pps = cmod_pps_opt.expect("cmod pps computed");
+                    let note_time = state.note_time_cache[arrow.note_index];
+                    let time_diff = note_time - music_time_sec;
+                    receptor_y + time_diff * pps
                 }
-                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => { // Beat-based mods
-                    let speed_multiplier = state.timing.get_speed_multiplier(state.current_beat, state.current_music_time);
-                    
-                    let note_disp_beat = state.timing.get_displayed_beat(arrow.beat);
-                    let curr_disp_beat = state.timing.get_displayed_beat(state.current_beat);
+                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
+                    let note_disp_beat = state.note_display_beat_cache[arrow.note_index];
                     let beat_diff_disp = note_disp_beat - curr_disp_beat;
-                    
-                    let player_multiplier = state.scroll_speed.beat_multiplier(state.scroll_reference_bpm);
-                    let final_multiplier = player_multiplier * speed_multiplier;
-
-                    receptor_y + beat_diff_disp * ScrollSpeedSetting::ARROW_SPACING * final_multiplier
+                    receptor_y
+                        + beat_diff_disp
+                            * ScrollSpeedSetting::ARROW_SPACING
+                            * beatmod_multiplier
                 }
             };
 
