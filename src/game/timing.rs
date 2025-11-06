@@ -7,12 +7,12 @@ use std::sync::Arc;
 pub const ROWS_PER_BEAT: i32 = 48;
 
 #[inline(always)]
-pub fn NoteRowToBeat(row: i32) -> f32 {
+pub fn note_row_to_beat(row: i32) -> f32 {
     row as f32 / ROWS_PER_BEAT as f32
 }
 
 #[inline(always)]
-pub fn BeatToNoteRow(beat: f32) -> i32 {
+pub fn beat_to_note_row(beat: f32) -> i32 {
     (beat * ROWS_PER_BEAT as f32).round() as i32
 }
 
@@ -83,7 +83,6 @@ pub struct TimingData {
     scroll_prefix: Vec<ScrollPrefix>,
     global_offset_sec: f32,
     max_bpm: f32,
-    has_warps: bool,
 }
 
 #[derive(Debug, Clone, Default, Copy)]
@@ -129,11 +128,8 @@ pub struct GetBeatArgs {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BeatInfo {
 	pub beat: f32,
-	pub bps: f32,
 	pub is_in_freeze: bool,
 	pub is_in_delay: bool,
-	pub warp_begin_row: i32,
-	pub warp_destination_beat: f32,
 }
 
 #[derive(PartialEq, Eq)]
@@ -210,7 +206,6 @@ impl TimingData {
 		let stops = parse_optional_timing(chart_stops, global_stops, parse_stops);
 		let delays = parse_optional_timing(chart_delays, global_delays, parse_delays);
 		let warps = parse_optional_timing(chart_warps, global_warps, parse_warps);
-		let has_warps = !warps.is_empty();
 		let mut speeds = parse_optional_timing(chart_speeds, global_speeds, parse_speeds);
 		let mut scrolls = parse_optional_timing(chart_scrolls, global_scrolls, parse_scrolls);
 		// Ensure event lists are sorted by beat for binary searches
@@ -221,7 +216,7 @@ impl TimingData {
 			row_to_beat: Arc::new(vec![]), beat_to_time: Arc::new(beat_to_time),
 			stops, delays, warps, speeds, scrolls,
 			speed_runtime: Vec::new(), scroll_prefix: Vec::new(),
-			global_offset_sec, max_bpm, has_warps,
+			global_offset_sec, max_bpm,
 		};
 
 		let re_beat_to_time: Vec<_> = timing_with_stops.beat_to_time.iter().map(|point| {
@@ -324,22 +319,19 @@ impl TimingData {
         Some(idx)
     }
 
-    pub fn get_beat_info_from_time(&self, target_time_sec: f32) -> BeatInfo {
+	pub fn get_beat_info_from_time(&self, target_time_sec: f32) -> BeatInfo {
 		let mut args = GetBeatArgs::default();
         args.elapsed_time = target_time_sec + self.global_offset_sec;
 		
 		let mut start = GetBeatStarts::default();
-		start.last_time = -self.m_fBeat0OffsetInSeconds() - self.m_fBeat0GroupOffsetInSeconds();
+		start.last_time = -self.beat0_offset_seconds() - self.beat0_group_offset_seconds();
 
 		self.get_beat_internal(start, &mut args, u32::MAX as usize);
 
 		BeatInfo {
 			beat: args.beat,
-			bps: args.bps_out,
 			is_in_freeze: args.freeze_out,
 			is_in_delay: args.delay_out,
-			warp_begin_row: args.warp_begin_out,
-			warp_destination_beat: args.warp_dest_out,
 		}
 	}
 
@@ -365,9 +357,9 @@ impl TimingData {
         self.get_time_for_beat_internal(target_beat) - self.global_offset_sec
     }
 
-    fn get_time_for_beat_internal(&self, target_beat: f32) -> f32 {
+	fn get_time_for_beat_internal(&self, target_beat: f32) -> f32 {
 		let mut starts = GetBeatStarts::default();
-		starts.last_time = -self.m_fBeat0OffsetInSeconds() - self.m_fBeat0GroupOffsetInSeconds();
+		starts.last_time = -self.beat0_offset_seconds() - self.beat0_group_offset_seconds();
 		return self.get_elapsed_time_internal(&mut starts, target_beat);
 	}
 
@@ -458,8 +450,8 @@ fn parse_scrolls(s: &str) -> Result<Vec<ScrollSegment>, &'static str> {
 }
 
 impl TimingData {
-	fn m_fBeat0OffsetInSeconds(&self) -> f32 { self.beat_to_time.first().map_or(0.0, |p| p.time_sec) }
-	fn m_fBeat0GroupOffsetInSeconds(&self) -> f32 { self.global_offset_sec }
+	fn beat0_offset_seconds(&self) -> f32 { self.beat_to_time.first().map_or(0.0, |p| p.time_sec) }
+	fn beat0_group_offset_seconds(&self) -> f32 { self.global_offset_sec }
 
     fn get_elapsed_time_internal(&self, starts: &mut GetBeatStarts, beat: f32) -> f32 {
 		let mut start = *starts;
@@ -474,13 +466,13 @@ impl TimingData {
 		let delays = &self.delays;
 		
 		let mut curr_segment = start.bpm_idx + start.warp_idx + start.stop_idx + start.delay_idx;
-		let mut bps = self.get_bpm_for_beat(NoteRowToBeat(start.last_row)) / 60.0;
+		let mut bps = self.get_bpm_for_beat(note_row_to_beat(start.last_row)) / 60.0;
 		while curr_segment < max_segment {
 			let mut event_row = i32::MAX;
 			let mut event_type = TimingEvent::NotFound;
-			FindEvent(&mut event_row, &mut event_type, start, 0.0, false, bpms, warps, stops, delays);
+			find_event(&mut event_row, &mut event_type, start, 0.0, false, bpms, warps, stops, delays);
 			if event_type == TimingEvent::NotFound { break; }
-			let time_to_next_event = if start.is_warping { 0.0 } else { NoteRowToBeat(event_row - start.last_row) / bps };
+			let time_to_next_event = if start.is_warping { 0.0 } else { note_row_to_beat(event_row - start.last_row) / bps };
 			let next_event_time = start.last_time + time_to_next_event;
 			if args.elapsed_time < next_event_time { break; }
 			start.last_time = next_event_time;
@@ -532,7 +524,7 @@ impl TimingData {
 			start.last_row = event_row;
 		}
 		if args.elapsed_time == f32::MAX { args.elapsed_time = start.last_time; }
-		args.beat = NoteRowToBeat(start.last_row) + (args.elapsed_time - start.last_time) * bps;
+		args.beat = note_row_to_beat(start.last_row) + (args.elapsed_time - start.last_time) * bps;
 		args.bps_out = bps;
 	}
 
@@ -543,15 +535,15 @@ impl TimingData {
 		let delays = &self.delays;
 		
 		let mut curr_segment = start.bpm_idx + start.warp_idx + start.stop_idx + start.delay_idx;
-		let mut bps = self.get_bpm_for_beat(NoteRowToBeat(start.last_row)) / 60.0;
+		let mut bps = self.get_bpm_for_beat(note_row_to_beat(start.last_row)) / 60.0;
 		let find_marker = beat < f32::MAX;
 
 		while curr_segment < max_segment {
 			let mut event_row = i32::MAX;
 			let mut event_type = TimingEvent::NotFound;
-			FindEvent(&mut event_row, &mut event_type, *start, beat, find_marker, bpms, warps, stops, delays);
+			find_event(&mut event_row, &mut event_type, *start, beat, find_marker, bpms, warps, stops, delays);
 			if event_type == TimingEvent::NotFound { break; }
-			let time_to_next_event = if start.is_warping { 0.0 } else { NoteRowToBeat(event_row - start.last_row) / bps };
+			let time_to_next_event = if start.is_warping { 0.0 } else { note_row_to_beat(event_row - start.last_row) / bps };
 			start.last_time += time_to_next_event;
 			
 			match event_type {
@@ -632,7 +624,7 @@ impl TimingData {
     }
 }
 
-fn FindEvent(
+fn find_event(
     event_row: &mut i32, 
     event_type: &mut TimingEvent, 
     start: GetBeatStarts, 
@@ -643,29 +635,29 @@ fn FindEvent(
     stops: &[StopSegment], 
     delays: &[DelaySegment]
 ) {
-    if start.is_warping && BeatToNoteRow(start.warp_destination) < *event_row {
-        *event_row = BeatToNoteRow(start.warp_destination);
+    if start.is_warping && beat_to_note_row(start.warp_destination) < *event_row {
+        *event_row = beat_to_note_row(start.warp_destination);
         *event_type = TimingEvent::WarpDest;
     }
-    if start.bpm_idx < bpms.len() && BeatToNoteRow(bpms[start.bpm_idx].beat) < *event_row {
-        *event_row = BeatToNoteRow(bpms[start.bpm_idx].beat);
+    if start.bpm_idx < bpms.len() && beat_to_note_row(bpms[start.bpm_idx].beat) < *event_row {
+        *event_row = beat_to_note_row(bpms[start.bpm_idx].beat);
         *event_type = TimingEvent::Bpm;
     }
-    if start.delay_idx < delays.len() && BeatToNoteRow(delays[start.delay_idx].beat) < *event_row {
-        *event_row = BeatToNoteRow(delays[start.delay_idx].beat);
+    if start.delay_idx < delays.len() && beat_to_note_row(delays[start.delay_idx].beat) < *event_row {
+        *event_row = beat_to_note_row(delays[start.delay_idx].beat);
         *event_type = TimingEvent::Delay;
     }
-    if find_marker && BeatToNoteRow(beat) < *event_row {
-        *event_row = BeatToNoteRow(beat);
+    if find_marker && beat_to_note_row(beat) < *event_row {
+        *event_row = beat_to_note_row(beat);
         *event_type = TimingEvent::Marker;
     }
-    if start.stop_idx < stops.len() && BeatToNoteRow(stops[start.stop_idx].beat) < *event_row {
+    if start.stop_idx < stops.len() && beat_to_note_row(stops[start.stop_idx].beat) < *event_row {
         let tmp_row = *event_row;
-        *event_row = BeatToNoteRow(stops[start.stop_idx].beat);
+        *event_row = beat_to_note_row(stops[start.stop_idx].beat);
         *event_type = if tmp_row == *event_row { TimingEvent::StopDelay } else { TimingEvent::Stop };
     }
-    if start.warp_idx < warps.len() && BeatToNoteRow(warps[start.warp_idx].beat) < *event_row {
-        *event_row = BeatToNoteRow(warps[start.warp_idx].beat);
+    if start.warp_idx < warps.len() && beat_to_note_row(warps[start.warp_idx].beat) < *event_row {
+        *event_row = beat_to_note_row(warps[start.warp_idx].beat);
         *event_type = TimingEvent::Warp;
     }
 }

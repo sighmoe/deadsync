@@ -909,10 +909,7 @@ pub fn judge_a_tap(state: &mut State, column: usize, current_time: f32) -> bool 
         .map(|(idx, arrow)| (idx, arrow.clone()))
     {
         let note_index = arrow_to_judge.note_index;
-        let (note_beat, note_row_index) = {
-            let note = &state.notes[note_index];
-            (note.beat, note.row_index)
-        };
+        let note_row_index = state.notes[note_index].row_index;
         let note_type = state.notes[note_index].note_type.clone();
         let note_time = state.note_time_cache[note_index];
         let time_error = current_time - note_time;
@@ -1183,10 +1180,7 @@ fn update_judged_rows(state: &mut State) {
     }
 }
 
-fn get_music_end_time(state: &State) -> f32 {
-    // Cached at init; see State.music_end_time
-    state.music_end_time
-}
+// get_music_end_time removed; use state.music_end_time directly
 
 #[inline(always)]
 fn process_input_edges(state: &mut State, music_time_sec: f32, now: Instant) {

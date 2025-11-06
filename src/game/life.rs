@@ -1,5 +1,4 @@
 pub const REGEN_COMBO_AFTER_MISS: u32 = 5;
-pub const MAX_REGEN_COMBO_AFTER_MISS: u32 = 10;
 
 // In SM, life regeneration is tied to LifePercentChangeHeld. Simply Love sets
 // TimingWindowSecondsHold to 0.32s, so mirror that grace window. Reference:

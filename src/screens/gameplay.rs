@@ -464,7 +464,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             }
         };
         let current_time = state.current_music_time;
-        let current_bpm = state.timing.get_bpm_for_beat(state.current_beat);
+        // BPM not needed here; compute_lane_y handles per-mod logic
         let compute_lane_y = |beat: f32| -> f32 {
             match state.scroll_speed {
                 ScrollSpeedSetting::CMod(c_bpm) => {
@@ -1067,8 +1067,6 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         // Active arrows
         for column_arrows in &state.arrows {
             for arrow in column_arrows {
-                let arrow_time = state.timing.get_time_for_beat(arrow.beat);
-                let time_diff = arrow_time - current_time;
                 let y_pos = compute_lane_y(arrow.beat);
 
                 if y_pos < receptor_y - state.draw_distance_after_targets
