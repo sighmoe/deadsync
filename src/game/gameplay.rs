@@ -1189,6 +1189,11 @@ fn get_music_end_time(state: &State) -> f32 {
 }
 
 #[inline(always)]
+fn process_input_edges(state: &mut State, music_time_sec: f32, now: Instant) {
+    process_input_edges(state, music_time_sec, now);
+}
+
+#[inline(always)]
 fn decay_let_go_hold_life(state: &mut State) {
     for note in &mut state.notes {
         let Some(hold) = note.hold.as_mut() else { continue; };
@@ -1502,20 +1507,7 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
 
     tick_visual_effects(state, delta_time);
 
-    let lookahead_time = music_time_sec + state.scroll_travel_time;
-    let lookahead_beat = state.timing.get_beat_for_time(lookahead_time);
-    while state.note_spawn_cursor < state.notes.len()
-        && state.notes[state.note_spawn_cursor].beat < lookahead_beat
-    {
-        let note = &state.notes[state.note_spawn_cursor];
-        state.arrows[note.column].push(Arrow {
-            beat: note.beat,
-            column: note.column,
-            note_type: note.note_type.clone(),
-            note_index: state.note_spawn_cursor,
-        });
-        state.note_spawn_cursor += 1;
-    }
+    spawn_lookahead_arrows(state, music_time_sec);
 
     apply_passive_misses_and_mine_avoidance(state, music_time_sec);
 
