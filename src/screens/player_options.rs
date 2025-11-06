@@ -403,7 +403,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
 
     // Speed Mod Helper Display (from overlay.lua)
     let speed_mod_y = 48.0;
-    let speed_mod_x = screen_center_x() + widescale(-77.0, -100.0);
+    // Slightly more to the right for parity
+    let speed_mod_x = screen_center_x() + widescale(-67.0, -90.0);
     let speed_color = color::simply_love_rgba(state.active_color_index);
     let speed_text = if state.speed_mod.mod_type == "X" {
         format!("{:.2}x", state.speed_mod.value)
@@ -427,7 +428,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     const ROW_START_OFFSET: f32 = -164.0;
     const ROW_HEIGHT: f32 = 33.0;
     const ROW_GAP: f32 = 1.0;
-    const TITLE_BG_WIDTH: f32 = 115.0;
+    // Make the first column a bit wider to match SL
+    const TITLE_BG_WIDTH: f32 = 140.0;
 
     let frame_h = ROW_HEIGHT;
     let row_gap = ROW_GAP;
@@ -438,8 +440,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
     let row_center_x = row_left + (row_width * 0.5);
     let title_bg_center_x = row_left + (TITLE_BG_WIDTH * 0.5);
 
-    // Title text x: a bit of padding inside the title strip
-    let title_x = row_left + widescale(13.0, 24.0);
+    // Title text x: slightly less padding so text sits further left
+    let title_x = row_left + widescale(8.0, 14.0);
 
     // Start first row exactly at the requested offset
     let mut current_row_y = screen_center_y() + ROW_START_OFFSET;
@@ -474,31 +476,33 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             ));
         }
 
-        let title_color = if is_active && row.name != "Exit" {
-            color::simply_love_rgba(state.active_color_index)
-        } else {
-            [1.0, 1.0, 1.0, 1.0]
-        };
+        // Simply Love parity:
+        // - Left column (row titles) stays white regardless of selection.
+        // - Increase its size slightly for readability.
+        let title_color = [1.0, 1.0, 1.0, 1.0];
 
         actors.push(act!(text: font("miso"): settext(row.name.clone()):
-            align(0.0, 0.5): xy(title_x, current_row_y): zoom(0.8):
+            align(0.0, 0.5): xy(title_x, current_row_y): zoom(0.9):
             diffuse(title_color[0], title_color[1], title_color[2], title_color[3]):
             horizalign(left): maxwidth(widescale(128.0, 120.0)):
             z(101)
         ));
 
-        // Choice text: keep it inside the row frame; position it with some inner padding
-        // (Using widescale so it breathes similarly across ARs.)
-        let choice_inner_left = row_left + widescale(150.0, 180.0);
+        // Choice text: align more to the right, relative to the widened title column
+        let choice_inner_left = row_left + TITLE_BG_WIDTH + widescale(24.0, 30.0);
         let choice_text = &row.choices[row.selected_choice_index];
-        let choice_color = if is_active && row.name == "Exit" {
-            [0.0, 0.0, 0.0, 1.0]
+        // Simply Love parity:
+        // - Option text is gray when the row is not active.
+        // - Active row uses white; "Exit" row uses black on colored background for contrast.
+        let sl_gray = color::rgba_hex("#5A6166");
+        let choice_color = if is_active {
+            if row.name == "Exit" { [0.0, 0.0, 0.0, 1.0] } else { [1.0, 1.0, 1.0, 1.0] }
         } else {
-            [1.0, 1.0, 1.0, 1.0]
+            sl_gray
         };
 
         actors.push(act!(text: font("miso"): settext(choice_text.clone()):
-            align(0.0, 0.5): xy(choice_inner_left, current_row_y): zoom(0.75):
+            align(0.0, 0.5): xy(choice_inner_left, current_row_y): zoom(0.8):
             diffuse(choice_color[0], choice_color[1], choice_color[2], choice_color[3]):
             z(101)
         ));
@@ -522,7 +526,8 @@ pub fn get_actors(state: &State) -> Vec<Actor> {
             font("miso"): settext(help_text):
             align(0.0, 0.5):
             xy(help_box_x + 15.0, help_box_bottom_y - (help_box_h / 2.0)):
-            zoom(widescale(0.7, 0.75)):
+            // Slightly larger help text for readability
+            zoom(widescale(0.8, 0.85)):
             diffuse(help_text_color[0], help_text_color[1], help_text_color[2], 1.0):
             maxwidth(wrap_width): horizalign(left)
         ));
