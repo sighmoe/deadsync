@@ -1190,7 +1190,27 @@ fn get_music_end_time(state: &State) -> f32 {
 
 #[inline(always)]
 fn process_input_edges(state: &mut State, music_time_sec: f32, now: Instant) {
-    process_input_edges(state, music_time_sec, now);
+    while let Some(edge) = state.pending_edges.pop_front() {
+        let lane_idx = edge.lane.index();
+        let was_down = state.keyboard_lane_state[lane_idx] || state.gamepad_lane_state[lane_idx];
+
+        match edge.source {
+            InputSource::Keyboard => state.keyboard_lane_state[lane_idx] = edge.pressed,
+            InputSource::Gamepad => state.gamepad_lane_state[lane_idx] = edge.pressed,
+        }
+
+        let is_down = state.keyboard_lane_state[lane_idx] || state.gamepad_lane_state[lane_idx];
+
+        if edge.pressed && is_down && !was_down {
+            let elapsed = now.saturating_duration_since(edge.timestamp).as_secs_f32();
+            let event_music_time = music_time_sec - elapsed;
+            let hit_note = judge_a_tap(state, lane_idx, event_music_time);
+            refresh_roll_life_on_step(state, lane_idx);
+            if !hit_note {
+                state.receptor_bop_timers[lane_idx] = 0.11;
+            }
+        }
+    }
 }
 
 #[inline(always)]
@@ -1464,27 +1484,7 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
         return ScreenAction::Navigate(Screen::Evaluation);
     }
 
-    while let Some(edge) = state.pending_edges.pop_front() {
-        let lane_idx = edge.lane.index();
-        let was_down = state.keyboard_lane_state[lane_idx] || state.gamepad_lane_state[lane_idx];
-
-        match edge.source {
-            InputSource::Keyboard => state.keyboard_lane_state[lane_idx] = edge.pressed,
-            InputSource::Gamepad => state.gamepad_lane_state[lane_idx] = edge.pressed,
-        }
-
-        let is_down = state.keyboard_lane_state[lane_idx] || state.gamepad_lane_state[lane_idx];
-
-        if edge.pressed && is_down && !was_down {
-            let elapsed = now.saturating_duration_since(edge.timestamp).as_secs_f32();
-            let event_music_time = music_time_sec - elapsed;
-            let hit_note = judge_a_tap(state, lane_idx, event_music_time);
-            refresh_roll_life_on_step(state, lane_idx);
-            if !hit_note {
-                state.receptor_bop_timers[lane_idx] = 0.11;
-            }
-        }
-    }
+    process_input_edges(state, music_time_sec, now);
 
     let current_inputs = [
         state.keyboard_lane_state[0] || state.gamepad_lane_state[0],
