@@ -232,7 +232,7 @@ fn change_choice(state: &mut State, delta: isize) {
             _ => "".to_string(),
         };
         row.choices[0] = speed_mod_value_str;
-        audio::play_sfx("assets/sounds/change.ogg");
+        audio::play_sfx("assets/sounds/change_value.ogg");
     } else {
         let num_choices = row.choices.len();
         if num_choices > 0 {
@@ -273,7 +273,7 @@ fn change_choice(state: &mut State, delta: isize) {
                     }
                 }
             }
-            audio::play_sfx("assets/sounds/change.ogg");
+            audio::play_sfx("assets/sounds/change_value.ogg");
         }
     }
 }
@@ -379,7 +379,12 @@ pub fn update(state: &mut State, _dt: f32) {
     }
 
     if state.selected_row != state.prev_selected_row {
-        audio::play_sfx("assets/sounds/change.ogg");
+        // Direction-aware row change sounds
+        match state.nav_key_held_direction {
+            Some(NavDirection::Up) => audio::play_sfx("assets/sounds/prev_row.ogg"),
+            Some(NavDirection::Down) => audio::play_sfx("assets/sounds/next_row.ogg"),
+            _ => audio::play_sfx("assets/sounds/next_row.ogg"),
+        }
         state.prev_selected_row = state.selected_row;
     }
 }
@@ -430,7 +435,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     // Row layout constants
     const ROW_START_OFFSET: f32 = -164.0;
     const ROW_HEIGHT: f32 = 33.0;
-    const ROW_GAP: f32 = 1.0;
+    const ROW_GAP: f32 = 1.4;
     // Make the first column a bit wider to match SL
     const TITLE_BG_WIDTH: f32 = 140.0;
 
@@ -479,10 +484,19 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             ));
         }
 
-        // Simply Love parity:
-        // - Left column (row titles) stays white regardless of selection.
-        // - Increase its size slightly for readability.
-        let title_color = [1.0, 1.0, 1.0, 1.0];
+        // Left column (row titles): use Simply Love active color for the active row,
+        // default to white otherwise. For the Exit row when active, keep high contrast.
+        let title_color = if is_active {
+            if row.name == "Exit" {
+                [0.0, 0.0, 0.0, 1.0]
+            } else {
+                let mut c = color::simply_love_rgba(state.active_color_index);
+                c[3] = 1.0;
+                c
+            }
+        } else {
+            [1.0, 1.0, 1.0, 1.0]
+        };
 
         actors.push(act!(text: font("miso"): settext(row.name.clone()):
             align(0.0, 0.5): xy(title_x, current_row_y): zoom(0.9):
@@ -518,7 +532,8 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     // Padding and border thickness
                     let pad_x = widescale(16.0, 20.0);
                     let pad_y = widescale(6.0, 8.0);
-                    let border_w = widescale(4.0, 5.0);
+                    // Halve the cursor border thickness for a lighter ring
+                    let border_w = widescale(2.0, 2.5);
                     let ring_w = draw_w + pad_x * 2.0;
                     let ring_h = draw_h + pad_y * 2.0;
 
