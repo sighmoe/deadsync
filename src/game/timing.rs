@@ -54,6 +54,20 @@ pub struct ScrollSegment {
 	pub ratio: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct SpeedRuntime {
+    start_time: f32,
+    end_time: f32,
+    prev_ratio: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScrollPrefix {
+    beat: f32,
+    cum_displayed: f32,
+    ratio: f32,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TimingData {
     /// A pre-calculated mapping from a note row index to its precise beat.
@@ -65,6 +79,8 @@ pub struct TimingData {
     warps: Vec<WarpSegment>,
     speeds: Vec<SpeedSegment>,
     scrolls: Vec<ScrollSegment>,
+    speed_runtime: Vec<SpeedRuntime>,
+    scroll_prefix: Vec<ScrollPrefix>,
     global_offset_sec: f32,
     max_bpm: f32,
     has_warps: bool,
@@ -195,12 +211,16 @@ impl TimingData {
 		let delays = parse_optional_timing(chart_delays, global_delays, parse_delays);
 		let warps = parse_optional_timing(chart_warps, global_warps, parse_warps);
 		let has_warps = !warps.is_empty();
-		let speeds = parse_optional_timing(chart_speeds, global_speeds, parse_speeds);
-		let scrolls = parse_optional_timing(chart_scrolls, global_scrolls, parse_scrolls);
+		let mut speeds = parse_optional_timing(chart_speeds, global_speeds, parse_speeds);
+		let mut scrolls = parse_optional_timing(chart_scrolls, global_scrolls, parse_scrolls);
+		// Ensure event lists are sorted by beat for binary searches
+		speeds.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap_or(Ordering::Less));
+		scrolls.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap_or(Ordering::Less));
 
 		let mut timing_with_stops = Self {
 			row_to_beat: Arc::new(vec![]), beat_to_time: Arc::new(beat_to_time),
 			stops, delays, warps, speeds, scrolls,
+			speed_runtime: Vec::new(), scroll_prefix: Vec::new(),
 			global_offset_sec, max_bpm, has_warps,
 		};
 
@@ -210,6 +230,40 @@ impl TimingData {
 			new_point
 		}).collect();
 		timing_with_stops.beat_to_time = Arc::new(re_beat_to_time);
+
+		// Precompute runtime data for speeds and scrolls
+		if !timing_with_stops.speeds.is_empty() {
+			let mut runtime = Vec::with_capacity(timing_with_stops.speeds.len());
+			let mut prev_ratio = 1.0_f32;
+			for seg in &timing_with_stops.speeds {
+				let start_time = timing_with_stops.get_time_for_beat(seg.beat);
+				let end_time = if seg.delay <= 0.0 {
+					start_time
+				} else if seg.unit == SpeedUnit::Seconds {
+					start_time + seg.delay
+				} else {
+					timing_with_stops.get_time_for_beat(seg.beat + seg.delay)
+				};
+				runtime.push(SpeedRuntime { start_time, end_time, prev_ratio });
+				prev_ratio = seg.ratio;
+			}
+			timing_with_stops.speed_runtime = runtime;
+		}
+
+		if !timing_with_stops.scrolls.is_empty() {
+			let mut prefixes = Vec::with_capacity(timing_with_stops.scrolls.len());
+			let mut cum_displayed = 0.0_f32;
+			let mut last_real_beat = 0.0_f32;
+			let mut last_ratio = 1.0_f32;
+			for seg in &timing_with_stops.scrolls {
+				// Accumulate displayed beats up to seg.beat using previous ratio
+				cum_displayed += (seg.beat - last_real_beat) * last_ratio;
+				prefixes.push(ScrollPrefix { beat: seg.beat, cum_displayed, ratio: seg.ratio });
+				last_real_beat = seg.beat;
+				last_ratio = seg.ratio;
+			}
+			timing_with_stops.scroll_prefix = prefixes;
+		}
 
         let mut row_to_beat = Vec::new();
         let mut measure_index = 0;
@@ -533,50 +587,35 @@ impl TimingData {
 	}
 	
 	pub fn get_displayed_beat(&self, beat: f32) -> f32 {
-		if self.scrolls.is_empty() {
+		if self.scroll_prefix.is_empty() {
 			return beat;
 		}
-		let mut displayed_beat = 0.0;
-		let mut last_real_beat = 0.0;
-		let mut last_ratio = 1.0;
-
-		for seg in &self.scrolls {
-			if seg.beat > beat {
-				break;
-			}
-			displayed_beat += (seg.beat - last_real_beat) * last_ratio;
-			last_real_beat = seg.beat;
-			last_ratio = seg.ratio;
+		// If before first scroll segment, base ratio is 1.0 from 0.0
+		if beat < self.scroll_prefix[0].beat {
+			return beat;
 		}
-		displayed_beat += (beat - last_real_beat) * last_ratio;
-		displayed_beat
+		let idx = self.scroll_prefix.partition_point(|p| p.beat <= beat);
+		let i = idx.saturating_sub(1);
+		let p = self.scroll_prefix[i];
+		p.cum_displayed + (beat - p.beat) * p.ratio
 	}
 
 	pub fn get_speed_multiplier(&self, beat: f32, time: f32) -> f32 {
 		if self.speeds.is_empty() { return 1.0; }
-
 		let segment_index = self.get_speed_segment_index_at_beat(beat);
 		if segment_index < 0 { return 1.0; }
-		let seg = self.speeds[segment_index as usize];
+		let i = segment_index as usize;
+		let seg = self.speeds[i];
+		let rt = self.speed_runtime.get(i).copied().unwrap_or(SpeedRuntime { start_time: self.get_time_for_beat(seg.beat), end_time: if seg.unit == SpeedUnit::Seconds { self.get_time_for_beat(seg.beat) + seg.delay } else { self.get_time_for_beat(seg.beat + seg.delay) }, prev_ratio: if i > 0 { self.speeds[i-1].ratio } else { 1.0 } });
 
-		let start_time = self.get_time_for_beat(seg.beat);
-		let end_time = if seg.unit == SpeedUnit::Seconds {
-			start_time + seg.delay
-		} else {
-			self.get_time_for_beat(seg.beat + seg.delay)
-		};
-
-		let prev_ratio = if segment_index > 0 { self.speeds[segment_index as usize - 1].ratio } else { 1.0 };
-
-		if time >= end_time || seg.delay <= 0.0 {
+		if time >= rt.end_time || seg.delay <= 0.0 {
 			return seg.ratio;
 		}
-		if time < start_time {
-			return prev_ratio;
+		if time < rt.start_time {
+			return rt.prev_ratio;
 		}
-
-		let progress = (time - start_time) / (end_time - start_time);
-		prev_ratio + (seg.ratio - prev_ratio) * progress
+		let progress = (time - rt.start_time) / (rt.end_time - rt.start_time);
+		rt.prev_ratio + (seg.ratio - rt.prev_ratio) * progress
 	}
 
     fn get_speed_segment_index_at_beat(&self, beat: f32) -> isize {
