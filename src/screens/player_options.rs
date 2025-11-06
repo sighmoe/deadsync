@@ -240,7 +240,8 @@ fn change_choice(state: &mut State, delta: isize) {
             row.selected_choice_index =
                 ((current_idx + delta + num_choices as isize) % num_choices as isize) as usize;
 
-            if row.name == "Speed Mod Type" {
+            // Changing the speed mod type should update the mod and the next row display
+            if row.name == "Type of Speed Mod" {
                 let new_type = match row.selected_choice_index {
                     0 => "X",
                     1 => "C",
@@ -520,92 +521,185 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
             z(101)
         ));
 
-        // Choice text: align more to the right, relative to the widened title column
+        // Choice area: align more to the right, relative to the widened title column
         let choice_inner_left = row_left + TITLE_BG_WIDTH + widescale(24.0, 30.0);
-        let choice_text = &row.choices[row.selected_choice_index];
-        // Simply Love parity:
-        // - Option text is gray when the row is not active.
-        // - Active row uses white; "Exit" row uses black on colored background for contrast.
         let sl_gray = color::rgba_hex("#5A6166");
-        let choice_color = if is_active {
-            if row.name == "Exit" { [0.0, 0.0, 0.0, 1.0] } else { [1.0, 1.0, 1.0, 1.0] }
-        } else {
-            sl_gray
-        };
 
-        // Encircling cursor around the active option value (programmatic border, Simply Love style)
-        if is_active {
-            // Measure text width in logical units and scale by our zoom
+        // Some rows (Perspective, Background Filter) should display all choices inline
+        let show_all_choices_inline = row.name == "Perspective" || row.name == "Background Filter";
+
+        if show_all_choices_inline {
+            // Render every option horizontally, highlight the selected one; when active, draw ring around it.
             let value_zoom = 0.8;
+            let spacing = widescale(20.0, 24.0);
+
+            // First pass: measure widths so we can position and draw the ring precisely
+            let mut widths: Vec<f32> = Vec::with_capacity(row.choices.len());
             asset_manager.with_fonts(|all_fonts| {
                 asset_manager.with_font("miso", |metrics_font| {
-                    let mut text_w = crate::ui::font::measure_line_width_logical(metrics_font, choice_text, all_fonts) as f32;
-                    if !text_w.is_finite() || text_w <= 0.0 { text_w = 1.0; }
-                    let text_h = (metrics_font.height as f32).max(1.0);
-                    let draw_w = text_w * value_zoom;
-                    let draw_h = text_h * value_zoom;
-                    // Padding and border thickness
-                    // Dynamic horizontal padding: closer for short strings, roomier for long
-                    let pad_y = widescale(6.0, 8.0);
-                    let min_pad_x = widescale(2.0, 3.0);
-                    let max_pad_x = widescale(22.0, 28.0);
-                    let width_ref = widescale(180.0, 220.0);
-                    let mut t = draw_w / width_ref; // 0 .. ~1+ depending on width
-                    if !t.is_finite() { t = 0.0; }
-                    if t < 0.0 { t = 0.0; }
-                    if t > 1.0 { t = 1.0; }
-                    let pad_x = min_pad_x + (max_pad_x - min_pad_x) * t;
-                    // Halve the cursor border thickness for a lighter ring
-                    let border_w = widescale(2.0, 2.5);
-                    let ring_w = draw_w + pad_x * 2.0;
-                    let ring_h = draw_h + pad_y * 2.0;
-
-                    // Rectangle edges (four quads) — white, fairly opaque
-                    let left = choice_inner_left - pad_x;
-                    let right = left + ring_w;
-                    let top = current_row_y - ring_h * 0.5;
-                    let bottom = current_row_y + ring_h * 0.5;
-                    // Use active Simply Love accent color, fully opaque
-                    let mut ring_color = color::simply_love_rgba(state.active_color_index);
-                    ring_color[3] = 1.0;
-
-                    // Top border
-                    actors.push(act!(quad:
-                        align(0.5, 0.5): xy((left + right) * 0.5, top + border_w * 0.5):
-                        zoomto(ring_w, border_w):
-                        diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
-                        z(101)
-                    ));
-                    // Bottom border
-                    actors.push(act!(quad:
-                        align(0.5, 0.5): xy((left + right) * 0.5, bottom - border_w * 0.5):
-                        zoomto(ring_w, border_w):
-                        diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
-                        z(101)
-                    ));
-                    // Left border
-                    actors.push(act!(quad:
-                        align(0.5, 0.5): xy(left + border_w * 0.5, (top + bottom) * 0.5):
-                        zoomto(border_w, ring_h):
-                        diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
-                        z(101)
-                    ));
-                    // Right border
-                    actors.push(act!(quad:
-                        align(0.5, 0.5): xy(right - border_w * 0.5, (top + bottom) * 0.5):
-                        zoomto(border_w, ring_h):
-                        diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
-                        z(101)
-                    ));
+                    for text in &row.choices {
+                        let mut w = crate::ui::font::measure_line_width_logical(metrics_font, text, all_fonts) as f32;
+                        if !w.is_finite() || w <= 0.0 { w = 1.0; }
+                        widths.push(w * value_zoom);
+                    }
                 });
             });
-        }
 
-        actors.push(act!(text: font("miso"): settext(choice_text.clone()):
-            align(0.0, 0.5): xy(choice_inner_left, current_row_y): zoom(0.8):
-            diffuse(choice_color[0], choice_color[1], choice_color[2], choice_color[3]):
-            z(101)
-        ));
+            // Draw the ring around the selected option if the row is active
+            if is_active {
+                let mut x_cursor = choice_inner_left;
+                for (idx, w) in widths.iter().enumerate() {
+                    if idx == row.selected_choice_index {
+                        // Ring geometry around the selected option
+                        let draw_w = *w;
+                        asset_manager.with_fonts(|_all_fonts| {
+                            asset_manager.with_font("miso", |metrics_font| {
+                                let text_h = (metrics_font.height as f32).max(1.0) * value_zoom;
+                                let pad_y = widescale(6.0, 8.0);
+                                let min_pad_x = widescale(2.0, 3.0);
+                                let max_pad_x = widescale(22.0, 28.0);
+                                let width_ref = widescale(180.0, 220.0);
+                                let mut t = draw_w / width_ref;
+                                if !t.is_finite() { t = 0.0; }
+                                if t < 0.0 { t = 0.0; }
+                                if t > 1.0 { t = 1.0; }
+                                let pad_x = min_pad_x + (max_pad_x - min_pad_x) * t;
+                                let border_w = widescale(2.0, 2.5);
+                                let ring_w = draw_w + pad_x * 2.0;
+                                let ring_h = text_h + pad_y * 2.0;
+                                let left = x_cursor - pad_x;
+                                let right = left + ring_w;
+                                let top = current_row_y - ring_h * 0.5;
+                                let bottom = current_row_y + ring_h * 0.5;
+                                let mut ring_color = color::simply_love_rgba(state.active_color_index);
+                                ring_color[3] = 1.0;
+
+                                actors.push(act!(quad:
+                                    align(0.5, 0.5): xy((left + right) * 0.5, top + border_w * 0.5):
+                                    zoomto(ring_w, border_w):
+                                    diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                                    z(101)
+                                ));
+                                actors.push(act!(quad:
+                                    align(0.5, 0.5): xy((left + right) * 0.5, bottom - border_w * 0.5):
+                                    zoomto(ring_w, border_w):
+                                    diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                                    z(101)
+                                ));
+                                actors.push(act!(quad:
+                                    align(0.5, 0.5): xy(left + border_w * 0.5, (top + bottom) * 0.5):
+                                    zoomto(border_w, ring_h):
+                                    diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                                    z(101)
+                                ));
+                                actors.push(act!(quad:
+                                    align(0.5, 0.5): xy(right - border_w * 0.5, (top + bottom) * 0.5):
+                                    zoomto(border_w, ring_h):
+                                    diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                                    z(101)
+                                ));
+                            });
+                        });
+                        break;
+                    }
+                    x_cursor += *w + spacing;
+                }
+            }
+
+            // Now draw each option text
+            let mut x_cursor = choice_inner_left;
+            for (idx, text) in row.choices.iter().enumerate() {
+                let is_selected = idx == row.selected_choice_index;
+                let color_rgba = if row.name == "Exit" && is_active {
+                    [0.0, 0.0, 0.0, 1.0]
+                } else if is_selected {
+                    [1.0, 1.0, 1.0, 1.0]
+                } else {
+                    sl_gray
+                };
+
+                actors.push(act!(text: font("miso"): settext(text.clone()):
+                    align(0.0, 0.5): xy(x_cursor, current_row_y): zoom(value_zoom):
+                    diffuse(color_rgba[0], color_rgba[1], color_rgba[2], color_rgba[3]):
+                    z(101)
+                ));
+                // Advance by measured width + spacing
+                let w = widths.get(idx).copied().unwrap_or(60.0);
+                x_cursor += w + spacing;
+            }
+        } else {
+            // Single value display (default behavior)
+            let choice_text = &row.choices[row.selected_choice_index];
+            let choice_color = if is_active {
+                if row.name == "Exit" { [0.0, 0.0, 0.0, 1.0] } else { [1.0, 1.0, 1.0, 1.0] }
+            } else {
+                sl_gray
+            };
+
+            // Encircling cursor around the active option value (programmatic border)
+            if is_active {
+                let value_zoom = 0.8;
+                asset_manager.with_fonts(|all_fonts| {
+                    asset_manager.with_font("miso", |metrics_font| {
+                        let mut text_w = crate::ui::font::measure_line_width_logical(metrics_font, choice_text, all_fonts) as f32;
+                        if !text_w.is_finite() || text_w <= 0.0 { text_w = 1.0; }
+                        let text_h = (metrics_font.height as f32).max(1.0);
+                        let draw_w = text_w * value_zoom;
+                        let draw_h = text_h * value_zoom;
+                        let pad_y = widescale(6.0, 8.0);
+                        let min_pad_x = widescale(2.0, 3.0);
+                        let max_pad_x = widescale(22.0, 28.0);
+                        let width_ref = widescale(180.0, 220.0);
+                        let mut t = draw_w / width_ref;
+                        if !t.is_finite() { t = 0.0; }
+                        if t < 0.0 { t = 0.0; }
+                        if t > 1.0 { t = 1.0; }
+                        let pad_x = min_pad_x + (max_pad_x - min_pad_x) * t;
+                        let border_w = widescale(2.0, 2.5);
+                        let ring_w = draw_w + pad_x * 2.0;
+                        let ring_h = draw_h + pad_y * 2.0;
+
+                        let left = choice_inner_left - pad_x;
+                        let right = left + ring_w;
+                        let top = current_row_y - ring_h * 0.5;
+                        let bottom = current_row_y + ring_h * 0.5;
+                        let mut ring_color = color::simply_love_rgba(state.active_color_index);
+                        ring_color[3] = 1.0;
+
+                        actors.push(act!(quad:
+                            align(0.5, 0.5): xy((left + right) * 0.5, top + border_w * 0.5):
+                            zoomto(ring_w, border_w):
+                            diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                            z(101)
+                        ));
+                        actors.push(act!(quad:
+                            align(0.5, 0.5): xy((left + right) * 0.5, bottom - border_w * 0.5):
+                            zoomto(ring_w, border_w):
+                            diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                            z(101)
+                        ));
+                        actors.push(act!(quad:
+                            align(0.5, 0.5): xy(left + border_w * 0.5, (top + bottom) * 0.5):
+                            zoomto(border_w, ring_h):
+                            diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                            z(101)
+                        ));
+                        actors.push(act!(quad:
+                            align(0.5, 0.5): xy(right - border_w * 0.5, (top + bottom) * 0.5):
+                            zoomto(border_w, ring_h):
+                            diffuse(ring_color[0], ring_color[1], ring_color[2], ring_color[3]):
+                            z(101)
+                        ));
+                    });
+                });
+            }
+
+            actors.push(act!(text: font("miso"): settext(choice_text.clone()):
+                align(0.0, 0.5): xy(choice_inner_left, current_row_y): zoom(0.8):
+                diffuse(choice_color[0], choice_color[1], choice_color[2], choice_color[3]):
+                z(101)
+            ));
+        }
 
         current_row_y += frame_h + row_gap;
     }
