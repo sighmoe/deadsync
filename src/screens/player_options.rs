@@ -36,6 +36,8 @@ pub struct Row {
     pub choices: Vec<String>,
     pub selected_choice_index: usize,
     pub help: Vec<String>,
+    // Optional: map each choice to a FILE_DIFFICULTY_NAMES index (used for Stepchart)
+    pub choice_difficulty_indices: Option<Vec<usize>>, 
 }
 
 pub struct SpeedMod {
@@ -57,13 +59,37 @@ pub struct State {
     nav_key_last_scrolled_at: Option<Instant>,
 }
 
-fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
+fn build_rows(song: &SongData, speed_mod: &SpeedMod, selected_difficulty_index: usize) -> Vec<Row> {
     let speed_mod_value_str = match speed_mod.mod_type.as_str() {
         "X" => format!("{:.2}x", speed_mod.value),
         "C" => format!("C{}", speed_mod.value as i32),
         "M" => format!("M{}", speed_mod.value as i32),
         _ => "".to_string(),
     };
+
+    // Build Stepchart choices from the song's dance-single charts, ordered Beginner..Challenge
+    let mut stepchart_choices: Vec<String> = Vec::with_capacity(5);
+    let mut stepchart_choice_indices: Vec<usize> = Vec::with_capacity(5);
+    for (i, file_name) in crate::ui::color::FILE_DIFFICULTY_NAMES.iter().enumerate() {
+        if let Some(chart) = song
+            .charts
+            .iter()
+            .find(|c| c.chart_type.eq_ignore_ascii_case("dance-single") && c.difficulty.eq_ignore_ascii_case(file_name))
+        {
+            let display_name = crate::ui::color::DISPLAY_DIFFICULTY_NAMES[i];
+            stepchart_choices.push(format!("{} {}", display_name, chart.meter));
+            stepchart_choice_indices.push(i);
+        }
+    }
+    // Fallback if none found (defensive; SelectMusic filters to dance-single songs)
+    if stepchart_choices.is_empty() {
+        stepchart_choices.push("(Current)".to_string());
+        stepchart_choice_indices.push(selected_difficulty_index.min(crate::ui::color::FILE_DIFFICULTY_NAMES.len() - 1));
+    }
+    let initial_stepchart_choice_index = stepchart_choice_indices
+        .iter()
+        .position(|&idx| idx == selected_difficulty_index)
+        .unwrap_or(0);
 
     vec![
         Row {
@@ -80,12 +106,14 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
                 _ => 1, // Default to C
             },
             help: vec!["Change the way the arrows react to changing BPMs.".to_string()],
+            choice_difficulty_indices: None,
         },
         Row {
             name: "Speed Mod".to_string(),
             choices: vec![speed_mod_value_str], // Display only the current value
             selected_choice_index: 0,
             help: vec!["Adjust the speed at which arrows travel towards the targets.".to_string()],
+            choice_difficulty_indices: None,
         },
         Row {
             name: "Mini".to_string(),
@@ -94,6 +122,7 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
             ],
             selected_choice_index: 0,
             help: vec!["Change the size of your arrows.".to_string()],
+            choice_difficulty_indices: None,
         },
         Row {
             name: "Perspective".to_string(),
@@ -106,12 +135,14 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
             ],
             selected_choice_index: 0,
             help: vec!["Change the viewing angle of the arrow stream.".to_string()],
+            choice_difficulty_indices: None,
         },
         Row {
             name: "NoteSkin".to_string(),
             choices: vec!["cel".to_string(), "metal".to_string(), "note".to_string()],
             selected_choice_index: 0,
             help: vec!["Change the appearance of the arrows.".to_string()],
+            choice_difficulty_indices: None,
         },
         Row {
             name: "Background Filter".to_string(),
@@ -126,6 +157,7 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
                 "Darken the underside of the playing field.".to_string(),
                 "This will partially obscure background art.".to_string(),
             ],
+            choice_difficulty_indices: None,
         },
         Row {
             name: "Visual Delay".to_string(),
@@ -135,24 +167,28 @@ fn build_rows(speed_mod: &SpeedMod) -> Vec<Row> {
                 "Player specific visual delay. Negative values shifts the arrows".to_string(),
                 "upwards, while positive values move them down.".to_string(),
             ],
+            choice_difficulty_indices: None,
         },
         Row {
             name: "Music Rate".to_string(),
             choices: vec!["1.00x".to_string()],
             selected_choice_index: 0,
             help: vec!["Change the native speed of the music itself.".to_string()],
+            choice_difficulty_indices: None,
         },
         Row {
             name: "Stepchart".to_string(),
-            choices: vec!["(Current)".to_string()],
-            selected_choice_index: 0,
+            choices: stepchart_choices,
+            selected_choice_index: initial_stepchart_choice_index,
             help: vec!["Choose the stepchart you wish to play.".to_string()],
+            choice_difficulty_indices: Some(stepchart_choice_indices),
         },
         Row {
             name: "Exit".to_string(),
             choices: vec!["Start Game".to_string(), "Go Back".to_string()],
             selected_choice_index: 0,
             help: vec!["".to_string()],
+            choice_difficulty_indices: None,
         },
     ]
 }
@@ -174,10 +210,12 @@ pub fn init(song: Arc<SongData>, chart_difficulty_index: usize, active_color_ind
         },
     };
 
+    let rows = build_rows(&song, &speed_mod, chart_difficulty_index);
+
     State {
         song,
         chart_difficulty_index,
-        rows: build_rows(&speed_mod),
+        rows,
         selected_row: 0,
         prev_selected_row: 0,
         active_color_index,
@@ -271,6 +309,13 @@ fn change_choice(state: &mut State, delta: isize) {
                 if let Some(speed_mod_row) = state.rows.get_mut(1) {
                     if speed_mod_row.name == "Speed Mod" {
                         speed_mod_row.choices[0] = speed_mod_value_str;
+                    }
+                }
+            } else if row.name == "Stepchart" {
+                // Update the state's difficulty index to match the newly selected choice
+                if let Some(diff_indices) = &row.choice_difficulty_indices {
+                    if let Some(&difficulty_idx) = diff_indices.get(row.selected_choice_index) {
+                        state.chart_difficulty_index = difficulty_idx;
                     }
                 }
             }
@@ -525,8 +570,10 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
         let choice_inner_left = row_left + TITLE_BG_WIDTH + widescale(24.0, 30.0);
         let sl_gray = color::rgba_hex("#5A6166");
 
-        // Some rows (Perspective, Background Filter) should display all choices inline
-        let show_all_choices_inline = row.name == "Perspective" || row.name == "Background Filter";
+        // Some rows should display all choices inline
+        let show_all_choices_inline = row.name == "Perspective"
+            || row.name == "Background Filter"
+            || row.name == "Stepchart";
 
         if show_all_choices_inline {
             // Render every option horizontally, highlight the selected one; when active, draw ring around it.

@@ -713,6 +713,15 @@ pub fn out_transition() -> (Vec<Actor>, f32) {
     (vec![actor], TRANSITION_OUT_DURATION)
 }
 
+/// Force the SelectMusic screen to refresh its delayed assets (graph, preview)
+/// on the next update tick without waiting for the usual delay.
+pub fn trigger_immediate_refresh(state: &mut State) {
+    // Ensure we exceed the preview delay so update() runs the delayed branch
+    state.time_since_selection_change = PREVIEW_DELAY_SECONDS;
+    // Setting this to None forces a new density graph request for the selected chart
+    state.last_requested_chart_hash = None;
+}
+
 fn format_session_time(seconds_total: f32) -> String {
     if seconds_total < 0.0 {
         return "00:00".to_string();

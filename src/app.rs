@@ -917,9 +917,10 @@ impl ApplicationHandler for App {
                     }
 
                     if prev == CurrentScreen::SelectMusic || prev == CurrentScreen::PlayerOptions {
-                        // When leaving PlayerOptions, save the selected speed mod if it's a C-Mod.
+                        // When leaving PlayerOptions, persist any user-chosen settings
                         if prev == CurrentScreen::PlayerOptions {
                             if let Some(po_state) = &self.player_options_state {
+                                // Save speed mod to profile
                                 let setting = match po_state.speed_mod.mod_type.as_str() {
                                     "C" => Some(ScrollSpeedSetting::CMod(po_state.speed_mod.value)),
                                     "X" => Some(ScrollSpeedSetting::XMod(po_state.speed_mod.value)),
@@ -936,6 +937,10 @@ impl ApplicationHandler for App {
                                         po_state.speed_mod.mod_type
                                     );
                                 }
+
+                                // Reflect difficulty changes back to SelectMusic
+                                self.preferred_difficulty_index = po_state.chart_difficulty_index;
+                                info!("Updated preferred difficulty index to {} from PlayerOptions", self.preferred_difficulty_index);
                             }
                         }
                         crate::core::audio::stop_music();
@@ -984,7 +989,13 @@ impl ApplicationHandler for App {
                             let song_arc = po_state.song;
                             let chart_difficulty_index = po_state.chart_difficulty_index;
                             let difficulty_name = color::FILE_DIFFICULTY_NAMES[chart_difficulty_index];
-                            let chart_ref = song_arc.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)).unwrap();
+                            // Prefer a dance-single chart for the selected difficulty; fall back to any matching difficulty.
+                            let chart_ref = song_arc
+                                .charts
+                                .iter()
+                                .find(|c| c.chart_type.eq_ignore_ascii_case("dance-single") && c.difficulty.eq_ignore_ascii_case(difficulty_name))
+                                .or_else(|| song_arc.charts.iter().find(|c| c.difficulty.eq_ignore_ascii_case(difficulty_name)))
+                                .expect("No chart found for selected difficulty");
                             let chart = Arc::new(chart_ref.clone());
 
                             let color_index = po_state.active_color_index;
@@ -1046,7 +1057,35 @@ impl ApplicationHandler for App {
                             info!("Session timer started.");
                         }
 
-                        if prev != CurrentScreen::Gameplay && prev != CurrentScreen::Evaluation {
+                        if prev == CurrentScreen::PlayerOptions {
+                            // Preserve wheel state; only sync difficulty choice back from PlayerOptions
+                            let preferred = self.preferred_difficulty_index;
+                            self.select_music_state.preferred_difficulty_index = preferred;
+                            self.select_music_state.selected_difficulty_index = preferred;
+
+                            // Clamp to the nearest playable difficulty for the currently selected song
+                            if let Some(select_music::MusicWheelEntry::Song(song)) =
+                                self.select_music_state.entries.get(self.select_music_state.selected_index)
+                            {
+                                let mut best_match_index = None;
+                                let mut min_diff = i32::MAX;
+                                for i in 0..color::FILE_DIFFICULTY_NAMES.len() {
+                                    if select_music::is_difficulty_playable(song, i) {
+                                        let diff = (i as i32 - preferred as i32).abs();
+                                        if diff < min_diff {
+                                            min_diff = diff;
+                                            best_match_index = Some(i);
+                                        }
+                                    }
+                                }
+                                if let Some(idx) = best_match_index {
+                                    self.select_music_state.selected_difficulty_index = idx;
+                                }
+                            }
+
+                            // Nudge delayed updates to refresh graph immediately on return
+                            select_music::trigger_immediate_refresh(&mut self.select_music_state);
+                        } else if prev != CurrentScreen::Gameplay && prev != CurrentScreen::Evaluation {
                             let current_color_index = self.select_music_state.active_color_index;
                             self.select_music_state = select_music::init();
                             self.select_music_state.active_color_index = current_color_index;
