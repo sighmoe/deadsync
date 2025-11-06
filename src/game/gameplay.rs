@@ -1188,6 +1188,216 @@ fn get_music_end_time(state: &State) -> f32 {
     state.music_end_time
 }
 
+#[inline(always)]
+fn decay_let_go_hold_life(state: &mut State) {
+    for note in &mut state.notes {
+        let Some(hold) = note.hold.as_mut() else { continue; };
+        if hold.result == Some(HoldResult::Held) { continue; }
+        let Some(start_time) = hold.let_go_started_at else { continue; };
+
+        let base_life = hold.let_go_starting_life.clamp(0.0, MAX_HOLD_LIFE);
+        if base_life <= 0.0 { hold.life = 0.0; continue; }
+
+        let window = match note.note_type {
+            NoteType::Roll => TIMING_WINDOW_SECONDS_ROLL,
+            _ => TIMING_WINDOW_SECONDS_HOLD,
+        };
+        if window <= 0.0 { hold.life = 0.0; continue; }
+
+        let elapsed = (state.current_music_time - start_time).max(0.0);
+        hold.life = (base_life - elapsed / window).max(0.0);
+    }
+}
+
+#[inline(always)]
+fn tick_visual_effects(state: &mut State, delta_time: f32) {
+    for timer in &mut state.receptor_glow_timers {
+        *timer = (*timer - delta_time).max(0.0);
+    }
+    for timer in &mut state.receptor_bop_timers {
+        *timer = (*timer - delta_time).max(0.0);
+    }
+
+    state.combo_milestones.retain_mut(|milestone| {
+        milestone.elapsed += delta_time;
+        let max_duration = match milestone.kind {
+            ComboMilestoneKind::Hundred => COMBO_HUNDRED_MILESTONE_DURATION,
+            ComboMilestoneKind::Thousand => COMBO_THOUSAND_MILESTONE_DURATION,
+        };
+        milestone.elapsed < max_duration
+    });
+
+    for explosion in &mut state.tap_explosions {
+        if let Some(active) = explosion {
+            active.elapsed += delta_time;
+            let lifetime = state
+                .noteskin
+                .as_ref()
+                .and_then(|ns| ns.tap_explosions.get(&active.window))
+                .map(|explosion| explosion.animation.duration())
+                .unwrap_or(0.0);
+            if lifetime <= 0.0 || active.elapsed >= lifetime {
+                *explosion = None;
+            }
+        }
+    }
+
+    for explosion in &mut state.mine_explosions {
+        if let Some(active) = explosion {
+            active.elapsed += delta_time;
+            if active.elapsed >= MINE_EXPLOSION_DURATION {
+                *explosion = None;
+            }
+        }
+    }
+
+    for slot in &mut state.hold_judgments {
+        if let Some(render_info) = slot {
+            if render_info.triggered_at.elapsed().as_secs_f32() >= HOLD_JUDGMENT_TOTAL_DURATION {
+                *slot = None;
+            }
+        }
+    }
+}
+
+#[inline(always)]
+fn spawn_lookahead_arrows(state: &mut State, music_time_sec: f32) {
+    let lookahead_time = music_time_sec + state.scroll_travel_time;
+    let lookahead_beat = state.timing.get_beat_for_time(lookahead_time);
+    while state.note_spawn_cursor < state.notes.len()
+        && state.notes[state.note_spawn_cursor].beat < lookahead_beat
+    {
+        let note = &state.notes[state.note_spawn_cursor];
+        state.arrows[note.column].push(Arrow {
+            beat: note.beat,
+            column: note.column,
+            note_type: note.note_type.clone(),
+            note_index: state.note_spawn_cursor,
+        });
+        state.note_spawn_cursor += 1;
+    }
+}
+
+#[inline(always)]
+fn apply_passive_misses_and_mine_avoidance(state: &mut State, music_time_sec: f32) {
+    let way_off_window = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
+    for (col_idx, col_arrows) in state.arrows.iter_mut().enumerate() {
+        let Some(next_arrow_index) = col_arrows
+            .iter()
+            .position(|arrow| state.notes[arrow.note_index].result.is_none())
+        else { continue; };
+
+        let arrow = col_arrows[next_arrow_index].clone();
+        let note_index = arrow.note_index;
+        let (note_row_index, note_type) = {
+            let note = &state.notes[note_index];
+            (note.row_index, note.note_type.clone())
+        };
+        let note_time = state.note_time_cache[note_index];
+
+        if matches!(note_type, NoteType::Mine) {
+            match state.notes[note_index].mine_result {
+                Some(MineResult::Hit) => { col_arrows.remove(next_arrow_index); }
+                Some(MineResult::Avoided) => {}
+                None => {
+                    let mine_window = BASE_MINE_WINDOW + TIMING_WINDOW_ADD;
+                    if music_time_sec - note_time > mine_window {
+                        state.notes[note_index].mine_result = Some(MineResult::Avoided);
+                        state.mines_avoided = state.mines_avoided.saturating_add(1);
+                        info!(
+                            "MINE AVOIDED: Row {}, Col {}, Time: {:.2}s",
+                            note_row_index, col_idx, music_time_sec
+                        );
+                    }
+                }
+            }
+            continue;
+        }
+
+        if music_time_sec - note_time > way_off_window {
+            let judgment = Judgment {
+                time_error_ms: ((music_time_sec - note_time) * 1000.0),
+                grade: JudgeGrade::Miss,
+                row: note_row_index,
+            };
+
+            if let Some(hold) = state.notes[note_index].hold.as_mut() {
+                if hold.result != Some(HoldResult::Held) {
+                    hold.result = Some(HoldResult::LetGo);
+                    if hold.let_go_started_at.is_none() {
+                        hold.let_go_started_at = Some(music_time_sec);
+                        hold.let_go_starting_life = hold.life.clamp(0.0, MAX_HOLD_LIFE);
+                    }
+                }
+            }
+
+            state.notes[note_index].result = Some(judgment);
+            info!(
+                "MISSED (pending): Row {}, Col {}",
+                note_row_index, col_idx
+            );
+        }
+    }
+}
+
+#[inline(always)]
+fn cull_scrolled_out_arrows(state: &mut State, music_time_sec: f32) {
+    let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
+    let miss_cull_threshold = receptor_y - state.draw_distance_after_targets;
+
+    let (cmod_pps_opt, curr_disp_beat, beatmod_multiplier) = match state.scroll_speed {
+        ScrollSpeedSetting::CMod(c_bpm) => {
+            let pps = (c_bpm / 60.0) * ScrollSpeedSetting::ARROW_SPACING;
+            (Some(pps), 0.0, 0.0)
+        }
+        ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
+            let curr_disp = state.timing.get_displayed_beat(state.current_beat);
+            let speed_multiplier = state
+                .timing
+                .get_speed_multiplier(state.current_beat, state.current_music_time);
+            let player_multiplier = state
+                .scroll_speed
+                .beat_multiplier(state.scroll_reference_bpm);
+            (None, curr_disp, player_multiplier * speed_multiplier)
+        }
+    };
+
+    for col_arrows in &mut state.arrows {
+        col_arrows.retain(|arrow| {
+            let note = &state.notes[arrow.note_index];
+            if matches!(note.note_type, NoteType::Mine) {
+                match note.mine_result {
+                    Some(MineResult::Avoided) => {}
+                    Some(MineResult::Hit) => return false,
+                    None => return true,
+                }
+            } else {
+                let Some(judgment) = note.result.as_ref() else { return true; };
+                if judgment.grade != JudgeGrade::Miss { return false; }
+            }
+
+            let y_pos = match state.scroll_speed {
+                ScrollSpeedSetting::CMod(_) => {
+                    let pps = cmod_pps_opt.expect("cmod pps computed");
+                    let note_time = state.note_time_cache[arrow.note_index];
+                    let time_diff = note_time - music_time_sec;
+                    receptor_y + time_diff * pps
+                }
+                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
+                    let note_disp_beat = state.note_display_beat_cache[arrow.note_index];
+                    let beat_diff_disp = note_disp_beat - curr_disp_beat;
+                    receptor_y
+                        + beat_diff_disp
+                            * ScrollSpeedSetting::ARROW_SPACING
+                            * beatmod_multiplier
+                }
+            };
+
+            y_pos >= miss_cull_threshold
+        });
+    }
+}
+
 pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
     if let (Some(key), Some(start_time)) = (state.hold_to_exit_key, state.hold_to_exit_start) {
         if start_time.elapsed() >= std::time::Duration::from_secs(1) {
@@ -1288,84 +1498,9 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
     state.prev_inputs = current_inputs;
 
     update_active_holds(state, &current_inputs, music_time_sec, delta_time);
+    decay_let_go_hold_life(state);
 
-    for note in &mut state.notes {
-        let Some(hold) = note.hold.as_mut() else {
-            continue;
-        };
-        if hold.result == Some(HoldResult::Held) {
-            continue;
-        }
-        let Some(start_time) = hold.let_go_started_at else {
-            continue;
-        };
-
-        let base_life = hold.let_go_starting_life.clamp(0.0, MAX_HOLD_LIFE);
-        if base_life <= 0.0 {
-            hold.life = 0.0;
-            continue;
-        }
-
-        let window = match note.note_type {
-            NoteType::Roll => TIMING_WINDOW_SECONDS_ROLL,
-            _ => TIMING_WINDOW_SECONDS_HOLD,
-        };
-        if window <= 0.0 {
-            hold.life = 0.0;
-            continue;
-        }
-
-        let elapsed = (state.current_music_time - start_time).max(0.0);
-        let new_life = (base_life - elapsed / window).max(0.0);
-        hold.life = new_life;
-    }
-
-    for timer in &mut state.receptor_glow_timers {
-        *timer = (*timer - delta_time).max(0.0);
-    }
-    for timer in &mut state.receptor_bop_timers {
-        *timer = (*timer - delta_time).max(0.0);
-    }
-    state.combo_milestones.retain_mut(|milestone| {
-        milestone.elapsed += delta_time;
-        let max_duration = match milestone.kind {
-            ComboMilestoneKind::Hundred => COMBO_HUNDRED_MILESTONE_DURATION,
-            ComboMilestoneKind::Thousand => COMBO_THOUSAND_MILESTONE_DURATION,
-        };
-        milestone.elapsed < max_duration
-    });
-    for explosion in &mut state.tap_explosions {
-        if let Some(active) = explosion {
-            active.elapsed += delta_time;
-            let lifetime = state
-                .noteskin
-                .as_ref()
-                .and_then(|ns| ns.tap_explosions.get(&active.window))
-                .map(|explosion| explosion.animation.duration())
-                .unwrap_or(0.0);
-
-            if lifetime <= 0.0 || active.elapsed >= lifetime {
-                *explosion = None;
-            }
-        }
-    }
-
-    for explosion in &mut state.mine_explosions {
-        if let Some(active) = explosion {
-            active.elapsed += delta_time;
-            if active.elapsed >= MINE_EXPLOSION_DURATION {
-                *explosion = None;
-            }
-        }
-    }
-
-    for slot in &mut state.hold_judgments {
-        if let Some(render_info) = slot {
-            if render_info.triggered_at.elapsed().as_secs_f32() >= HOLD_JUDGMENT_TOTAL_DURATION {
-                *slot = None;
-            }
-        }
-    }
+    tick_visual_effects(state, delta_time);
 
     let lookahead_time = music_time_sec + state.scroll_travel_time;
     let lookahead_beat = state.timing.get_beat_for_time(lookahead_time);
@@ -1382,133 +1517,9 @@ pub fn update(state: &mut State, delta_time: f32) -> ScreenAction {
         state.note_spawn_cursor += 1;
     }
 
-    let way_off_window = BASE_WAY_OFF_WINDOW + TIMING_WINDOW_ADD;
-    for (col_idx, col_arrows) in state.arrows.iter_mut().enumerate() {
-        let Some(next_arrow_index) = col_arrows
-            .iter()
-            .position(|arrow| state.notes[arrow.note_index].result.is_none())
-        else {
-            continue;
-        };
+    apply_passive_misses_and_mine_avoidance(state, music_time_sec);
 
-        let arrow = col_arrows[next_arrow_index].clone();
-        let note_index = arrow.note_index;
-        let (note_row_index, note_beat, note_type) = {
-            let note = &state.notes[note_index];
-            (note.row_index, note.beat, note.note_type.clone())
-        };
-
-        let note_time = state.note_time_cache[note_index];
-
-        if matches!(note_type, NoteType::Mine) {
-            match state.notes[note_index].mine_result {
-                Some(MineResult::Hit) => {
-                    col_arrows.remove(next_arrow_index);
-                }
-                Some(MineResult::Avoided) => {}
-                None => {
-                    let mine_window = BASE_MINE_WINDOW + TIMING_WINDOW_ADD;
-                    if music_time_sec - note_time > mine_window {
-                        state.notes[note_index].mine_result = Some(MineResult::Avoided);
-                        state.mines_avoided = state.mines_avoided.saturating_add(1);
-
-                        info!(
-                            "MINE AVOIDED: Row {}, Col {}, Time: {:.2}s",
-                            note_row_index, col_idx, music_time_sec
-                        );
-                    }
-                }
-            }
-
-            continue;
-        }
-
-        if music_time_sec - note_time > way_off_window {
-            let judgment = Judgment {
-                time_error_ms: ((music_time_sec - note_time) * 1000.0),
-                grade: JudgeGrade::Miss,
-                row: note_row_index,
-            };
-
-            if let Some(hold) = state.notes[note_index].hold.as_mut() {
-                if hold.result != Some(HoldResult::Held) {
-                    hold.result = Some(HoldResult::LetGo);
-                    if hold.let_go_started_at.is_none() {
-                        hold.let_go_started_at = Some(music_time_sec);
-                        hold.let_go_starting_life = hold.life.clamp(0.0, MAX_HOLD_LIFE);
-                    }
-                }
-            }
-
-            state.notes[note_index].result = Some(judgment);
-            info!(
-                "MISSED (pending): Row {}, Col {}, Beat {:.2}",
-                note_row_index, col_idx, arrow.beat
-            );
-        }
-    }
-
-    let receptor_y = screen_center_y() + RECEPTOR_Y_OFFSET_FROM_CENTER;
-	let miss_cull_threshold = receptor_y - state.draw_distance_after_targets;
-
-    // Precompute frame-constants used by retain closures
-    let (cmod_pps_opt, curr_disp_beat, beatmod_multiplier) = match state.scroll_speed {
-        ScrollSpeedSetting::CMod(c_bpm) => {
-            let pps = (c_bpm / 60.0) * ScrollSpeedSetting::ARROW_SPACING;
-            (Some(pps), 0.0, 0.0)
-        }
-        ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
-            let curr_disp = state.timing.get_displayed_beat(state.current_beat);
-            let speed_multiplier = state
-                .timing
-                .get_speed_multiplier(state.current_beat, state.current_music_time);
-            let player_multiplier = state
-                .scroll_speed
-                .beat_multiplier(state.scroll_reference_bpm);
-            (None, curr_disp, player_multiplier * speed_multiplier)
-        }
-    };
-
-	for col_arrows in &mut state.arrows {
-		col_arrows.retain(|arrow| {
-			let note = &state.notes[arrow.note_index];
-
-			if matches!(note.note_type, NoteType::Mine) {
-				match note.mine_result {
-					Some(MineResult::Avoided) => {}
-					Some(MineResult::Hit) => return false,
-					None => return true,
-				}
-			} else {
-				let Some(judgment) = note.result.as_ref() else {
-					return true;
-				};
-
-				if judgment.grade != JudgeGrade::Miss {
-					return false;
-				}
-            }
-
-            let y_pos = match state.scroll_speed {
-                ScrollSpeedSetting::CMod(_) => {
-                    let pps = cmod_pps_opt.expect("cmod pps computed");
-                    let note_time = state.note_time_cache[arrow.note_index];
-                    let time_diff = note_time - music_time_sec;
-                    receptor_y + time_diff * pps
-                }
-                ScrollSpeedSetting::XMod(_) | ScrollSpeedSetting::MMod(_) => {
-                    let note_disp_beat = state.note_display_beat_cache[arrow.note_index];
-                    let beat_diff_disp = note_disp_beat - curr_disp_beat;
-                    receptor_y
-                        + beat_diff_disp
-                            * ScrollSpeedSetting::ARROW_SPACING
-                            * beatmod_multiplier
-                }
-            };
-
-            y_pos >= miss_cull_threshold
-        });
-    }
+    cull_scrolled_out_arrows(state, music_time_sec);
 
     update_judged_rows(state);
 
