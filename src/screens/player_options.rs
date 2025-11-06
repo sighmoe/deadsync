@@ -435,12 +435,27 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     // Row layout constants
     const ROW_START_OFFSET: f32 = -164.0;
     const ROW_HEIGHT: f32 = 33.0;
-    const ROW_GAP: f32 = 1.4;
     // Make the first column a bit wider to match SL
     const TITLE_BG_WIDTH: f32 = 140.0;
 
     let frame_h = ROW_HEIGHT;
-    let row_gap = ROW_GAP;
+
+    // Compute dynamic row gap so the space between the last visible
+    // row and the help box equals all other inter-row gaps.
+    // Derivation (using row centers):
+    //   help_top = y0 + (N - 0.5)*H + N*gap  =>  gap = (help_top - y0 - (N - 0.5)*H)/N
+    // where y0 is the first row center, H is row height, N is number of rows.
+    let first_row_center_y = screen_center_y() + ROW_START_OFFSET;
+    let help_top_y = help_box_bottom_y - help_box_h;
+    let n_rows_f = state.rows.len() as f32;
+    // Guard against degenerate cases; clamp to 0.0 minimum to avoid overlaps.
+    let mut row_gap = if n_rows_f > 0.0 {
+        (help_top_y - first_row_center_y - ((n_rows_f - 0.5) * frame_h)) / n_rows_f
+    } else {
+        0.0
+    };
+    if !row_gap.is_finite() { row_gap = 0.0; }
+    if row_gap < 0.0 { row_gap = 0.0; }
 
     // Make row frame LEFT and WIDTH exactly match the help box.
     let row_left = help_box_x;
@@ -452,7 +467,7 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
     let title_x = row_left + widescale(8.0, 14.0);
 
     // Start first row exactly at the requested offset
-    let mut current_row_y = screen_center_y() + ROW_START_OFFSET;
+    let mut current_row_y = first_row_center_y;
 
     for i in 0..state.rows.len() {
         let is_active = i == state.selected_row;
@@ -530,8 +545,16 @@ pub fn get_actors(state: &State, asset_manager: &AssetManager) -> Vec<Actor> {
                     let draw_w = text_w * value_zoom;
                     let draw_h = text_h * value_zoom;
                     // Padding and border thickness
-                    let pad_x = widescale(16.0, 20.0);
+                    // Dynamic horizontal padding: closer for short strings, roomier for long
                     let pad_y = widescale(6.0, 8.0);
+                    let min_pad_x = widescale(2.0, 3.0);
+                    let max_pad_x = widescale(22.0, 28.0);
+                    let width_ref = widescale(180.0, 220.0);
+                    let mut t = draw_w / width_ref; // 0 .. ~1+ depending on width
+                    if !t.is_finite() { t = 0.0; }
+                    if t < 0.0 { t = 0.0; }
+                    if t > 1.0 { t = 1.0; }
+                    let pad_x = min_pad_x + (max_pad_x - min_pad_x) * t;
                     // Halve the cursor border thickness for a lighter ring
                     let border_w = widescale(2.0, 2.5);
                     let ring_w = draw_w + pad_x * 2.0;
